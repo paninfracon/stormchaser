@@ -2,6 +2,7 @@ use crate::{
     ListRunsQuery, TestReportSummary, TestSummaryResponse, UpdateStorageBackendRequest,
     WorkflowRunDetail,
 };
+use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 use stormchaser_model::event_rules::{EventRule, WebhookConfig};
 use stormchaser_model::workflow::RunStatus;
@@ -48,9 +49,9 @@ pub async fn insert_run_context(
     tx: &mut Transaction<'_, Postgres>,
     run_id: Uuid,
     dsl_version: &str,
-    workflow_definition: serde_json::Value,
+    workflow_definition: Value,
     source_code: &str,
-    inputs: &serde_json::Value,
+    inputs: &Value,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"
@@ -271,7 +272,7 @@ pub async fn create_event_rule(
     repo_url: &str,
     workflow_path: &str,
     git_ref: &str,
-    input_mappings: serde_json::Value,
+    input_mappings: Value,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"
@@ -332,7 +333,7 @@ pub async fn create_cron_workflow(
     repo_url: &str,
     workflow_path: &str,
     git_ref: &str,
-    inputs: &serde_json::Value,
+    inputs: &Value,
     secret_token: &str,
     external_job_id: &Option<String>,
 ) -> Result<(), sqlx::Error> {
@@ -405,7 +406,7 @@ pub async fn create_storage_backend(
     name: &str,
     description: &Option<String>,
     backend_type: &storage::BackendType,
-    config: &serde_json::Value,
+    config: &Value,
     is_default_sfs: bool,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
@@ -651,7 +652,7 @@ pub async fn insert_approval_registry(
     step_id: Uuid,
     user_id: &str,
     status: &str,
-    payload: &serde_json::Value,
+    payload: &Value,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "INSERT INTO approval_registry (id, step_instance_id, user_id, status, payload) VALUES ($1, $2, $3, $4, $5)"

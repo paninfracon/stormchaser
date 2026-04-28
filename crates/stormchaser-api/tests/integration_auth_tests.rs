@@ -4,10 +4,12 @@ use axum::{
 };
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
+use std::collections::HashMap;
 use std::sync::Arc;
 use stormchaser_api::{app, AppState};
 use stormchaser_model::OpaClient;
 use tower::ServiceExt;
+use uuid::Uuid;
 
 use axum::extract::connect_info::ConnectInfo;
 use std::net::SocketAddr;
@@ -56,7 +58,7 @@ async fn test_auth_exchange_dex_flow() {
     .unwrap();
 
     // Create a mock JWK for this key
-    let mut jwks = std::collections::HashMap::new();
+    let mut jwks = HashMap::new();
     let jwk = jsonwebtoken::jwk::Jwk {
         common: jsonwebtoken::jwk::CommonParameters {
             key_id: Some(kid.clone()),
@@ -85,7 +87,7 @@ async fn test_auth_exchange_dex_flow() {
         nats: nats_client,
         opa: Arc::new(OpaClient::new(None, None)),
         oidc_config: Some(oidc_config),
-        jwks: std::sync::Arc::new(tokio::sync::RwLock::new(jwks)),
+        jwks: Arc::new(tokio::sync::RwLock::new(jwks)),
         log_backend: None,
     });
 
@@ -142,7 +144,7 @@ async fn test_auth_login_redirect() {
         nats: nats_client,
         opa: Arc::new(OpaClient::new(None, None)),
         oidc_config: Some(oidc_config),
-        jwks: std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
     });
 
@@ -190,7 +192,7 @@ async fn test_protected_route_rejection() {
         nats: nats_client,
         opa: Arc::new(OpaClient::new(None, None)),
         oidc_config: None,
-        jwks: std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
     });
 
@@ -205,7 +207,7 @@ async fn test_protected_route_rejection() {
                 .extension(ConnectInfo(addr))
                 .body(Body::from(
                     serde_json::to_vec(&json!({
-                        "workflow_name": format!("test-workflow-{}", uuid::Uuid::new_v4()),
+                        "workflow_name": format!("test-workflow-{}", Uuid::new_v4()),
                         "repo_url": "url",
                         "workflow_path": "path",
                         "git_ref": "ref",

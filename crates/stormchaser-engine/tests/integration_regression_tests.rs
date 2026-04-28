@@ -154,7 +154,7 @@ async fn test_dispatch_pending_steps_column_created_at() {
         run_id,
         pool.clone(),
         nats_client.clone(),
-        std::sync::Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
+        Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
     )
     .await
     .expect("dispatch_pending_steps should succeed with created_at column present");

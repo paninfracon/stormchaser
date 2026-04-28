@@ -1,6 +1,7 @@
 use super::*;
 use crate::AppEvent;
 use chrono::Utc;
+use serde_json::Value;
 use stormchaser_model::workflow::RunStatus;
 use uuid::Uuid;
 
@@ -50,8 +51,7 @@ impl<'a> App<'a> {
             return;
         }
 
-        let parsed_status = if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&status)
-        {
+        let parsed_status = if let Ok(payload) = serde_json::from_str::<Value>(&status) {
             payload
                 .get("status")
                 .and_then(|s| s.as_str())
@@ -62,8 +62,7 @@ impl<'a> App<'a> {
         };
 
         if let Some(run) = self.runs.iter_mut().find(|r| r.id == run_id) {
-            if let Ok(s) = serde_json::from_value(serde_json::Value::String(parsed_status.clone()))
-            {
+            if let Ok(s) = serde_json::from_value(Value::String(parsed_status.clone())) {
                 // Prevent downgrading terminal statuses
                 match run.status {
                     RunStatus::Succeeded | RunStatus::Failed | RunStatus::Aborted => {
@@ -75,7 +74,7 @@ impl<'a> App<'a> {
         }
         if let Some(run) = &mut self.selected_run {
             if run.detail.id == run_id {
-                if let Ok(s) = serde_json::from_value(serde_json::Value::String(parsed_status)) {
+                if let Ok(s) = serde_json::from_value(Value::String(parsed_status)) {
                     match run.detail.status {
                         RunStatus::Succeeded | RunStatus::Failed | RunStatus::Aborted => {}
                         _ => run.detail.status = s,
@@ -127,9 +126,8 @@ impl<'a> App<'a> {
                                                 && (new_status == "unpacking_sfs"
                                                     || new_status == "pending")
                                             {
-                                                *new_status_val = serde_json::Value::String(
-                                                    old_status.to_string(),
-                                                );
+                                                *new_status_val =
+                                                    Value::String(old_status.to_string());
                                             }
                                         }
                                     }
@@ -189,10 +187,7 @@ impl<'a> App<'a> {
                         == Some(&step_name)
                     {
                         if let Some(obj) = step_detail.instance.as_object_mut() {
-                            obj.insert(
-                                "status".to_string(),
-                                serde_json::Value::String(status.clone()),
-                            );
+                            obj.insert("status".to_string(), Value::String(status.clone()));
                             updated_step_index = Some(i);
                         }
                     }

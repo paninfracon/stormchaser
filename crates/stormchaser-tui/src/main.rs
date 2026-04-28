@@ -7,6 +7,7 @@ use ratatui::crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
+use std::time::Duration;
 use stormchaser_tui::app::{App, AppState, Pane};
 use stormchaser_tui::ui::ui;
 use stormchaser_tui::AppEvent;
@@ -288,7 +289,7 @@ async fn main() -> Result<()> {
     let tx_clone = tx.clone();
     tokio::spawn(async move {
         loop {
-            if event::poll(std::time::Duration::from_millis(100)).unwrap() {
+            if event::poll(Duration::from_millis(100)).unwrap() {
                 let e = event::read().unwrap();
                 let _ = tx_clone.send(AppEvent::Terminal(e)).await;
             } else {

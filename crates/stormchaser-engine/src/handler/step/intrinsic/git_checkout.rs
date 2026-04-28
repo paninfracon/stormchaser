@@ -1,6 +1,7 @@
+use serde_json::Value;
 use stormchaser_model::dsl;
 
-pub fn mutate(step_type: &mut String, resolved_spec: &mut serde_json::Value) {
+pub fn mutate(step_type: &mut String, resolved_spec: &mut Value) {
     if step_type == "GitCheckout" {
         let git_spec: Result<dsl::GitCheckoutSpec, _> =
             serde_json::from_value(resolved_spec.get("spec").unwrap_or(&*resolved_spec).clone());

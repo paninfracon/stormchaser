@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use opa_wasm::Runtime;
+use serde_json::Value;
 use stormchaser_model::auth::OpaWasmExecutor;
 use wasmtime::*;
 
@@ -21,7 +22,7 @@ impl OpaWasmInstance {
 
 #[async_trait]
 impl OpaWasmExecutor for OpaWasmInstance {
-    async fn evaluate(&self, entrypoint: &str, input: &serde_json::Value) -> Result<bool> {
+    async fn evaluate(&self, entrypoint: &str, input: &Value) -> Result<bool> {
         let mut store = Store::new(&self.engine, ());
         let runtime = Runtime::new(&mut store, &self.module)
             .await
@@ -29,7 +30,7 @@ impl OpaWasmExecutor for OpaWasmInstance {
 
         let policy = runtime.without_data(&mut store).await?;
 
-        let result: serde_json::Value = policy
+        let result: Value = policy
             .evaluate(&mut store, entrypoint, input)
             .await
             .context("Failed to evaluate OPA policy")?;

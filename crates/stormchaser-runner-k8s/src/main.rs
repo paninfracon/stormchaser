@@ -1,3 +1,7 @@
+use axum::extract::State;
+use serde_json::Value;
+use std::collections::HashMap;
+use tokio::time::sleep;
 mod job_machine;
 
 use anyhow::{Context, Result};
@@ -56,7 +60,7 @@ impl ClusterPool {
             .request_text(Request::builder().uri("/version").body(vec![])?)
             .await?;
 
-        let version_data: serde_json::Value = serde_json::from_str(&version_resp)?;
+        let version_data: Value = serde_json::from_str(&version_resp)?;
         let major = version_data["major"].as_str().unwrap_or("0");
         let minor = version_data["minor"].as_str().unwrap_or("0");
         let version = format!("{}.{}", major, minor.replace('+', ""));
@@ -218,8 +222,8 @@ async fn scan_for_orphans(
                         dsl::Step {
                             name: job_name.clone(),
                             r#type: "RunContainer".to_string(),
-                            spec: serde_json::Value::Null,
-                            params: std::collections::HashMap::new(),
+                            spec: Value::Null,
+                            params: HashMap::new(),
                             condition: None,
                             strategy: None,
                             aggregation: Vec::new(),
@@ -243,8 +247,8 @@ async fn scan_for_orphans(
                     dsl::Step {
                         name: job_name.clone(),
                         r#type: "RunContainer".to_string(),
-                        spec: serde_json::Value::Null,
-                        params: std::collections::HashMap::new(),
+                        spec: Value::Null,
+                        params: HashMap::new(),
                         condition: None,
                         strategy: None,
                         aggregation: Vec::new(),
@@ -281,7 +285,7 @@ async fn scan_for_orphans(
                         .await
                     {
                         Ok(reply) => {
-                            let response: serde_json::Value =
+                            let response: Value =
                                 serde_json::from_slice(&reply.payload).unwrap_or_default();
                             let status = response["status"].as_str().unwrap_or_default();
                             let exists = response["exists"].as_bool().unwrap_or(false);
@@ -458,7 +462,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
     let version_resp = local_client
         .request_text(Request::builder().uri("/version").body(vec![])?)
         .await?;
-    let version_data: serde_json::Value = serde_json::from_str(&version_resp)?;
+    let version_data: Value = serde_json::from_str(&version_resp)?;
     let major = version_data["major"].as_str().unwrap_or("0");
     let minor = version_data["minor"].as_str().unwrap_or("0");
     let local_version = format!("{}.{}", major, minor.replace('+', ""));
@@ -479,7 +483,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
         .route("/healthz", get(|| async { "OK" }))
         .route(
             "/readyz",
-            get(|state: axum::extract::State<Arc<AppState>>| async move {
+            get(|state: State<Arc<AppState>>| async move {
                 if *state.is_ready.borrow() {
                     axum::http::StatusCode::OK
                 } else {
@@ -687,7 +691,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
 
 async fn handle_task(
     msg: async_nats::jetstream::message::Message,
-    cluster_pool: std::sync::Arc<ClusterPool>,
+    cluster_pool: Arc<ClusterPool>,
     nats_client: async_nats::Client,
     runner_id: String,
     encryption_key: Option<String>,
@@ -695,11 +699,11 @@ async fn handle_task(
     let received_at = chrono::Utc::now();
     tracing::info!("Received task message: {:?}", msg.subject);
 
-    let payload: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+    let payload: Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
     let run_id_str = payload["run_id"].as_str().unwrap_or_default();
-    let run_id = uuid::Uuid::parse_str(run_id_str).unwrap_or_default();
+    let run_id = Uuid::parse_str(run_id_str).unwrap_or_default();
     let step_id_str = payload["step_id"].as_str().unwrap_or_default();
-    let step_id = uuid::Uuid::parse_str(step_id_str).unwrap_or_default();
+    let step_id = Uuid::parse_str(step_id_str).unwrap_or_default();
 
     let step_dsl: dsl::Step = match serde_json::from_value(payload["spec"].clone()) {
         Ok(spec) => {
@@ -738,15 +742,15 @@ async fn handle_task(
             return;
         }
     };
-    let storage: Option<std::collections::HashMap<String, serde_json::Value>> =
+    let storage: Option<HashMap<String, Value>> =
         serde_json::from_value(payload["storage"].clone()).ok();
-    let test_report_urls: Option<std::collections::HashMap<String, serde_json::Value>> =
+    let test_report_urls: Option<HashMap<String, Value>> =
         serde_json::from_value(payload["test_report_urls"].clone()).ok();
 
     let in_progress_msg = msg.clone();
     let in_progress_handle = tokio::spawn(async move {
         loop {
-            tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+            sleep(Duration::from_secs(15)).await;
             let _ = in_progress_msg
                 .ack_with(async_nats::jetstream::message::AckKind::Progress)
                 .await;

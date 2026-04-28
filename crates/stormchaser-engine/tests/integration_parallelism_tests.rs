@@ -69,7 +69,7 @@ async fn test_dynamic_parallelism_with_batching() {
         run_id,
         pool.clone(),
         nats_client.clone(),
-        std::sync::Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
+        Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
     )
     .await
     .unwrap();
@@ -106,7 +106,7 @@ async fn test_dynamic_parallelism_with_batching() {
         pool.clone(),
         nats_client.clone(),
         log_backend.clone(),
-        std::sync::Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
+        Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
     )
     .await
     .unwrap();
@@ -150,7 +150,7 @@ async fn test_dynamic_parallelism_with_batching() {
         pool.clone(),
         nats_client.clone(),
         log_backend.clone(),
-        std::sync::Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
+        Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
     )
     .await
     .unwrap();

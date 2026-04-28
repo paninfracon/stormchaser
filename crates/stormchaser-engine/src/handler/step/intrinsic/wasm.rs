@@ -1,6 +1,7 @@
 use crate::handler::{fetch_inputs, fetch_step_instance};
 use anyhow::{Context, Result};
 use chrono::Utc;
+use serde_json::Value;
 use sqlx::PgPool;
 use std::sync::Arc;
 use stormchaser_tls::TlsReloader;
@@ -11,13 +12,13 @@ pub async fn try_dispatch(
     run_id: Uuid,
     step_instance_id: Uuid,
     step_type: &str,
-    resolved_spec: &serde_json::Value,
-    resolved_params: &serde_json::Value,
+    resolved_spec: &Value,
+    resolved_params: &Value,
     pool: PgPool,
     nats_client: async_nats::Client,
     _tls_reloader: Arc<TlsReloader>,
 ) -> Result<bool> {
-    let wasm_def: Option<(String, String, serde_json::Value)> =
+    let wasm_def: Option<(String, String, Value)> =
         crate::db::get_wasm_step_definition(&pool, step_type).await?;
 
     let (module, function, wasm_config) = if let Some((m, f, c)) = wasm_def {
@@ -31,9 +32,9 @@ pub async fn try_dispatch(
             .as_str()
             .unwrap_or("run")
             .to_string();
-        (m, f, serde_json::Value::Null)
+        (m, f, Value::Null)
     } else {
-        ("".to_string(), "".to_string(), serde_json::Value::Null)
+        ("".to_string(), "".to_string(), Value::Null)
     };
 
     if !module.is_empty() {

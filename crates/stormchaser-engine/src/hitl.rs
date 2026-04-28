@@ -56,6 +56,7 @@ pub fn generate_approval_token(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Value;
 
     #[test]
     fn test_generate_approval_token() {
@@ -78,7 +79,7 @@ mod tests {
         let nonce = Nonce::from_slice(nonce_bytes);
         let plaintext = cipher.decrypt(nonce, ciphertext).unwrap();
 
-        let payload: serde_json::Value = serde_json::from_slice(&plaintext).unwrap();
+        let payload: Value = serde_json::from_slice(&plaintext).unwrap();
         assert_eq!(payload["run_id"], run_id.to_string());
         assert_eq!(payload["step_id"], step_id.to_string());
         assert_eq!(payload["action"], "approve");

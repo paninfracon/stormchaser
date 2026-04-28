@@ -14,7 +14,9 @@ use stormchaser_engine::{
 use stormchaser_model::auth::OpaClient;
 use stormchaser_model::runner::RunnerStatus;
 use stormchaser_model::workflow::RunStatus;
+use tokio::time::sleep;
 use tracing::info;
+use uuid::Uuid;
 
 use stormchaser_engine::db;
 use stormchaser_engine::git_cache;
@@ -162,7 +164,7 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
 
     db_options = db_options
         .log_statements(log::LevelFilter::Debug)
-        .log_slow_statements(log::LevelFilter::Warn, std::time::Duration::from_secs(1));
+        .log_slow_statements(log::LevelFilter::Warn, Duration::from_secs(1));
 
     let pool = PgPoolOptions::new()
         .max_connections(5)
@@ -207,9 +209,8 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
     let log_backend = Arc::new(log_backend);
 
     // Initialize Secret Backend
-    let secret_backend =
-        std::sync::Arc::new(VaultBackend::new(config.vault_addr, config.vault_token)?)
-            as secrets::SharedSecretBackend;
+    let secret_backend = Arc::new(VaultBackend::new(config.vault_addr, config.vault_token)?)
+        as secrets::SharedSecretBackend;
     hcl_eval::set_secrets_backend(secret_backend);
 
     let nats_options = async_nats::ConnectOptions::new()
@@ -265,7 +266,7 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
             // Find all non-terminal runs and check their timeouts
             #[derive(sqlx::FromRow)]
             struct TimeoutCheck {
-                id: uuid::Uuid,
+                id: Uuid,
                 #[sqlx(rename = "status")]
                 _status: RunStatus,
                 created_at: chrono::DateTime<chrono::Utc>,
@@ -388,7 +389,7 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
                     }
                     Some(Err(e)) => {
                         tracing::error!("JetStream consumer error: {:?}", e);
-                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        sleep(Duration::from_secs(1)).await;
                     }
                     None => {
                         tracing::error!("JetStream consumer closed");
@@ -425,14 +426,14 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
 #[allow(clippy::too_many_arguments)]
 async fn handle_message(
     subject: &str,
-    payload: serde_json::Value,
+    payload: Value,
     message: async_nats::jetstream::message::Message,
     pool: sqlx::PgPool,
-    git_cache: std::sync::Arc<git_cache::GitCache>,
-    opa_client: std::sync::Arc<auth::OpaClient>,
+    git_cache: Arc<git_cache::GitCache>,
+    opa_client: Arc<auth::OpaClient>,
     nats_client: async_nats::Client,
-    tls_reloader: std::sync::Arc<TlsReloader>,
-    log_backend: std::sync::Arc<Option<LogBackend>>,
+    tls_reloader: Arc<TlsReloader>,
+    log_backend: Arc<Option<LogBackend>>,
 ) {
     match subject {
         "stormchaser.run.queued" => {
@@ -443,7 +444,7 @@ async fn handle_message(
                     return;
                 }
             };
-            let run_id = match uuid::Uuid::parse_str(run_id_str) {
+            let run_id = match Uuid::parse_str(run_id_str) {
                 Ok(id) => id,
                 Err(_) => {
                     let _ = message.double_ack().await;
@@ -479,7 +480,7 @@ async fn handle_message(
                     return;
                 }
             };
-            let run_id = match uuid::Uuid::parse_str(run_id_str) {
+            let run_id = match Uuid::parse_str(run_id_str) {
                 Ok(id) => id,
                 Err(_) => {
                     let _ = message.double_ack().await;
@@ -508,7 +509,7 @@ async fn handle_message(
                     return;
                 }
             };
-            let run_id = match uuid::Uuid::parse_str(run_id_str) {
+            let run_id = match Uuid::parse_str(run_id_str) {
                 Ok(id) => id,
                 Err(_) => {
                     let _ = message.double_ack().await;

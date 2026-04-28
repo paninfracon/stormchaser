@@ -1,3 +1,5 @@
+use serde_json::Value;
+use std::collections::HashMap;
 pub mod auth;
 pub mod cron;
 pub mod step;
@@ -41,7 +43,7 @@ pub struct EnqueueRequest {
     pub workflow_path: String,
     pub git_ref: String,
     #[schema(value_type = Object)]
-    pub inputs: serde_json::Value,
+    pub inputs: Value,
     pub overrides: Option<RunOverrides>,
 }
 
@@ -88,8 +90,8 @@ pub struct WorkflowRunDetail {
     pub started_at: Option<DateTime<Utc>>,
     pub finished_at: Option<DateTime<Utc>>,
     pub error: Option<String>,
-    pub inputs: serde_json::Value,
-    pub secrets: serde_json::Value,
+    pub inputs: Value,
+    pub secrets: Value,
     pub source_code: String,
     pub dsl_version: String,
 }
@@ -116,7 +118,7 @@ pub struct StepDetail {
 #[derive(Debug, Deserialize)]
 pub struct DirectRunRequest {
     pub dsl: String,
-    pub inputs: serde_json::Value,
+    pub inputs: Value,
 }
 
 #[derive(Debug, Deserialize)]
@@ -138,7 +140,7 @@ pub struct CreateEventRuleRequest {
     pub repo_url: String,
     pub workflow_path: String,
     pub git_ref: String,
-    pub input_mappings: std::collections::HashMap<String, String>,
+    pub input_mappings: HashMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -150,7 +152,7 @@ pub struct CreateCronWorkflowRequest {
     pub repo_url: String,
     pub workflow_path: String,
     pub git_ref: String,
-    pub inputs: serde_json::Value,
+    pub inputs: Value,
 }
 
 #[derive(Debug, Serialize)]
@@ -165,7 +167,7 @@ pub struct CreateStorageBackendRequest {
     pub name: String,
     pub description: Option<String>,
     pub backend_type: BackendType,
-    pub config: serde_json::Value,
+    pub config: Value,
     pub is_default_sfs: bool,
 }
 
@@ -174,7 +176,7 @@ pub struct UpdateStorageBackendRequest {
     pub name: Option<String>,
     pub description: Option<String>,
     pub backend_type: Option<BackendType>,
-    pub config: Option<serde_json::Value>,
+    pub config: Option<Value>,
     pub is_default_sfs: Option<bool>,
 }
 

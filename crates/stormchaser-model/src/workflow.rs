@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use uuid::Uuid;
 
 use utoipa::ToSchema;
@@ -68,11 +69,11 @@ pub struct WorkflowRun {
 pub struct RunContext {
     pub run_id: Uuid,
     pub dsl_version: String,
-    pub workflow_definition: serde_json::Value, // Full parsed AST
-    pub source_code: String,                    // Original workflow file content
-    pub inputs: serde_json::Value,              // Trigger-time inputs
-    pub secrets: serde_json::Value,             // Decrypted secrets map
-    pub sensitive_values: Vec<String>,          // Redaction registry
+    pub workflow_definition: Value,    // Full parsed AST
+    pub source_code: String,           // Original workflow file content
+    pub inputs: Value,                 // Trigger-time inputs
+    pub secrets: Value,                // Decrypted secrets map
+    pub sensitive_values: Vec<String>, // Redaction registry
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
@@ -93,6 +94,6 @@ pub struct AuditLog {
     pub run_id: Uuid,
     pub event_type: String, // e.g., "workflow_started", "step_failed", "approval_granted"
     pub actor: String,      // User ID or system process
-    pub payload: serde_json::Value,
+    pub payload: Value,
     pub created_at: DateTime<Utc>,
 }

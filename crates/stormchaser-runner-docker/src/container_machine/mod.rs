@@ -1,3 +1,5 @@
+use serde_json::Value;
+use std::collections::HashMap;
 pub mod crypto;
 pub mod docker_utils;
 pub mod transitions;
@@ -14,8 +16,8 @@ pub struct ContainerMetadata {
     pub step_dsl: Step,
     pub received_at: chrono::DateTime<chrono::Utc>,
     pub encryption_key: Option<String>,
-    pub storage: Option<std::collections::HashMap<String, serde_json::Value>>,
-    pub test_report_urls: Option<std::collections::HashMap<String, serde_json::Value>>,
+    pub storage: Option<HashMap<String, Value>>,
+    pub test_report_urls: Option<HashMap<String, Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -23,9 +25,9 @@ pub struct ContainerMetrics {
     pub exit_code: Option<i64>,
     pub duration_ms: u64,
     pub latency_ms: u64,
-    pub storage_hashes: Option<std::collections::HashMap<String, String>>,
-    pub artifacts: Option<std::collections::HashMap<String, serde_json::Value>>,
-    pub test_reports: Option<serde_json::Value>,
+    pub storage_hashes: Option<HashMap<String, String>>,
+    pub artifacts: Option<HashMap<String, Value>>,
+    pub test_reports: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

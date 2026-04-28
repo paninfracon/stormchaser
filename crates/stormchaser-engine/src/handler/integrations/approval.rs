@@ -1,5 +1,6 @@
 #![allow(unused_imports)]
 use anyhow::Result;
+use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -11,7 +12,7 @@ use stormchaser_model::workflow;
 pub async fn handle_approval_notification(
     run_id: Uuid,
     step_id: Uuid,
-    spec: serde_json::Value,
+    spec: Value,
     pool: PgPool,
     _nats_client: async_nats::Client,
 ) -> Result<()> {
@@ -34,7 +35,7 @@ pub async fn handle_approval_notification(
         // 2. Prepare Context
         let run_context: workflow::RunContext =
             crate::handler::fetch_run_context(run_id, &pool).await?;
-        let outputs: serde_json::Value = crate::handler::fetch_outputs(run_id, &pool).await?;
+        let outputs: Value = crate::handler::fetch_outputs(run_id, &pool).await?;
 
         let template_ctx = serde_json::json!({
             "inputs": run_context.inputs,

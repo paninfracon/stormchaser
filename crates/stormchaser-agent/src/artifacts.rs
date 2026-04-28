@@ -1,17 +1,19 @@
 use anyhow::Result;
+use serde_json::Value;
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use tracing::{error, info, warn};
 
 async fn upload_to_s3(
     name: &String,
-    artifact_val: &serde_json::Value,
+    artifact_val: &Value,
     path: &str,
     file_size: u64,
     hash: String,
     client: &reqwest::Client,
-    metadata_map: &mut std::collections::HashMap<String, serde_json::Value>,
+    metadata_map: &mut HashMap<String, Value>,
 ) {
     if let Some(put_url) = artifact_val.get("put_url").and_then(|u| u.as_str()) {
         let file_tokio = match tokio::fs::File::open(path).await {
@@ -62,11 +64,11 @@ async fn upload_to_s3(
 
 async fn upload_to_oci(
     name: &String,
-    artifact_val: &serde_json::Value,
+    artifact_val: &Value,
     path: &str,
     file_size: u64,
     hash: String,
-    metadata_map: &mut std::collections::HashMap<String, serde_json::Value>,
+    metadata_map: &mut HashMap<String, Value>,
 ) {
     if let Some(remote_path) = artifact_val.get("remote_path").and_then(|u| u.as_str()) {
         let mut cmd = std::process::Command::new("oras");
@@ -112,11 +114,9 @@ async fn upload_to_oci(
     }
 }
 
-pub async fn park_artifacts(
-    artifacts: serde_json::Value,
-) -> Result<std::collections::HashMap<String, serde_json::Value>> {
+pub async fn park_artifacts(artifacts: Value) -> Result<HashMap<String, Value>> {
     let client = reqwest::Client::new();
-    let mut metadata_map = std::collections::HashMap::new();
+    let mut metadata_map = HashMap::new();
 
     if let Some(artifact_map) = artifacts.as_object() {
         for (name, artifact_val) in artifact_map {

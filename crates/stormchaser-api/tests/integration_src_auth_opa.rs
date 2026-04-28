@@ -1,6 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use axum::{body::Body, http::Request, http::StatusCode, routing::get, Router};
+use std::collections::HashMap;
 use std::sync::Arc;
 use stormchaser_api::auth::opa::opa_middleware;
 use stormchaser_api::AppState;
@@ -43,7 +44,7 @@ async fn mock_state(auth: MockAuthorizer) -> AppState {
         nats,
         opa: Arc::new(auth),
         oidc_config: None,
-        jwks: std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
     }
 }

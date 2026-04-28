@@ -84,7 +84,7 @@ async fn test_artifact_persistence_on_completion() {
         run_id,
         pool.clone(),
         nats_client.clone(),
-        std::sync::Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
+        Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
     )
     .await
     .unwrap();
@@ -118,7 +118,7 @@ async fn test_artifact_persistence_on_completion() {
         pool.clone(),
         nats_client.clone(),
         log_backend.clone(),
-        std::sync::Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
+        Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
     )
     .await
     .unwrap();
@@ -205,7 +205,7 @@ async fn test_test_report_persistence_on_completion() {
         run_id,
         pool.clone(),
         nats_client.clone(),
-        std::sync::Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
+        Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
     )
     .await
     .unwrap();
@@ -241,7 +241,7 @@ async fn test_test_report_persistence_on_completion() {
         pool.clone(),
         nats_client.clone(),
         log_backend.clone(),
-        std::sync::Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
+        Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
     )
     .await
     .unwrap();

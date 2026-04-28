@@ -1,6 +1,7 @@
 use anyhow::Result;
 use quick_xml::de::from_str;
 use serde::Deserialize;
+use serde_json::Value;
 use stormchaser_model::{TestCase, TestCaseStatus, TestSummary};
 use uuid::Uuid;
 
@@ -15,7 +16,7 @@ struct TestCaseXml {
     time: Option<f64>,
     failure: Option<TestFailureXml>,
     error: Option<TestFailureXml>,
-    skipped: Option<serde_json::Value>,
+    skipped: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -1,6 +1,7 @@
 use crate::handler::fetch_step_instance;
 use anyhow::Result;
 use chrono::Utc;
+use serde_json::Value;
 use sqlx::PgPool;
 use std::sync::Arc;
 use stormchaser_tls::TlsReloader;
@@ -8,7 +9,7 @@ use uuid::Uuid;
 
 use stormchaser_model::dsl;
 
-pub fn mutate_if_has_files(step_type: &mut String, resolved_spec: &mut serde_json::Value) {
+pub fn mutate_if_has_files(step_type: &mut String, resolved_spec: &mut Value) {
     if step_type == "JQ" {
         let jq_spec: Result<dsl::JqSpec, _> =
             serde_json::from_value(resolved_spec.get("spec").unwrap_or(&*resolved_spec).clone());
@@ -54,7 +55,7 @@ pub async fn try_dispatch(
     run_id: Uuid,
     step_instance_id: Uuid,
     step_type: &str,
-    resolved_spec: &serde_json::Value,
+    resolved_spec: &Value,
     pool: PgPool,
     nats_client: async_nats::Client,
     _tls_reloader: Arc<TlsReloader>,
@@ -82,7 +83,7 @@ pub async fn try_dispatch(
                     use jaq_core::{Ctx, RcIter};
                     use jaq_json::Val;
 
-                    let input_value = jq.input.unwrap_or(serde_json::Value::Null);
+                    let input_value = jq.input.unwrap_or(Value::Null);
 
                     let loader = Loader::new(jaq_std::defs().chain(jaq_json::defs()));
                     let arena = Arena::default();
@@ -111,7 +112,7 @@ pub async fn try_dispatch(
                                     for res in out {
                                         match res {
                                             Ok(v) => {
-                                                results.push(serde_json::Value::from(v));
+                                                results.push(Value::from(v));
                                             }
                                             Err(e) => {
                                                 execution_err = Some(anyhow::anyhow!(
@@ -129,7 +130,7 @@ pub async fn try_dispatch(
                                         let final_result = if results.len() == 1 {
                                             results.remove(0)
                                         } else {
-                                            serde_json::Value::Array(results)
+                                            Value::Array(results)
                                         };
 
                                         Ok(final_result)

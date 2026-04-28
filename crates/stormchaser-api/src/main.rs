@@ -1,9 +1,11 @@
 use anyhow::Context;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::ConnectOptions;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use stormchaser_api::{
     app,
     telemetry::{init_telemetry, shutdown_telemetry},
@@ -137,7 +139,7 @@ pub async fn run_server(config: Config) -> anyhow::Result<()> {
         server_name: config.tls_server_name.clone(),
     };
 
-    let tls_reloader = std::sync::Arc::new(TlsReloader::new(tls_config).await?);
+    let tls_reloader = Arc::new(TlsReloader::new(tls_config).await?);
 
     let mut db_options: sqlx::postgres::PgConnectOptions = config.database_url.parse()?;
     if config.db_ssl {
@@ -155,7 +157,7 @@ pub async fn run_server(config: Config) -> anyhow::Result<()> {
 
     db_options = db_options
         .log_statements(log::LevelFilter::Debug)
-        .log_slow_statements(log::LevelFilter::Warn, std::time::Duration::from_secs(1));
+        .log_slow_statements(log::LevelFilter::Warn, Duration::from_secs(1));
 
     let pool = PgPoolOptions::new()
         .max_connections(5)
@@ -202,7 +204,7 @@ pub async fn run_server(config: Config) -> anyhow::Result<()> {
 
     // OIDC Configuration
     let mut oidc_config = None;
-    let mut jwks = std::collections::HashMap::new();
+    let mut jwks = HashMap::new();
 
     if let (Some(issuer), Some(client_id), Some(client_secret)) = (
         config.oidc_issuer,
@@ -239,7 +241,7 @@ pub async fn run_server(config: Config) -> anyhow::Result<()> {
         nats: nats_client,
         opa: opa_client,
         oidc_config,
-        jwks: std::sync::Arc::new(tokio::sync::RwLock::new(jwks)),
+        jwks: Arc::new(tokio::sync::RwLock::new(jwks)),
         log_backend,
     };
 

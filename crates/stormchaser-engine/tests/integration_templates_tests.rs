@@ -5,6 +5,7 @@ use uuid::Uuid;
 
 // Assumes there's a test setup function like in other tests
 mod common {
+    use std::sync::Arc;
     use stormchaser_model::auth::{self, OpaClient};
     pub async fn get_pool() -> sqlx::PgPool {
         let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
@@ -13,17 +14,13 @@ mod common {
         sqlx::PgPool::connect(&db_url).await.unwrap()
     }
 
-    pub async fn setup_test_env() -> (
-        sqlx::PgPool,
-        async_nats::Client,
-        std::sync::Arc<auth::OpaClient>,
-    ) {
+    pub async fn setup_test_env() -> (sqlx::PgPool, async_nats::Client, Arc<auth::OpaClient>) {
         let pool = get_pool().await;
         let nats_client = async_nats::connect("nats://localhost:4222").await.unwrap();
 
         let opa_client = OpaClient::new(None, None);
 
-        (pool, nats_client, std::sync::Arc::new(opa_client))
+        (pool, nats_client, Arc::new(opa_client))
     }
 }
 

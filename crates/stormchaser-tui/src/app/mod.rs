@@ -2,6 +2,8 @@ use crate::AppEvent;
 use chrono::{DateTime, Utc};
 use ratatui::widgets::ListState;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::HashMap;
 use stormchaser_model::workflow::RunStatus;
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -21,9 +23,9 @@ pub struct WorkflowRunDetail {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct StepDetail {
-    pub instance: serde_json::Value,
-    pub outputs: Vec<serde_json::Value>,
-    pub history: Vec<serde_json::Value>,
+    pub instance: Value,
+    pub outputs: Vec<Value>,
+    pub history: Vec<Value>,
     pub logs: Vec<String>,
 }
 
@@ -101,7 +103,7 @@ pub struct App<'a> {
     pub file_explorer: tui_file_explorer::FileExplorer,
     pub direct_submit_form: Option<ratatui_form::Form>,
     pub direct_submit_dsl: Option<String>,
-    pub cached_runs: std::collections::HashMap<uuid::Uuid, WorkflowRunFullDetail>,
+    pub cached_runs: HashMap<Uuid, WorkflowRunFullDetail>,
     // Use the lifetime param to satisfy rust compiler. This avoids removing the lifetime everywhere.
     pub _marker: std::marker::PhantomData<&'a ()>,
 }
@@ -162,7 +164,7 @@ impl<'a> App<'a> {
             file_browser_active: false,
             direct_submit_form: None,
             direct_submit_dsl: None,
-            cached_runs: std::collections::HashMap::new(),
+            cached_runs: HashMap::new(),
             file_explorer: tui_file_explorer::FileExplorer::new(
                 std::env::current_dir().unwrap_or_default(),
                 vec!["storm".to_string()],

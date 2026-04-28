@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use stormchaser_model::cron;
 
 use super::{CreateCronWorkflowRequest, CronWorkflowResponse, EnqueueResponse};
@@ -216,7 +217,7 @@ async fn register_ofelia_cron(
     let trigger_url = format!("{}/api/v1/cron-trigger/{}", system_url, id);
     let container_name = format!("stormchaser-cron-{}", id);
 
-    let mut labels = std::collections::HashMap::new();
+    let mut labels = HashMap::new();
     labels.insert("ofelia.enabled".to_string(), "true".to_string());
     labels.insert(
         format!("ofelia.job-run.{}.schedule", name),

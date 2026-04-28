@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::Type, PartialEq, Eq)]
 #[sqlx(type_name = "runner_status", rename_all = "snake_case")]
@@ -23,7 +24,7 @@ pub struct Runner {
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
 pub struct StepDefinition {
     pub step_type: String,
-    pub schema: serde_json::Value,
+    pub schema: Value,
     pub documentation: Option<String>,
     pub registered_at: DateTime<Utc>,
 }

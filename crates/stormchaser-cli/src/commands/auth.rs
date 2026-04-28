@@ -2,6 +2,7 @@ use crate::utils::handle_response;
 use anyhow::{Context, Result};
 use clap::Subcommand;
 use serde_json::json;
+use serde_json::Value;
 
 #[derive(Subcommand)]
 pub enum AuthCommands {
@@ -116,7 +117,7 @@ pub async fn handle_login(
         .await?;
 
     let sso_token = if token_res.status().is_success() {
-        let json: serde_json::Value = token_res.json().await.unwrap_or_default();
+        let json: Value = token_res.json().await.unwrap_or_default();
         if let Some(id_token) = json.get("id_token").and_then(|v| v.as_str()) {
             id_token.to_string()
         } else {
@@ -138,7 +139,7 @@ pub async fn handle_login(
     let status = res.status();
     let body = res.text().await.unwrap_or_default();
     if status.is_success() {
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&body) {
+        if let Ok(val) = serde_json::from_str::<Value>(&body) {
             if let Some(access_token) = val.get("access_token").and_then(|t| t.as_str()) {
                 println!("\nSuccessfully logged in! Export your token to use it:");
                 println!("export STORMCHASER_TOKEN=\"{}\"", access_token);

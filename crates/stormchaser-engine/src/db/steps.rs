@@ -11,7 +11,7 @@ use stormchaser_model::test_report;
 
 pub struct StepDefinitionInput {
     pub step_type: String,
-    pub schema: serde_json::Value,
+    pub schema: Value,
     pub documentation: Option<String>,
 }
 

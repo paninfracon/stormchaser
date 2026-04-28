@@ -5,6 +5,7 @@ use axum::{
 use jsonwebtoken::{encode, EncodingKey, Header};
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
+use std::collections::HashMap;
 use std::sync::Arc;
 use stormchaser_api::{app, AppState, EnqueueResponse};
 use stormchaser_model::auth::{Claims, OpaClient};
@@ -35,7 +36,7 @@ async fn test_api_enqueue_inserts_quotas() {
         nats: nats_client,
         opa: Arc::new(OpaClient::new(None, None)),
         oidc_config: None,
-        jwks: std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
     };
 

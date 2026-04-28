@@ -1,4 +1,6 @@
 use anyhow::{Context, Result};
+use serde_json::Value;
+use std::time::Duration;
 use stormchaser_model::dsl::Artifact;
 use stormchaser_model::storage::{BackendType, StorageBackend};
 use uuid::Uuid;
@@ -8,7 +10,7 @@ pub async fn generate_parking_instructions(
     run_id: Uuid,
     storage_name: &str,
     artifact: &Artifact,
-) -> Result<serde_json::Value> {
+) -> Result<Value> {
     match backend.backend_type {
         BackendType::S3 => {
             let client = crate::s3::get_s3_client(backend).await?;
@@ -17,7 +19,7 @@ pub async fn generate_parking_instructions(
                 .context("Missing bucket in SFS backend config")?;
 
             let artifact_key = format!("artifacts/{}/{}/{}", run_id, storage_name, artifact.name);
-            let expires = std::time::Duration::from_secs(3600); // 1 hour
+            let expires = Duration::from_secs(3600); // 1 hour
 
             let put_url =
                 crate::s3::generate_presigned_url(&client, bucket, &artifact_key, true, expires)
@@ -50,14 +52,8 @@ pub async fn generate_parking_instructions(
 
             if let (Some(u), Some(p)) = (username, password) {
                 if let Some(map) = payload.as_object_mut() {
-                    map.insert(
-                        "username".to_string(),
-                        serde_json::Value::String(u.to_string()),
-                    );
-                    map.insert(
-                        "password".to_string(),
-                        serde_json::Value::String(p.to_string()),
-                    );
+                    map.insert("username".to_string(), Value::String(u.to_string()));
+                    map.insert("password".to_string(), Value::String(p.to_string()));
                 }
             }
 

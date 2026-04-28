@@ -3,8 +3,10 @@ use async_trait::async_trait;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::sync::Arc;
 use tracing::debug;
+use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
@@ -15,7 +17,7 @@ pub struct Claims {
 
 #[async_trait]
 pub trait OpaWasmExecutor: Send + Sync {
-    async fn evaluate(&self, entrypoint: &str, input: &serde_json::Value) -> Result<bool>;
+    async fn evaluate(&self, entrypoint: &str, input: &Value) -> Result<bool>;
 }
 
 #[derive(Clone)]
@@ -47,10 +49,7 @@ struct OpaResponse {
 }
 
 impl OpaClient {
-    pub fn new(
-        url: Option<String>,
-        tls_config: Option<std::sync::Arc<rustls::ClientConfig>>,
-    ) -> Self {
+    pub fn new(url: Option<String>, tls_config: Option<Arc<rustls::ClientConfig>>) -> Self {
         let retry_policy = ExponentialBackoff::builder().build_with_max_retries(3);
         let mut builder = reqwest::Client::builder();
 
@@ -154,8 +153,8 @@ pub struct ApiOpaContext<'a> {
 /// Context for OPA checks in the Engine after DSL parsing
 #[derive(Debug, Serialize)]
 pub struct EngineOpaContext {
-    pub run_id: uuid::Uuid,
+    pub run_id: Uuid,
     pub initiating_user: String,
-    pub workflow_ast: serde_json::Value,
-    pub inputs: serde_json::Value,
+    pub workflow_ast: Value,
+    pub inputs: Value,
 }

@@ -1,6 +1,7 @@
 #![allow(unused_imports)]
 use anyhow::{Context, Result};
 use chrono::Utc;
+use serde_json::Value;
 use sqlx::PgPool;
 use std::sync::Arc;
 use stormchaser_tls::TlsReloader;
@@ -163,7 +164,7 @@ async fn send_email_ses(
 pub async fn handle_email_send(
     run_id: Uuid,
     step_id: Uuid,
-    spec: serde_json::Value,
+    spec: Value,
     pool: PgPool,
     nats_client: async_nats::Client,
     tls_reloader: Arc<TlsReloader>,
@@ -189,7 +190,7 @@ pub async fn handle_email_send(
 
     // 2. Prepare Context for Template Rendering
     let run_context: workflow::RunContext = fetch_run_context(run_id, &pool).await?;
-    let outputs: serde_json::Value = fetch_outputs(run_id, &pool).await?;
+    let outputs: Value = fetch_outputs(run_id, &pool).await?;
 
     let template_ctx = serde_json::json!({
         "inputs": run_context.inputs,
@@ -434,7 +435,7 @@ async fn fail_email_step(
 pub async fn handle_test_report_email(
     run_id: Uuid,
     step_id: Uuid,
-    spec: serde_json::Value,
+    spec: Value,
     pool: PgPool,
     nats_client: async_nats::Client,
     tls_reloader: Arc<TlsReloader>,
@@ -460,7 +461,7 @@ pub async fn handle_test_report_email(
 
     // 3. Prepare Context
     let run_context: workflow::RunContext = fetch_run_context(run_id, &pool).await?;
-    let outputs: serde_json::Value = fetch_outputs(run_id, &pool).await?;
+    let outputs: Value = fetch_outputs(run_id, &pool).await?;
 
     let template_ctx = serde_json::json!({
         "inputs": run_context.inputs,
@@ -500,7 +501,7 @@ async fn fetch_test_reports(
     run_id: Uuid,
     spec: &dsl::TestReportEmailSpec,
     pool: &PgPool,
-) -> Result<Vec<serde_json::Value>> {
+) -> Result<Vec<Value>> {
     let all_summaries = crate::db::get_test_summaries_for_run(pool, run_id).await?;
     let filtered_summaries = if let Some(name) = &spec.report_name {
         all_summaries
@@ -526,7 +527,7 @@ async fn fetch_test_reports(
 #[cfg(feature = "email")]
 fn render_test_report_body(
     spec: &dsl::TestReportEmailSpec,
-    template_ctx: &serde_json::Value,
+    template_ctx: &Value,
 ) -> Result<String> {
     use minijinja::Environment;
     let default_template = r#"
@@ -709,7 +710,7 @@ async fn send_test_report_via_smtp(
 pub async fn handle_email_send(
     _run_id: Uuid,
     _step_id: Uuid,
-    _spec: serde_json::Value,
+    _spec: Value,
     _pool: PgPool,
     _nats_client: async_nats::Client,
     __tls_reloader: Arc<TlsReloader>,
@@ -721,7 +722,7 @@ pub async fn handle_email_send(
 pub async fn handle_test_report_email(
     _run_id: Uuid,
     _step_id: Uuid,
-    _spec: serde_json::Value,
+    _spec: Value,
     _pool: PgPool,
     _nats_client: async_nats::Client,
     __tls_reloader: Arc<TlsReloader>,

@@ -1,3 +1,5 @@
+use serde_json::Value;
+use std::collections::HashMap;
 pub mod crypto;
 pub mod k8s_utils;
 pub mod transitions;
@@ -21,8 +23,8 @@ pub struct JobMetadata {
     pub received_at: DateTime<Utc>,
     pub cluster_version: String,
     pub encryption_key: Option<String>,
-    pub storage: Option<std::collections::HashMap<String, serde_json::Value>>,
-    pub test_report_urls: Option<std::collections::HashMap<String, serde_json::Value>>,
+    pub storage: Option<HashMap<String, Value>>,
+    pub test_report_urls: Option<HashMap<String, Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -31,9 +33,9 @@ pub struct JobMetrics {
     pub attempts: i32,
     pub duration_ms: u64,
     pub latency_ms: u64,
-    pub storage_hashes: Option<std::collections::HashMap<String, String>>,
-    pub artifacts: Option<std::collections::HashMap<String, serde_json::Value>>,
-    pub test_reports: Option<std::collections::HashMap<String, serde_json::Value>>,
+    pub storage_hashes: Option<HashMap<String, String>>,
+    pub artifacts: Option<HashMap<String, Value>>,
+    pub test_reports: Option<HashMap<String, Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

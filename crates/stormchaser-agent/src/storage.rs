@@ -1,10 +1,13 @@
 use anyhow::Result;
 use flate2::write::GzEncoder;
 use flate2::Compression;
+use serde_json::Value;
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Write};
 use tracing::{error, info, warn};
+use uuid::Uuid;
 
 pub async fn unpark_storage(
     url: &str,
@@ -22,7 +25,7 @@ pub async fn unpark_storage(
     }
 
     let mut hasher = Sha256::new();
-    let tar_path = format!("/tmp/unpark_{}.tar.gz", uuid::Uuid::new_v4());
+    let tar_path = format!("/tmp/unpark_{}.tar.gz", Uuid::new_v4());
     {
         let mut file = File::create(&tar_path)?;
         while let Some(chunk) = response.chunk().await? {
@@ -62,12 +65,9 @@ pub async fn unpark_storage(
     Ok(())
 }
 
-pub async fn park_storage(
-    urls: serde_json::Value,
-    paths: serde_json::Value,
-) -> Result<std::collections::HashMap<String, String>> {
+pub async fn park_storage(urls: Value, paths: Value) -> Result<HashMap<String, String>> {
     let client = reqwest::Client::new();
-    let mut hashes = std::collections::HashMap::new();
+    let mut hashes = HashMap::new();
 
     if let Some(url_map) = urls.as_object() {
         for (name, url_val) in url_map {

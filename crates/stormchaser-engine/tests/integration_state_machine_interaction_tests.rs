@@ -1,5 +1,6 @@
 #![allow(clippy::explicit_auto_deref)]
 use chrono::Utc;
+use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
 use stormchaser_engine::step_machine::StepMachine;
 use stormchaser_engine::workflow_machine::WorkflowMachine;
@@ -73,8 +74,8 @@ fn create_test_step(run_id: Uuid, name: &str) -> StepInstance {
         finished_at: None,
         exit_code: None,
         error: None,
-        spec: serde_json::Value::Null,
-        params: serde_json::Value::Null,
+        spec: Value::Null,
+        params: Value::Null,
         created_at: Utc::now(),
     }
 }

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 pub mod auth;
 pub mod db;
 pub mod hitl;
@@ -84,14 +85,12 @@ pub struct AppState {
     pub nats: async_nats::Client,
     pub opa: Arc<dyn OpaAuthorizer>,
     pub oidc_config: Option<OidcConfig>,
-    pub jwks: Arc<RwLock<std::collections::HashMap<String, jsonwebtoken::jwk::Jwk>>>,
+    pub jwks: Arc<RwLock<HashMap<String, jsonwebtoken::jwk::Jwk>>>,
     pub log_backend: Option<LogBackend>,
 }
 
-pub async fn fetch_jwks(
-    jwks_url: &str,
-) -> std::collections::HashMap<String, jsonwebtoken::jwk::Jwk> {
-    let mut jwks = std::collections::HashMap::new();
+pub async fn fetch_jwks(jwks_url: &str) -> HashMap<String, jsonwebtoken::jwk::Jwk> {
+    let mut jwks = HashMap::new();
     let retry_policy =
         reqwest_retry::policies::ExponentialBackoff::builder().build_with_max_retries(3);
     let client = reqwest_middleware::ClientBuilder::new(reqwest::Client::new())

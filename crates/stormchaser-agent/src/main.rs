@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use serde_json::Value;
 use std::process::Command;
 use tracing::info;
 
@@ -89,8 +90,8 @@ pub async fn run_agent(cli: Cli) -> Result<()> {
             report_urls,
             command,
         } => {
-            let urls: serde_json::Value = serde_json::from_str(&parking_urls)?;
-            let paths: serde_json::Value = serde_json::from_str(&mount_paths)?;
+            let urls: Value = serde_json::from_str(&parking_urls)?;
+            let paths: Value = serde_json::from_str(&mount_paths)?;
 
             if command.is_empty() {
                 anyhow::bail!("No command provided to run");
@@ -104,8 +105,8 @@ pub async fn run_agent(cli: Cli) -> Result<()> {
 
             // Always collect reports even if command failed (test failures are common)
             if let Some(reports_json) = test_reports {
-                let reports: serde_json::Value = serde_json::from_str(&reports_json)?;
-                let urls_val: Option<serde_json::Value> =
+                let reports: Value = serde_json::from_str(&reports_json)?;
+                let urls_val: Option<Value> =
                     report_urls.and_then(|u| serde_json::from_str(&u).ok());
                 let collected_reports = collect_test_reports(reports, urls_val).await?;
                 if !collected_reports.is_empty() {
@@ -127,7 +128,7 @@ pub async fn run_agent(cli: Cli) -> Result<()> {
                 }
 
                 if let Some(artifacts_json) = artifact_urls {
-                    let artifacts: serde_json::Value = serde_json::from_str(&artifacts_json)?;
+                    let artifacts: Value = serde_json::from_str(&artifacts_json)?;
                     let artifact_meta = park_artifacts(artifacts).await?;
                     if !artifact_meta.is_empty() {
                         let meta_json = serde_json::to_string(&artifact_meta)?;

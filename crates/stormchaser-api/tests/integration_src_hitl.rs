@@ -1,6 +1,8 @@
 use axum::response::IntoResponse;
 use serde_json::json;
+use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
+use std::collections::HashMap;
 use std::sync::Arc;
 use stormchaser_model::auth::OpaClient;
 use uuid::Uuid;
@@ -26,7 +28,7 @@ struct ApprovalLinkPayload {
     step_id: Uuid,
     action: String,
     #[serde(default)]
-    inputs: serde_json::Value,
+    inputs: Value,
 }
 
 async fn mock_state() -> AppState {
@@ -46,7 +48,7 @@ async fn mock_state() -> AppState {
         nats,
         opa: Arc::new(OpaClient::new(None, None)),
         oidc_config: None,
-        jwks: std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
     }
 }

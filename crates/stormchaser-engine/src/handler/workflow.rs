@@ -7,6 +7,7 @@ use crate::git_cache::GitCache;
 use crate::workflow_machine::{state, WorkflowMachine};
 use anyhow::{Context, Result};
 use chrono::Utc;
+use serde_json::Value;
 use sqlx::PgPool;
 use std::collections::HashSet;
 use std::fs;
@@ -182,7 +183,7 @@ pub async fn handle_workflow_start_pending(
 
 #[tracing::instrument(skip(payload, pool, opa_client, nats_client), fields(run_id = tracing::field::Empty))]
 pub async fn handle_workflow_direct(
-    payload: serde_json::Value,
+    payload: Value,
     pool: PgPool,
     opa_client: Arc<OpaClient>,
     nats_client: async_nats::Client,

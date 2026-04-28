@@ -1,4 +1,5 @@
 #![allow(clippy::explicit_auto_deref)]
+use serde_json::Value;
 pub mod integrations;
 pub mod runner;
 pub mod step;
@@ -22,8 +23,8 @@ use uuid::Uuid;
 pub async fn fetch_outputs(
     run_id: Uuid,
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
-) -> Result<serde_json::Value> {
-    let rows: Vec<(String, String, serde_json::Value)> =
+) -> Result<Value> {
+    let rows: Vec<(String, String, Value)> =
         crate::db::get_step_outputs_for_run(executor, run_id).await?;
 
     let mut steps_obj = serde_json::Map::new();
@@ -40,7 +41,7 @@ pub async fn fetch_outputs(
         }
     }
 
-    Ok(serde_json::Value::Object(steps_obj))
+    Ok(Value::Object(steps_obj))
 }
 
 #[tracing::instrument(skip(executor), fields(run_id = %run_id))]
@@ -77,11 +78,11 @@ where
 }
 
 #[tracing::instrument(skip(executor), fields(run_id = %run_id))]
-pub async fn fetch_inputs<'a, E>(run_id: Uuid, executor: E) -> Result<serde_json::Value>
+pub async fn fetch_inputs<'a, E>(run_id: Uuid, executor: E) -> Result<Value>
 where
     E: sqlx::Executor<'a, Database = sqlx::Postgres>,
 {
-    let row: (serde_json::Value,) = crate::db::get_run_inputs_by_id(executor, run_id)
+    let row: (Value,) = crate::db::get_run_inputs_by_id(executor, run_id)
         .await
         .with_context(|| format!("Failed to fetch inputs for {}", run_id))?;
     Ok(row.0)
@@ -132,8 +133,7 @@ pub async fn dispatch_pending_steps(
     for step in pending_steps {
         info!("Run {}: Evaluating queued step {}", run_id, step.step_name);
         // We need to fetch the resolved spec and params for this step
-        let inst_data: (serde_json::Value, serde_json::Value) =
-            crate::db::get_step_spec_and_params(&pool, step.id).await?;
+        let inst_data: (Value, Value) = crate::db::get_step_spec_and_params(&pool, step.id).await?;
 
         // 3. Enforce CPU and Memory quotas before dispatching
         let (cpu_req, mem_req) =

@@ -2,6 +2,7 @@ use super::*;
 use crate::AppEvent;
 use eventsource_stream::Eventsource;
 use futures::StreamExt;
+use serde_json::Value;
 use uuid::Uuid;
 
 impl<'a> App<'a> {
@@ -82,8 +83,7 @@ impl<'a> App<'a> {
                                         .await;
                                 }
                                 "step_status" => {
-                                    if let Ok(payload) =
-                                        serde_json::from_str::<serde_json::Value>(&event.data)
+                                    if let Ok(payload) = serde_json::from_str::<Value>(&event.data)
                                     {
                                         let step_name = payload["step_name"]
                                             .as_str()

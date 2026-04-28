@@ -1,4 +1,5 @@
 use anyhow::Result;
+use serde_json::Value;
 use sqlx::PgPool;
 use std::sync::Arc;
 use stormchaser_tls::TlsReloader;
@@ -11,7 +12,7 @@ pub async fn try_dispatch(
     run_id: Uuid,
     step_instance_id: Uuid,
     step_type: &str,
-    resolved_spec: &serde_json::Value,
+    resolved_spec: &Value,
     pool: PgPool,
     nats_client: async_nats::Client,
     tls_reloader: Arc<TlsReloader>,

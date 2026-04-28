@@ -8,7 +8,9 @@ use axum::{
     Json,
 };
 use hmac::{Hmac, Mac};
+use serde_json::Value;
 use sha2::Sha256;
+use std::collections::HashMap;
 use stormchaser_model::event_rules::WebhookConfig;
 use stormchaser_model::workflow::RunStatus;
 use uuid::Uuid;
@@ -144,8 +146,7 @@ pub async fn handle_webhook(
             .ok_or(StatusCode::NOT_FOUND)?;
 
     // 2. Validate Source/Signature
-    let payload: serde_json::Value =
-        serde_json::from_slice(&body).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let payload: Value = serde_json::from_slice(&body).map_err(|_| StatusCode::BAD_REQUEST)?;
     let event_type = match webhook.source_type.as_str() {
         "github" => {
             validate_github_signature(&headers, &body, webhook.secret_token.as_deref())?;
@@ -184,7 +185,7 @@ pub async fn handle_webhook(
                 headers
                     .iter()
                     .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or_default().to_string()))
-                    .collect::<std::collections::HashMap<_, _>>(),
+                    .collect::<HashMap<_, _>>(),
             )
             .unwrap(),
         ),
@@ -207,7 +208,7 @@ pub async fn handle_webhook(
         // 3b. Evaluate condition expression
         if let Some(cond) = &rule.condition_expr {
             match hcl_eval::evaluate_raw_expr(cond, &hcl_ctx) {
-                Ok(serde_json::Value::Bool(true)) => {}
+                Ok(Value::Bool(true)) => {}
                 Ok(_) => continue,
                 Err(e) => {
                     tracing::error!("Rule '{}' condition evaluation failed: {:?}", rule.name, e);
@@ -270,7 +271,7 @@ pub async fn handle_webhook(
             "v1",
             serde_json::json!({}),
             "",
-            &serde_json::Value::Object(inputs),
+            &Value::Object(inputs),
         )
         .await
         .map_err(|e| {

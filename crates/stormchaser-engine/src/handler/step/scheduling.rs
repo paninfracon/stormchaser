@@ -1,3 +1,4 @@
+use serde_json::Value;
 use stormchaser_dsl::ast;
 use stormchaser_model::dsl;
 
@@ -21,8 +22,7 @@ pub async fn schedule_step(
 ) -> Result<()> {
     let mut resolved_type = step_dsl.r#type.clone();
     let mut resolved_spec = step_dsl.spec.clone();
-    let mut resolved_params =
-        serde_json::to_value(&step_dsl.params).unwrap_or(serde_json::Value::Null);
+    let mut resolved_params = serde_json::to_value(&step_dsl.params).unwrap_or(Value::Null);
 
     // Merge Step Library if it exists
     if let Some(library) = workflow
@@ -33,36 +33,35 @@ pub async fn schedule_step(
         resolved_type = library.r#type.clone();
 
         // Merge specs
-        if let (serde_json::Value::Object(mut lib_spec), serde_json::Value::Object(step_spec)) =
+        if let (Value::Object(mut lib_spec), Value::Object(step_spec)) =
             (library.spec.clone(), resolved_spec.clone())
         {
             for (k, v) in step_spec {
                 lib_spec.insert(k, v);
             }
-            resolved_spec = serde_json::Value::Object(lib_spec);
+            resolved_spec = Value::Object(lib_spec);
         } else if resolved_spec.is_null() {
             resolved_spec = library.spec.clone();
         }
 
         // Merge params
-        if let (serde_json::Value::Object(mut lib_params), serde_json::Value::Object(step_params)) = (
-            serde_json::to_value(&library.params).unwrap_or(serde_json::Value::Null),
+        if let (Value::Object(mut lib_params), Value::Object(step_params)) = (
+            serde_json::to_value(&library.params).unwrap_or(Value::Null),
             resolved_params.clone(),
         ) {
             for (k, v) in step_params {
                 lib_params.insert(k, v);
             }
-            resolved_params = serde_json::Value::Object(lib_params);
+            resolved_params = Value::Object(lib_params);
         } else if resolved_params.is_null() {
-            resolved_params =
-                serde_json::to_value(&library.params).unwrap_or(serde_json::Value::Null);
+            resolved_params = serde_json::to_value(&library.params).unwrap_or(Value::Null);
         }
     }
 
     if let Some(condition_expr) = &step_dsl.condition {
         match crate::hcl_eval::evaluate_raw_expr(condition_expr, hcl_ctx) {
-            Ok(serde_json::Value::Bool(true)) => {}
-            Ok(serde_json::Value::Bool(false)) => {
+            Ok(Value::Bool(true)) => {}
+            Ok(Value::Bool(false)) => {
                 crate::db::insert_step_instance(
                     executor,
                     Uuid::new_v4(),
@@ -82,7 +81,7 @@ pub async fn schedule_step(
 
     if let Some(iterate_expr) = &step_dsl.iterate {
         let items = match crate::hcl_eval::evaluate_raw_expr(iterate_expr, hcl_ctx) {
-            Ok(serde_json::Value::Array(arr)) => arr,
+            Ok(Value::Array(arr)) => arr,
             Ok(_) => return Err(anyhow::anyhow!("Iterate must evaluate to an array")),
             Err(e) => return Err(e),
         };

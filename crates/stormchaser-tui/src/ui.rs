@@ -8,6 +8,7 @@ use ratatui::{
     },
     Frame,
 };
+use std::time::Duration;
 use stormchaser_model::workflow::RunStatus;
 
 use stormchaser_model::test_report::TestCaseStatus;
@@ -283,7 +284,7 @@ fn render_run_detail(
             humantime::format_duration(
                 (finished - run.detail.created_at)
                     .to_std()
-                    .unwrap_or(std::time::Duration::from_secs(0))
+                    .unwrap_or(Duration::from_secs(0))
             )
         ));
     }
@@ -319,9 +320,7 @@ fn render_run_detail(
                 chrono::DateTime::parse_from_rfc3339(s_str),
                 chrono::DateTime::parse_from_rfc3339(f_str),
             ) {
-                let std_dur = (f - s)
-                    .to_std()
-                    .unwrap_or(std::time::Duration::from_secs(0));
+                let std_dur = (f - s).to_std().unwrap_or(Duration::from_secs(0));
                 status_line = format!(
                     "{:<15} ({})",
                     status_fmt,

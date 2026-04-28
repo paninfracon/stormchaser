@@ -1,9 +1,12 @@
 use futures::StreamExt;
 use serde_json::json;
+use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
+use std::time::Duration;
 use stormchaser_engine::handler;
 use stormchaser_model::auth::OpaClient;
+use tokio::time::sleep;
 use uuid::Uuid;
 
 use stormchaser_tls::TlsConfig;
@@ -77,7 +80,7 @@ async fn test_jq_step_execution() {
         run_id,
         pool.clone(),
         nats_client.clone(),
-        std::sync::Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
+        Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
     )
     .await
     .unwrap();
@@ -86,13 +89,13 @@ async fn test_jq_step_execution() {
     let step_completed_payload;
 
     // Timeout after 10 seconds
-    let timeout = tokio::time::sleep(std::time::Duration::from_secs(10));
+    let timeout = sleep(Duration::from_secs(10));
     tokio::pin!(timeout);
 
     loop {
         tokio::select! {
             Some(msg) = completion_sub.next() => {
-                if let Ok(payload) = serde_json::from_slice::<serde_json::Value>(&msg.payload) {
+                if let Ok(payload) = serde_json::from_slice::<Value>(&msg.payload) {
                     if payload["run_id"].as_str() == Some(&run_id.to_string()) {
                         step_completed_payload = payload;
                         break;
@@ -118,7 +121,7 @@ async fn test_jq_step_execution() {
         pool.clone(),
         nats_client.clone(),
         log_backend.clone(),
-        std::sync::Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
+        Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
     )
     .await
     .unwrap();
@@ -138,7 +141,7 @@ async fn test_jq_step_execution() {
         "Output 'result' should be registered in archived_step_outputs"
     );
 
-    let output_val: serde_json::Value = sqlx::query_scalar(
+    let output_val: Value = sqlx::query_scalar(
         "SELECT so.value FROM archived_step_outputs so JOIN archived_step_instances si ON so.step_instance_id = si.id WHERE si.run_id = $1 AND so.key = $2"
     )
     .bind(run_id)
