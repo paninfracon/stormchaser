@@ -1,11 +1,17 @@
 use anyhow::Result;
+use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
+
+#[cfg(feature = "email")]
+use stormchaser_model::dsl::EmailSpec;
+#[cfg(feature = "email")]
+use stormchaser_model::workflow;
 
 pub async fn handle_approval_notification(
     run_id: Uuid,
     step_id: Uuid,
-    spec: serde_json::Value,
+    spec: Value,
     pool: PgPool,
     _nats_client: async_nats::Client,
 ) -> Result<()> {
@@ -14,7 +20,6 @@ pub async fn handle_approval_notification(
         use lettre::message::header::ContentType;
         use lettre::{Message, Transport};
         use minijinja::Environment;
-        use stormchaser_model::dsl::EmailSpec;
         use tracing::info;
 
         let spec: EmailSpec = serde_json::from_value(spec)?;
@@ -27,9 +32,9 @@ pub async fn handle_approval_notification(
             generate_approval_links(run_id, step_id, &secret, &base_url)?;
 
         // 2. Prepare Context
-        let run_context: stormchaser_model::workflow::RunContext =
+        let run_context: workflow::RunContext =
             crate::handler::fetch_run_context(run_id, &pool).await?;
-        let outputs: serde_json::Value = crate::handler::fetch_outputs(run_id, &pool).await?;
+        let outputs: Value = crate::handler::fetch_outputs(run_id, &pool).await?;
 
         let template_ctx = serde_json::json!({
             "inputs": run_context.inputs,
@@ -99,7 +104,7 @@ fn generate_approval_links(
 }
 
 #[cfg(feature = "email")]
-fn build_approval_mailer(spec: &stormchaser_model::dsl::EmailSpec) -> lettre::SmtpTransport {
+fn build_approval_mailer(spec: &EmailSpec) -> lettre::SmtpTransport {
     use lettre::SmtpTransport;
     let smtp_server = spec.smtp_server.clone().unwrap_or_else(|| {
         std::env::var("SMTP_SERVER").unwrap_or_else(|_| "localhost".to_string())
@@ -128,7 +133,7 @@ fn build_approval_mailer(spec: &stormchaser_model::dsl::EmailSpec) -> lettre::Sm
     mailer_builder.build()
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "email"))]
 mod tests {
     use super::*;
     use stormchaser_model::dsl::{EmailBackend, EmailSpec};

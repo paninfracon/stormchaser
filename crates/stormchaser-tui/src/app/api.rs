@@ -3,7 +3,11 @@ use crate::AppEvent;
 use anyhow::Result;
 use eventsource_stream::Eventsource;
 use futures::StreamExt;
+use serde_json::Value;
+use std::collections::HashMap;
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::time::sleep;
 use uuid::Uuid;
 
 impl<'a> App<'a> {
@@ -11,7 +15,7 @@ impl<'a> App<'a> {
         &self,
         method: reqwest::Method,
         path: &str,
-        body: Option<serde_json::Value>,
+        body: Option<Value>,
     ) -> Result<reqwest::Response> {
         let client = reqwest::Client::new();
         let mut req = client.request(method, format!("{}{}", self.url, path));
@@ -48,7 +52,7 @@ impl<'a> App<'a> {
         tokio::spawn(async move {
             let callback_url_val = callback_url.clone();
             let (mut stream, _) = match tokio::time::timeout(
-                std::time::Duration::from_secs(300), // 5 minute timeout for user to login
+                Duration::from_secs(300), // 5 minute timeout for user to login
                 listener.accept(),
             )
             .await
@@ -73,9 +77,7 @@ impl<'a> App<'a> {
             let mut code = None;
             if let Some(path) = request_str.split_whitespace().nth(1) {
                 if let Some(query) = path.split('?').nth(1) {
-                    if let Ok(params) = serde_urlencoded::from_str::<
-                        std::collections::HashMap<String, String>,
-                    >(query)
+                    if let Ok(params) = serde_urlencoded::from_str::<HashMap<String, String>>(query)
                     {
                         code = params.get("code").cloned();
                     }
@@ -294,7 +296,7 @@ impl<'a> App<'a> {
                         }
                     }
                 }
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                sleep(Duration::from_secs(2)).await;
             }
         });
         self.workflow_handle = Some(workflow_handle);

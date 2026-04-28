@@ -2,6 +2,9 @@ use anyhow::Result;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use tokio::sync::mpsc;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum LogBackend {
@@ -20,7 +23,7 @@ impl LogBackend {
     pub async fn fetch_step_logs(
         &self,
         step_name: &str,
-        step_id: uuid::Uuid,
+        step_id: Uuid,
         started_at: Option<chrono::DateTime<chrono::Utc>>,
         finished_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<Vec<String>> {
@@ -45,8 +48,8 @@ impl LogBackend {
     pub async fn stream_step_logs(
         &self,
         step_name: &str,
-        step_id: uuid::Uuid,
-    ) -> Result<tokio::sync::mpsc::Receiver<Result<String>>> {
+        step_id: Uuid,
+    ) -> Result<mpsc::Receiver<Result<String>>> {
         let job_name = format!(
             "storm-{}-{}",
             step_name.to_lowercase().replace('_', "-"),
@@ -67,7 +70,7 @@ impl LogBackend {
         &self,
         loki_url: &str,
         job_name: &str,
-    ) -> Result<tokio::sync::mpsc::Receiver<Result<String>>> {
+    ) -> Result<mpsc::Receiver<Result<String>>> {
         use futures::StreamExt;
 
         let query = format!("{{job_name=\"{}\"}}", job_name);
@@ -90,7 +93,7 @@ impl LogBackend {
         tracing::debug!("Connecting to Loki WebSocket: {}", ws_url);
         let (ws_stream, _) = tokio_tungstenite::connect_async(&ws_url).await?;
         tracing::debug!("Connected to Loki WebSocket");
-        let (tx, rx) = tokio::sync::mpsc::channel(100);
+        let (tx, rx) = mpsc::channel(100);
 
         tokio::spawn(async move {
             let mut read_stream = ws_stream;
@@ -98,7 +101,7 @@ impl LogBackend {
                 match msg {
                     Ok(tungstenite::Message::Text(text)) => {
                         tracing::trace!("Received Loki WebSocket text: {}", text);
-                        if let Ok(data) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if let Ok(data) = serde_json::from_str::<Value>(&text) {
                             if let Some(streams) = data.get("streams").and_then(|s| s.as_array()) {
                                 for stream in streams {
                                     if let Some(values) =
@@ -182,7 +185,7 @@ impl LogBackend {
             return Err(anyhow::anyhow!("Loki returned status {}", resp.status()));
         }
 
-        let data: serde_json::Value = resp.json().await?;
+        let data: Value = resp.json().await?;
         let mut logs = Vec::new();
 
         if let Some(streams) = data["data"]["result"].as_array() {
@@ -255,7 +258,7 @@ impl LogBackend {
             ));
         }
 
-        let data: serde_json::Value = resp.json().await?;
+        let data: Value = resp.json().await?;
         let mut logs = Vec::new();
 
         if let Some(hits) = data["hits"]["hits"].as_array() {

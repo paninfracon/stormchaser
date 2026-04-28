@@ -2,9 +2,10 @@ use anyhow::{Context, Result};
 use eventsource_stream::Eventsource;
 use futures::stream::StreamExt;
 use serde_json::json;
+use serde_json::Value;
 use uuid::Uuid;
 
-pub fn parse_key_val_list(list: Vec<String>) -> serde_json::Map<String, serde_json::Value> {
+pub fn parse_key_val_list(list: Vec<String>) -> serde_json::Map<String, Value> {
     let mut map = serde_json::Map::new();
     for i in list {
         if let Some((key, value)) = i.split_once('=') {
@@ -21,7 +22,7 @@ pub async fn handle_response(res: reqwest::Response) -> Result<()> {
     if status.is_success() {
         let body = res.text().await?;
         if !body.is_empty() {
-            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&body) {
+            if let Ok(val) = serde_json::from_str::<Value>(&body) {
                 println!("{}", serde_json::to_string_pretty(&val)?);
             } else {
                 println!("{}", body);
@@ -124,7 +125,7 @@ pub async fn handle_run_response(
     let status = res.status();
     let body = res.text().await.unwrap_or_default();
     if status.is_success() {
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&body) {
+        if let Ok(val) = serde_json::from_str::<Value>(&body) {
             println!("{}", serde_json::to_string_pretty(&val)?);
             if tail {
                 if let Some(id_str) = val.get("run_id").and_then(|i| i.as_str()) {

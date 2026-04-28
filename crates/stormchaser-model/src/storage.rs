@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::Type, PartialEq, Eq)]
@@ -18,7 +19,7 @@ pub struct StorageBackend {
     pub name: String,
     pub description: Option<String>,
     pub backend_type: BackendType,
-    pub config: serde_json::Value,
+    pub config: Value,
     pub is_default_sfs: bool,
     pub ca_cert: Option<String>,
     pub client_cert: Option<String>,
@@ -35,6 +36,6 @@ pub struct ArtifactRegistry {
     pub artifact_name: String,
     pub backend_id: Uuid,
     pub remote_path: String,
-    pub metadata: serde_json::Value,
+    pub metadata: Value,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }

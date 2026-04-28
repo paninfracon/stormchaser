@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -30,7 +31,7 @@ pub struct EventRule {
     pub repo_url: String,
     pub workflow_path: String,
     pub git_ref: String,
-    pub input_mappings: serde_json::Value, // Map of name -> CEL expr
+    pub input_mappings: Value, // Map of name -> CEL expr
     pub is_active: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,

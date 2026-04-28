@@ -1,3 +1,5 @@
+use serde_json::Value;
+use std::collections::HashMap;
 pub mod auth;
 pub mod cron;
 pub mod step;
@@ -10,6 +12,10 @@ use serde::{Deserialize, Serialize};
 use stormchaser_model::workflow::RunStatus;
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
+
+use stormchaser_model::step::{StepInstance, StepOutput, StepStatusHistory};
+use stormchaser_model::storage::{ArtifactRegistry, BackendType};
+use stormchaser_model::test_report;
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct AuthExchangeRequest {
@@ -37,7 +43,7 @@ pub struct EnqueueRequest {
     pub workflow_path: String,
     pub git_ref: String,
     #[schema(value_type = Object)]
-    pub inputs: serde_json::Value,
+    pub inputs: Value,
     pub overrides: Option<RunOverrides>,
 }
 
@@ -84,8 +90,8 @@ pub struct WorkflowRunDetail {
     pub started_at: Option<DateTime<Utc>>,
     pub finished_at: Option<DateTime<Utc>>,
     pub error: Option<String>,
-    pub inputs: serde_json::Value,
-    pub secrets: serde_json::Value,
+    pub inputs: Value,
+    pub secrets: Value,
     pub source_code: String,
     pub dsl_version: String,
 }
@@ -95,24 +101,24 @@ pub struct WorkflowRunFullDetail {
     pub detail: WorkflowRunDetail,
     pub steps: Vec<StepDetail>,
     #[schema(value_type = Vec<Object>)]
-    pub artifacts: Vec<stormchaser_model::storage::ArtifactRegistry>,
+    pub artifacts: Vec<ArtifactRegistry>,
     pub test_summaries: Vec<TestSummaryResponse>,
     #[schema(value_type = Vec<Object>)]
-    pub test_cases: Vec<stormchaser_model::test_report::TestCase>,
+    pub test_cases: Vec<test_report::TestCase>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct StepDetail {
-    pub instance: stormchaser_model::step::StepInstance,
-    pub outputs: Vec<stormchaser_model::step::StepOutput>,
-    pub history: Vec<stormchaser_model::step::StepStatusHistory>,
+    pub instance: StepInstance,
+    pub outputs: Vec<StepOutput>,
+    pub history: Vec<StepStatusHistory>,
     pub logs: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct DirectRunRequest {
     pub dsl: String,
-    pub inputs: serde_json::Value,
+    pub inputs: Value,
 }
 
 #[derive(Debug, Deserialize)]
@@ -134,7 +140,7 @@ pub struct CreateEventRuleRequest {
     pub repo_url: String,
     pub workflow_path: String,
     pub git_ref: String,
-    pub input_mappings: std::collections::HashMap<String, String>,
+    pub input_mappings: HashMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -146,7 +152,7 @@ pub struct CreateCronWorkflowRequest {
     pub repo_url: String,
     pub workflow_path: String,
     pub git_ref: String,
-    pub inputs: serde_json::Value,
+    pub inputs: Value,
 }
 
 #[derive(Debug, Serialize)]
@@ -160,8 +166,8 @@ pub struct CronWorkflowResponse {
 pub struct CreateStorageBackendRequest {
     pub name: String,
     pub description: Option<String>,
-    pub backend_type: stormchaser_model::storage::BackendType,
-    pub config: serde_json::Value,
+    pub backend_type: BackendType,
+    pub config: Value,
     pub is_default_sfs: bool,
 }
 
@@ -169,8 +175,8 @@ pub struct CreateStorageBackendRequest {
 pub struct UpdateStorageBackendRequest {
     pub name: Option<String>,
     pub description: Option<String>,
-    pub backend_type: Option<stormchaser_model::storage::BackendType>,
-    pub config: Option<serde_json::Value>,
+    pub backend_type: Option<BackendType>,
+    pub config: Option<Value>,
     pub is_default_sfs: Option<bool>,
 }
 

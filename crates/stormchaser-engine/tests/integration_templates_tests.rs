@@ -5,6 +5,8 @@ use uuid::Uuid;
 
 // Assumes there's a test setup function like in other tests
 mod common {
+    use std::sync::Arc;
+    use stormchaser_model::auth::{self, OpaClient};
     pub async fn get_pool() -> sqlx::PgPool {
         let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
             "postgres://stormchaser:stormchaser@localhost:5432/stormchaser".to_string()
@@ -12,19 +14,22 @@ mod common {
         sqlx::PgPool::connect(&db_url).await.unwrap()
     }
 
-    pub async fn setup_test_env() -> (
-        sqlx::PgPool,
-        async_nats::Client,
-        std::sync::Arc<stormchaser_model::auth::OpaClient>,
-    ) {
+    pub async fn setup_test_env() -> (sqlx::PgPool, async_nats::Client, Arc<auth::OpaClient>) {
         let pool = get_pool().await;
         let nats_client = async_nats::connect("nats://localhost:4222").await.unwrap();
 
-        let opa_client = stormchaser_model::auth::OpaClient::new(None, None);
+        let opa_client = OpaClient::new(None, None);
 
-        (pool, nats_client, std::sync::Arc::new(opa_client))
+        (pool, nats_client, Arc::new(opa_client))
     }
 }
+
+use stormchaser_dsl::StormchaserParser;
+use stormchaser_engine::db;
+use stormchaser_model::workflow;
+use stormchaser_model::workflow::RunStatus;
+use stormchaser_tls::TlsConfig;
+use stormchaser_tls::TlsReloader;
 
 #[tokio::test]
 async fn test_step_library_direct_run() {
@@ -57,16 +62,16 @@ async fn test_step_library_direct_run() {
 
     // Instead of using handle_workflow_direct which publishes to NATS and triggers
     // the system-wide stormchaser-engine daemon, we'll manually insert the run context
-    let parser = stormchaser_dsl::StormchaserParser::new();
+    let parser = StormchaserParser::new();
     let parsed_workflow = parser.parse(dsl).unwrap();
-    let run = stormchaser_model::workflow::WorkflowRun {
+    let run = workflow::WorkflowRun {
         id: run_id,
         workflow_name: parsed_workflow.name.clone(),
         initiating_user: "test".to_string(),
         repo_url: "direct://".to_string(),
         workflow_path: "inline.storm".to_string(),
         git_ref: "HEAD".to_string(),
-        status: stormchaser_model::workflow::RunStatus::StartPending,
+        status: RunStatus::StartPending,
         version: 1,
         fencing_token: chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0),
         created_at: chrono::Utc::now(),
@@ -78,7 +83,7 @@ async fn test_step_library_direct_run() {
     };
 
     let mut tx = pool.begin().await.unwrap();
-    stormchaser_engine::db::insert_full_workflow_run(
+    db::insert_full_workflow_run(
         &mut tx,
         &run,
         &parsed_workflow.dsl_version,
@@ -100,11 +105,7 @@ async fn test_step_library_direct_run() {
         run_id,
         pool.clone(),
         nats_client.clone(),
-        Arc::new(
-            stormchaser_tls::TlsReloader::new(stormchaser_tls::TlsConfig::default())
-                .await
-                .unwrap(),
-        ),
+        Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
     )
     .await
     .unwrap();

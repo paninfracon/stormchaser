@@ -1,6 +1,7 @@
 use crate::handler::{fetch_outputs, fetch_run_context, fetch_step_instance};
 use anyhow::Result;
 use chrono::Utc;
+use serde_json::Value;
 use sqlx::PgPool;
 use tracing::info;
 use uuid::Uuid;
@@ -8,7 +9,7 @@ use uuid::Uuid;
 pub async fn handle_jinja_render(
     run_id: Uuid,
     step_id: Uuid,
-    spec: serde_json::Value,
+    spec: Value,
     pool: PgPool,
     nats_client: async_nats::Client,
 ) -> Result<()> {
@@ -41,12 +42,14 @@ pub async fn handle_jinja_render(
     save_output_and_complete(run_id, step_id, &spec, rendered, pool, nats_client).await
 }
 
+use stormchaser_model::dsl;
+
 fn prepare_template_context(
-    spec: &stormchaser_model::dsl::JinjaRenderSpec,
+    spec: &dsl::JinjaRenderSpec,
     run_context: crate::handler::RunContext,
-    outputs: serde_json::Value,
+    outputs: Value,
     run_id: Uuid,
-) -> serde_json::Value {
+) -> Value {
     let mut template_ctx = serde_json::json!({
         "inputs": run_context.inputs,
         "steps": outputs,
@@ -68,7 +71,7 @@ fn prepare_template_context(
     template_ctx
 }
 
-fn render_template(template: &str, context: &serde_json::Value) -> Result<String> {
+fn render_template(template: &str, context: &Value) -> Result<String> {
     use minijinja::Environment;
     let env = Environment::new();
     env.render_str(template, context)
@@ -78,7 +81,7 @@ fn render_template(template: &str, context: &serde_json::Value) -> Result<String
 async fn save_output_and_complete(
     run_id: Uuid,
     step_id: Uuid,
-    spec: &stormchaser_model::dsl::JinjaRenderSpec,
+    spec: &dsl::JinjaRenderSpec,
     rendered: String,
     pool: PgPool,
     nats_client: async_nats::Client,
@@ -99,7 +102,7 @@ async fn save_output_and_complete(
         &mut *tx,
         step_id,
         &output_key,
-        &serde_json::Value::String(rendered.clone()),
+        &Value::String(rendered.clone()),
     )
     .await?;
 

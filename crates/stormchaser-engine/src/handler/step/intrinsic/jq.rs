@@ -1,14 +1,17 @@
 use crate::handler::fetch_step_instance;
 use anyhow::Result;
 use chrono::Utc;
+use serde_json::Value;
 use sqlx::PgPool;
 use std::sync::Arc;
 use stormchaser_tls::TlsReloader;
 use uuid::Uuid;
 
-pub fn mutate_if_has_files(step_type: &mut String, resolved_spec: &mut serde_json::Value) {
+use stormchaser_model::dsl;
+
+pub fn mutate_if_has_files(step_type: &mut String, resolved_spec: &mut Value) {
     if step_type == "JQ" {
-        let jq_spec: Result<stormchaser_model::dsl::JqSpec, _> =
+        let jq_spec: Result<dsl::JqSpec, _> =
             serde_json::from_value(resolved_spec.get("spec").unwrap_or(&*resolved_spec).clone());
 
         let has_files = match &jq_spec {
@@ -29,7 +32,7 @@ pub fn mutate_if_has_files(step_type: &mut String, resolved_spec: &mut serde_jso
                 script.push_str(&format!(" > {}", output_file));
             }
 
-            let container_spec = stormchaser_model::dsl::CommonContainerSpec {
+            let container_spec = dsl::CommonContainerSpec {
                 image: "ghcr.io/jqlang/jq:latest".to_string(),
                 command: Some(vec!["sh".to_string(), "-c".to_string(), script]),
                 args: None,
@@ -52,7 +55,7 @@ pub async fn try_dispatch(
     run_id: Uuid,
     step_instance_id: Uuid,
     step_type: &str,
-    resolved_spec: &serde_json::Value,
+    resolved_spec: &Value,
     pool: PgPool,
     nats_client: async_nats::Client,
     _tls_reloader: Arc<TlsReloader>,
@@ -72,8 +75,7 @@ pub async fn try_dispatch(
             }
 
             let actual_spec = spec.get("spec").unwrap_or(&spec).clone();
-            let jq_spec: Result<stormchaser_model::dsl::JqSpec, _> =
-                serde_json::from_value(actual_spec.clone());
+            let jq_spec: Result<dsl::JqSpec, _> = serde_json::from_value(actual_spec.clone());
 
             let result = match jq_spec {
                 Ok(jq) => {
@@ -81,7 +83,7 @@ pub async fn try_dispatch(
                     use jaq_core::{Ctx, RcIter};
                     use jaq_json::Val;
 
-                    let input_value = jq.input.unwrap_or(serde_json::Value::Null);
+                    let input_value = jq.input.unwrap_or(Value::Null);
 
                     let loader = Loader::new(jaq_std::defs().chain(jaq_json::defs()));
                     let arena = Arena::default();
@@ -110,7 +112,7 @@ pub async fn try_dispatch(
                                     for res in out {
                                         match res {
                                             Ok(v) => {
-                                                results.push(serde_json::Value::from(v));
+                                                results.push(Value::from(v));
                                             }
                                             Err(e) => {
                                                 execution_err = Some(anyhow::anyhow!(
@@ -128,7 +130,7 @@ pub async fn try_dispatch(
                                         let final_result = if results.len() == 1 {
                                             results.remove(0)
                                         } else {
-                                            serde_json::Value::Array(results)
+                                            Value::Array(results)
                                         };
 
                                         Ok(final_result)

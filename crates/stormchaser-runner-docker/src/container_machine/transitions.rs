@@ -8,9 +8,14 @@ use bollard::service::{HostConfig, Mount, MountTypeEnum};
 use bollard::volume::CreateVolumeOptions;
 use chrono::Utc;
 use futures::StreamExt;
+use serde_json::Value;
 use std::collections::HashMap;
+use std::path::PathBuf;
+use std::time::Duration;
 use stormchaser_model::dsl::CommonContainerSpec;
+use tokio::time::sleep;
 use tracing::{error, info};
+use uuid::Uuid;
 
 impl DockerContainerMachine<state::Initialized> {
     pub fn adopt(self, container_name: String) -> DockerContainerMachine<state::Running> {
@@ -131,7 +136,7 @@ impl DockerContainerMachine<state::Initialized> {
                                             )
                                             .await;
                                     }
-                                    let mut full_dest = std::path::PathBuf::from(&mount.mount_path);
+                                    let mut full_dest = PathBuf::from(&mount.mount_path);
                                     if dest != "/" && !dest.is_empty() {
                                         let relative_dest =
                                             dest.trim_start_matches('/').replace('/', "");
@@ -209,7 +214,7 @@ impl DockerContainerMachine<state::Initialized> {
         get_url: &str,
     ) -> Result<()> {
         let agent_image = "stormchaser-agent:v1";
-        let unpark_container_name = format!("unpark-{}", uuid::Uuid::new_v4());
+        let unpark_container_name = format!("unpark-{}", Uuid::new_v4());
         let config = Config {
             image: Some(agent_image.to_string()),
             cmd: Some(vec![
@@ -262,7 +267,7 @@ impl DockerContainerMachine<state::Initialized> {
                 Ok(res) if res.status_code == 0 => {
                     info!("Unpark successful for {}", volume_name);
                     // Wait for logs
-                    tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+                    sleep(Duration::from_secs(15)).await;
                     let _ = self
                         .docker
                         .remove_container(&unpark_container_name, None)
@@ -350,7 +355,7 @@ impl DockerContainerMachine<state::Running> {
 
         if !storage_names.is_empty() || !self.metadata.step_dsl.reports.is_empty() {
             let agent_image = "stormchaser-agent:v1";
-            let park_container_name = format!("park-{}", uuid::Uuid::new_v4());
+            let park_container_name = format!("park-{}", Uuid::new_v4());
 
             let mut parking_urls = HashMap::new();
             let mut mount_paths = HashMap::new();
@@ -380,9 +385,8 @@ impl DockerContainerMachine<state::Running> {
                                 {
                                     if let Some(p) = art_val.get("path").and_then(|p| p.as_str()) {
                                         let abs_path = std::path::Path::new(&m.mount_path).join(p);
-                                        cloned_art["path"] = serde_json::Value::String(
-                                            abs_path.to_string_lossy().to_string(),
-                                        );
+                                        cloned_art["path"] =
+                                            Value::String(abs_path.to_string_lossy().to_string());
                                     }
                                 }
                                 artifact_urls.insert(art_name.clone(), cloned_art);
@@ -494,7 +498,7 @@ impl DockerContainerMachine<state::Running> {
             }
 
             // Wait for logs
-            tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+            sleep(Duration::from_secs(15)).await;
             let _ = self
                 .docker
                 .remove_container(&park_container_name, None)
@@ -514,7 +518,7 @@ impl DockerContainerMachine<state::Running> {
 
         // Cleanup volume and container
         // Wait a bit for log collector (Alloy) to catch the final logs before we delete the container
-        tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+        sleep(Duration::from_secs(15)).await;
         let _ = self.docker.remove_container(&container_name, None).await;
 
         for vol in volumes_to_cleanup {
@@ -542,7 +546,7 @@ impl DockerContainerMachine<state::Running> {
     async fn get_artifact_meta(
         &self,
         container_name: &str,
-    ) -> Result<Option<HashMap<String, serde_json::Value>>> {
+    ) -> Result<Option<HashMap<String, Value>>> {
         let mut logs = self.docker.logs(
             container_name,
             Some(LogsOptions::<String> {
@@ -599,7 +603,7 @@ impl DockerContainerMachine<state::Running> {
         Ok(None)
     }
 
-    async fn get_test_reports(&self, container_name: &str) -> Result<Option<serde_json::Value>> {
+    async fn get_test_reports(&self, container_name: &str) -> Result<Option<Value>> {
         let mut logs = self.docker.logs(
             container_name,
             Some(LogsOptions::<String> {
@@ -664,7 +668,7 @@ mod tests {
                 r#type: "RunContainer".to_string(),
                 spec,
                 condition: None,
-                params: std::collections::HashMap::new(),
+                params: HashMap::new(),
                 strategy: None,
                 aggregation: vec![],
                 iterate: None,

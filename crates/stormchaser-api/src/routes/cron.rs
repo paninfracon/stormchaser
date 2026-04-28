@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use stormchaser_model::cron;
+
 use super::{CreateCronWorkflowRequest, CronWorkflowResponse, EnqueueResponse};
 use crate::{AppState, AuthClaims};
 use axum::{
@@ -62,7 +65,7 @@ pub async fn create_cron_workflow(
 pub async fn list_cron_workflows(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-) -> Result<Json<Vec<stormchaser_model::cron::CronWorkflow>>, StatusCode> {
+) -> Result<Json<Vec<cron::CronWorkflow>>, StatusCode> {
     let workflows = crate::db::list_cron_workflows(&state.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -214,7 +217,7 @@ async fn register_ofelia_cron(
     let trigger_url = format!("{}/api/v1/cron-trigger/{}", system_url, id);
     let container_name = format!("stormchaser-cron-{}", id);
 
-    let mut labels = std::collections::HashMap::new();
+    let mut labels = HashMap::new();
     labels.insert("ofelia.enabled".to_string(), "true".to_string());
     labels.insert(
         format!("ofelia.job-run.{}.schedule", name),

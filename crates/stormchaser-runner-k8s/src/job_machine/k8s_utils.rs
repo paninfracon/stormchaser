@@ -7,7 +7,11 @@ use k8s_openapi::api::core::v1::{
 };
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
+use serde_json::Value;
 use std::collections::BTreeMap;
+use std::path::PathBuf;
+
+use stormchaser_model::dsl;
 
 pub fn do_extract_pod_metrics_with_reason(pods: Vec<Pod>) -> (Option<i32>, i32, Option<String>) {
     let mut max_restart_count = 0;
@@ -53,7 +57,7 @@ fn normalize_resource_name(name: &str, prefix: &str) -> String {
     format!("{}-{}", prefix, name.to_lowercase().replace('_', "-"))
 }
 
-fn map_dsl_env_to_k8s(env: Vec<stormchaser_model::dsl::EnvVar>) -> Vec<K8sEnvVar> {
+fn map_dsl_env_to_k8s(env: Vec<dsl::EnvVar>) -> Vec<K8sEnvVar> {
     env.into_iter()
         .map(|v| K8sEnvVar {
             name: v.name,
@@ -98,15 +102,15 @@ struct StepSpec {
     restart_policy: Option<String>,
     extra_labels: Option<BTreeMap<String, String>>,
     extra_annotations: Option<BTreeMap<String, String>>,
-    storage_mounts: Vec<stormchaser_model::dsl::StorageMount>,
-    secret_mounts: Vec<stormchaser_model::dsl::SecretMount>,
-    config_map_mounts: Vec<stormchaser_model::dsl::ConfigMapMount>,
+    storage_mounts: Vec<dsl::StorageMount>,
+    secret_mounts: Vec<dsl::SecretMount>,
+    config_map_mounts: Vec<dsl::ConfigMapMount>,
 }
 
 fn parse_step_spec(metadata: &JobMetadata) -> Result<StepSpec> {
     match metadata.step_dsl.r#type.as_str() {
         "RunContainer" => {
-            let spec: stormchaser_model::dsl::CommonContainerSpec =
+            let spec: dsl::CommonContainerSpec =
                 serde_json::from_value(metadata.step_dsl.spec.clone())
                     .context("Failed to parse RunContainer spec as CommonContainerSpec")?;
 
@@ -401,10 +405,7 @@ fn wrap_main_command(
                     parking_urls.insert(name.clone(), urls.clone());
                 }
                 if let Some(mount) = step_spec.storage_mounts.iter().find(|x| x.name == *name) {
-                    mount_paths.insert(
-                        name.clone(),
-                        serde_json::Value::String(mount.mount_path.clone()),
-                    );
+                    mount_paths.insert(name.clone(), Value::String(mount.mount_path.clone()));
                 }
                 if let Some(artifacts) = urls.get("artifacts").and_then(|a| a.as_object()) {
                     for (art_name, art_data) in artifacts {
@@ -531,7 +532,7 @@ fn build_k8s_containers(
                             prov.get("url").and_then(|u| u.as_str()),
                             prov.get("destination").and_then(|d| d.as_str()),
                         ) {
-                            let mut full_dest = std::path::PathBuf::from(&mount.mount_path);
+                            let mut full_dest = PathBuf::from(&mount.mount_path);
                             if dest != "/" && !dest.is_empty() {
                                 let relative_dest = dest.trim_start_matches('/').replace('/', "");
                                 full_dest.push(relative_dest);
@@ -754,6 +755,7 @@ mod tests {
     use k8s_openapi::api::core::v1::{
         ContainerState, ContainerStateTerminated, ContainerStatus, PodStatus,
     };
+    use std::collections::HashMap;
     use stormchaser_model::dsl::Step;
     use uuid::Uuid;
 
@@ -790,7 +792,7 @@ mod tests {
         let step_dsl = Step {
             name: "test-step".into(),
             r#type: "RunContainer".into(),
-            params: std::collections::HashMap::new(),
+            params: HashMap::new(),
             spec: serde_json::json!({
                 "image": "alpine:latest",
                 "command": ["echo"],
@@ -838,7 +840,7 @@ mod tests {
         let step_dsl = Step {
             name: "test-pvc-step".into(),
             r#type: "RunContainer".into(),
-            params: std::collections::HashMap::new(),
+            params: HashMap::new(),
             spec: serde_json::json!({
                 "image": "alpine:latest",
                 "command": ["echo"],
@@ -869,7 +871,7 @@ mod tests {
             artifacts: None,
         };
 
-        let mut storage_map = std::collections::HashMap::new();
+        let mut storage_map = HashMap::new();
         storage_map.insert(
             "workspace".to_string(),
             serde_json::json!({
@@ -968,11 +970,11 @@ mod tests {
     #[test]
     fn test_map_dsl_env_to_k8s() {
         let dsl_env = vec![
-            stormchaser_model::dsl::EnvVar {
+            dsl::EnvVar {
                 name: "KEY1".to_string(),
                 value: "VAL1".to_string(),
             },
-            stormchaser_model::dsl::EnvVar {
+            dsl::EnvVar {
                 name: "KEY2".to_string(),
                 value: "VAL2".to_string(),
             },

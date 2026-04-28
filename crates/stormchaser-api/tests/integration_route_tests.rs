@@ -6,12 +6,16 @@ use axum::{
 use jsonwebtoken::{encode, EncodingKey, Header};
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::Once;
 use stormchaser_api::{app, AppState, Claims, JWT_SECRET};
 use stormchaser_model::auth::OpaClient;
 use tower::ServiceExt;
+use uuid::Uuid;
+
+use stormchaser_model::LogBackend;
 
 static INIT: Once = Once::new();
 
@@ -41,10 +45,10 @@ async fn setup_app() -> Option<axum::Router> {
         nats: nats_client,
         opa: Arc::new(OpaClient::new(None, None)),
         oidc_config: None,
-        jwks: std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: std::env::var("LOKI_URL")
             .ok()
-            .map(|url| stormchaser_model::LogBackend::Loki { url }),
+            .map(|url| LogBackend::Loki { url }),
     }))
 }
 
@@ -161,7 +165,7 @@ async fn test_create_webhook() {
         None => return,
     };
 
-    let name = format!("test-webhook-{}", uuid::Uuid::new_v4());
+    let name = format!("test-webhook-{}", Uuid::new_v4());
     let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
     let response = app
         .oneshot(
@@ -193,8 +197,8 @@ async fn test_create_cron_workflow() {
         None => return,
     };
 
-    let name = format!("test-cron-{}", uuid::Uuid::new_v4());
-    let workflow_name = format!("test-workflow-{}", uuid::Uuid::new_v4());
+    let name = format!("test-cron-{}", Uuid::new_v4());
+    let workflow_name = format!("test-workflow-{}", Uuid::new_v4());
     let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
     let response = app
         .oneshot(
@@ -234,7 +238,7 @@ async fn test_create_event_rule() {
     let db_url = std::env::var("DATABASE_URL")
         .unwrap_or("postgres://stormchaser:stormchaser@localhost:5432/stormchaser".into());
     let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
-    let webhook_id = uuid::Uuid::new_v4();
+    let webhook_id = Uuid::new_v4();
     let webhook_name = format!("test-hook-{}", webhook_id);
     sqlx::query("INSERT INTO webhooks (id, name, source_type) VALUES ($1, $2, 'generic')")
         .bind(webhook_id)
@@ -243,8 +247,8 @@ async fn test_create_event_rule() {
         .await
         .unwrap();
 
-    let rule_name = format!("test-rule-{}", uuid::Uuid::new_v4());
-    let workflow_name = format!("test-workflow-{}", uuid::Uuid::new_v4());
+    let rule_name = format!("test-rule-{}", Uuid::new_v4());
+    let workflow_name = format!("test-workflow-{}", Uuid::new_v4());
     let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
     let response = app
         .oneshot(
@@ -282,7 +286,7 @@ async fn test_stream_run_status() {
         None => return,
     };
 
-    let run_id = uuid::Uuid::new_v4();
+    let run_id = Uuid::new_v4();
     let workflow_name = format!("test-workflow-{}", run_id);
     let db_url = std::env::var("DATABASE_URL")
         .unwrap_or("postgres://stormchaser:stormchaser@localhost:5432/stormchaser".into());
@@ -328,7 +332,7 @@ async fn test_delete_cron_workflow() {
         None => return,
     };
 
-    let id = uuid::Uuid::new_v4();
+    let id = Uuid::new_v4();
     let db_url = std::env::var("DATABASE_URL")
         .unwrap_or("postgres://stormchaser:stormchaser@localhost:5432/stormchaser".into());
     let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
@@ -370,7 +374,7 @@ async fn test_trigger_cron_workflow() {
         None => return,
     };
 
-    let id = uuid::Uuid::new_v4();
+    let id = Uuid::new_v4();
     let db_url = std::env::var("DATABASE_URL")
         .unwrap_or("postgres://stormchaser:stormchaser@localhost:5432/stormchaser".into());
     let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
@@ -436,7 +440,7 @@ async fn test_stream_run_logs() {
         None => return,
     };
 
-    let run_id = uuid::Uuid::new_v4();
+    let run_id = Uuid::new_v4();
     let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
     let response = app
         .oneshot(
@@ -472,8 +476,8 @@ async fn test_stream_step_logs() {
         None => return,
     };
 
-    let run_id = uuid::Uuid::new_v4();
-    let step_id = uuid::Uuid::new_v4();
+    let run_id = Uuid::new_v4();
+    let step_id = Uuid::new_v4();
     let db_url = std::env::var("DATABASE_URL")
         .unwrap_or("postgres://stormchaser:stormchaser@localhost:5432/stormchaser".into());
     let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
@@ -562,7 +566,7 @@ async fn test_get_workflow_run_not_found() {
         None => return,
     };
 
-    let run_id = uuid::Uuid::new_v4();
+    let run_id = Uuid::new_v4();
     let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
     let response = app
         .oneshot(
@@ -586,7 +590,7 @@ async fn test_delete_workflow_run() {
         None => return,
     };
 
-    let run_id = uuid::Uuid::new_v4();
+    let run_id = Uuid::new_v4();
     let db_url = std::env::var("DATABASE_URL")
         .unwrap_or("postgres://stormchaser:stormchaser@localhost:5432/stormchaser".into());
     let pool = sqlx::PgPool::connect(&db_url).await.unwrap();

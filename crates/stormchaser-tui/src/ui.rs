@@ -8,7 +8,10 @@ use ratatui::{
     },
     Frame,
 };
+use std::time::Duration;
 use stormchaser_model::workflow::RunStatus;
+
+use stormchaser_model::test_report::TestCaseStatus;
 
 pub fn ui(f: &mut Frame, app: &mut App) {
     if app.state == AppState::LoggedOut || app.state == AppState::LoggingIn {
@@ -281,7 +284,7 @@ fn render_run_detail(
             humantime::format_duration(
                 (finished - run.detail.created_at)
                     .to_std()
-                    .unwrap_or(std::time::Duration::from_secs(0))
+                    .unwrap_or(Duration::from_secs(0))
             )
         ));
     }
@@ -317,9 +320,7 @@ fn render_run_detail(
                 chrono::DateTime::parse_from_rfc3339(s_str),
                 chrono::DateTime::parse_from_rfc3339(f_str),
             ) {
-                let std_dur = (f - s)
-                    .to_std()
-                    .unwrap_or(std::time::Duration::from_secs(0));
+                let std_dur = (f - s).to_std().unwrap_or(Duration::from_secs(0));
                 status_line = format!(
                     "{:<15} ({})",
                     status_fmt,
@@ -512,16 +513,16 @@ fn render_test_results(
 
     for tc in &run.test_cases {
         let symbol = match tc.status {
-            stormchaser_model::test_report::TestCaseStatus::Passed => "✔",
-            stormchaser_model::test_report::TestCaseStatus::Failed => "✘",
-            stormchaser_model::test_report::TestCaseStatus::Error => "!",
-            stormchaser_model::test_report::TestCaseStatus::Skipped => "○",
+            TestCaseStatus::Passed => "✔",
+            TestCaseStatus::Failed => "✘",
+            TestCaseStatus::Error => "!",
+            TestCaseStatus::Skipped => "○",
         };
         let color = match tc.status {
-            stormchaser_model::test_report::TestCaseStatus::Passed => Color::Green,
-            stormchaser_model::test_report::TestCaseStatus::Failed => Color::Red,
-            stormchaser_model::test_report::TestCaseStatus::Error => Color::LightRed,
-            stormchaser_model::test_report::TestCaseStatus::Skipped => Color::Yellow,
+            TestCaseStatus::Passed => Color::Green,
+            TestCaseStatus::Failed => Color::Red,
+            TestCaseStatus::Error => Color::LightRed,
+            TestCaseStatus::Skipped => Color::Yellow,
         };
 
         current_line.spans.push(ratatui::text::Span::styled(

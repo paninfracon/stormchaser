@@ -14,7 +14,21 @@ use stormchaser_engine::{
 use stormchaser_model::auth::OpaClient;
 use stormchaser_model::runner::RunnerStatus;
 use stormchaser_model::workflow::RunStatus;
+use tokio::time::sleep;
 use tracing::info;
+use uuid::Uuid;
+
+use stormchaser_engine::db;
+use stormchaser_engine::git_cache;
+use stormchaser_engine::hcl_eval;
+use stormchaser_engine::parse_duration;
+use stormchaser_engine::secrets;
+use stormchaser_engine::secrets::VaultBackend;
+use stormchaser_model::auth;
+use stormchaser_model::LogBackend;
+use stormchaser_opa::OpaWasmInstance;
+use stormchaser_tls::TlsConfig;
+use stormchaser_tls::TlsReloader;
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -123,14 +137,14 @@ async fn main() -> anyhow::Result<()> {
 }
 
 pub async fn run_engine(config: Config) -> anyhow::Result<()> {
-    let tls_config = stormchaser_tls::TlsConfig {
+    let tls_config = TlsConfig {
         ca_cert_path: config.tls_ca_cert_path.clone(),
         cert_path: config.tls_cert_path.clone(),
         key_path: config.tls_key_path.clone(),
         server_name: config.tls_server_name.clone(),
     };
 
-    let tls_reloader = Arc::new(stormchaser_tls::TlsReloader::new(tls_config).await?);
+    let tls_reloader = Arc::new(TlsReloader::new(tls_config).await?);
 
     let mut db_options: sqlx::postgres::PgConnectOptions = config.database_url.parse()?;
     if config.db_ssl {
@@ -150,7 +164,7 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
 
     db_options = db_options
         .log_statements(log::LevelFilter::Debug)
-        .log_slow_statements(log::LevelFilter::Warn, std::time::Duration::from_secs(1));
+        .log_slow_statements(log::LevelFilter::Warn, Duration::from_secs(1));
 
     let pool = PgPoolOptions::new()
         .max_connections(5)
@@ -168,7 +182,7 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
     if let Some(wasm_path) = &config.opa_wasm_path {
         tracing::info!("Loading OPA WASM policy from {:?}", wasm_path);
         let wasm_bytes = std::fs::read(wasm_path).context("Failed to read OPA WASM policy")?;
-        let executor = stormchaser_opa::OpaWasmInstance::new(&wasm_bytes)?;
+        let executor = OpaWasmInstance::new(&wasm_bytes)?;
         opa_client = opa_client.with_wasm_executor(Arc::new(executor));
     }
 
@@ -182,7 +196,7 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
     let mut log_backend = None;
     if let Some(url) = config.loki_url {
         tracing::info!("Configuring Loki log backend: {}", url);
-        log_backend = Some(stormchaser_model::LogBackend::Loki { url });
+        log_backend = Some(LogBackend::Loki { url });
     } else if let (Some(url), Some(index)) = (config.elasticsearch_url, config.elasticsearch_index)
     {
         tracing::info!(
@@ -190,16 +204,14 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
             url,
             index
         );
-        log_backend = Some(stormchaser_model::LogBackend::Elasticsearch { url, index });
+        log_backend = Some(LogBackend::Elasticsearch { url, index });
     }
     let log_backend = Arc::new(log_backend);
 
     // Initialize Secret Backend
-    let secret_backend = std::sync::Arc::new(stormchaser_engine::secrets::VaultBackend::new(
-        config.vault_addr,
-        config.vault_token,
-    )?) as stormchaser_engine::secrets::SharedSecretBackend;
-    stormchaser_engine::hcl_eval::set_secrets_backend(secret_backend);
+    let secret_backend = Arc::new(VaultBackend::new(config.vault_addr, config.vault_token)?)
+        as secrets::SharedSecretBackend;
+    hcl_eval::set_secrets_backend(secret_backend);
 
     let nats_options = async_nats::ConnectOptions::new()
         .tls_client_config((*tls_reloader.client_config()).clone());
@@ -220,7 +232,7 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
         let mut interval = tokio::time::interval(Duration::from_secs(15));
         loop {
             interval.tick().await;
-            let result = stormchaser_engine::db::mark_stale_runners_offline(
+            let result = db::mark_stale_runners_offline(
                 &liveness_pool,
                 RunnerStatus::Offline,
                 RunnerStatus::Online,
@@ -254,7 +266,7 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
             // Find all non-terminal runs and check their timeouts
             #[derive(sqlx::FromRow)]
             struct TimeoutCheck {
-                id: uuid::Uuid,
+                id: Uuid,
                 #[sqlx(rename = "status")]
                 _status: RunStatus,
                 created_at: chrono::DateTime<chrono::Utc>,
@@ -262,15 +274,14 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
                 timeout: String,
             }
 
-            let result =
-                stormchaser_engine::db::get_active_workflow_runs_with_quotas(&timeout_pool)
-                    .await
-                    .map(|v: Vec<TimeoutCheck>| v);
+            let result = db::get_active_workflow_runs_with_quotas(&timeout_pool)
+                .await
+                .map(|v: Vec<TimeoutCheck>| v);
 
             match result {
                 Ok(runs) => {
                     for run in runs {
-                        let duration_res = stormchaser_engine::parse_duration(&run.timeout);
+                        let duration_res = parse_duration(&run.timeout);
                         let duration = match duration_res {
                             Ok(d) => d,
                             Err(e) => {
@@ -378,7 +389,7 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
                     }
                     Some(Err(e)) => {
                         tracing::error!("JetStream consumer error: {:?}", e);
-                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        sleep(Duration::from_secs(1)).await;
                     }
                     None => {
                         tracing::error!("JetStream consumer closed");
@@ -415,14 +426,14 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
 #[allow(clippy::too_many_arguments)]
 async fn handle_message(
     subject: &str,
-    payload: serde_json::Value,
+    payload: Value,
     message: async_nats::jetstream::message::Message,
     pool: sqlx::PgPool,
-    git_cache: std::sync::Arc<stormchaser_engine::git_cache::GitCache>,
-    opa_client: std::sync::Arc<stormchaser_model::auth::OpaClient>,
+    git_cache: Arc<git_cache::GitCache>,
+    opa_client: Arc<auth::OpaClient>,
     nats_client: async_nats::Client,
-    tls_reloader: std::sync::Arc<stormchaser_tls::TlsReloader>,
-    log_backend: std::sync::Arc<Option<stormchaser_model::LogBackend>>,
+    tls_reloader: Arc<TlsReloader>,
+    log_backend: Arc<Option<LogBackend>>,
 ) {
     match subject {
         "stormchaser.run.queued" => {
@@ -433,7 +444,7 @@ async fn handle_message(
                     return;
                 }
             };
-            let run_id = match uuid::Uuid::parse_str(run_id_str) {
+            let run_id = match Uuid::parse_str(run_id_str) {
                 Ok(id) => id,
                 Err(_) => {
                     let _ = message.double_ack().await;
@@ -469,7 +480,7 @@ async fn handle_message(
                     return;
                 }
             };
-            let run_id = match uuid::Uuid::parse_str(run_id_str) {
+            let run_id = match Uuid::parse_str(run_id_str) {
                 Ok(id) => id,
                 Err(_) => {
                     let _ = message.double_ack().await;
@@ -498,7 +509,7 @@ async fn handle_message(
                     return;
                 }
             };
-            let run_id = match uuid::Uuid::parse_str(run_id_str) {
+            let run_id = match Uuid::parse_str(run_id_str) {
                 Ok(id) => id,
                 Err(_) => {
                     let _ = message.double_ack().await;

@@ -1,3 +1,7 @@
+use axum::extract::State;
+use serde_json::Value;
+use std::collections::HashMap;
+use tokio::time::sleep;
 mod container_machine;
 pub mod traits;
 
@@ -18,9 +22,9 @@ use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use uuid::Uuid;
 
-pub fn parse_step_from_nats_payload(
-    payload: &serde_json::Value,
-) -> Result<stormchaser_model::dsl::Step> {
+use stormchaser_model::dsl;
+
+pub fn parse_step_from_nats_payload(payload: &Value) -> Result<dsl::Step> {
     if let Some(dsl_val) = payload.get("step_dsl") {
         if !dsl_val.is_null() {
             if let Ok(step) = serde_json::from_value(dsl_val.clone()) {
@@ -32,7 +36,7 @@ pub fn parse_step_from_nats_payload(
     let spec =
         serde_json::from_value(payload["spec"].clone()).context("Failed to parse step spec")?;
 
-    Ok(stormchaser_model::dsl::Step {
+    Ok(dsl::Step {
         name: payload["step_name"]
             .as_str()
             .unwrap_or_default()
@@ -67,7 +71,7 @@ pub fn parse_step_from_docker_labels(
     raw_step_dsl: Option<&String>,
     is_encrypted: bool,
     encryption_key: Option<&String>,
-) -> Result<stormchaser_model::dsl::Step> {
+) -> Result<dsl::Step> {
     if let Some(raw) = raw_step_dsl {
         let dsl_str = if is_encrypted {
             if let Some(key) = encryption_key {
@@ -91,11 +95,11 @@ pub fn parse_step_from_docker_labels(
     }
 
     // Fallback
-    Ok(stormchaser_model::dsl::Step {
+    Ok(dsl::Step {
         name: container_name.to_string(),
         r#type: "RunContainer".to_string(),
-        spec: serde_json::Value::Null,
-        params: std::collections::HashMap::new(),
+        spec: Value::Null,
+        params: HashMap::new(),
         condition: None,
         strategy: None,
         aggregation: Vec::new(),
@@ -121,7 +125,7 @@ async fn run_reaper(docker: Docker) -> Result<()> {
         interval.tick().await;
         info!("Running garbage collection (reaper) on Docker containers and volumes...");
 
-        let mut filters = std::collections::HashMap::new();
+        let mut filters = HashMap::new();
         filters.insert("label", vec!["managed-by=stormchaser"]);
 
         // 1. Reap old containers
@@ -179,7 +183,7 @@ async fn scan_for_orphans(
 ) -> Result<()> {
     info!("Scanning for orphaned Docker containers...");
 
-    let mut filters = std::collections::HashMap::new();
+    let mut filters = HashMap::new();
     filters.insert("label", vec!["managed-by=stormchaser"]);
 
     let containers = docker
@@ -257,7 +261,7 @@ async fn scan_for_orphans(
                     .await
                 {
                     Ok(reply) => {
-                        let response: serde_json::Value =
+                        let response: Value =
                             serde_json::from_slice(&reply.payload).unwrap_or_default();
                         let status = response["status"].as_str().unwrap_or_default();
                         let exists = response["exists"].as_bool().unwrap_or(false);
@@ -441,7 +445,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
         .route("/healthz", get(|| async { "OK" }))
         .route(
             "/readyz",
-            get(|state: axum::extract::State<Arc<AppState>>| async move {
+            get(|state: State<Arc<AppState>>| async move {
                 if *state.is_ready.borrow() {
                     axum::http::StatusCode::OK
                 } else {
@@ -470,7 +474,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
     let nats_subject = format!("stormchaser.runner.docker.{}", runner_id);
 
     // Generate JSON Schema for our supported step type
-    let common_schema = schemars::schema_for!(stormchaser_model::dsl::CommonContainerSpec);
+    let common_schema = schemars::schema_for!(dsl::CommonContainerSpec);
     let common_schema_json = serde_json::to_value(common_schema)?;
 
     let registration_payload = json!({
@@ -626,13 +630,13 @@ async fn handle_task(
     let received_at = chrono::Utc::now();
     info!("Received task message: {:?}", msg.subject);
 
-    let payload: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+    let payload: Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
     let run_id_str = payload["run_id"].as_str().unwrap_or_default();
-    let run_id = uuid::Uuid::parse_str(run_id_str).unwrap_or_default();
+    let run_id = Uuid::parse_str(run_id_str).unwrap_or_default();
     let step_id_str = payload["step_id"].as_str().unwrap_or_default();
-    let step_id = uuid::Uuid::parse_str(step_id_str).unwrap_or_default();
+    let step_id = Uuid::parse_str(step_id_str).unwrap_or_default();
 
-    let step_dsl: stormchaser_model::dsl::Step = match payload.get("step_dsl").and_then(|v| {
+    let step_dsl: dsl::Step = match payload.get("step_dsl").and_then(|v| {
         if !v.is_null() {
             serde_json::from_value(v.clone()).ok()
         } else {
@@ -641,7 +645,7 @@ async fn handle_task(
     }) {
         Some(step) => step,
         None => match serde_json::from_value(payload["spec"].clone()) {
-            Ok(spec) => stormchaser_model::dsl::Step {
+            Ok(spec) => dsl::Step {
                 name: payload["step_name"]
                     .as_str()
                     .unwrap_or_default()
@@ -676,15 +680,15 @@ async fn handle_task(
         },
     };
 
-    let storage: Option<std::collections::HashMap<String, serde_json::Value>> =
+    let storage: Option<HashMap<String, Value>> =
         serde_json::from_value(payload["storage"].clone()).ok();
-    let test_report_urls: Option<std::collections::HashMap<String, serde_json::Value>> =
+    let test_report_urls: Option<HashMap<String, Value>> =
         serde_json::from_value(payload["test_report_urls"].clone()).ok();
 
     let in_progress_msg = msg.clone();
     let in_progress_handle = tokio::spawn(async move {
         loop {
-            tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+            sleep(Duration::from_secs(15)).await;
             let _ = in_progress_msg
                 .ack_with(async_nats::jetstream::message::AckKind::Progress)
                 .await;

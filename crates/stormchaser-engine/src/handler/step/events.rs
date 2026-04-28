@@ -7,6 +7,7 @@ use crate::workflow_machine::{state, WorkflowMachine};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use flate2::read::GzDecoder;
+use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 use std::io::Read;
 use std::sync::Arc;
@@ -21,8 +22,12 @@ use super::dispatch::dispatch_step_instance;
 use super::quota::release_step_quota_for_instance;
 use super::scheduling::schedule_step;
 
+use stormchaser_dsl::ast;
+use stormchaser_model::LogBackend;
+use stormchaser_model::StorageBackend;
+
 #[tracing::instrument(skip(payload, pool), fields(run_id = tracing::field::Empty, step_id = tracing::field::Empty))]
-pub async fn handle_step_unpacking_sfs(payload: serde_json::Value, pool: PgPool) -> Result<()> {
+pub async fn handle_step_unpacking_sfs(payload: Value, pool: PgPool) -> Result<()> {
     let run_id_str = payload["run_id"].as_str().context("Missing run_id")?;
     let run_id = Uuid::parse_str(run_id_str)?;
     let step_id_str = payload["step_id"].as_str().context("Missing step_id")?;
@@ -51,7 +56,7 @@ pub async fn handle_step_unpacking_sfs(payload: serde_json::Value, pool: PgPool)
 }
 
 #[tracing::instrument(skip(payload, pool), fields(run_id = tracing::field::Empty, step_id = tracing::field::Empty))]
-pub async fn handle_step_packing_sfs(payload: serde_json::Value, pool: PgPool) -> Result<()> {
+pub async fn handle_step_packing_sfs(payload: Value, pool: PgPool) -> Result<()> {
     let run_id_str = payload["run_id"].as_str().context("Missing run_id")?;
     let run_id = Uuid::parse_str(run_id_str)?;
     let step_id_str = payload["step_id"].as_str().context("Missing step_id")?;
@@ -74,7 +79,7 @@ pub async fn handle_step_packing_sfs(payload: serde_json::Value, pool: PgPool) -
 }
 
 #[tracing::instrument(skip(payload, pool), fields(run_id = tracing::field::Empty, step_id = tracing::field::Empty))]
-pub async fn handle_step_running(payload: serde_json::Value, pool: PgPool) -> Result<()> {
+pub async fn handle_step_running(payload: Value, pool: PgPool) -> Result<()> {
     let run_id_str = payload["run_id"].as_str().context("Missing run_id")?;
     let run_id = Uuid::parse_str(run_id_str)?;
     let step_id_str = payload["step_id"].as_str().context("Missing step_id")?;
@@ -116,10 +121,10 @@ pub async fn handle_step_running(payload: serde_json::Value, pool: PgPool) -> Re
 
 #[tracing::instrument(skip(payload, pool, nats_client, log_backend, tls_reloader), fields(run_id = tracing::field::Empty, step_id = tracing::field::Empty))]
 pub async fn handle_step_completed(
-    payload: serde_json::Value,
+    payload: Value,
     pool: PgPool,
     nats_client: async_nats::Client,
-    log_backend: Arc<Option<stormchaser_model::LogBackend>>,
+    log_backend: Arc<Option<LogBackend>>,
     tls_reloader: Arc<TlsReloader>,
 ) -> Result<()> {
     let run_id_str = payload["run_id"].as_str().context("Missing run_id")?;
@@ -368,7 +373,7 @@ pub async fn handle_step_completed(
                             >::from_instance((**next_instance).clone());
                         let _ = machine.reschedule(&mut *tx).await?;
 
-                        let inst_data: (serde_json::Value, serde_json::Value) =
+                        let inst_data: (Value, Value) =
                             crate::db::get_step_spec_and_params(&mut *tx, next_instance.id).await?;
 
                         dispatch_step_instance(
@@ -399,7 +404,7 @@ pub async fn handle_step_completed(
             );
 
             for next_step_name in &dsl_step.next {
-                let predecessors: Vec<&stormchaser_dsl::ast::Step> = workflow
+                let predecessors: Vec<&ast::Step> = workflow
                     .steps
                     .iter()
                     .filter(|s| s.next.contains(next_step_name))
@@ -490,7 +495,7 @@ pub async fn handle_step_completed(
 
 #[tracing::instrument(skip(payload, pool, nats_client, tls_reloader), fields(run_id = tracing::field::Empty, step_id = tracing::field::Empty))]
 pub async fn handle_step_failed(
-    payload: serde_json::Value,
+    payload: Value,
     pool: PgPool,
     nats_client: async_nats::Client,
     tls_reloader: Arc<TlsReloader>,
@@ -587,7 +592,7 @@ pub async fn handle_step_failed(
 }
 
 async fn persist_step_test_reports(
-    payload: &serde_json::Value,
+    payload: &Value,
     tx: &mut Transaction<'_, Postgres>,
     run_id: Uuid,
     step_id: Uuid,
@@ -628,7 +633,7 @@ async fn persist_step_test_reports(
 
                 if let (Some(path), Some(bid)) = (remote_path, backend_id) {
                     // Download and parse
-                    let backend: stormchaser_model::StorageBackend =
+                    let backend: StorageBackend =
                         crate::db::storage::get_storage_backend_by_id(pool, bid)
                             .await?
                             .ok_or_else(|| anyhow::anyhow!("Storage backend not found"))?;
@@ -737,13 +742,13 @@ async fn persist_step_test_reports(
 }
 
 pub async fn handle_step_query(
-    payload: serde_json::Value,
+    payload: Value,
     pool: PgPool,
     nats_client: async_nats::Client,
     reply: Option<String>,
 ) -> Result<()> {
     let step_id_str = payload["step_id"].as_str().context("Missing step_id")?;
-    let step_id = uuid::Uuid::parse_str(step_id_str)?;
+    let step_id = Uuid::parse_str(step_id_str)?;
 
     let step: Option<StepInstance> = crate::db::get_step_instance_by_id(&pool, step_id)
         .await

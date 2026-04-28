@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
@@ -12,7 +13,7 @@ pub struct CronWorkflow {
     pub repo_url: String,
     pub workflow_path: String,
     pub git_ref: String,
-    pub inputs: serde_json::Value,
+    pub inputs: Value,
     pub secret_token: String,
     pub is_active: bool,
     pub external_job_id: Option<String>,

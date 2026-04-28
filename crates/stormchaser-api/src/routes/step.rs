@@ -1,15 +1,18 @@
 use crate::{AppState, AuthClaims};
+use axum::response::sse::Event;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
 use futures::StreamExt;
+use std::collections::HashMap;
+use std::time::Duration;
+use tokio::sync::mpsc;
+use tokio::time::sleep;
 use uuid::Uuid;
 
-pub fn format_log_event(line: &str) -> axum::response::sse::Event {
-    axum::response::sse::Event::default()
-        .event("log")
-        .data(line)
+pub fn format_log_event(line: &str) -> Event {
+    Event::default().event("log").data(line)
 }
 
 pub async fn stream_step_logs_api(
@@ -18,9 +21,7 @@ pub async fn stream_step_logs_api(
     Path((run_id, step_name)): Path<(Uuid, String)>,
 ) -> Result<
     axum::response::sse::Sse<
-        impl futures::stream::Stream<
-            Item = Result<axum::response::sse::Event, std::convert::Infallible>,
-        >,
+        impl futures::stream::Stream<Item = Result<Event, std::convert::Infallible>>,
     >,
     StatusCode,
 > {
@@ -51,7 +52,7 @@ pub async fn stream_step_logs_api(
                 .collect();
             tokio_stream::iter(events)
         }
-        Err(e) => tokio_stream::iter(vec![Ok(axum::response::sse::Event::default()
+        Err(e) => tokio_stream::iter(vec![Ok(Event::default()
             .event("error")
             .data(e.to_string()))]),
     });
@@ -65,9 +66,7 @@ pub async fn stream_run_logs_api(
     Path(run_id): Path<Uuid>,
 ) -> Result<
     axum::response::sse::Sse<
-        impl futures::stream::Stream<
-            Item = Result<axum::response::sse::Event, std::convert::Infallible>,
-        >,
+        impl futures::stream::Stream<Item = Result<Event, std::convert::Infallible>>,
     >,
     StatusCode,
 > {
@@ -76,7 +75,7 @@ pub async fn stream_run_logs_api(
         None => return Err(StatusCode::NOT_IMPLEMENTED),
     };
 
-    let (tx, rx) = tokio::sync::mpsc::channel(100);
+    let (tx, rx) = mpsc::channel(100);
 
     let pool = state.pool.clone();
     tokio::spawn(async move {
@@ -162,11 +161,11 @@ pub async fn stream_run_logs_api(
 
             if is_terminal {
                 // Allow some time for final logs to flush
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                sleep(Duration::from_secs(5)).await;
                 break;
             }
 
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            sleep(Duration::from_secs(2)).await;
         }
     });
 
@@ -178,7 +177,7 @@ pub async fn stream_run_logs_api(
                 .collect();
             tokio_stream::iter(events)
         }
-        Err(e) => tokio_stream::iter(vec![Ok(axum::response::sse::Event::default()
+        Err(e) => tokio_stream::iter(vec![Ok(Event::default()
             .event("error")
             .data(e.to_string()))]),
     });
@@ -192,21 +191,16 @@ pub async fn stream_run_status_api(
     Path(run_id): Path<Uuid>,
 ) -> Result<
     axum::response::sse::Sse<
-        impl futures::stream::Stream<
-            Item = Result<axum::response::sse::Event, std::convert::Infallible>,
-        >,
+        impl futures::stream::Stream<Item = Result<Event, std::convert::Infallible>>,
     >,
     StatusCode,
 > {
-    let (tx, rx) = tokio::sync::mpsc::channel::<
-        Result<axum::response::sse::Event, std::convert::Infallible>,
-    >(100);
+    let (tx, rx) = mpsc::channel::<Result<Event, std::convert::Infallible>>(100);
     let pool = state.pool.clone();
 
     tokio::spawn(async move {
         let mut last_run_status: Option<String> = None;
-        let mut last_step_statuses: std::collections::HashMap<Uuid, String> =
-            std::collections::HashMap::new();
+        let mut last_step_statuses: HashMap<Uuid, String> = HashMap::new();
 
         loop {
             // Check workflow run status
@@ -222,9 +216,7 @@ pub async fn stream_run_status_api(
             if current_run_status != last_run_status {
                 if let Some(ref status) = current_run_status {
                     let data = serde_json::json!({ "status": status }).to_string();
-                    let event = axum::response::sse::Event::default()
-                        .event("run_status")
-                        .data(data);
+                    let event = Event::default().event("run_status").data(data);
                     if tx.send(Ok(event)).await.is_err() {
                         break;
                     }
@@ -250,9 +242,7 @@ pub async fn stream_run_status_api(
                         "status": status,
                     })
                     .to_string();
-                    let event = axum::response::sse::Event::default()
-                        .event("step_status")
-                        .data(data);
+                    let event = Event::default().event("step_status").data(data);
                     if tx.send(Ok(event)).await.is_err() {
                         return; // Receiver dropped, break out of spawn
                     }
@@ -262,11 +252,11 @@ pub async fn stream_run_status_api(
 
             if is_terminal {
                 // Allow some time for final steps to be flushed and updated
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                sleep(Duration::from_secs(2)).await;
                 break;
             }
 
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            sleep(Duration::from_secs(1)).await;
         }
     });
 

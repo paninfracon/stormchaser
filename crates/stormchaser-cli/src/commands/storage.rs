@@ -2,6 +2,7 @@ use crate::utils::{handle_response, require_token};
 use anyhow::Result;
 use clap::Subcommand;
 use serde_json::json;
+use serde_json::Value;
 use std::fs;
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -66,8 +67,7 @@ pub async fn handle(
             default_sfs,
             description,
         } => {
-            let config_json: serde_json::Value =
-                serde_json::from_str(&fs::read_to_string(config)?)?;
+            let config_json: Value = serde_json::from_str(&fs::read_to_string(config)?)?;
             let token = require_token(token)?;
             let res = http_client
                 .post(format!("{}/api/v1/storage-backends", url))

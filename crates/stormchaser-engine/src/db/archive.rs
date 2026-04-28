@@ -1,8 +1,4 @@
-#![allow(unused_imports)]
-use chrono::{DateTime, Utc};
-use serde_json::Value;
-use sqlx::{Executor, PgConnection, Postgres};
-use stormchaser_model::workflow::{RunStatus, WorkflowRun};
+use sqlx::PgConnection;
 use uuid::Uuid;
 
 pub async fn archive_and_delete_workflow_run(

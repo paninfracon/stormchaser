@@ -4,7 +4,9 @@ use axum::{
     http::{Request, StatusCode},
 };
 use serde_json::json;
+use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
+use std::collections::HashMap;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -32,7 +34,7 @@ async fn test_webhook_trigger() {
         opa: Arc::new(OpaClient::new(None, None)),
 
         oidc_config: None,
-        jwks: std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
     };
 
@@ -96,11 +98,11 @@ async fn test_webhook_trigger() {
     let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
         .await
         .unwrap();
-    let res_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let res_json: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(res_json["triggered_rules"], 1);
 
     // 4. Verify Workflow Run was created
-    let run: (String, serde_json::Value) = sqlx::query_as(
+    let run: (String, Value) = sqlx::query_as(
         "SELECT workflow_name, inputs FROM workflow_runs wr JOIN run_contexts rc ON wr.id = rc.run_id WHERE wr.workflow_name = $1"
     )
     .bind(format!("test-workflow-{}", rule_id))
@@ -147,7 +149,7 @@ async fn test_github_webhook_signature() {
         opa: Arc::new(OpaClient::new(None, None)),
 
         oidc_config: None,
-        jwks: std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
     };
 

@@ -1,12 +1,18 @@
 use anyhow::{Context, Result};
 use chrono::Utc;
+use serde_json::Value;
 use sqlx::PgPool;
 use std::sync::Arc;
+use std::time::Duration;
 use stormchaser_model::dsl::Step;
 use stormchaser_tls::TlsReloader;
 use uuid::Uuid;
 
 use crate::handler::fetch_run_context;
+
+use stormchaser_model::dsl;
+use stormchaser_model::storage;
+use stormchaser_model::storage::BackendType;
 
 pub fn find_step<'a>(steps: &'a [Step], name: &str) -> Option<&'a Step> {
     for step in steps {
@@ -28,8 +34,8 @@ pub async fn dispatch_step_instance(
     step_instance_id: Uuid,
     step_name: &str,
     step_type: &str,
-    resolved_spec: &serde_json::Value,
-    resolved_params: &serde_json::Value,
+    resolved_spec: &Value,
+    resolved_params: &Value,
     nats_client: async_nats::Client,
     pool: PgPool,
     tls_reloader: Arc<TlsReloader>,
@@ -41,15 +47,14 @@ pub async fn dispatch_step_instance(
     super::intrinsic::jq::mutate_if_has_files(&mut step_type, &mut resolved_spec);
 
     let run_context = fetch_run_context(run_id, &pool).await?;
-    let workflow: stormchaser_model::dsl::Workflow =
-        serde_json::from_value(run_context.workflow_definition.clone())
-            .context("Failed to parse workflow definition from context")?;
+    let workflow: dsl::Workflow = serde_json::from_value(run_context.workflow_definition.clone())
+        .context("Failed to parse workflow definition from context")?;
 
     let mut storage_urls = serde_json::Map::new();
 
     if !workflow.storage.is_empty() {
         for storage in workflow.storage {
-            let backend: Option<stormchaser_model::storage::StorageBackend> =
+            let backend: Option<storage::StorageBackend> =
                 if let Some(ref backend_name) = storage.backend {
                     crate::db::get_storage_backend_by_name(&pool, backend_name).await?
                 } else {
@@ -60,14 +65,14 @@ pub async fn dispatch_step_instance(
                 let mut get_url = None;
                 let mut put_url = None;
 
-                if backend.backend_type == stormchaser_model::storage::BackendType::S3 {
+                if backend.backend_type == BackendType::S3 {
                     let client = crate::s3::get_s3_client(&backend).await?;
                     let bucket = backend.config["bucket"]
                         .as_str()
                         .context("Missing bucket in SFS backend config")?;
 
                     let key = format!("{}/{}.tar.gz", run_id, storage.name);
-                    let expires = std::time::Duration::from_secs(3600);
+                    let expires = Duration::from_secs(3600);
 
                     get_url = Some(
                         crate::s3::generate_presigned_url(&client, bucket, &key, false, expires)
@@ -97,7 +102,7 @@ pub async fn dispatch_step_instance(
                 let mut provision_data = Vec::new();
                 for mut prov in storage.provision {
                     if let Some(url) = &prov.url {
-                        let mut val = serde_json::Value::String(url.clone());
+                        let mut val = Value::String(url.clone());
                         let hcl_ctx = crate::hcl_eval::create_context(
                             run_context.inputs.clone(),
                             run_id,
@@ -105,7 +110,7 @@ pub async fn dispatch_step_instance(
                         );
                         if crate::hcl_eval::resolve_expressions(&mut val, &hcl_ctx).is_ok() {
                             prov.url = match val {
-                                serde_json::Value::String(s) => Some(s),
+                                Value::String(s) => Some(s),
                                 other => Some(other.to_string()),
                             };
                         }
@@ -226,9 +231,9 @@ pub async fn dispatch_step_instance(
         return Ok(());
     }
 
-    let mut dsl_step_val = serde_json::Value::Null;
+    let mut dsl_step_val = Value::Null;
     if let Some(found_step) = find_step(&workflow.steps, step_name) {
-        dsl_step_val = serde_json::to_value(found_step).unwrap_or(serde_json::Value::Null);
+        dsl_step_val = serde_json::to_value(found_step).unwrap_or(Value::Null);
     }
 
     let mut test_report_urls = serde_json::Map::new();
@@ -247,7 +252,7 @@ pub async fn dispatch_step_instance(
                     "test-reports/{}/{}/{}.tar.gz",
                     run_id, step_instance_id, report.name
                 );
-                let expires = std::time::Duration::from_secs(3600);
+                let expires = Duration::from_secs(3600);
                 let put_url =
                     crate::s3::generate_presigned_url(&client, bucket, &report_key, true, expires)
                         .await?;

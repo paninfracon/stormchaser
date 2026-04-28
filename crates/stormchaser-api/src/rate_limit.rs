@@ -8,6 +8,7 @@ use axum::{
 use bytes::Bytes;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::OnceCell;
 
 #[derive(Clone)]
@@ -39,7 +40,7 @@ pub async fn nats_rate_limiter(
             let js = async_nats::jetstream::new(state.nats.clone());
             js.create_key_value(Config {
                 bucket: "api_rate_limits".to_string(),
-                max_age: std::time::Duration::from_secs(60),
+                max_age: Duration::from_secs(60),
                 ..Default::default()
             })
             .await

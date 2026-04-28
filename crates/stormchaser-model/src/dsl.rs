@@ -1,5 +1,6 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,7 +42,7 @@ pub struct StepLibrary {
     #[serde(default)]
     pub params: HashMap<String, String>,
     #[serde(default)]
-    pub spec: serde_json::Value,
+    pub spec: Value,
     pub timeout: Option<String>,
     pub allow_failure: Option<bool>,
     pub retry: Option<RetryPolicy>,
@@ -107,7 +108,7 @@ pub struct Input {
     pub name: String,
     pub r#type: String,
     pub description: Option<String>,
-    pub default: Option<serde_json::Value>,
+    pub default: Option<Value>,
     pub validation: Option<String>,
     pub options: Option<Vec<String>>,
     pub query: Option<String>,
@@ -138,7 +139,7 @@ pub struct Step {
     /// This allows each step type to define its own structured parameters.
     /// For "RunContainer" on K8s, this would be a K8sJobSpec.
     #[serde(default)]
-    pub spec: serde_json::Value,
+    pub spec: Value,
 
     pub strategy: Option<Strategy>,
     pub aggregation: Vec<Aggregation>,
@@ -286,7 +287,7 @@ pub struct WaitEventSpec {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct LambdaInvokeSpec {
     pub function_name: String,
-    pub payload: Option<serde_json::Value>,
+    pub payload: Option<Value>,
     pub invocation_type: Option<String>, // "RequestResponse", "Event", "DryRun"
     pub qualifier: Option<String>,       // Alias or version
     pub region: Option<String>,
@@ -308,7 +309,7 @@ pub struct GitCheckoutSpec {
 pub struct WasmStepSpec {
     pub module: String, // URI to WASM module (e.g., file://, s3://, or registry name)
     pub function: String,
-    pub args: Option<serde_json::Value>,
+    pub args: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -351,7 +352,7 @@ pub struct EmailSpec {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct JinjaRenderSpec {
     pub template: String,
-    pub context: Option<serde_json::Value>,
+    pub context: Option<Value>,
     pub output_key: Option<String>, // Key to store the result in step outputs, defaults to "result"
 }
 
@@ -377,7 +378,7 @@ pub struct TestReportEmailSpec {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct JqSpec {
     pub program: String,
-    pub input: Option<serde_json::Value>,
+    pub input: Option<Value>,
     pub input_file: Option<String>,
     pub output_file: Option<String>,
     pub storage_mounts: Option<Vec<StorageMount>>,

@@ -1,10 +1,18 @@
-use anyhow::{Context, Result};
-use chrono::Utc;
+use anyhow::Result;
+use serde_json::Value;
 use sqlx::PgPool;
-use tracing::info;
 use uuid::Uuid;
 
+#[cfg(feature = "aws-lambda")]
 use crate::handler::fetch_step_instance;
+#[cfg(feature = "aws-lambda")]
+use anyhow::Context;
+#[cfg(feature = "aws-lambda")]
+use chrono::Utc;
+#[cfg(feature = "aws-lambda")]
+use stormchaser_model::dsl::{self};
+#[cfg(feature = "aws-lambda")]
+use tracing::info;
 
 #[cfg(feature = "aws-lambda")]
 use aws_sdk_lambda::primitives::Blob;
@@ -15,7 +23,7 @@ use aws_sdk_lambda::types::InvocationType;
 pub async fn handle_lambda_invoke(
     run_id: Uuid,
     step_id: Uuid,
-    spec: serde_json::Value,
+    spec: Value,
     pool: PgPool,
     nats_client: async_nats::Client,
 ) -> Result<()> {
@@ -74,7 +82,7 @@ pub async fn handle_lambda_invoke(
 
 #[cfg(feature = "aws-lambda")]
 async fn build_lambda_client(
-    spec: &stormchaser_model::dsl::LambdaInvokeSpec,
+    spec: &dsl::LambdaInvokeSpec,
     run_id: Uuid,
 ) -> Result<aws_sdk_lambda::Client> {
     let mut config_loader = aws_config::defaults(aws_config::BehaviorVersion::v2026_01_12());
@@ -132,10 +140,9 @@ async fn handle_lambda_response(
     let status_code = response.status_code();
     let payload = if let Some(payload) = response.payload() {
         let s = String::from_utf8_lossy(payload.as_ref());
-        serde_json::from_str::<serde_json::Value>(&s)
-            .unwrap_or(serde_json::Value::String(s.to_string()))
+        serde_json::from_str::<Value>(&s).unwrap_or(Value::String(s.to_string()))
     } else {
-        serde_json::Value::Null
+        Value::Null
     };
 
     if (200..300).contains(&status_code) {
@@ -197,7 +204,7 @@ async fn handle_lambda_response(
 pub async fn handle_lambda_invoke(
     _run_id: Uuid,
     _step_id: Uuid,
-    _spec: serde_json::Value,
+    _spec: Value,
     _pool: PgPool,
     _nats_client: async_nats::Client,
 ) -> Result<()> {

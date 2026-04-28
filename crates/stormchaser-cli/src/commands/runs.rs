@@ -460,6 +460,7 @@ async fn list_pending(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     #[test]
     fn test_build_list_runs_url_basic() {
@@ -494,7 +495,7 @@ mod tests {
             },
         )
         .unwrap();
-        let query: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+        let query: HashMap<_, _> = url.query_pairs().into_owned().collect();
         assert_eq!(query.get("initiating_user").unwrap(), "alice");
         assert_eq!(query.get("workflow_name").unwrap(), "my-workflow");
         assert_eq!(query.get("status").unwrap(), "Succeeded");

@@ -1,6 +1,8 @@
 use axum::response::IntoResponse;
 use serde_json::json;
+use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
+use std::collections::HashMap;
 use std::sync::Arc;
 use stormchaser_model::auth::OpaClient;
 use uuid::Uuid;
@@ -14,16 +16,19 @@ use axum::Json;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use reqwest::StatusCode;
 use sha2::{Digest, Sha256};
+use stormchaser_api::auth::AuthClaims;
 use stormchaser_api::hitl::*;
 use stormchaser_api::AppState;
 use stormchaser_api::JWT_SECRET;
+use stormchaser_model::auth::Claims;
+
 #[derive(serde::Deserialize, serde::Serialize)]
 struct ApprovalLinkPayload {
     run_id: Uuid,
     step_id: Uuid,
     action: String,
     #[serde(default)]
-    inputs: serde_json::Value,
+    inputs: Value,
 }
 
 async fn mock_state() -> AppState {
@@ -43,7 +48,7 @@ async fn mock_state() -> AppState {
         nats,
         opa: Arc::new(OpaClient::new(None, None)),
         oidc_config: None,
-        jwks: std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
     }
 }
@@ -144,7 +149,7 @@ async fn test_approve_step_success() {
 
     let response = approve_step(
         State(state),
-        stormchaser_api::auth::AuthClaims(stormchaser_model::auth::Claims {
+        AuthClaims(Claims {
             sub: "test-user-123".to_string(),
             email: Some("test-user-123@paninfracon.net".to_string()),
             exp: 0,

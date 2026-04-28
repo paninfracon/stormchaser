@@ -1,3 +1,5 @@
+use serde_json::Value;
+use std::collections::HashMap;
 pub mod crypto;
 pub mod k8s_utils;
 pub mod transitions;
@@ -10,6 +12,8 @@ use std::collections::BTreeMap;
 use stormchaser_model::dsl::Step;
 use uuid::Uuid;
 
+use stormchaser_model::dsl;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JobMetadata {
     pub run_id: Uuid,
@@ -19,8 +23,8 @@ pub struct JobMetadata {
     pub received_at: DateTime<Utc>,
     pub cluster_version: String,
     pub encryption_key: Option<String>,
-    pub storage: Option<std::collections::HashMap<String, serde_json::Value>>,
-    pub test_report_urls: Option<std::collections::HashMap<String, serde_json::Value>>,
+    pub storage: Option<HashMap<String, Value>>,
+    pub test_report_urls: Option<HashMap<String, Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -29,9 +33,9 @@ pub struct JobMetrics {
     pub attempts: i32,
     pub duration_ms: u64,
     pub latency_ms: u64,
-    pub storage_hashes: Option<std::collections::HashMap<String, String>>,
-    pub artifacts: Option<std::collections::HashMap<String, serde_json::Value>>,
-    pub test_reports: Option<std::collections::HashMap<String, serde_json::Value>>,
+    pub storage_hashes: Option<HashMap<String, String>>,
+    pub artifacts: Option<HashMap<String, Value>>,
+    pub test_reports: Option<HashMap<String, Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,7 +73,7 @@ pub struct K8sJobSpec {
     pub image: String,
     pub command: Option<Vec<String>>,
     pub args: Option<Vec<String>>,
-    pub env: Option<Vec<stormchaser_model::dsl::EnvVar>>,
+    pub env: Option<Vec<dsl::EnvVar>>,
     pub resources: Option<K8sResources>,
     pub active_deadline_seconds: Option<i64>,
     pub backoff_limit: Option<i32>,
@@ -82,9 +86,9 @@ pub struct K8sJobSpec {
     pub restart_policy: Option<String>,
     pub labels: Option<BTreeMap<String, String>>,
     pub annotations: Option<BTreeMap<String, String>>,
-    pub storage_mounts: Option<Vec<stormchaser_model::dsl::StorageMount>>,
-    pub secret_mounts: Option<Vec<stormchaser_model::dsl::SecretMount>>,
-    pub config_map_mounts: Option<Vec<stormchaser_model::dsl::ConfigMapMount>>,
+    pub storage_mounts: Option<Vec<dsl::StorageMount>>,
+    pub secret_mounts: Option<Vec<dsl::SecretMount>>,
+    pub config_map_mounts: Option<Vec<dsl::ConfigMapMount>>,
     #[allow(dead_code)]
     pub minimum_version: Option<String>,
 }

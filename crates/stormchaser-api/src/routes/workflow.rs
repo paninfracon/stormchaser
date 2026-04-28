@@ -3,6 +3,7 @@ use super::{
     WorkflowRunDetail, WorkflowRunFullDetail,
 };
 use crate::{AppState, AuthClaims, RUNS_ENQUEUED};
+use axum::response::sse::Event;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -10,7 +11,9 @@ use axum::{
     Json,
 };
 use futures::StreamExt;
+use serde_json::Value;
 use stormchaser_model::workflow::RunStatus;
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 #[utoipa::path(
@@ -382,15 +385,11 @@ pub async fn stream_workflow_runs_api(
     State(state): State<AppState>,
 ) -> Result<
     axum::response::sse::Sse<
-        impl futures::stream::Stream<
-            Item = Result<axum::response::sse::Event, std::convert::Infallible>,
-        >,
+        impl futures::stream::Stream<Item = Result<Event, std::convert::Infallible>>,
     >,
     StatusCode,
 > {
-    let (tx, rx) = tokio::sync::mpsc::channel::<
-        Result<axum::response::sse::Event, std::convert::Infallible>,
-    >(100);
+    let (tx, rx) = mpsc::channel::<Result<Event, std::convert::Infallible>>(100);
 
     let nats = state.nats.clone();
     let pool = state.pool.clone();
@@ -405,7 +404,7 @@ pub async fn stream_workflow_runs_api(
         };
 
         while let Some(msg) = subscriber.next().await {
-            let payload: serde_json::Value = match serde_json::from_slice(&msg.payload) {
+            let payload: Value = match serde_json::from_slice(&msg.payload) {
                 Ok(p) => p,
                 Err(_) => continue,
             };
@@ -419,9 +418,7 @@ pub async fn stream_workflow_runs_api(
 
                     if let Some(run) = detail {
                         let data = serde_json::to_string(&run).unwrap_or_default();
-                        let event = axum::response::sse::Event::default()
-                            .event("workflow_run")
-                            .data(data);
+                        let event = Event::default().event("workflow_run").data(data);
                         if tx.send(Ok(event)).await.is_err() {
                             break;
                         }

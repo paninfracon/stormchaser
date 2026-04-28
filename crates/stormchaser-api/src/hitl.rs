@@ -11,8 +11,11 @@ use axum::{
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde_json::json;
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
+
+use stormchaser_model::step::StepStatus;
 
 #[derive(serde::Deserialize, serde::Serialize)]
 struct ApprovalLinkPayload {
@@ -20,7 +23,7 @@ struct ApprovalLinkPayload {
     step_id: Uuid,
     action: String,
     #[serde(default)]
-    inputs: serde_json::Value,
+    inputs: Value,
 }
 
 #[utoipa::path(
@@ -89,7 +92,7 @@ pub async fn approve_step_link(
         None => return (StatusCode::NOT_FOUND, "Step not found").into_response(),
     };
 
-    if step.status != stormchaser_model::step::StepStatus::WaitingForEvent {
+    if step.status != StepStatus::WaitingForEvent {
         return (StatusCode::BAD_REQUEST, "Step is not waiting for approval").into_response();
     }
 
@@ -144,7 +147,7 @@ pub async fn approve_step(
     State(state): State<AppState>,
     crate::auth::AuthClaims(claims): crate::auth::AuthClaims,
     Path((run_id, step_id)): Path<(Uuid, Uuid)>,
-    Json(inputs): Json<serde_json::Value>,
+    Json(inputs): Json<Value>,
 ) -> impl IntoResponse {
     // 1. Verify step exists and is WaitingForEvent
     let step = crate::db::get_step_instance_for_approval(&state.pool, step_id, run_id)
@@ -156,7 +159,7 @@ pub async fn approve_step(
         None => return (StatusCode::NOT_FOUND, "Step not found").into_response(),
     };
 
-    if step.status != stormchaser_model::step::StepStatus::WaitingForEvent {
+    if step.status != StepStatus::WaitingForEvent {
         return (StatusCode::BAD_REQUEST, "Step is not waiting for approval").into_response();
     }
 
@@ -202,7 +205,7 @@ pub async fn reject_step(
         None => return (StatusCode::NOT_FOUND, "Step not found").into_response(),
     };
 
-    if step.status != stormchaser_model::step::StepStatus::WaitingForEvent {
+    if step.status != StepStatus::WaitingForEvent {
         return (StatusCode::BAD_REQUEST, "Step is not waiting for approval").into_response();
     }
 
@@ -235,7 +238,7 @@ pub async fn reject_step(
 
 pub async fn correlate_event(
     State(state): State<AppState>,
-    Json(payload): Json<serde_json::Value>,
+    Json(payload): Json<Value>,
 ) -> impl IntoResponse {
     // 1. Iterate over event_correlations, match payload against correlation_key
     // For simplicity, let's assume payload has exactly { "key": "...", "value": "..." }

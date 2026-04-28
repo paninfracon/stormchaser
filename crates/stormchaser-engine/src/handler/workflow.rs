@@ -7,6 +7,7 @@ use crate::git_cache::GitCache;
 use crate::workflow_machine::{state, WorkflowMachine};
 use anyhow::{Context, Result};
 use chrono::Utc;
+use serde_json::Value;
 use sqlx::PgPool;
 use std::collections::HashSet;
 use std::fs;
@@ -18,6 +19,8 @@ use stormchaser_model::workflow::{RunStatus, WorkflowRun};
 use stormchaser_tls::TlsReloader;
 use tracing::{debug, error, info};
 use uuid::Uuid;
+
+use stormchaser_dsl::ast;
 
 #[tracing::instrument(skip(pool, nats_client, _tls_reloader), fields(run_id = %run_id))]
 pub async fn handle_workflow_timeout(
@@ -122,7 +125,7 @@ pub async fn handle_workflow_start_pending(
         .flat_map(|s| s.next.iter().cloned())
         .collect();
 
-    let initial_steps: Vec<&stormchaser_dsl::ast::Step> = workflow
+    let initial_steps: Vec<&ast::Step> = workflow
         .steps
         .iter()
         .filter(|s| !all_next_steps.contains(&s.name))
@@ -180,7 +183,7 @@ pub async fn handle_workflow_start_pending(
 
 #[tracing::instrument(skip(payload, pool, opa_client, nats_client), fields(run_id = tracing::field::Empty))]
 pub async fn handle_workflow_direct(
-    payload: serde_json::Value,
+    payload: Value,
     pool: PgPool,
     opa_client: Arc<OpaClient>,
     nats_client: async_nats::Client,

@@ -1,9 +1,12 @@
 use anyhow::Result;
+use serde_json::Value;
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
 use tracing::error;
+use uuid::Uuid;
 
 struct UploadReportParams<'a> {
     name: &'a str,
@@ -17,14 +20,10 @@ struct UploadReportParams<'a> {
 
 async fn upload_report(
     params: UploadReportParams<'_>,
-    collected: &mut std::collections::HashMap<String, serde_json::Value>,
+    collected: &mut HashMap<String, Value>,
 ) -> Result<()> {
     // Zip the files
-    let tar_path = format!(
-        "/tmp/report_{}_{}.tar.gz",
-        params.name,
-        uuid::Uuid::new_v4()
-    );
+    let tar_path = format!("/tmp/report_{}_{}.tar.gz", params.name, Uuid::new_v4());
     let file = File::create(&tar_path)?;
     let enc = flate2::write::GzEncoder::new(file, flate2::Compression::default());
     let mut tar = tar::Builder::new(enc);
@@ -82,7 +81,7 @@ fn fallback_to_memory(
     name: &str,
     format: &str,
     matched_files: Vec<PathBuf>,
-    collected: &mut std::collections::HashMap<String, serde_json::Value>,
+    collected: &mut HashMap<String, Value>,
 ) -> Result<()> {
     for p in matched_files {
         let mut file = File::open(&p)?;
@@ -114,10 +113,10 @@ fn fallback_to_memory(
 }
 
 pub async fn collect_test_reports(
-    reports: serde_json::Value,
-    urls: Option<serde_json::Value>,
-) -> Result<std::collections::HashMap<String, serde_json::Value>> {
-    let mut collected = std::collections::HashMap::new();
+    reports: Value,
+    urls: Option<Value>,
+) -> Result<HashMap<String, Value>> {
+    let mut collected = HashMap::new();
     let client = reqwest::Client::new();
 
     if let Some(report_list) = reports.as_array() {

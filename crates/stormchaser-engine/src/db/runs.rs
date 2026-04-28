@@ -1,9 +1,6 @@
-#![allow(unused_imports)]
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::{Executor, Postgres};
-use stormchaser_model::runner::RunnerStatus;
-use stormchaser_model::step::StepStatus;
 use stormchaser_model::workflow::{RunStatus, WorkflowRun};
 use uuid::Uuid;
 
@@ -32,9 +29,9 @@ pub async fn insert_full_workflow_run(
     conn: &mut sqlx::PgConnection,
     run: &WorkflowRun,
     dsl_version: &str,
-    workflow_definition: serde_json::Value,
+    workflow_definition: Value,
     source_code: Option<&str>,
-    inputs: serde_json::Value,
+    inputs: Value,
     max_concurrency: i32,
     max_cpu: &str,
     max_memory: &str,

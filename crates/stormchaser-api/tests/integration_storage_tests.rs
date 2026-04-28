@@ -5,13 +5,18 @@ use axum::{
 };
 use jsonwebtoken::{encode, EncodingKey, Header};
 use serde_json::json;
+use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use stormchaser_api::{app, AppState, Claims, JWT_SECRET};
 use stormchaser_model::OpaClient;
 use tower::ServiceExt;
 use uuid::Uuid;
+
+use stormchaser_model::step::StepStatus;
+use stormchaser_model::workflow::RunStatus;
 
 fn get_token() -> String {
     let claims = Claims {
@@ -46,7 +51,7 @@ async fn test_storage_backend_crud() {
         nats: nats_client.clone(),
         opa: Arc::new(OpaClient::new(None, None)),
         oidc_config: None,
-        jwks: std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
     };
 
@@ -102,7 +107,7 @@ async fn test_storage_backend_crud() {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
-    let backends: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
+    let backends: Vec<Value> = serde_json::from_slice(&body).unwrap();
     assert!(backends.iter().any(|b| b["name"] == "test-s3"));
 
     let backend_id = backends.iter().find(|b| b["name"] == "test-s3").unwrap()["id"]
@@ -168,7 +173,7 @@ async fn test_artifact_listing() {
         nats: nats_client.clone(),
         opa: Arc::new(OpaClient::new(None, None)),
         oidc_config: None,
-        jwks: std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
     };
 
@@ -183,7 +188,7 @@ async fn test_artifact_listing() {
         .bind(run_id)
         .bind(&workflow_name)
         .bind("test-user")
-        .bind(stormchaser_model::workflow::RunStatus::Running)
+        .bind(RunStatus::Running)
         .bind(chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0))
         .bind("http://example.com")
         .bind("test.storm")
@@ -210,7 +215,7 @@ async fn test_artifact_listing() {
         .bind(run_id)
         .bind("test-step")
         .bind("RunContainer")
-        .bind(stormchaser_model::step::StepStatus::Succeeded)
+        .bind(StepStatus::Succeeded)
         .bind(json!({}))
         .bind(json!({}))
         .execute(&pool)
@@ -245,7 +250,7 @@ async fn test_artifact_listing() {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
-    let artifacts: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
+    let artifacts: Vec<Value> = serde_json::from_slice(&body).unwrap();
     assert_eq!(artifacts.len(), 1);
     assert_eq!(artifacts[0]["artifact_name"], "test-artifact");
 

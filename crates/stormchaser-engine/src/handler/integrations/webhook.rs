@@ -1,14 +1,16 @@
 use crate::handler::{fetch_outputs, fetch_run_context, fetch_step_instance};
 use anyhow::Result;
 use chrono::Utc;
+use serde_json::Value;
 use sqlx::PgPool;
+use std::time::Duration;
 use tracing::info;
 use uuid::Uuid;
 
 pub async fn handle_webhook_invoke(
     run_id: Uuid,
     step_id: Uuid,
-    spec: serde_json::Value,
+    spec: Value,
     pool: PgPool,
     nats_client: async_nats::Client,
 ) -> Result<()> {
@@ -47,9 +49,11 @@ pub async fn handle_webhook_invoke(
     execute_webhook_request(run_id, step_id, &spec, rendered_body, pool, nats_client).await
 }
 
+use stormchaser_model::dsl;
+
 fn render_webhook_body(
-    spec: &stormchaser_model::dsl::WebhookInvokeSpec,
-    template_ctx: &serde_json::Value,
+    spec: &dsl::WebhookInvokeSpec,
+    template_ctx: &Value,
 ) -> Result<Option<String>> {
     use minijinja::Environment;
     if let Some(body_tmpl) = &spec.body {
@@ -65,7 +69,7 @@ fn render_webhook_body(
 async fn execute_webhook_request(
     run_id: Uuid,
     step_id: Uuid,
-    spec: &stormchaser_model::dsl::WebhookInvokeSpec,
+    spec: &dsl::WebhookInvokeSpec,
     rendered_body: Option<String>,
     pool: PgPool,
     nats_client: async_nats::Client,
@@ -102,14 +106,14 @@ async fn execute_webhook_request(
         .timeout
         .as_ref()
         .and_then(|t| humantime::parse_duration(t).ok())
-        .unwrap_or(std::time::Duration::from_secs(30));
+        .unwrap_or(Duration::from_secs(30));
 
     let res = builder.timeout(timeout).send().await?;
     let status = res.status();
 
     if status.is_success() {
         let body_bytes = res.bytes().await?;
-        let body_val: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap_or_else(
+        let body_val: Value = serde_json::from_slice(&body_bytes).unwrap_or_else(
             |_| serde_json::json!({ "text": String::from_utf8_lossy(&body_bytes) }),
         );
 

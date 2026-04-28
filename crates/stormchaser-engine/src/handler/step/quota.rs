@@ -1,4 +1,5 @@
 use anyhow::Result;
+use serde_json::Value;
 use uuid::Uuid;
 
 pub async fn release_step_quota_for_instance(
@@ -6,7 +7,7 @@ pub async fn release_step_quota_for_instance(
     run_id: Uuid,
     step_id: Uuid,
 ) -> Result<()> {
-    let row: Option<(String, serde_json::Value)> =
+    let row: Option<(String, Value)> =
         crate::db::steps::get_step_type_and_spec(&mut *executor, step_id)
             .await
             .ok();

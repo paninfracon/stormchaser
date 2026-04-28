@@ -7,7 +7,10 @@ use k8s_openapi::api::core::v1::Pod;
 use kube::api::{
     Api, DeleteParams, ListParams, PostParams, PropagationPolicy, WatchEvent, WatchParams,
 };
+use serde_json::Value;
 use std::collections::HashMap;
+use std::time::Duration;
+use tokio::time::sleep;
 use tracing::{error, info, warn};
 
 impl K8sJobMachine<state::Initialized> {
@@ -177,7 +180,7 @@ impl K8sJobMachine<state::Running> {
                     .await;
             }
 
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            sleep(Duration::from_secs(2)).await;
 
             if let Some(job) = jobs.get_opt(job_name).await? {
                 if let Some(state) = self
@@ -201,7 +204,7 @@ impl K8sJobMachine<state::Running> {
         job_name: &str,
         dispatched_at: chrono::DateTime<chrono::Utc>,
     ) -> Result<JobState> {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
+        let mut interval = tokio::time::interval(Duration::from_secs(10));
         loop {
             interval.tick().await;
             info!("Polling K8s job {} status...", job_name);
@@ -333,10 +336,7 @@ impl K8sJobMachine<state::Running> {
         Ok(None)
     }
 
-    async fn get_artifact_meta(
-        &self,
-        job_name: &str,
-    ) -> Result<Option<HashMap<String, serde_json::Value>>> {
+    async fn get_artifact_meta(&self, job_name: &str) -> Result<Option<HashMap<String, Value>>> {
         if self.metadata.storage.is_none() {
             return Ok(None);
         }
@@ -371,10 +371,7 @@ impl K8sJobMachine<state::Running> {
         Ok(None)
     }
 
-    async fn get_test_reports(
-        &self,
-        job_name: &str,
-    ) -> Result<Option<HashMap<String, serde_json::Value>>> {
+    async fn get_test_reports(&self, job_name: &str) -> Result<Option<HashMap<String, Value>>> {
         if self.metadata.step_dsl.reports.is_empty() {
             return Ok(None);
         }

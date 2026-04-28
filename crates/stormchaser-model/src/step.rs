@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use uuid::Uuid;
 
 use utoipa::ToSchema;
@@ -34,8 +35,8 @@ pub struct StepInstance {
     pub finished_at: Option<DateTime<Utc>>,
     pub exit_code: Option<i32>,
     pub error: Option<String>,
-    pub spec: serde_json::Value,
-    pub params: serde_json::Value,
+    pub spec: Value,
+    pub params: Value,
     pub created_at: DateTime<Utc>,
 }
 
@@ -43,7 +44,7 @@ pub struct StepInstance {
 pub struct StepOutput {
     pub step_instance_id: Uuid,
     pub key: String,
-    pub value: serde_json::Value,
+    pub value: Value,
     pub is_sensitive: bool,
 }
 

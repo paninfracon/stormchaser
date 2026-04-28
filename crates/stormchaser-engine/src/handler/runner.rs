@@ -1,10 +1,11 @@
 #![allow(clippy::explicit_auto_deref)]
 use anyhow::{Context, Result};
+use serde_json::Value;
 use sqlx::PgPool;
 use stormchaser_model::runner::RunnerStatus;
 use tracing::{debug, error, info};
 
-pub async fn handle_runner_registration(payload: serde_json::Value, pool: PgPool) -> Result<()> {
+pub async fn handle_runner_registration(payload: Value, pool: PgPool) -> Result<()> {
     let runner_id = payload["runner_id"].as_str().context("Missing runner_id")?;
     let runner_type = payload["runner_type"]
         .as_str()
@@ -59,7 +60,7 @@ pub async fn handle_runner_registration(payload: serde_json::Value, pool: PgPool
     Ok(())
 }
 
-pub async fn handle_wasm_registration(payload: serde_json::Value, pool: PgPool) -> Result<()> {
+pub async fn handle_wasm_registration(payload: Value, pool: PgPool) -> Result<()> {
     let step_type = payload["step_type"].as_str().context("Missing step_type")?;
     let module = payload["wasm_module"]
         .as_str()
@@ -86,7 +87,7 @@ pub async fn handle_wasm_registration(payload: serde_json::Value, pool: PgPool) 
     Ok(())
 }
 
-pub async fn handle_runner_heartbeat(payload: serde_json::Value, pool: PgPool) -> Result<()> {
+pub async fn handle_runner_heartbeat(payload: Value, pool: PgPool) -> Result<()> {
     let runner_id = payload["runner_id"].as_str().context("Missing runner_id")?;
 
     debug!("Received heartbeat from runner: {}", runner_id);
@@ -103,7 +104,7 @@ pub async fn handle_runner_heartbeat(payload: serde_json::Value, pool: PgPool) -
     Ok(())
 }
 
-pub async fn handle_runner_offline(payload: serde_json::Value, pool: PgPool) -> Result<()> {
+pub async fn handle_runner_offline(payload: Value, pool: PgPool) -> Result<()> {
     let runner_id = payload["runner_id"].as_str().context("Missing runner_id")?;
 
     info!("Runner going offline: {}", runner_id);

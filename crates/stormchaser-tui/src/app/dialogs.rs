@@ -1,6 +1,8 @@
 use super::*;
 use anyhow::Result;
 
+use stormchaser_dsl::StormchaserParser;
+
 impl<'a> App<'a> {
     pub fn open_filter_dialog(&mut self) {
         self.filter_dialog_active = true;
@@ -90,7 +92,7 @@ impl<'a> App<'a> {
         if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("storm") {
             let dsl = std::fs::read_to_string(path)?;
 
-            if let Ok(workflow) = stormchaser_dsl::StormchaserParser.parse(&dsl) {
+            if let Ok(workflow) = StormchaserParser.parse(&dsl) {
                 if !workflow.inputs.is_empty() {
                     let mut builder = ratatui_form::Form::builder().title("Workflow Inputs");
                     for input in workflow.inputs {

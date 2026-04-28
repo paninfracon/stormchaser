@@ -210,7 +210,7 @@ fn load_key(path: &Path) -> Result<PrivateKeyDer<'static>> {
 
 impl Default for TlsConfig {
     fn default() -> Self {
-        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../");
         Self {
             ca_cert_path: Some(base.join("tests/certs/ca.crt")),
             cert_path: base.join("tests/certs/tls.crt"),

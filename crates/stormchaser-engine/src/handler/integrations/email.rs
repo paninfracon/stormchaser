@@ -1,12 +1,22 @@
-use anyhow::{Context, Result};
-use chrono::Utc;
+use anyhow::Result;
+use serde_json::Value;
 use sqlx::PgPool;
 use std::sync::Arc;
 use stormchaser_tls::TlsReloader;
-use tracing::{error, info};
 use uuid::Uuid;
 
+#[cfg(feature = "email")]
 use crate::handler::{fetch_outputs, fetch_run_context, fetch_step_instance};
+#[cfg(feature = "email")]
+use anyhow::Context;
+#[cfg(feature = "email")]
+use chrono::Utc;
+#[cfg(feature = "email")]
+use stormchaser_model::dsl::{self, EmailBackend};
+#[cfg(feature = "email")]
+use stormchaser_model::workflow;
+#[cfg(feature = "email")]
+use tracing::{error, info};
 
 #[cfg(feature = "email")]
 pub struct SmtpParams {
@@ -157,7 +167,7 @@ async fn send_email_ses(
 pub async fn handle_email_send(
     run_id: Uuid,
     step_id: Uuid,
-    spec: serde_json::Value,
+    spec: Value,
     pool: PgPool,
     nats_client: async_nats::Client,
     tls_reloader: Arc<TlsReloader>,
@@ -182,9 +192,8 @@ pub async fn handle_email_send(
         .await?;
 
     // 2. Prepare Context for Template Rendering
-    let run_context: stormchaser_model::workflow::RunContext =
-        fetch_run_context(run_id, &pool).await?;
-    let outputs: serde_json::Value = fetch_outputs(run_id, &pool).await?;
+    let run_context: workflow::RunContext = fetch_run_context(run_id, &pool).await?;
+    let outputs: Value = fetch_outputs(run_id, &pool).await?;
 
     let template_ctx = serde_json::json!({
         "inputs": run_context.inputs,
@@ -201,13 +210,10 @@ pub async fn handle_email_send(
         .map_err(|e| anyhow::anyhow!("Failed to render email body: {:?}", e))?;
 
     let is_html = spec.html.unwrap_or(false);
-    let backend = spec
-        .backend
-        .clone()
-        .unwrap_or(stormchaser_model::dsl::EmailBackend::Smtp);
+    let backend = spec.backend.clone().unwrap_or(EmailBackend::Smtp);
 
     match backend {
-        stormchaser_model::dsl::EmailBackend::Ses => {
+        EmailBackend::Ses => {
             send_via_ses(
                 run_id,
                 step_id,
@@ -219,7 +225,7 @@ pub async fn handle_email_send(
             )
             .await
         }
-        stormchaser_model::dsl::EmailBackend::Smtp => {
+        EmailBackend::Smtp => {
             send_via_smtp(
                 run_id,
                 step_id,
@@ -239,7 +245,7 @@ pub async fn handle_email_send(
 async fn send_via_ses(
     run_id: Uuid,
     step_id: Uuid,
-    spec: &stormchaser_model::dsl::EmailSpec,
+    spec: &dsl::EmailSpec,
     rendered_body: String,
     is_html: bool,
     pool: PgPool,
@@ -292,7 +298,7 @@ async fn send_via_ses(
 async fn send_via_smtp(
     run_id: Uuid,
     step_id: Uuid,
-    spec: &stormchaser_model::dsl::EmailSpec,
+    spec: &dsl::EmailSpec,
     rendered_body: String,
     is_html: bool,
     pool: PgPool,
@@ -432,7 +438,7 @@ async fn fail_email_step(
 pub async fn handle_test_report_email(
     run_id: Uuid,
     step_id: Uuid,
-    spec: serde_json::Value,
+    spec: Value,
     pool: PgPool,
     nats_client: async_nats::Client,
     tls_reloader: Arc<TlsReloader>,
@@ -457,9 +463,8 @@ pub async fn handle_test_report_email(
     let reports = fetch_test_reports(run_id, &spec, &pool).await?;
 
     // 3. Prepare Context
-    let run_context: stormchaser_model::workflow::RunContext =
-        fetch_run_context(run_id, &pool).await?;
-    let outputs: serde_json::Value = fetch_outputs(run_id, &pool).await?;
+    let run_context: workflow::RunContext = fetch_run_context(run_id, &pool).await?;
+    let outputs: Value = fetch_outputs(run_id, &pool).await?;
 
     let template_ctx = serde_json::json!({
         "inputs": run_context.inputs,
@@ -473,16 +478,13 @@ pub async fn handle_test_report_email(
     // 4. Render Template
     let rendered_body = render_test_report_body(&spec, &template_ctx)?;
 
-    let backend = spec
-        .backend
-        .clone()
-        .unwrap_or(stormchaser_model::dsl::EmailBackend::Smtp);
+    let backend = spec.backend.clone().unwrap_or(EmailBackend::Smtp);
 
     match backend {
-        stormchaser_model::dsl::EmailBackend::Ses => {
+        EmailBackend::Ses => {
             send_test_report_via_ses(run_id, step_id, &spec, rendered_body, pool, nats_client).await
         }
-        stormchaser_model::dsl::EmailBackend::Smtp => {
+        EmailBackend::Smtp => {
             send_test_report_via_smtp(
                 run_id,
                 step_id,
@@ -500,9 +502,9 @@ pub async fn handle_test_report_email(
 #[cfg(feature = "email")]
 async fn fetch_test_reports(
     run_id: Uuid,
-    spec: &stormchaser_model::dsl::TestReportEmailSpec,
+    spec: &dsl::TestReportEmailSpec,
     pool: &PgPool,
-) -> Result<Vec<serde_json::Value>> {
+) -> Result<Vec<Value>> {
     let all_summaries = crate::db::get_test_summaries_for_run(pool, run_id).await?;
     let filtered_summaries = if let Some(name) = &spec.report_name {
         all_summaries
@@ -527,8 +529,8 @@ async fn fetch_test_reports(
 
 #[cfg(feature = "email")]
 fn render_test_report_body(
-    spec: &stormchaser_model::dsl::TestReportEmailSpec,
-    template_ctx: &serde_json::Value,
+    spec: &dsl::TestReportEmailSpec,
+    template_ctx: &Value,
 ) -> Result<String> {
     use minijinja::Environment;
     let default_template = r#"
@@ -601,7 +603,7 @@ fn render_test_report_body(
 async fn send_test_report_via_ses(
     run_id: Uuid,
     step_id: Uuid,
-    spec: &stormchaser_model::dsl::TestReportEmailSpec,
+    spec: &dsl::TestReportEmailSpec,
     rendered_body: String,
     pool: PgPool,
     nats_client: async_nats::Client,
@@ -647,7 +649,7 @@ async fn send_test_report_via_ses(
 async fn send_test_report_via_smtp(
     run_id: Uuid,
     step_id: Uuid,
-    spec: &stormchaser_model::dsl::TestReportEmailSpec,
+    spec: &dsl::TestReportEmailSpec,
     rendered_body: String,
     pool: PgPool,
     nats_client: async_nats::Client,
@@ -711,7 +713,7 @@ async fn send_test_report_via_smtp(
 pub async fn handle_email_send(
     _run_id: Uuid,
     _step_id: Uuid,
-    _spec: serde_json::Value,
+    _spec: Value,
     _pool: PgPool,
     _nats_client: async_nats::Client,
     __tls_reloader: Arc<TlsReloader>,
@@ -723,7 +725,7 @@ pub async fn handle_email_send(
 pub async fn handle_test_report_email(
     _run_id: Uuid,
     _step_id: Uuid,
-    _spec: serde_json::Value,
+    _spec: Value,
     _pool: PgPool,
     _nats_client: async_nats::Client,
     __tls_reloader: Arc<TlsReloader>,
@@ -731,7 +733,7 @@ pub async fn handle_test_report_email(
     anyhow::bail!("Email support is not enabled. Enable 'email' feature.")
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "email"))]
 mod tests {
     use super::*;
     use serde_json::json;

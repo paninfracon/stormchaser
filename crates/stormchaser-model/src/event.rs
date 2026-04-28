@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
@@ -18,6 +19,6 @@ pub struct ApprovalRegistry {
     pub step_instance_id: Uuid,
     pub user_id: String,
     pub status: String, // approved, rejected
-    pub payload: serde_json::Value,
+    pub payload: Value,
     pub created_at: DateTime<Utc>,
 }
