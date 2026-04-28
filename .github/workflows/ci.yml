@@ -56,7 +56,7 @@ jobs:
       with:
         tool: sqlx-cli
     - name: Start Infrastructure (NATS, Postgres)
-      run: docker compose up -d nats postgres
+      run: docker compose up -d --wait nats postgres
     - name: Generate Certificates
       run: |
         mkdir -p tests/certs
