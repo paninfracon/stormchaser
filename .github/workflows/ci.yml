@@ -20,6 +20,8 @@ jobs:
       uses: dtolnay/rust-toolchain@stable
       with:
         components: rustfmt
+    - name: Patch ratatui-form
+      run: ./scripts/patch-ratatui-form.sh
     - name: Run cargo fmt
       run: cargo fmt --all -- --check
 
@@ -32,6 +34,8 @@ jobs:
       uses: dtolnay/rust-toolchain@stable
       with:
         components: clippy
+    - name: Patch ratatui-form
+      run: ./scripts/patch-ratatui-form.sh
     - name: Cache dependencies
       uses: Swatinem/rust-cache@v2
     - name: Run cargo clippy
@@ -49,6 +53,8 @@ jobs:
     - uses: actions/checkout@v4
     - name: Setup Rust
       uses: dtolnay/rust-toolchain@stable
+    - name: Patch ratatui-form
+      run: ./scripts/patch-ratatui-form.sh
     - name: Cache dependencies
       uses: Swatinem/rust-cache@v2
     - name: Install sqlx-cli
@@ -66,7 +72,5 @@ jobs:
         openssl x509 -req -in tests/certs/tls.csr -CA tests/certs/ca.crt -CAkey tests/certs/ca.key -CAcreateserial -out tests/certs/tls.crt -days 365
     - name: Run Database Migrations
       run: sqlx migrate run --database-url postgres://stormchaser:stormchaser@localhost:5432/stormchaser
-    - name: Patch ratatui-form
-      run: ./scripts/patch-ratatui-form.sh
     - name: Run Tests
       run: cargo test --workspace
