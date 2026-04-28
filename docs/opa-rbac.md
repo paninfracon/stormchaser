@@ -73,6 +73,12 @@ run policies completely locally without network hops, Stormchaser's API and
 Orchestration Engine support executing pre-compiled OPA WebAssembly (WASM)
 modules directly.
 
+> **Note:** While WASM execution is incredibly fast, using OPA over HTTP
+> (via `OPA_URL`) is generally more flexible. It is preferable for centrally
+> managed RBAC solutions or in environments where policies may change
+> frequently, as it allows policies to be updated without restarting the
+> Stormchaser services.
+
 ### 1. Compile the Rego Policy
 
 You can use the `opa` CLI to compile your `.rego` file into a WASM module. You
