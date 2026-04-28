@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "trunk" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "trunk" ]
 
 env:
   CARGO_TERM_COLOR: always
@@ -39,13 +39,31 @@ jobs:
   test:
     name: Run Tests
     runs-on: ubuntu-latest
+    env:
+      SQLX_OFFLINE: "true"
+      STORMCHASER_CERT_DIR: ./tests/certs
+      API_RATE_LIMIT_BURST_SIZE: 1000
+      API_RATE_LIMIT_PER_SECOND: 1000
     steps:
     - uses: actions/checkout@v4
     - name: Setup Rust
       uses: dtolnay/rust-toolchain@stable
     - name: Cache dependencies
       uses: Swatinem/rust-cache@v2
+    - name: Install sqlx-cli
+      uses: taiki-e/install-action@v2
+      with:
+        tool: sqlx-cli
     - name: Start Infrastructure (NATS, Postgres)
-      run: docker-compose up -d nats postgres
+      run: docker compose up -d nats postgres
+    - name: Generate Certificates
+      run: |
+        mkdir -p tests/certs
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout tests/certs/ca.key -out tests/certs/ca.crt -subj "/CN=Stormchaser CA"
+        openssl genrsa -out tests/certs/tls.key 2048
+        openssl req -new -key tests/certs/tls.key -subj "/CN=stormchaser" -out tests/certs/tls.csr
+        openssl x509 -req -in tests/certs/tls.csr -CA tests/certs/ca.crt -CAkey tests/certs/ca.key -CAcreateserial -out tests/certs/tls.crt -days 365
+    - name: Run Database Migrations
+      run: sqlx migrate run --database-url postgres://stormchaser:stormchaser@localhost:5432/stormchaser
     - name: Run Tests
       run: cargo test --workspace
