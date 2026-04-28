@@ -21,6 +21,10 @@ use super::dispatch::dispatch_step_instance;
 use super::quota::release_step_quota_for_instance;
 use super::scheduling::schedule_step;
 
+use stormchaser_dsl::ast;
+use stormchaser_model::LogBackend;
+use stormchaser_model::StorageBackend;
+
 #[tracing::instrument(skip(payload, pool), fields(run_id = tracing::field::Empty, step_id = tracing::field::Empty))]
 pub async fn handle_step_unpacking_sfs(payload: serde_json::Value, pool: PgPool) -> Result<()> {
     let run_id_str = payload["run_id"].as_str().context("Missing run_id")?;
@@ -119,7 +123,7 @@ pub async fn handle_step_completed(
     payload: serde_json::Value,
     pool: PgPool,
     nats_client: async_nats::Client,
-    log_backend: Arc<Option<stormchaser_model::LogBackend>>,
+    log_backend: Arc<Option<LogBackend>>,
     tls_reloader: Arc<TlsReloader>,
 ) -> Result<()> {
     let run_id_str = payload["run_id"].as_str().context("Missing run_id")?;
@@ -399,7 +403,7 @@ pub async fn handle_step_completed(
             );
 
             for next_step_name in &dsl_step.next {
-                let predecessors: Vec<&stormchaser_dsl::ast::Step> = workflow
+                let predecessors: Vec<&ast::Step> = workflow
                     .steps
                     .iter()
                     .filter(|s| s.next.contains(next_step_name))
@@ -628,7 +632,7 @@ async fn persist_step_test_reports(
 
                 if let (Some(path), Some(bid)) = (remote_path, backend_id) {
                     // Download and parse
-                    let backend: stormchaser_model::StorageBackend =
+                    let backend: StorageBackend =
                         crate::db::storage::get_storage_backend_by_id(pool, bid)
                             .await?
                             .ok_or_else(|| anyhow::anyhow!("Storage backend not found"))?;

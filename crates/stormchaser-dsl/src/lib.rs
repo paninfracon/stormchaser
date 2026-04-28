@@ -6,6 +6,8 @@ use hcl::{Block, Body, Expression};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 
+use stormchaser_model::dsl;
+
 pub struct StormchaserParser;
 
 impl Default for StormchaserParser {
@@ -99,7 +101,7 @@ impl StormchaserParser {
                                     retention = expr_to_string(attr.expr())?;
                                 }
                             }
-                            artifacts.push(stormchaser_model::dsl::Artifact {
+                            artifacts.push(dsl::Artifact {
                                 name: art_name,
                                 path,
                                 retention,
@@ -124,7 +126,7 @@ impl StormchaserParser {
                                     _ => {}
                                 }
                             }
-                            provision.push(stormchaser_model::dsl::Provision {
+                            provision.push(dsl::Provision {
                                 name: prov_name,
                                 resource_type,
                                 source,
@@ -137,7 +139,7 @@ impl StormchaserParser {
                         }
                     }
 
-                    storage.push(stormchaser_model::dsl::Storage {
+                    storage.push(dsl::Storage {
                         name,
                         backend,
                         size,
@@ -162,7 +164,7 @@ impl StormchaserParser {
                             default = Some(expr_to_value(attr.expr())?);
                         }
                     }
-                    inputs.push(stormchaser_model::dsl::Input {
+                    inputs.push(dsl::Input {
                         name,
                         r#type,
                         description: None,
@@ -184,7 +186,7 @@ impl StormchaserParser {
                             value = expr_to_string(attr.expr())?;
                         }
                     }
-                    outputs.push(stormchaser_model::dsl::Output { name, value });
+                    outputs.push(dsl::Output { name, value });
                 }
                 "step_library" => {
                     let name = block
@@ -238,7 +240,7 @@ impl StormchaserParser {
                         }
                     }
 
-                    step_libraries.push(stormchaser_model::dsl::StepLibrary {
+                    step_libraries.push(dsl::StepLibrary {
                         name,
                         r#type,
                         params,
@@ -273,7 +275,7 @@ impl StormchaserParser {
                         }
                     }
 
-                    includes.push(stormchaser_model::dsl::Include {
+                    includes.push(dsl::Include {
                         name,
                         workflow,
                         inputs: inputs_map,
@@ -370,7 +372,7 @@ impl StormchaserParser {
                             inner_steps = Some(self.parse_steps(inner_block.body())?);
                         }
                         "strategy" => {
-                            let mut s = stormchaser_model::dsl::Strategy {
+                            let mut s = dsl::Strategy {
                                 affinity: None,
                                 fail_fast: None,
                                 max_parallel: None,
@@ -412,7 +414,7 @@ impl StormchaserParser {
                                             format = expr_to_string(attr.expr())?;
                                         }
                                     }
-                                    reports.push(stormchaser_model::dsl::TestReport {
+                                    reports.push(dsl::TestReport {
                                         name: art_name,
                                         path,
                                         format,
@@ -470,7 +472,7 @@ impl StormchaserParser {
                                         }
                                     }
 
-                                    outputs.push(stormchaser_model::dsl::OutputExtraction {
+                                    outputs.push(dsl::OutputExtraction {
                                         name,
                                         source,
                                         marker,

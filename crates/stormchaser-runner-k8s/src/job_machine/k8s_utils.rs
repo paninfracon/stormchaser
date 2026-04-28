@@ -9,6 +9,8 @@ use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use std::collections::BTreeMap;
 
+use stormchaser_model::dsl;
+
 pub fn do_extract_pod_metrics_with_reason(pods: Vec<Pod>) -> (Option<i32>, i32, Option<String>) {
     let mut max_restart_count = 0;
     let mut exit_code = None;
@@ -53,7 +55,7 @@ fn normalize_resource_name(name: &str, prefix: &str) -> String {
     format!("{}-{}", prefix, name.to_lowercase().replace('_', "-"))
 }
 
-fn map_dsl_env_to_k8s(env: Vec<stormchaser_model::dsl::EnvVar>) -> Vec<K8sEnvVar> {
+fn map_dsl_env_to_k8s(env: Vec<dsl::EnvVar>) -> Vec<K8sEnvVar> {
     env.into_iter()
         .map(|v| K8sEnvVar {
             name: v.name,
@@ -98,15 +100,15 @@ struct StepSpec {
     restart_policy: Option<String>,
     extra_labels: Option<BTreeMap<String, String>>,
     extra_annotations: Option<BTreeMap<String, String>>,
-    storage_mounts: Vec<stormchaser_model::dsl::StorageMount>,
-    secret_mounts: Vec<stormchaser_model::dsl::SecretMount>,
-    config_map_mounts: Vec<stormchaser_model::dsl::ConfigMapMount>,
+    storage_mounts: Vec<dsl::StorageMount>,
+    secret_mounts: Vec<dsl::SecretMount>,
+    config_map_mounts: Vec<dsl::ConfigMapMount>,
 }
 
 fn parse_step_spec(metadata: &JobMetadata) -> Result<StepSpec> {
     match metadata.step_dsl.r#type.as_str() {
         "RunContainer" => {
-            let spec: stormchaser_model::dsl::CommonContainerSpec =
+            let spec: dsl::CommonContainerSpec =
                 serde_json::from_value(metadata.step_dsl.spec.clone())
                     .context("Failed to parse RunContainer spec as CommonContainerSpec")?;
 
@@ -968,11 +970,11 @@ mod tests {
     #[test]
     fn test_map_dsl_env_to_k8s() {
         let dsl_env = vec![
-            stormchaser_model::dsl::EnvVar {
+            dsl::EnvVar {
                 name: "KEY1".to_string(),
                 value: "VAL1".to_string(),
             },
-            stormchaser_model::dsl::EnvVar {
+            dsl::EnvVar {
                 name: "KEY2".to_string(),
                 value: "VAL2".to_string(),
             },

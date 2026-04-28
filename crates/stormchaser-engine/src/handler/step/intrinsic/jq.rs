@@ -6,9 +6,11 @@ use std::sync::Arc;
 use stormchaser_tls::TlsReloader;
 use uuid::Uuid;
 
+use stormchaser_model::dsl;
+
 pub fn mutate_if_has_files(step_type: &mut String, resolved_spec: &mut serde_json::Value) {
     if step_type == "JQ" {
-        let jq_spec: Result<stormchaser_model::dsl::JqSpec, _> =
+        let jq_spec: Result<dsl::JqSpec, _> =
             serde_json::from_value(resolved_spec.get("spec").unwrap_or(&*resolved_spec).clone());
 
         let has_files = match &jq_spec {
@@ -29,7 +31,7 @@ pub fn mutate_if_has_files(step_type: &mut String, resolved_spec: &mut serde_jso
                 script.push_str(&format!(" > {}", output_file));
             }
 
-            let container_spec = stormchaser_model::dsl::CommonContainerSpec {
+            let container_spec = dsl::CommonContainerSpec {
                 image: "ghcr.io/jqlang/jq:latest".to_string(),
                 command: Some(vec!["sh".to_string(), "-c".to_string(), script]),
                 args: None,
@@ -72,8 +74,7 @@ pub async fn try_dispatch(
             }
 
             let actual_spec = spec.get("spec").unwrap_or(&spec).clone();
-            let jq_spec: Result<stormchaser_model::dsl::JqSpec, _> =
-                serde_json::from_value(actual_spec.clone());
+            let jq_spec: Result<dsl::JqSpec, _> = serde_json::from_value(actual_spec.clone());
 
             let result = match jq_spec {
                 Ok(jq) => {

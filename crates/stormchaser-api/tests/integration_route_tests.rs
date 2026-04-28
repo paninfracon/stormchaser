@@ -13,6 +13,8 @@ use stormchaser_api::{app, AppState, Claims, JWT_SECRET};
 use stormchaser_model::auth::OpaClient;
 use tower::ServiceExt;
 
+use stormchaser_model::LogBackend;
+
 static INIT: Once = Once::new();
 
 fn init_test() {
@@ -44,7 +46,7 @@ async fn setup_app() -> Option<axum::Router> {
         jwks: std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         log_backend: std::env::var("LOKI_URL")
             .ok()
-            .map(|url| stormchaser_model::LogBackend::Loki { url }),
+            .map(|url| LogBackend::Loki { url }),
     }))
 }
 

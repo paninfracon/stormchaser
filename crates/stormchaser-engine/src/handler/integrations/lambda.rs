@@ -1,10 +1,14 @@
+#![allow(unused_imports)]
 use anyhow::{Context, Result};
 use chrono::Utc;
 use sqlx::PgPool;
 use tracing::info;
 use uuid::Uuid;
 
+#[cfg(feature = "aws-lambda")]
 use crate::handler::fetch_step_instance;
+#[cfg(feature = "aws-lambda")]
+use stormchaser_model::dsl::{self, LambdaInvokeSpec};
 
 #[cfg(feature = "aws-lambda")]
 use aws_sdk_lambda::primitives::Blob;
@@ -74,7 +78,7 @@ pub async fn handle_lambda_invoke(
 
 #[cfg(feature = "aws-lambda")]
 async fn build_lambda_client(
-    spec: &stormchaser_model::dsl::LambdaInvokeSpec,
+    spec: &dsl::LambdaInvokeSpec,
     run_id: Uuid,
 ) -> Result<aws_sdk_lambda::Client> {
     let mut config_loader = aws_config::defaults(aws_config::BehaviorVersion::v2026_01_12());

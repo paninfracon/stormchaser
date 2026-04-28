@@ -11,6 +11,13 @@ use stormchaser_api::{
 };
 use stormchaser_model::auth::OpaClient;
 
+use stormchaser_api::fetch_jwks;
+use stormchaser_api::OidcConfig;
+use stormchaser_model::LogBackend;
+use stormchaser_opa::OpaWasmInstance;
+use stormchaser_tls::TlsConfig;
+use stormchaser_tls::TlsReloader;
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub database_url: String,
@@ -123,14 +130,14 @@ async fn main() -> anyhow::Result<()> {
 }
 
 pub async fn run_server(config: Config) -> anyhow::Result<()> {
-    let tls_config = stormchaser_tls::TlsConfig {
+    let tls_config = TlsConfig {
         ca_cert_path: config.tls_ca_cert_path.clone(),
         cert_path: config.tls_cert_path.clone(),
         key_path: config.tls_key_path.clone(),
         server_name: config.tls_server_name.clone(),
     };
 
-    let tls_reloader = std::sync::Arc::new(stormchaser_tls::TlsReloader::new(tls_config).await?);
+    let tls_reloader = std::sync::Arc::new(TlsReloader::new(tls_config).await?);
 
     let mut db_options: sqlx::postgres::PgConnectOptions = config.database_url.parse()?;
     if config.db_ssl {
@@ -168,7 +175,7 @@ pub async fn run_server(config: Config) -> anyhow::Result<()> {
     if let Some(wasm_path) = config.opa_wasm_path {
         tracing::info!("Loading OPA WASM policy from {}", wasm_path);
         let wasm_bytes = std::fs::read(&wasm_path).context("Failed to read OPA WASM policy")?;
-        let executor = stormchaser_opa::OpaWasmInstance::new(&wasm_bytes)?;
+        let executor = OpaWasmInstance::new(&wasm_bytes)?;
         opa_client = opa_client.with_wasm_executor(Arc::new(executor));
     }
 
@@ -182,7 +189,7 @@ pub async fn run_server(config: Config) -> anyhow::Result<()> {
     let mut log_backend = None;
     if let Some(url) = config.loki_url {
         tracing::info!("Configuring Loki log backend: {}", url);
-        log_backend = Some(stormchaser_model::LogBackend::Loki { url });
+        log_backend = Some(LogBackend::Loki { url });
     } else if let (Some(url), Some(index)) = (config.elasticsearch_url, config.elasticsearch_index)
     {
         tracing::info!(
@@ -190,7 +197,7 @@ pub async fn run_server(config: Config) -> anyhow::Result<()> {
             url,
             index
         );
-        log_backend = Some(stormchaser_model::LogBackend::Elasticsearch { url, index });
+        log_backend = Some(LogBackend::Elasticsearch { url, index });
     }
 
     // OIDC Configuration
@@ -214,11 +221,11 @@ pub async fn run_server(config: Config) -> anyhow::Result<()> {
         );
 
         // Fetch JWKS on startup
-        jwks = stormchaser_api::fetch_jwks(&jwks_url).await;
+        jwks = fetch_jwks(&jwks_url).await;
 
         // Always set oidc_config if issuer and client_id are provided
         // This allows the bypass to work even if the OIDC provider is temporarily down
-        oidc_config = Some(stormchaser_api::OidcConfig {
+        oidc_config = Some(OidcConfig {
             issuer,
             external_issuer,
             client_id,

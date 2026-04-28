@@ -10,6 +10,8 @@ use ratatui::{
 };
 use stormchaser_model::workflow::RunStatus;
 
+use stormchaser_model::test_report::TestCaseStatus;
+
 pub fn ui(f: &mut Frame, app: &mut App) {
     if app.state == AppState::LoggedOut || app.state == AppState::LoggingIn {
         render_login_screen(f, app);
@@ -512,16 +514,16 @@ fn render_test_results(
 
     for tc in &run.test_cases {
         let symbol = match tc.status {
-            stormchaser_model::test_report::TestCaseStatus::Passed => "✔",
-            stormchaser_model::test_report::TestCaseStatus::Failed => "✘",
-            stormchaser_model::test_report::TestCaseStatus::Error => "!",
-            stormchaser_model::test_report::TestCaseStatus::Skipped => "○",
+            TestCaseStatus::Passed => "✔",
+            TestCaseStatus::Failed => "✘",
+            TestCaseStatus::Error => "!",
+            TestCaseStatus::Skipped => "○",
         };
         let color = match tc.status {
-            stormchaser_model::test_report::TestCaseStatus::Passed => Color::Green,
-            stormchaser_model::test_report::TestCaseStatus::Failed => Color::Red,
-            stormchaser_model::test_report::TestCaseStatus::Error => Color::LightRed,
-            stormchaser_model::test_report::TestCaseStatus::Skipped => Color::Yellow,
+            TestCaseStatus::Passed => Color::Green,
+            TestCaseStatus::Failed => Color::Red,
+            TestCaseStatus::Error => Color::LightRed,
+            TestCaseStatus::Skipped => Color::Yellow,
         };
 
         current_line.spans.push(ratatui::text::Span::styled(

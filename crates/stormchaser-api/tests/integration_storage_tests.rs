@@ -13,6 +13,9 @@ use stormchaser_model::OpaClient;
 use tower::ServiceExt;
 use uuid::Uuid;
 
+use stormchaser_model::step::StepStatus;
+use stormchaser_model::workflow::RunStatus;
+
 fn get_token() -> String {
     let claims = Claims {
         sub: "test-user".to_string(),
@@ -183,7 +186,7 @@ async fn test_artifact_listing() {
         .bind(run_id)
         .bind(&workflow_name)
         .bind("test-user")
-        .bind(stormchaser_model::workflow::RunStatus::Running)
+        .bind(RunStatus::Running)
         .bind(chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0))
         .bind("http://example.com")
         .bind("test.storm")
@@ -210,7 +213,7 @@ async fn test_artifact_listing() {
         .bind(run_id)
         .bind("test-step")
         .bind("RunContainer")
-        .bind(stormchaser_model::step::StepStatus::Succeeded)
+        .bind(StepStatus::Succeeded)
         .bind(json!({}))
         .bind(json!({}))
         .execute(&pool)

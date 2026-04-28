@@ -1,6 +1,8 @@
+use stormchaser_model::dsl;
+
 pub fn mutate(step_type: &mut String, resolved_spec: &mut serde_json::Value) {
     if step_type == "GitCheckout" {
-        let git_spec: Result<stormchaser_model::dsl::GitCheckoutSpec, _> =
+        let git_spec: Result<dsl::GitCheckoutSpec, _> =
             serde_json::from_value(resolved_spec.get("spec").unwrap_or(&*resolved_spec).clone());
 
         if let Ok(git) = git_spec {
@@ -30,7 +32,7 @@ pub fn mutate(step_type: &mut String, resolved_spec: &mut serde_json::Value) {
                 }
             }
 
-            let container_spec = stormchaser_model::dsl::CommonContainerSpec {
+            let container_spec = dsl::CommonContainerSpec {
                 image: "alpine/git:latest".to_string(),
                 command: Some(vec!["sh".to_string(), "-c".to_string(), script]),
                 args: None,

@@ -18,7 +18,7 @@ pub async fn get_s3_client(backend: &StorageBackend) -> Result<Client> {
     // Configure mTLS if certificates are provided in the DB
     if backend.ca_cert.is_some() || (backend.client_cert.is_some() && backend.client_key.is_some())
     {
-        let _tls_config = stormchaser_tls::build_client_config(
+        let _tls_config = build_client_config(
             backend.ca_cert.as_deref(),
             backend.client_cert.as_deref(),
             backend.client_key.as_deref(),
@@ -78,6 +78,8 @@ pub async fn generate_presigned_url(
 
     Ok(url.uri().to_string())
 }
+
+use stormchaser_tls::build_client_config;
 
 #[cfg(test)]
 mod tests {

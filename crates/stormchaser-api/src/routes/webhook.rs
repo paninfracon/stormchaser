@@ -176,13 +176,10 @@ pub async fn handle_webhook(
 
     let mut triggered_count = 0;
     let mut hcl_ctx = hcl::eval::Context::default();
-    hcl_ctx.declare_var(
-        "event",
-        stormchaser_model::hcl_eval::json_to_hcl(payload.clone()),
-    );
+    hcl_ctx.declare_var("event", hcl_eval::json_to_hcl(payload.clone()));
     hcl_ctx.declare_var(
         "headers",
-        stormchaser_model::hcl_eval::json_to_hcl(
+        hcl_eval::json_to_hcl(
             serde_json::to_value(
                 headers
                     .iter()
@@ -209,7 +206,7 @@ pub async fn handle_webhook(
 
         // 3b. Evaluate condition expression
         if let Some(cond) = &rule.condition_expr {
-            match stormchaser_model::hcl_eval::evaluate_raw_expr(cond, &hcl_ctx) {
+            match hcl_eval::evaluate_raw_expr(cond, &hcl_ctx) {
                 Ok(serde_json::Value::Bool(true)) => {}
                 Ok(_) => continue,
                 Err(e) => {
@@ -222,7 +219,7 @@ pub async fn handle_webhook(
         // 3c. Map inputs
         let mut inputs = serde_json::Map::new();
         for (name, expr) in rule.get_input_mappings() {
-            match stormchaser_model::hcl_eval::evaluate_raw_expr(&expr, &hcl_ctx) {
+            match hcl_eval::evaluate_raw_expr(&expr, &hcl_ctx) {
                 Ok(val) => {
                     inputs.insert(name, val);
                 }
@@ -319,6 +316,8 @@ pub async fn handle_webhook(
         "triggered_rules": triggered_count
     })))
 }
+
+use stormchaser_model::hcl_eval;
 
 fn validate_github_signature(
     headers: &HeaderMap,

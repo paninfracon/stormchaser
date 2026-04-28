@@ -12,6 +12,8 @@ use stormchaser_tui::ui::ui;
 use stormchaser_tui::AppEvent;
 use tokio::sync::mpsc;
 
+use stormchaser_tui::app;
+
 #[derive(Parser)]
 struct Cli {
     #[arg(
@@ -86,12 +88,12 @@ async fn handle_app_event<'a>(app: &mut App<'a>, event: AppEvent) -> bool {
                         app.filter_focus = (app.filter_focus + 1) % focus_count;
                     }
                     KeyCode::Left if app.filter_focus == 6 => {
-                        let opts_len = stormchaser_tui::app::FILTER_STATUS_OPTIONS.len();
+                        let opts_len = app::FILTER_STATUS_OPTIONS.len();
                         app.filter_status_index =
                             (app.filter_status_index + opts_len - 1) % opts_len;
                     }
                     KeyCode::Right if app.filter_focus == 6 => {
-                        let opts_len = stormchaser_tui::app::FILTER_STATUS_OPTIONS.len();
+                        let opts_len = app::FILTER_STATUS_OPTIONS.len();
                         app.filter_status_index = (app.filter_status_index + 1) % opts_len;
                     }
                     _ => {

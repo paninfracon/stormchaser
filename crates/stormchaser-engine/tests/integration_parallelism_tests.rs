@@ -6,6 +6,9 @@ use stormchaser_model::auth::OpaClient;
 use stormchaser_model::step::{StepInstance, StepStatus};
 use uuid::Uuid;
 
+use stormchaser_tls::TlsConfig;
+use stormchaser_tls::TlsReloader;
+
 #[tokio::test]
 async fn test_dynamic_parallelism_with_batching() {
     let db_url = std::env::var("DATABASE_URL")
@@ -66,11 +69,7 @@ async fn test_dynamic_parallelism_with_batching() {
         run_id,
         pool.clone(),
         nats_client.clone(),
-        std::sync::Arc::new(
-            stormchaser_tls::TlsReloader::new(stormchaser_tls::TlsConfig::default())
-                .await
-                .unwrap(),
-        ),
+        std::sync::Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
     )
     .await
     .unwrap();
@@ -107,11 +106,7 @@ async fn test_dynamic_parallelism_with_batching() {
         pool.clone(),
         nats_client.clone(),
         log_backend.clone(),
-        std::sync::Arc::new(
-            stormchaser_tls::TlsReloader::new(stormchaser_tls::TlsConfig::default())
-                .await
-                .unwrap(),
-        ),
+        std::sync::Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
     )
     .await
     .unwrap();
@@ -155,11 +150,7 @@ async fn test_dynamic_parallelism_with_batching() {
         pool.clone(),
         nats_client.clone(),
         log_backend.clone(),
-        std::sync::Arc::new(
-            stormchaser_tls::TlsReloader::new(stormchaser_tls::TlsConfig::default())
-                .await
-                .unwrap(),
-        ),
+        std::sync::Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
     )
     .await
     .unwrap();

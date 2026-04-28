@@ -1,3 +1,6 @@
+use stormchaser_dsl::ast;
+use stormchaser_model::dsl;
+
 use anyhow::Result;
 use sqlx::PgPool;
 use stormchaser_model::step::StepStatus;
@@ -9,12 +12,12 @@ use crate::handler::{
 
 pub async fn schedule_step(
     run_id: Uuid,
-    step_dsl: &stormchaser_dsl::ast::Step,
+    step_dsl: &ast::Step,
     executor: &mut sqlx::PgConnection,
     nats_client: async_nats::Client,
     hcl_ctx: &hcl::eval::Context<'_>,
     pool: PgPool,
-    workflow: &stormchaser_dsl::ast::Workflow,
+    workflow: &ast::Workflow,
 ) -> Result<()> {
     let mut resolved_type = step_dsl.r#type.clone();
     let mut resolved_spec = step_dsl.spec.clone();
@@ -154,9 +157,9 @@ pub async fn schedule_step(
             .await?;
 
             if status == StepStatus::WaitingForEvent && resolved_type == "Wait" {
-                if let Ok(wait_spec) = serde_json::from_value::<stormchaser_model::dsl::WaitEventSpec>(
-                    resolved_spec_iter.clone(),
-                ) {
+                if let Ok(wait_spec) =
+                    serde_json::from_value::<dsl::WaitEventSpec>(resolved_spec_iter.clone())
+                {
                     let _ = crate::db::insert_event_correlation(
                         &mut *executor,
                         Uuid::new_v4(),
@@ -199,9 +202,9 @@ pub async fn schedule_step(
 
         if insert_result.rows_affected() > 0 && initial_status == StepStatus::WaitingForEvent {
             if resolved_type == "Wait" {
-                if let Ok(wait_spec) = serde_json::from_value::<stormchaser_model::dsl::WaitEventSpec>(
-                    resolved_spec.clone(),
-                ) {
+                if let Ok(wait_spec) =
+                    serde_json::from_value::<dsl::WaitEventSpec>(resolved_spec.clone())
+                {
                     let _ = crate::db::insert_event_correlation(
                         &mut *executor,
                         Uuid::new_v4(),
@@ -213,9 +216,8 @@ pub async fn schedule_step(
                     .await;
                 }
             } else if step_dsl.r#type == "Approval" {
-                if let Ok(approval_spec) = serde_json::from_value::<
-                    stormchaser_model::dsl::ApprovalSpec,
-                >(resolved_spec.clone())
+                if let Ok(approval_spec) =
+                    serde_json::from_value::<dsl::ApprovalSpec>(resolved_spec.clone())
                 {
                     if let Some(notify_spec) = approval_spec.notify {
                         let pool = pool.clone();

@@ -1,3 +1,5 @@
+use stormchaser_model::cron;
+
 use super::{CreateCronWorkflowRequest, CronWorkflowResponse, EnqueueResponse};
 use crate::{AppState, AuthClaims};
 use axum::{
@@ -62,7 +64,7 @@ pub async fn create_cron_workflow(
 pub async fn list_cron_workflows(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-) -> Result<Json<Vec<stormchaser_model::cron::CronWorkflow>>, StatusCode> {
+) -> Result<Json<Vec<cron::CronWorkflow>>, StatusCode> {
     let workflows = crate::db::list_cron_workflows(&state.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;

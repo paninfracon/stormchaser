@@ -7,6 +7,8 @@ use stormchaser_model::step::StepStatus;
 use stormchaser_model::workflow::{RunStatus, WorkflowRun};
 use uuid::Uuid;
 
+use stormchaser_model::test_report;
+
 pub struct StepDefinitionInput {
     pub step_type: String,
     pub schema: serde_json::Value,
@@ -510,7 +512,7 @@ where
 pub async fn get_test_summaries_for_run<'a, E>(
     executor: E,
     run_id: Uuid,
-) -> Result<Vec<stormchaser_model::test_report::TestSummary>, sqlx::Error>
+) -> Result<Vec<test_report::TestSummary>, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
@@ -533,7 +535,7 @@ pub async fn get_test_cases_for_report<'a, E>(
     executor: E,
     run_id: Uuid,
     report_name: &str,
-) -> Result<Vec<stormchaser_model::test_report::TestCase>, sqlx::Error>
+) -> Result<Vec<test_report::TestCase>, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {

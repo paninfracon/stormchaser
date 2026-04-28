@@ -14,6 +14,8 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+use stormchaser_model::step::StepStatus;
+
 #[derive(serde::Deserialize, serde::Serialize)]
 struct ApprovalLinkPayload {
     run_id: Uuid,
@@ -89,7 +91,7 @@ pub async fn approve_step_link(
         None => return (StatusCode::NOT_FOUND, "Step not found").into_response(),
     };
 
-    if step.status != stormchaser_model::step::StepStatus::WaitingForEvent {
+    if step.status != StepStatus::WaitingForEvent {
         return (StatusCode::BAD_REQUEST, "Step is not waiting for approval").into_response();
     }
 
@@ -156,7 +158,7 @@ pub async fn approve_step(
         None => return (StatusCode::NOT_FOUND, "Step not found").into_response(),
     };
 
-    if step.status != stormchaser_model::step::StepStatus::WaitingForEvent {
+    if step.status != StepStatus::WaitingForEvent {
         return (StatusCode::BAD_REQUEST, "Step is not waiting for approval").into_response();
     }
 
@@ -202,7 +204,7 @@ pub async fn reject_step(
         None => return (StatusCode::NOT_FOUND, "Step not found").into_response(),
     };
 
-    if step.status != stormchaser_model::step::StepStatus::WaitingForEvent {
+    if step.status != StepStatus::WaitingForEvent {
         return (StatusCode::BAD_REQUEST, "Step is not waiting for approval").into_response();
     }
 

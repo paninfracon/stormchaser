@@ -4,6 +4,8 @@ use stormchaser_api::db;
 use stormchaser_model::workflow::RunStatus;
 use uuid::Uuid;
 
+use stormchaser_api::ListRunsQuery;
+
 #[tokio::test]
 async fn test_db_functions() {
     let db_url = std::env::var("DATABASE_URL")
@@ -51,7 +53,7 @@ async fn test_db_functions() {
     assert!(detail.is_some());
 
     // list_workflow_runs
-    let params = stormchaser_api::ListRunsQuery {
+    let params = ListRunsQuery {
         workflow_name: Some(workflow_name.clone()),
         status: None,
         initiating_user: None,

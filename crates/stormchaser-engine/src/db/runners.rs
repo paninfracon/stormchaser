@@ -8,6 +8,8 @@ use stormchaser_model::step::StepStatus;
 use stormchaser_model::workflow::{RunStatus, WorkflowRun};
 use uuid::Uuid;
 
+use stormchaser_model::runner;
+
 #[allow(clippy::too_many_arguments)]
 pub async fn mark_stale_runners_offline<'e, E>(
     executor: E,
@@ -29,7 +31,7 @@ where
 pub async fn get_runner(
     pool: &sqlx::PgPool,
     id: &str,
-) -> Result<Option<stormchaser_model::runner::Runner>, sqlx::Error> {
+) -> Result<Option<runner::Runner>, sqlx::Error> {
     sqlx::query_as(r#"SELECT * FROM runners WHERE id = $1"#)
         .bind(id)
         .fetch_optional(pool)

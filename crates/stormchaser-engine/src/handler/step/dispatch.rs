@@ -8,6 +8,10 @@ use uuid::Uuid;
 
 use crate::handler::fetch_run_context;
 
+use stormchaser_model::dsl;
+use stormchaser_model::storage;
+use stormchaser_model::storage::BackendType;
+
 pub fn find_step<'a>(steps: &'a [Step], name: &str) -> Option<&'a Step> {
     for step in steps {
         if step.name == name {
@@ -41,15 +45,14 @@ pub async fn dispatch_step_instance(
     super::intrinsic::jq::mutate_if_has_files(&mut step_type, &mut resolved_spec);
 
     let run_context = fetch_run_context(run_id, &pool).await?;
-    let workflow: stormchaser_model::dsl::Workflow =
-        serde_json::from_value(run_context.workflow_definition.clone())
-            .context("Failed to parse workflow definition from context")?;
+    let workflow: dsl::Workflow = serde_json::from_value(run_context.workflow_definition.clone())
+        .context("Failed to parse workflow definition from context")?;
 
     let mut storage_urls = serde_json::Map::new();
 
     if !workflow.storage.is_empty() {
         for storage in workflow.storage {
-            let backend: Option<stormchaser_model::storage::StorageBackend> =
+            let backend: Option<storage::StorageBackend> =
                 if let Some(ref backend_name) = storage.backend {
                     crate::db::get_storage_backend_by_name(&pool, backend_name).await?
                 } else {
@@ -60,7 +63,7 @@ pub async fn dispatch_step_instance(
                 let mut get_url = None;
                 let mut put_url = None;
 
-                if backend.backend_type == stormchaser_model::storage::BackendType::S3 {
+                if backend.backend_type == BackendType::S3 {
                     let client = crate::s3::get_s3_client(&backend).await?;
                     let bucket = backend.config["bucket"]
                         .as_str()

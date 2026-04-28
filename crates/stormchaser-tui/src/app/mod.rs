@@ -6,6 +6,9 @@ use stormchaser_model::workflow::RunStatus;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+use stormchaser_model::storage;
+use stormchaser_model::test_report;
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WorkflowRunDetail {
     pub id: Uuid,
@@ -28,9 +31,9 @@ pub struct StepDetail {
 pub struct WorkflowRunFullDetail {
     pub detail: WorkflowRunDetail,
     pub steps: Vec<StepDetail>,
-    pub artifacts: Vec<stormchaser_model::storage::ArtifactRegistry>,
-    pub test_summaries: Vec<stormchaser_model::test_report::TestSummary>,
-    pub test_cases: Vec<stormchaser_model::test_report::TestCase>,
+    pub artifacts: Vec<storage::ArtifactRegistry>,
+    pub test_summaries: Vec<test_report::TestSummary>,
+    pub test_cases: Vec<test_report::TestCase>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

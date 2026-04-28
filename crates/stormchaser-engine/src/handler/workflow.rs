@@ -19,6 +19,8 @@ use stormchaser_tls::TlsReloader;
 use tracing::{debug, error, info};
 use uuid::Uuid;
 
+use stormchaser_dsl::ast;
+
 #[tracing::instrument(skip(pool, nats_client, _tls_reloader), fields(run_id = %run_id))]
 pub async fn handle_workflow_timeout(
     run_id: Uuid,
@@ -122,7 +124,7 @@ pub async fn handle_workflow_start_pending(
         .flat_map(|s| s.next.iter().cloned())
         .collect();
 
-    let initial_steps: Vec<&stormchaser_dsl::ast::Step> = workflow
+    let initial_steps: Vec<&ast::Step> = workflow
         .steps
         .iter()
         .filter(|s| !all_next_steps.contains(&s.name))

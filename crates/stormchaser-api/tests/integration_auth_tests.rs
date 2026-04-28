@@ -12,6 +12,9 @@ use tower::ServiceExt;
 use axum::extract::connect_info::ConnectInfo;
 use std::net::SocketAddr;
 
+use stormchaser_api::Claims;
+use stormchaser_api::OidcConfig;
+
 #[tokio::test]
 async fn test_auth_exchange_dex_flow() {
     let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
@@ -34,7 +37,7 @@ async fn test_auth_exchange_dex_flow() {
     // Generate a mock JWT using a symmetric key for simplicity in testing,
     // although real Dex uses RS256. The API code handles what's in the JWK.
     let secret = b"mock-dex-secret-long-enough-for-hs256";
-    let claims = stormchaser_api::Claims {
+    let claims = Claims {
         sub: "stormchaser-admin@paninfracon.net".to_string(),
         email: Some("stormchaser-admin@paninfracon.net".to_string()),
         exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
@@ -69,7 +72,7 @@ async fn test_auth_exchange_dex_flow() {
     };
     jwks.insert(kid.clone(), jwk);
 
-    let oidc_config = stormchaser_api::OidcConfig {
+    let oidc_config = OidcConfig {
         issuer: issuer.clone(),
         client_id: client_id.clone(),
         jwks_url: "http://dex:5556/dex/keys".to_string(),
@@ -126,7 +129,7 @@ async fn test_auth_login_redirect() {
         Err(_) => return,
     };
 
-    let oidc_config = stormchaser_api::OidcConfig {
+    let oidc_config = OidcConfig {
         issuer: "http://dex:5556/dex".to_string(),
         client_id: "stormchaser-cli".to_string(),
         jwks_url: "http://dex:5556/dex/keys".to_string(),

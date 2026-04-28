@@ -18,9 +18,9 @@ use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use uuid::Uuid;
 
-pub fn parse_step_from_nats_payload(
-    payload: &serde_json::Value,
-) -> Result<stormchaser_model::dsl::Step> {
+use stormchaser_model::dsl;
+
+pub fn parse_step_from_nats_payload(payload: &serde_json::Value) -> Result<dsl::Step> {
     if let Some(dsl_val) = payload.get("step_dsl") {
         if !dsl_val.is_null() {
             if let Ok(step) = serde_json::from_value(dsl_val.clone()) {
@@ -32,7 +32,7 @@ pub fn parse_step_from_nats_payload(
     let spec =
         serde_json::from_value(payload["spec"].clone()).context("Failed to parse step spec")?;
 
-    Ok(stormchaser_model::dsl::Step {
+    Ok(dsl::Step {
         name: payload["step_name"]
             .as_str()
             .unwrap_or_default()
@@ -67,7 +67,7 @@ pub fn parse_step_from_docker_labels(
     raw_step_dsl: Option<&String>,
     is_encrypted: bool,
     encryption_key: Option<&String>,
-) -> Result<stormchaser_model::dsl::Step> {
+) -> Result<dsl::Step> {
     if let Some(raw) = raw_step_dsl {
         let dsl_str = if is_encrypted {
             if let Some(key) = encryption_key {
@@ -91,7 +91,7 @@ pub fn parse_step_from_docker_labels(
     }
 
     // Fallback
-    Ok(stormchaser_model::dsl::Step {
+    Ok(dsl::Step {
         name: container_name.to_string(),
         r#type: "RunContainer".to_string(),
         spec: serde_json::Value::Null,
@@ -470,7 +470,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
     let nats_subject = format!("stormchaser.runner.docker.{}", runner_id);
 
     // Generate JSON Schema for our supported step type
-    let common_schema = schemars::schema_for!(stormchaser_model::dsl::CommonContainerSpec);
+    let common_schema = schemars::schema_for!(dsl::CommonContainerSpec);
     let common_schema_json = serde_json::to_value(common_schema)?;
 
     let registration_payload = json!({
@@ -632,7 +632,7 @@ async fn handle_task(
     let step_id_str = payload["step_id"].as_str().unwrap_or_default();
     let step_id = uuid::Uuid::parse_str(step_id_str).unwrap_or_default();
 
-    let step_dsl: stormchaser_model::dsl::Step = match payload.get("step_dsl").and_then(|v| {
+    let step_dsl: dsl::Step = match payload.get("step_dsl").and_then(|v| {
         if !v.is_null() {
             serde_json::from_value(v.clone()).ok()
         } else {
@@ -641,7 +641,7 @@ async fn handle_task(
     }) {
         Some(step) => step,
         None => match serde_json::from_value(payload["spec"].clone()) {
-            Ok(spec) => stormchaser_model::dsl::Step {
+            Ok(spec) => dsl::Step {
                 name: payload["step_name"]
                     .as_str()
                     .unwrap_or_default()

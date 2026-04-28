@@ -1,3 +1,4 @@
+#![allow(unused_imports)]
 use anyhow::{Context, Result};
 use chrono::Utc;
 use sqlx::PgPool;
@@ -6,7 +7,12 @@ use stormchaser_tls::TlsReloader;
 use tracing::{error, info};
 use uuid::Uuid;
 
+#[cfg(feature = "email")]
 use crate::handler::{fetch_outputs, fetch_run_context, fetch_step_instance};
+#[cfg(feature = "email")]
+use stormchaser_model::dsl::{self, EmailBackend, EmailSpec, TestReportEmailSpec};
+#[cfg(feature = "email")]
+use stormchaser_model::workflow;
 
 #[cfg(feature = "email")]
 pub struct SmtpParams {
@@ -182,8 +188,7 @@ pub async fn handle_email_send(
         .await?;
 
     // 2. Prepare Context for Template Rendering
-    let run_context: stormchaser_model::workflow::RunContext =
-        fetch_run_context(run_id, &pool).await?;
+    let run_context: workflow::RunContext = fetch_run_context(run_id, &pool).await?;
     let outputs: serde_json::Value = fetch_outputs(run_id, &pool).await?;
 
     let template_ctx = serde_json::json!({
@@ -201,13 +206,10 @@ pub async fn handle_email_send(
         .map_err(|e| anyhow::anyhow!("Failed to render email body: {:?}", e))?;
 
     let is_html = spec.html.unwrap_or(false);
-    let backend = spec
-        .backend
-        .clone()
-        .unwrap_or(stormchaser_model::dsl::EmailBackend::Smtp);
+    let backend = spec.backend.clone().unwrap_or(EmailBackend::Smtp);
 
     match backend {
-        stormchaser_model::dsl::EmailBackend::Ses => {
+        EmailBackend::Ses => {
             send_via_ses(
                 run_id,
                 step_id,
@@ -219,7 +221,7 @@ pub async fn handle_email_send(
             )
             .await
         }
-        stormchaser_model::dsl::EmailBackend::Smtp => {
+        EmailBackend::Smtp => {
             send_via_smtp(
                 run_id,
                 step_id,
@@ -239,7 +241,7 @@ pub async fn handle_email_send(
 async fn send_via_ses(
     run_id: Uuid,
     step_id: Uuid,
-    spec: &stormchaser_model::dsl::EmailSpec,
+    spec: &dsl::EmailSpec,
     rendered_body: String,
     is_html: bool,
     pool: PgPool,
@@ -292,7 +294,7 @@ async fn send_via_ses(
 async fn send_via_smtp(
     run_id: Uuid,
     step_id: Uuid,
-    spec: &stormchaser_model::dsl::EmailSpec,
+    spec: &dsl::EmailSpec,
     rendered_body: String,
     is_html: bool,
     pool: PgPool,
@@ -457,8 +459,7 @@ pub async fn handle_test_report_email(
     let reports = fetch_test_reports(run_id, &spec, &pool).await?;
 
     // 3. Prepare Context
-    let run_context: stormchaser_model::workflow::RunContext =
-        fetch_run_context(run_id, &pool).await?;
+    let run_context: workflow::RunContext = fetch_run_context(run_id, &pool).await?;
     let outputs: serde_json::Value = fetch_outputs(run_id, &pool).await?;
 
     let template_ctx = serde_json::json!({
@@ -473,16 +474,13 @@ pub async fn handle_test_report_email(
     // 4. Render Template
     let rendered_body = render_test_report_body(&spec, &template_ctx)?;
 
-    let backend = spec
-        .backend
-        .clone()
-        .unwrap_or(stormchaser_model::dsl::EmailBackend::Smtp);
+    let backend = spec.backend.clone().unwrap_or(EmailBackend::Smtp);
 
     match backend {
-        stormchaser_model::dsl::EmailBackend::Ses => {
+        EmailBackend::Ses => {
             send_test_report_via_ses(run_id, step_id, &spec, rendered_body, pool, nats_client).await
         }
-        stormchaser_model::dsl::EmailBackend::Smtp => {
+        EmailBackend::Smtp => {
             send_test_report_via_smtp(
                 run_id,
                 step_id,
@@ -500,7 +498,7 @@ pub async fn handle_test_report_email(
 #[cfg(feature = "email")]
 async fn fetch_test_reports(
     run_id: Uuid,
-    spec: &stormchaser_model::dsl::TestReportEmailSpec,
+    spec: &dsl::TestReportEmailSpec,
     pool: &PgPool,
 ) -> Result<Vec<serde_json::Value>> {
     let all_summaries = crate::db::get_test_summaries_for_run(pool, run_id).await?;
@@ -527,7 +525,7 @@ async fn fetch_test_reports(
 
 #[cfg(feature = "email")]
 fn render_test_report_body(
-    spec: &stormchaser_model::dsl::TestReportEmailSpec,
+    spec: &dsl::TestReportEmailSpec,
     template_ctx: &serde_json::Value,
 ) -> Result<String> {
     use minijinja::Environment;
@@ -601,7 +599,7 @@ fn render_test_report_body(
 async fn send_test_report_via_ses(
     run_id: Uuid,
     step_id: Uuid,
-    spec: &stormchaser_model::dsl::TestReportEmailSpec,
+    spec: &dsl::TestReportEmailSpec,
     rendered_body: String,
     pool: PgPool,
     nats_client: async_nats::Client,
@@ -647,7 +645,7 @@ async fn send_test_report_via_ses(
 async fn send_test_report_via_smtp(
     run_id: Uuid,
     step_id: Uuid,
-    spec: &stormchaser_model::dsl::TestReportEmailSpec,
+    spec: &dsl::TestReportEmailSpec,
     rendered_body: String,
     pool: PgPool,
     nats_client: async_nats::Client,

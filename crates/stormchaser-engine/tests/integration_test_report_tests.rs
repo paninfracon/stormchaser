@@ -2,6 +2,8 @@ use sqlx::PgPool;
 use stormchaser_model::test_report::{TestCase, TestCaseStatus, TestSummary};
 use uuid::Uuid;
 
+use stormchaser_engine::db;
+
 #[tokio::test]
 async fn test_report_persistence_integration() {
     let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
@@ -30,7 +32,7 @@ async fn test_report_persistence_integration() {
         .unwrap();
 
     // 2. Test Report Insertion
-    stormchaser_engine::db::insert_step_test_report(
+    db::insert_step_test_report(
         &pool,
         run_id,
         step_id,
@@ -52,7 +54,7 @@ async fn test_report_persistence_integration() {
         failed: 1,
         ..Default::default()
     };
-    stormchaser_engine::db::insert_step_test_summary(&pool, run_id, step_id, "api-tests", &summary)
+    db::insert_step_test_summary(&pool, run_id, step_id, "api-tests", &summary)
         .await
         .unwrap();
 
@@ -69,7 +71,7 @@ async fn test_report_persistence_integration() {
         message: None,
         created_at: chrono::Utc::now(),
     };
-    stormchaser_engine::db::insert_step_test_case(&pool, run_id, step_id, "api-tests", &test_case)
+    db::insert_step_test_case(&pool, run_id, step_id, "api-tests", &test_case)
         .await
         .unwrap();
 

@@ -7,6 +7,12 @@ use stormchaser_model::event_rules::{EventRule, WebhookConfig};
 use stormchaser_model::workflow::RunStatus;
 use uuid::Uuid;
 
+use stormchaser_model::cron;
+use stormchaser_model::event;
+use stormchaser_model::step;
+use stormchaser_model::storage;
+use stormchaser_model::TestCase;
+
 #[allow(clippy::too_many_arguments)]
 pub async fn insert_workflow_run(
     tx: &mut Transaction<'_, Postgres>,
@@ -171,7 +177,7 @@ pub async fn get_workflow_run_detail(
 pub async fn get_step_instances(
     pool: &PgPool,
     run_id: Uuid,
-) -> Result<Vec<stormchaser_model::step::StepInstance>, sqlx::Error> {
+) -> Result<Vec<step::StepInstance>, sqlx::Error> {
     sqlx::query_as(
         "SELECT * FROM combined_step_instances WHERE run_id = $1 ORDER BY created_at ASC",
     )
@@ -183,7 +189,7 @@ pub async fn get_step_instances(
 pub async fn get_step_outputs(
     pool: &PgPool,
     step_instance_id: Uuid,
-) -> Result<Vec<stormchaser_model::step::StepOutput>, sqlx::Error> {
+) -> Result<Vec<step::StepOutput>, sqlx::Error> {
     sqlx::query_as("SELECT * FROM combined_step_outputs WHERE step_instance_id = $1")
         .bind(step_instance_id)
         .fetch_all(pool)
@@ -193,7 +199,7 @@ pub async fn get_step_outputs(
 pub async fn get_step_status_history(
     pool: &PgPool,
     step_instance_id: Uuid,
-) -> Result<Vec<stormchaser_model::step::StepStatusHistory>, sqlx::Error> {
+) -> Result<Vec<step::StepStatusHistory>, sqlx::Error> {
     sqlx::query_as("SELECT * FROM combined_step_status_history WHERE step_instance_id = $1 ORDER BY created_at ASC")
         .bind(step_instance_id)
         .fetch_all(pool)
@@ -352,9 +358,7 @@ pub async fn create_cron_workflow(
     Ok(())
 }
 
-pub async fn list_cron_workflows(
-    pool: &PgPool,
-) -> Result<Vec<stormchaser_model::cron::CronWorkflow>, sqlx::Error> {
+pub async fn list_cron_workflows(pool: &PgPool) -> Result<Vec<cron::CronWorkflow>, sqlx::Error> {
     sqlx::query_as("SELECT * FROM cron_workflows ORDER BY created_at DESC")
         .fetch_all(pool)
         .await
@@ -363,7 +367,7 @@ pub async fn list_cron_workflows(
 pub async fn get_cron_workflow(
     pool: &PgPool,
     id: Uuid,
-) -> Result<Option<stormchaser_model::cron::CronWorkflow>, sqlx::Error> {
+) -> Result<Option<cron::CronWorkflow>, sqlx::Error> {
     sqlx::query_as("SELECT * FROM cron_workflows WHERE id = $1")
         .bind(id)
         .fetch_optional(pool)
@@ -373,7 +377,7 @@ pub async fn get_cron_workflow(
 pub async fn get_active_cron_workflow(
     pool: &PgPool,
     id: Uuid,
-) -> Result<Option<stormchaser_model::cron::CronWorkflow>, sqlx::Error> {
+) -> Result<Option<cron::CronWorkflow>, sqlx::Error> {
     sqlx::query_as("SELECT * FROM cron_workflows WHERE id = $1 AND is_active = TRUE")
         .bind(id)
         .fetch_optional(pool)
@@ -400,7 +404,7 @@ pub async fn create_storage_backend(
     id: Uuid,
     name: &str,
     description: &Option<String>,
-    backend_type: &stormchaser_model::storage::BackendType,
+    backend_type: &storage::BackendType,
     config: &serde_json::Value,
     is_default_sfs: bool,
 ) -> Result<(), sqlx::Error> {
@@ -423,7 +427,7 @@ pub async fn create_storage_backend(
 
 pub async fn list_storage_backends(
     pool: &PgPool,
-) -> Result<Vec<stormchaser_model::storage::StorageBackend>, sqlx::Error> {
+) -> Result<Vec<storage::StorageBackend>, sqlx::Error> {
     sqlx::query_as("SELECT * FROM storage_backends ORDER BY name ASC")
         .fetch_all(pool)
         .await
@@ -432,7 +436,7 @@ pub async fn list_storage_backends(
 pub async fn get_storage_backend(
     pool: &PgPool,
     id: Uuid,
-) -> Result<Option<stormchaser_model::storage::StorageBackend>, sqlx::Error> {
+) -> Result<Option<storage::StorageBackend>, sqlx::Error> {
     sqlx::query_as("SELECT * FROM storage_backends WHERE id = $1")
         .bind(id)
         .fetch_optional(pool)
@@ -482,7 +486,7 @@ pub async fn delete_storage_backend(pool: &PgPool, id: Uuid) -> Result<(), sqlx:
 pub async fn list_run_artifacts(
     pool: &PgPool,
     run_id: Uuid,
-) -> Result<Vec<stormchaser_model::storage::ArtifactRegistry>, sqlx::Error> {
+) -> Result<Vec<storage::ArtifactRegistry>, sqlx::Error> {
     sqlx::query_as(
         r#"
             WITH combined_artifacts AS (
@@ -539,7 +543,7 @@ pub async fn list_run_test_summaries(
 pub async fn list_run_test_cases(
     pool: &PgPool,
     run_id: Uuid,
-) -> Result<Vec<stormchaser_model::TestCase>, sqlx::Error> {
+) -> Result<Vec<TestCase>, sqlx::Error> {
     sqlx::query_as(
         r#"
             WITH combined_cases AS (
@@ -631,7 +635,7 @@ pub async fn get_step_instance_for_approval(
     pool: &PgPool,
     step_id: Uuid,
     run_id: Uuid,
-) -> Result<Option<stormchaser_model::step::StepInstance>, sqlx::Error> {
+) -> Result<Option<step::StepInstance>, sqlx::Error> {
     sqlx::query_as(
         r#"SELECT id, run_id, step_name, step_type, status as "status", iteration_index, runner_id, affinity_context, started_at, finished_at, exit_code, error, spec, params, created_at FROM step_instances WHERE id = $1 AND run_id = $2"#,
     )
@@ -666,7 +670,7 @@ pub async fn get_event_correlation(
     pool: &PgPool,
     key: &str,
     value: &str,
-) -> Result<Option<stormchaser_model::event::EventCorrelation>, sqlx::Error> {
+) -> Result<Option<event::EventCorrelation>, sqlx::Error> {
     sqlx::query_as(
         "SELECT id, step_instance_id, run_id, correlation_key, correlation_value, created_at FROM event_correlations WHERE correlation_key = $1 AND correlation_value = $2"
     )

@@ -11,6 +11,10 @@ use stormchaser_model::workflow::RunStatus;
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
+use stormchaser_model::step::{StepInstance, StepOutput, StepStatusHistory};
+use stormchaser_model::storage::{ArtifactRegistry, BackendType};
+use stormchaser_model::test_report;
+
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct AuthExchangeRequest {
     pub sso_token: String,
@@ -95,17 +99,17 @@ pub struct WorkflowRunFullDetail {
     pub detail: WorkflowRunDetail,
     pub steps: Vec<StepDetail>,
     #[schema(value_type = Vec<Object>)]
-    pub artifacts: Vec<stormchaser_model::storage::ArtifactRegistry>,
+    pub artifacts: Vec<ArtifactRegistry>,
     pub test_summaries: Vec<TestSummaryResponse>,
     #[schema(value_type = Vec<Object>)]
-    pub test_cases: Vec<stormchaser_model::test_report::TestCase>,
+    pub test_cases: Vec<test_report::TestCase>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct StepDetail {
-    pub instance: stormchaser_model::step::StepInstance,
-    pub outputs: Vec<stormchaser_model::step::StepOutput>,
-    pub history: Vec<stormchaser_model::step::StepStatusHistory>,
+    pub instance: StepInstance,
+    pub outputs: Vec<StepOutput>,
+    pub history: Vec<StepStatusHistory>,
     pub logs: Vec<String>,
 }
 
@@ -160,7 +164,7 @@ pub struct CronWorkflowResponse {
 pub struct CreateStorageBackendRequest {
     pub name: String,
     pub description: Option<String>,
-    pub backend_type: stormchaser_model::storage::BackendType,
+    pub backend_type: BackendType,
     pub config: serde_json::Value,
     pub is_default_sfs: bool,
 }
@@ -169,7 +173,7 @@ pub struct CreateStorageBackendRequest {
 pub struct UpdateStorageBackendRequest {
     pub name: Option<String>,
     pub description: Option<String>,
-    pub backend_type: Option<stormchaser_model::storage::BackendType>,
+    pub backend_type: Option<BackendType>,
     pub config: Option<serde_json::Value>,
     pub is_default_sfs: Option<bool>,
 }

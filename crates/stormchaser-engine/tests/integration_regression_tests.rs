@@ -15,6 +15,9 @@ async fn setup_db() -> sqlx::PgPool {
         .unwrap()
 }
 
+use stormchaser_tls::TlsConfig;
+use stormchaser_tls::TlsReloader;
+
 #[tokio::test]
 async fn test_direct_run_inserts_quotas() {
     let pool = setup_db().await;
@@ -151,11 +154,7 @@ async fn test_dispatch_pending_steps_column_created_at() {
         run_id,
         pool.clone(),
         nats_client.clone(),
-        std::sync::Arc::new(
-            stormchaser_tls::TlsReloader::new(stormchaser_tls::TlsConfig::default())
-                .await
-                .unwrap(),
-        ),
+        std::sync::Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
     )
     .await
     .expect("dispatch_pending_steps should succeed with created_at column present");

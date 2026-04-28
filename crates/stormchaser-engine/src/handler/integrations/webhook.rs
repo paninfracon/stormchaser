@@ -47,8 +47,10 @@ pub async fn handle_webhook_invoke(
     execute_webhook_request(run_id, step_id, &spec, rendered_body, pool, nats_client).await
 }
 
+use stormchaser_model::dsl;
+
 fn render_webhook_body(
-    spec: &stormchaser_model::dsl::WebhookInvokeSpec,
+    spec: &dsl::WebhookInvokeSpec,
     template_ctx: &serde_json::Value,
 ) -> Result<Option<String>> {
     use minijinja::Environment;
@@ -65,7 +67,7 @@ fn render_webhook_body(
 async fn execute_webhook_request(
     run_id: Uuid,
     step_id: Uuid,
-    spec: &stormchaser_model::dsl::WebhookInvokeSpec,
+    spec: &dsl::WebhookInvokeSpec,
     rendered_body: Option<String>,
     pool: PgPool,
     nats_client: async_nats::Client,

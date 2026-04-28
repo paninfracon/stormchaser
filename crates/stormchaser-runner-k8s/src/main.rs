@@ -21,6 +21,8 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use uuid::Uuid;
 
 /// Pool of Kubernetes cluster connections
+use stormchaser_model::dsl;
+
 pub struct ClusterPool {
     clients: DashMap<String, (Client, String)>, // (Client, Version)
 }
@@ -189,7 +191,7 @@ async fn scan_for_orphans(
 
                 let raw_step_dsl = annotations.and_then(|a| a.get("stormchaser.io/step-dsl"));
 
-                let step_dsl: stormchaser_model::dsl::Step = if let Some(raw) = raw_step_dsl {
+                let step_dsl: dsl::Step = if let Some(raw) = raw_step_dsl {
                     let dsl_str = if is_encrypted {
                         if let Some(key) = &encryption_key {
                             match job_machine::crypto::decrypt_state(raw, key) {
@@ -213,7 +215,7 @@ async fn scan_for_orphans(
 
                     serde_json::from_str(&dsl_str).unwrap_or_else(|_| {
                         // Fallback if parsing fails
-                        stormchaser_model::dsl::Step {
+                        dsl::Step {
                             name: job_name.clone(),
                             r#type: "RunContainer".to_string(),
                             spec: serde_json::Value::Null,
@@ -238,7 +240,7 @@ async fn scan_for_orphans(
                     })
                 } else {
                     // Reconstruct minimal step metadata as fallback
-                    stormchaser_model::dsl::Step {
+                    dsl::Step {
                         name: job_name.clone(),
                         r#type: "RunContainer".to_string(),
                         spec: serde_json::Value::Null,
@@ -506,9 +508,9 @@ pub async fn run_runner(config: Config) -> Result<()> {
     let nats_subject = format!("stormchaser.runner.k8s.{}", runner_id);
 
     // Generate JSON Schemas for our supported step types
-    let common_schema = schemars::schema_for!(stormchaser_model::dsl::CommonContainerSpec);
+    let common_schema = schemars::schema_for!(dsl::CommonContainerSpec);
     let common_schema_json = serde_json::to_value(common_schema)?;
-    let k8s_job_schema = schemars::schema_for!(stormchaser_model::dsl::K8sJobSpec);
+    let k8s_job_schema = schemars::schema_for!(dsl::K8sJobSpec);
     let k8s_job_schema_json = serde_json::to_value(k8s_job_schema)?;
 
     let registration_payload = json!({
@@ -699,44 +701,43 @@ async fn handle_task(
     let step_id_str = payload["step_id"].as_str().unwrap_or_default();
     let step_id = uuid::Uuid::parse_str(step_id_str).unwrap_or_default();
 
-    let step_dsl: stormchaser_model::dsl::Step =
-        match serde_json::from_value(payload["spec"].clone()) {
-            Ok(spec) => {
-                // Reconstruct Step from resolved spec and other fields
-                stormchaser_model::dsl::Step {
-                    name: payload["step_name"]
-                        .as_str()
-                        .unwrap_or_default()
-                        .to_string(),
-                    r#type: payload["step_type"]
-                        .as_str()
-                        .unwrap_or_default()
-                        .to_string(),
-                    spec,
-                    params: serde_json::from_value(payload["params"].clone()).unwrap_or_default(),
-                    condition: None,
-                    strategy: None,
-                    aggregation: Vec::new(),
-                    iterate: None,
-                    iterate_as: None,
-                    steps: None,
-                    next: Vec::new(),
-                    on_failure: None,
-                    retry: None,
-                    timeout: None,
-                    allow_failure: None,
-                    start_marker: None,
-                    end_marker: None,
-                    outputs: Vec::new(),
-                    reports: Vec::new(),
-                    artifacts: None,
-                }
+    let step_dsl: dsl::Step = match serde_json::from_value(payload["spec"].clone()) {
+        Ok(spec) => {
+            // Reconstruct Step from resolved spec and other fields
+            dsl::Step {
+                name: payload["step_name"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+                r#type: payload["step_type"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+                spec,
+                params: serde_json::from_value(payload["params"].clone()).unwrap_or_default(),
+                condition: None,
+                strategy: None,
+                aggregation: Vec::new(),
+                iterate: None,
+                iterate_as: None,
+                steps: None,
+                next: Vec::new(),
+                on_failure: None,
+                retry: None,
+                timeout: None,
+                allow_failure: None,
+                start_marker: None,
+                end_marker: None,
+                outputs: Vec::new(),
+                reports: Vec::new(),
+                artifacts: None,
             }
-            Err(e) => {
-                tracing::error!("Failed to parse step spec: {:?}", e);
-                return;
-            }
-        };
+        }
+        Err(e) => {
+            tracing::error!("Failed to parse step spec: {:?}", e);
+            return;
+        }
+    };
     let storage: Option<std::collections::HashMap<String, serde_json::Value>> =
         serde_json::from_value(payload["storage"].clone()).ok();
     let test_report_urls: Option<std::collections::HashMap<String, serde_json::Value>> =

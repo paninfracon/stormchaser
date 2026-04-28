@@ -17,6 +17,9 @@ async fn setup_db() -> sqlx::PgPool {
         .unwrap()
 }
 
+use stormchaser_model::runner;
+use stormchaser_model::test_report;
+
 #[tokio::test]
 async fn test_db_layer_functions() {
     let pool = setup_db().await;
@@ -35,8 +38,7 @@ async fn test_db_layer_functions() {
     .await
     .unwrap();
 
-    let runner: Option<stormchaser_model::runner::Runner> =
-        db::runners::get_runner(&pool, &runner_id).await.unwrap();
+    let runner: Option<runner::Runner> = db::runners::get_runner(&pool, &runner_id).await.unwrap();
     assert!(runner.is_some());
     assert_eq!(runner.as_ref().unwrap().status, RunnerStatus::Online);
 
@@ -51,8 +53,7 @@ async fn test_db_layer_functions() {
         .await
         .unwrap();
 
-    let runner: Option<stormchaser_model::runner::Runner> =
-        db::runners::get_runner(&pool, &runner_id).await.unwrap();
+    let runner: Option<runner::Runner> = db::runners::get_runner(&pool, &runner_id).await.unwrap();
     assert_eq!(runner.as_ref().unwrap().status, RunnerStatus::Offline);
 
     // Test creating a workflow run
@@ -208,13 +209,13 @@ async fn test_db_layer_functions() {
         .await
         .unwrap();
 
-    let summaries: Vec<stormchaser_model::test_report::TestSummary> =
+    let summaries: Vec<test_report::TestSummary> =
         db::steps::get_test_summaries_for_run(&pool, run_id)
             .await
             .unwrap();
     assert_eq!(summaries.len(), 1);
 
-    let cases: Vec<stormchaser_model::test_report::TestCase> =
+    let cases: Vec<test_report::TestCase> =
         db::steps::get_test_cases_for_report(&pool, run_id, "report")
             .await
             .unwrap();

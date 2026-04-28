@@ -8,6 +8,8 @@ use stormchaser_model::workflow::{RunStatus, WorkflowRun};
 use stormchaser_model::TestSummary;
 use uuid::Uuid;
 
+use stormchaser_model::test_report;
+
 #[allow(clippy::too_many_arguments)]
 pub async fn upsert_run_storage_state<'a, E>(
     executor: E,
@@ -132,7 +134,7 @@ pub async fn insert_step_test_summary<'a, E>(
     run_id: Uuid,
     step_instance_id: Uuid,
     report_name: &str,
-    summary: &stormchaser_model::TestSummary,
+    summary: &TestSummary,
 ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
@@ -161,7 +163,7 @@ pub async fn insert_step_test_case<'a, E>(
     run_id: Uuid,
     step_instance_id: Uuid,
     report_name: &str,
-    test_case: &stormchaser_model::test_report::TestCase,
+    test_case: &test_report::TestCase,
 ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
