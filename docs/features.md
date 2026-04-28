@@ -74,7 +74,7 @@
 2. Postgres backend
 3. NATS for events and queues
 4. Distributed controller with concensus and leader election
-5. Tree-sitter grammar for DSL parsing and editor support
+5. Leverage generic `tree-sitter-hcl` grammar for DSL parsing and editor support
 
 ## Out of scope
 

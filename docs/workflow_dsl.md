@@ -717,7 +717,7 @@ step "deploy" "RunContainer" {
 
 Every workflow MUST undergo a validation phase before execution. The `stormchaser lint` CLI command (and the Control Plane's pre-run handler) performs the following checks:
 
-1. **Grammar Validation:** Ensures the `.storm` file matches the Tree-sitter grammar specification.
+1. **Grammar Validation:** Ensures the `.storm` file is syntactically valid HCL, which can be checked via standard parsing or visually assisted with `tree-sitter-hcl` in editors.
 2. **DAG Cycle Detection:** The workflow graph is validated as a Directed Acyclic Graph (DAG) for all explicit `next` mappings. If a cycle is detected, the workflow is rejected.
 3. **Variable Resolution:** All `${inputs.*}`, `${steps.*}`, and `${secrets.*}` references are checked for existence and scope (including alias shadowing).
 4. **Policy Compliance:** The OPA engine is queried to ensure the workflow structure and resource requirements comply with organizational rules.

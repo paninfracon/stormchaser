@@ -48,7 +48,7 @@ Overall, the project has approximately 45% line coverage. Key backend components
 - **Graph based DSL (NOT YAML!):** [Implemented] DSL is defined in
   `stormchaser-dsl` and `stormchaser-model`. Supports complex graphs via `next`
   lists.
-- **Tree-sitter grammar:** [Implemented] `stormchaser-dsl` uses `tree-sitter`.
+- **Tree-sitter grammar:** [Not Implemented/Delegated] `.storm` files are standard HCL, meaning the generic `tree-sitter-hcl` grammar can be used for editor integration. `stormchaser-dsl` parses the AST directly using `hcl-rs`.
 - **Sequential and parallel workflow steps:** [Implemented] Naturally supported
   by the graph execution model in `stormchaser-engine`.
 - **Output/Input passing:** [Implemented] HCL expressions (`${...}`) allow
@@ -115,7 +115,9 @@ Overall, the project has approximately 45% line coverage. Key backend components
   S3-compatible parking (Minio/S3) and pluggable artifact backends (Artifact
   Registry) with cryptographic hash verification (SHA-256). K8s runner
   automatically handles unparking (Init Containers) and parking (Post-execution
-  agent wrapper). Full CRUD API for storage backends and artifact destinations
+  agent wrapper). It also includes **SFS Optimization**, allowing direct mounting
+  of Persistent Volume Claims (PVCs) for high-performance ReadWriteMany data sharing
+  without S3 overhead. Full CRUD API for storage backends and artifact destinations
   is available.
 - **Native Junit ingest:** [Implemented] Support for collecting and persisting
   test reports (e.g., `junit.xml`) via the `reports` block in the DSL. Runner

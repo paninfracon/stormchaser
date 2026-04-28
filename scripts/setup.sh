@@ -83,14 +83,7 @@ if [ "$CLEANUP" = true ]; then
 fi
 
 # 0. Setup patched ratatui-form locally
-if [ ! -d "$REPO_ROOT/.tmp/ratatui-form" ]; then
-    echo -e "${BLUE}>>> Cloning and patching ratatui-form...${NC}"
-    mkdir -p "$REPO_ROOT/.tmp"
-    git clone https://github.com/DavidLiedle/ratatui-form "$REPO_ROOT/.tmp/ratatui-form"
-    sed -i 's/ratatui = "0.29"/ratatui = "0.30"/' "$REPO_ROOT/.tmp/ratatui-form/Cargo.toml"
-    sed -i 's/crossterm = "0.28"/crossterm = "0.29"/' "$REPO_ROOT/.tmp/ratatui-form/Cargo.toml"
-    rm -rf "$REPO_ROOT/.tmp/ratatui-form/.git"
-fi
+"$REPO_ROOT/scripts/patch-ratatui-form.sh"
 
 # 1. Generate TLS Certificates if they don't exist
 if [ ! -f "$CERT_DIR/tls.crt" ]; then
