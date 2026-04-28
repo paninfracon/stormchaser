@@ -127,6 +127,7 @@ Detailed documentation is available in the `docs/` directory:
 - [Workflow DSL Reference](docs/workflow_dsl.md)
 - [Environments & Deployment](docs/environments.md)
 - [Observability (Metrics, Logs, Tracing)](docs/observability.md)
+- [OPA RBAC Policies](docs/opa-rbac.md)
 - [State Machines](docs/state_machines.md)
 - [Current State & Status](docs/current_state.md)
 
