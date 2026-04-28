@@ -1,4 +1,3 @@
-#![allow(unused_imports)]
 #![allow(unused_variables)]
 use anyhow::Result;
 use serde_json::Value;

@@ -1,19 +1,22 @@
-#![allow(unused_imports)]
-use anyhow::{Context, Result};
-use chrono::Utc;
+use anyhow::Result;
 use serde_json::Value;
 use sqlx::PgPool;
 use std::sync::Arc;
 use stormchaser_tls::TlsReloader;
-use tracing::{error, info};
 use uuid::Uuid;
 
 #[cfg(feature = "email")]
 use crate::handler::{fetch_outputs, fetch_run_context, fetch_step_instance};
 #[cfg(feature = "email")]
-use stormchaser_model::dsl::{self, EmailBackend, EmailSpec, TestReportEmailSpec};
+use anyhow::Context;
+#[cfg(feature = "email")]
+use chrono::Utc;
+#[cfg(feature = "email")]
+use stormchaser_model::dsl::{self, EmailBackend};
 #[cfg(feature = "email")]
 use stormchaser_model::workflow;
+#[cfg(feature = "email")]
+use tracing::{error, info};
 
 #[cfg(feature = "email")]
 pub struct SmtpParams {
@@ -730,7 +733,7 @@ pub async fn handle_test_report_email(
     anyhow::bail!("Email support is not enabled. Enable 'email' feature.")
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "email"))]
 mod tests {
     use super::*;
     use serde_json::json;

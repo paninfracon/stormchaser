@@ -1,15 +1,18 @@
-#![allow(unused_imports)]
-use anyhow::{Context, Result};
-use chrono::Utc;
+use anyhow::Result;
 use serde_json::Value;
 use sqlx::PgPool;
-use tracing::info;
 use uuid::Uuid;
 
 #[cfg(feature = "aws-lambda")]
 use crate::handler::fetch_step_instance;
 #[cfg(feature = "aws-lambda")]
-use stormchaser_model::dsl::{self, LambdaInvokeSpec};
+use anyhow::Context;
+#[cfg(feature = "aws-lambda")]
+use chrono::Utc;
+#[cfg(feature = "aws-lambda")]
+use stormchaser_model::dsl::{self};
+#[cfg(feature = "aws-lambda")]
+use tracing::info;
 
 #[cfg(feature = "aws-lambda")]
 use aws_sdk_lambda::primitives::Blob;

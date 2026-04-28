@@ -1,4 +1,3 @@
-#![allow(unused_imports)]
 use anyhow::Result;
 use serde_json::Value;
 use sqlx::PgPool;
@@ -134,7 +133,7 @@ fn build_approval_mailer(spec: &EmailSpec) -> lettre::SmtpTransport {
     mailer_builder.build()
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "email"))]
 mod tests {
     use super::*;
     use stormchaser_model::dsl::{EmailBackend, EmailSpec};
