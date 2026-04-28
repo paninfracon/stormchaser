@@ -65,3 +65,48 @@ for Attribute-Based Access Control. This `EngineOpaContext` is injected as:
 
 You can use this richer context to write rules like: *"Only allow
 production-deploy workflows if the initiating_user belongs to the SRE group."*
+
+## Compiling Policies to WASM
+
+For significantly higher performance (sub-millisecond evaluation times) and to
+run policies completely locally without network hops, Stormchaser's API and
+Orchestration Engine support executing pre-compiled OPA WebAssembly (WASM)
+modules directly.
+
+### 1. Compile the Rego Policy
+
+You can use the `opa` CLI to compile your `.rego` file into a WASM module. You
+must specify the entrypoint (the rule you want to evaluate) using the `-e` flag.
+
+```bash
+# Compile the policy targeting WASM
+opa build -t wasm -e stormchaser/allow docs/opa-rbac-example.rego
+
+# The build outputs a bundle.tar.gz file. Extract it to get the policy.wasm
+tar -xzf bundle.tar.gz /policy.wasm
+```
+
+### 2. Configure Stormchaser Servers
+
+Once you have the `policy.wasm` file, you can configure both the
+`stormchaser-api` and `stormchaser-engine` to load it directly into memory at
+startup by setting the `OPA_WASM_PATH` environment variable.
+
+For example, when running locally or via Docker Compose, you can map the file
+and set the variable:
+
+```yaml
+services:
+  orchestration-api:
+    environment:
+      # Tell the API to load the WASM module
+      OPA_WASM_PATH: /etc/opa/policy.wasm
+      # Optional: Override the default entrypoint
+      # OPA_ENTRYPOINT: stormchaser/allow
+    volumes:
+      - ./policy.wasm:/etc/opa/policy.wasm:ro
+```
+
+When `OPA_WASM_PATH` is set, Stormchaser skips making HTTP requests to the external
+OPA server (like `OPA_URL`) and evaluates the policies directly inside its own
+process using Wasmtime.
