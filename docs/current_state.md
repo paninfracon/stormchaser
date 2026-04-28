@@ -1,35 +1,73 @@
 # Stormchaser Project: Current State Analysis
 
+<!-- markdownlint-disable MD013 -->
+
 This report analyzes the current implementation status of Stormchaser against the
+
 goals defined in `features.md`.
 
 ## Recent Accomplishments & Status
 
 **Key Accomplishments:**
 
-- **CI/CD Workflow Fixes:** Consolidated and fixed the GitHub Actions workflows (`ci.yml`). The test suite now correctly provisions a Postgres database using `sqlx-cli`, generates required runtime TLS certificates, and sets explicit API rate limits to prevent `429 Too Many Requests` errors, ensuring all tests pass in CI.
-- **Test Certificate Handling:** Removed hardcoded dummy certificates from Git tracking and updated setup scripts to generate them locally on-the-fly, fixing `gitleaks` pre-commit hook failures and improving security posture.
-- **Git History Compression:** Compressed the Git history into a single initial commit on the `trunk` branch, preparing the repository for upstreaming.
-- **JinjaRender Step:** Implemented a new native `JinjaRender` step that allows stand-alone MiniJinja template rendering.
-- **TestReportEmail Step:** Implemented a specialized `TestReportEmail` step that sends rich HTML test reports (summaries + failures) with an overridable template.
-- **AWS SES Backend:** Added support for AWS SES as an alternative email delivery backend, utilizing the AWS SDK and supporting IAM role assumption (EKS Pod Identity). This is available behind the `aws-ses` feature gate.
-- **Documentation Alignment:** Updated documentation to accurately reflect that Webhook, Email, Lambda, WASM, and JinjaRender native steps are implemented and integrated into the engine.
-- **Intrinsic Step Integration:** Discovered and fixed a gap where `WebhookInvoke` and `EmailSend` handlers were defined but not correctly dispatched. I have now implemented the intrinsic dispatchers for these step types.
-- **Archival Verification:** Verified the archival logic in `stormchaser-engine`. Recent fixes for race conditions in the archival process have been confirmed in the code.
+- **Quality Pass & Refactoring:** Conducted a comprehensive code quality pass,
+refactoring multiple crates to adhere to the "500-line rule" and the "God Class"
+anti-pattern.
+  - **Modularization:** Massive files in `stormchaser-agent`, `stormchaser-tui`,
+`stormchaser-engine`, and `stormchaser-cli` were broken down into logical sub-
+modules (e.g., splitting `app.rs` into `app/api.rs`, `app/handlers.rs`, etc.).
+  - **Method Decomposition:** Monolithic functions like `collect_test_reports`
+(agent) and `do_build_job_spec` (k8s-runner) were decomposed into smaller,
+focused helper methods.
+  - **Stability Fixes:** Resolved flakiness in API rate limit tests by ensuring
+unique IP addresses for each test run to avoid NATS KV collisions.
+- **Improved Test Coverage:** Significantly expanded unit test coverage for
+refactored components, including Webhook/Email integrations, K8s job
+specification building, and CLI command logic.
+- **CI/CD Workflow Fixes:** Consolidated and fixed the GitHub Actions workflows
+(`ci.yml`). The test suite now correctly provisions a Postgres database using
+`sqlx-cli`, generates required runtime TLS certificates, and sets explicit API
+rate limits to prevent `429 Too Many Requests` errors, ensuring all tests pass
+in CI.
+- **Test Certificate Handling:** Removed hardcoded dummy certificates from Git
+tracking and updated setup scripts to generate them locally on-the-fly, fixing
+`gitleaks` pre-commit hook failures and improving security posture.
+- **JinjaRender Step:** Implemented a new native `JinjaRender` step that allows
+stand-alone MiniJinja template rendering.
+- **TestReportEmail Step:** Implemented a specialized `TestReportEmail` step
+that sends rich HTML test reports (summaries + failures) with an overridable
+template.
+- **AWS SES Backend:** Added support for AWS SES as an alternative email
+delivery backend, utilizing the AWS SDK and supporting IAM role assumption (EKS
+Pod Identity). This is available behind the `aws-ses` feature gate.
 
 **Code Coverage Summary:**
 
-Overall, the project has approximately 45% line coverage. Key backend components like the engine and API have higher coverage in crucial areas, while UI components (like the TUI) and specific runners have lower coverage.
+Overall, the project has approximately 46% line coverage. Refactoring efforts
+and new unit tests have improved visibility into core logic across the engine,
+agent, and runner.
 
-- **Total Regions Covered:** 40.65% (13,599 missed / 22,913 total)
-- **Total Functions Covered:** 47.03% (741 missed / 1,399 total)
-- **Total Lines Covered:** 45.11% (8,848 missed / 16,120 total)
+- **Total Regions Covered:** 41.6% (13,699 missed / 23,458 total)
+- **Total Functions Covered:** 46.9% (784 missed / 1,477 total)
+- **Total Lines Covered:** 45.6% (9,069 missed / 16,673 total)
+
+| Component | Line Coverage (%) |
+| :--- | :--- |
+| `stormchaser-agent` | ~60-98% (varies by module) |
+| `stormchaser-engine` | ~45-98% (varies by module) |
+| `stormchaser-api` | ~35-85% |
+| `stormchaser-runner-k8s` | ~69% |
+| `stormchaser-tui` / `stormchaser-cli` | ~10-25% |
 
 **Next Steps:**
 
-- **Push to GitHub:** Authenticate the GitHub CLI (`gh auth login`) and push the repository to the new private `stormchaser` repo.
-- **Verify Dogfood Run:** Run the updated `dogfood.storm` to confirm the full lifecycle from build to deploy, ensuring data is correctly archived upon completion.
-- **Feature Gap Focus:** Future development will focus on high-priority missing features like Workflow Templates, CronWorkflows, and Step Memoization/Caching.
+- **Push to GitHub:** Authenticate the GitHub CLI (`gh auth login`) and push the
+repository to the new private `stormchaser` repo.
+- **Verify Dogfood Run:** Run the updated `dogfood.storm` to confirm the full
+lifecycle from build to deploy, ensuring data is correctly archived upon
+completion.
+- **Feature Gap Focus:** Future development will focus on high-priority missing
+features like Workflow Templates, CronWorkflows, and Step Memoization/Caching.
 
 ## Implementation Overview
 
@@ -48,7 +86,6 @@ Overall, the project has approximately 45% line coverage. Key backend components
 - **Graph based DSL (NOT YAML!):** [Implemented] DSL is defined in
   `stormchaser-dsl` and `stormchaser-model`. Supports complex graphs via `next`
   lists.
-- **Tree-sitter grammar:** [Not Implemented/Delegated] `.storm` files are standard HCL, meaning the generic `tree-sitter-hcl` grammar can be used for editor integration. `stormchaser-dsl` parses the AST directly using `hcl-rs`.
 - **Sequential and parallel workflow steps:** [Implemented] Naturally supported
   by the graph execution model in `stormchaser-engine`.
 - **Output/Input passing:** [Implemented] HCL expressions (`${...}`) allow
@@ -67,9 +104,8 @@ Overall, the project has approximately 45% line coverage. Key backend components
 - **Distributed execution:** [Implemented] Runners subscribe to NATS subjects
   for task distribution.
 - **Step dispatch to container runtimes:** [Implemented] Native runners for
-  Kubernetes (`stormchaser-runner-k8s`) and Docker (`stormchaser-runner-docker`).
-- **Step optimization:** [Not Implemented] Logic to run multiple steps in one
-  container is TBD.
+  Kubernetes (`stormchaser-runner-k8s`) and Docker (`stormchaser-runner-
+docker`).
 - **Step restart/adoption:** [Implemented] K8s runner includes logic to adopt
   orphaned jobs after a restart.
 - **Concurrency Limits:** [Implemented] `max_concurrency` from `run_quotas` is
@@ -77,9 +113,11 @@ Overall, the project has approximately 45% line coverage. Key backend components
 - **Optimistic Concurrency Control:** [Implemented] Version-based OCC in
   `workflow_runs` ensures safe state transitions across distributed engine
   instances.
-- **Resource Quota Enforcement:** [Implemented] CPU and Memory limits (as defined
+- **Resource Quota Enforcement:** [Implemented] CPU and Memory limits (as
+defined
   in `run_quotas`) are enforced at the engine level using a reservation system.
-- **Timeout Enforcement:** [Implemented] Background "timeout reaper" in the engine
+- **Timeout Enforcement:** [Implemented] Background "timeout reaper" in the
+engine
   automatically fails workflows that exceed their `timeout` quota.
 
 ### 3. Integrations & Steps
@@ -99,7 +137,8 @@ Overall, the project has approximately 45% line coverage. Key backend components
   - `Invoke Webhook`: [Implemented] Native handler in the engine with template
     rendering for body/headers.
   - `Send Email`: [Implemented] `EmailSend` native handler in the engine with
-    MiniJinja templating (guarded by `email` feature). Supports SMTP (with TLS/mTLS)
+    MiniJinja templating (guarded by `email` feature). Supports SMTP (with
+TLS/mTLS)
     and AWS SES (guarded by `aws-ses` feature) backends.
   - `LambdaInvoke`: [Implemented] Native handler in the engine (guarded by
     `aws-lambda` feature).
@@ -108,16 +147,21 @@ Overall, the project has approximately 45% line coverage. Key backend components
     response (with inputs), and resuming. Includes unauthenticated approval
     links via encrypted tokens and external event correlation.
   - `Wasm`: [Implemented] Local WASM execution via Wasmtime.
-  - `JinjaRender`: [Implemented] Native Jinja templating for data transformation.
-  - `TestReportEmail`: [Implemented] Native HTML test report email with customizable template.
+  - `JinjaRender`: [Implemented] Native Jinja templating for data
+transformation.
+  - `TestReportEmail`: [Implemented] Native HTML test report email with
+customizable template.
   - `JQ`: [Implemented] Native JQ filtering for data transformation.
 - **Shared File System (SFS):** [Implemented] Phase 2 complete. Supports
   S3-compatible parking (Minio/S3) and pluggable artifact backends (Artifact
   Registry) with cryptographic hash verification (SHA-256). K8s runner
   automatically handles unparking (Init Containers) and parking (Post-execution
-  agent wrapper). It also includes **SFS Optimization**, allowing direct mounting
-  of Persistent Volume Claims (PVCs) for high-performance ReadWriteMany data sharing
-  without S3 overhead. Full CRUD API for storage backends and artifact destinations
+  agent wrapper). It also includes **SFS Optimization**, allowing direct
+mounting
+  of Persistent Volume Claims (PVCs) for high-performance ReadWriteMany data
+sharing
+  without S3 overhead. Full CRUD API for storage backends and artifact
+destinations
   is available.
 - **Native Junit ingest:** [Implemented] Support for collecting and persisting
   test reports (e.g., `junit.xml`) via the `reports` block in the DSL. Runner
@@ -140,8 +184,6 @@ Overall, the project has approximately 45% line coverage. Key backend components
 - **Step Status History:** [Implemented] Every granular state transition for a
   step is recorded in the `step_status_history` table and exposed via the API
   and TUI.
-- **Mermaid rendering:** [Partial] Mentioned in docs as an external CLI
-  integration; not built into the application code.
 
 ## Gap Analysis
 
@@ -161,9 +203,11 @@ require significant work:
 Stormchaser has a solid foundational architecture with a powerful DSL and a
 scalable, event-driven orchestration engine. The core container execution on
 Kubernetes is mature, and the security model (SSO/OPA) is well-integrated.
-The engine supports a rich set of native steps including Webhooks, Email, Lambda,
+The engine supports a rich set of native steps including Webhooks, Email,
+Lambda,
 and WASM. Recent focus has been on improving reliability, observability, and
-advanced data handling (SFS/Artifacts).
+advanced data handling (SFS/Artifacts) alongside significant code quality
+refactoring.
 
 ---
 
@@ -189,18 +233,21 @@ main categories:
 
 #### 2. Advanced Step Types & Integrations
 
-- **Slack/ChatOps Integration:** Approvals and status updates directly via Slack or
+- **Slack/ChatOps Integration:** Approvals and status updates directly via Slack
+or
   MS Teams.
 - **Continuous Verification:** Steps with health metric monitoring and
   automatic rollbacks.
-- **Sensors (Polling):** [Planned] Implementation of background polling mechanisms
+- **Sensors (Polling):** [Planned] Implementation of background polling
+mechanisms
   for external systems (Jira, GitHub, DB) to emit NATS events automatically.
 
 #### 3. Execution Runner Enhancements
 
 - **SFS Optimization:** Direct mounting of Persistent Volume Claims (PVCs) for
   high-performance ReadWriteMany data sharing.
-- **Native WASM on Kubernetes:** Integrate `https://kwasm.sh/` for executing Wasm
+- **Native WASM on Kubernetes:** Integrate `https://kwasm.sh/` for executing
+Wasm
   steps natively within the Kubernetes runner environment.
 
 #### 4. Reliability & DX (Developer Experience)
