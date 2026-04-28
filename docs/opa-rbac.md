@@ -16,43 +16,66 @@ into the policy evaluation under the `input` document:
 
 The `token` is the raw JWT access token provided by the client (if available).
 
-## Example Persona RBAC
+> 💡 **Tip:** The fastest way to learn and debug Rego policies is the
+> [Rego Playground](https://play.openpolicyagent.org/). You can paste your policy
+> there, supply a mock `input` JSON, and instantly see what evaluates to true
+> or false.
 
-An example policy file `docs/opa-rbac-example.rego` has been provided which
-demonstrates how to decode the JWT token inside OPA and apply Role-Based Access
-Control (RBAC) to the different endpoints in the API.
+## 1. Enterprise Data-Driven RBAC
 
-This example assumes you have an Identity Provider (like the bundled Dex) that
-injects a `groups` claim into your OIDC tokens, such as:
+Hardcoding groups into your Rego policy (e.g., `"admin" in token_payload.groups`)
+is fine for simple setups, but in an enterprise environment, identity provider
+(IdP) groups change frequently.
 
-- `admin`: Has full access to the platform.
-- `developer`: Can view and execute workflows, as well as approve manual steps,
-  but cannot modify platform configuration.
-- `operator`: Cannot execute workflows directly, but manages underlying
-  infrastructure like Cron Workflows, Webhooks, and Storage.
-- `security`: Has read-only access to workflow runs, test reports, and manages
-  platform event rules.
+OPA allows you to **decouple policy logic from organizational data**. See the
+`docs/enterprise-rbac/` directory for a complete example.
 
-## Using the Example
+You can provide a `roles.json` file to OPA:
 
-To test this policy locally using Docker Compose, you can mount it into the OPA
-container or replace the default policy:
-
-```bash
-cp docs/opa-rbac-example.rego deploy/opa/policy.rego
+```json
+{
+  "role_mappings": {
+    "admin": ["Okta-Global-Admins", "EntraID-Platform-Owners"],
+    "developer": ["Okta-Engineering", "EntraID-Developers"]
+  }
+}
 ```
 
-Then restart the OPA container:
+And your Rego policy (`policy.rego`) simply checks this data map:
 
-```bash
-docker compose restart opa
+```rego
+user_has_role(role_name) if {
+    allowed_idp_groups := data.role_mappings[role_name]
+    some user_group in token_payload.groups
+    user_group in allowed_idp_groups
+}
 ```
 
-## ABAC (Attribute-Based Access Control)
+When your organization's Okta groups change, you only update the JSON data,
+not the Rego code.
 
-Stormchaser's Orchestration Engine also performs a secondary OPA check right
-before executing a workflow step. At this point, the context is richer, allowing
-for Attribute-Based Access Control. This `EngineOpaContext` is injected as:
+## 2. Policy Unit Testing (`opa test`)
+
+The hardest part of writing Rego is figuring out why a rule evaluated to `false`.
+OPA has a built-in testing framework that makes this easy.
+
+See `docs/enterprise-rbac/policy_test.rego` for an example. You can write tests
+that mock the `input` (like the API path and a fake JWT) and the `data` (like
+the `roles.json` mapping).
+
+Run the tests using the OPA CLI:
+
+```bash
+opa test docs/enterprise-rbac/ -v
+```
+
+This guarantees your authorization logic works before deploying it to the cluster.
+
+## 3. ABAC (Attribute-Based Access Control)
+
+Stormchaser's Orchestration Engine performs a secondary OPA check right before
+executing a workflow step. At this point, the context is richer, allowing for
+Attribute-Based Access Control. This `EngineOpaContext` is injected as:
 
 ```json
 {
@@ -63,10 +86,75 @@ for Attribute-Based Access Control. This `EngineOpaContext` is injected as:
 }
 ```
 
-You can use this richer context to write rules like: *"Only allow
-production-deploy workflows if the initiating_user belongs to the SRE group."*
+### Concrete ABAC Examples
 
-## Compiling Policies to WASM
+**Example 1: Restrict deployment target based on groups.**
+Only allow users in the "ReleaseManagers" group to deploy to production.
+
+```rego
+allow if {
+    # Check if the user is a Release Manager
+    "ReleaseManagers" in token_payload.groups
+
+    # Check if the workflow inputs have 'env' set to 'production'
+    input.inputs.env == "production"
+}
+```
+
+**Example 2: Prevent privileged containers.**
+Deny any workflow attempting to run a Docker container with `privileged: true`
+unless the user is a global admin.
+
+```rego
+deny if {
+    # Is the step a RunContainer step?
+    input.workflow_ast.step_type == "RunContainer"
+
+    # Is privileged set to true in the AST?
+    input.workflow_ast.config.privileged == true
+
+    # Is the user NOT an admin?
+    not user_has_role("admin")
+}
+```
+
+## 4. OPA Cookbook (Helpful Snippets)
+
+Here are some common copy-pasteable snippets for enterprise environments.
+
+**MFA Enforcement**
+Only allow access if the Identity Provider (IdP) confirms MFA was used.
+
+```rego
+allow if {
+    # 'amr' (Authentication Methods References) claim usually contains 'mfa'
+    "mfa" in token_payload.amr
+}
+```
+
+**Email Domain Whitelisting**
+Deny all access if the user's email does not end with your corporate domain.
+
+```rego
+allow if {
+    endswith(token_payload.email, "@yourcompany.com")
+}
+```
+
+**Approval Separation of Duties (SoD)**
+Prevent the person who initiated a run from approving their own manual steps.
+
+```rego
+deny if {
+    # Is this an approval action?
+    endswith(input.path, "/approve")
+
+    # Does the current user's email match the initiating user?
+    token_payload.email == input.resource.initiating_user
+}
+```
+
+## 5. Compiling Policies to WASM
 
 For significantly higher performance (sub-millisecond evaluation times) and to
 run policies completely locally without network hops, Stormchaser's API and
@@ -79,7 +167,7 @@ modules directly.
 > frequently, as it allows policies to be updated without restarting the
 > Stormchaser services.
 
-### 1. Compile the Rego Policy
+### Compile the Rego Policy
 
 You can use the `opa` CLI to compile your `.rego` file into a WASM module. You
 must specify the entrypoint (the rule you want to evaluate) using the `-e` flag.
@@ -92,7 +180,7 @@ opa build -t wasm -e stormchaser/allow docs/opa-rbac-example.rego
 tar -xzf bundle.tar.gz /policy.wasm
 ```
 
-### 2. Configure Stormchaser Servers
+### Configure Stormchaser Servers
 
 Once you have the `policy.wasm` file, you can configure both the
 `stormchaser-api` and `stormchaser-engine` to load it directly into memory at
