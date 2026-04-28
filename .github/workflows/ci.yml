@@ -36,6 +36,8 @@ jobs:
         components: clippy
     - name: Patch ratatui-form
       run: ./scripts/patch-ratatui-form.sh
+    - name: Generate Certificates
+      run: ./scripts/generate-certs.sh
     - name: Cache dependencies
       uses: Swatinem/rust-cache@v2
     - name: Run cargo clippy
@@ -53,6 +55,8 @@ jobs:
     - uses: actions/checkout@v4
     - name: Setup Rust
       uses: dtolnay/rust-toolchain@stable
+      with:
+        components: clippy
     - name: Patch ratatui-form
       run: ./scripts/patch-ratatui-form.sh
     - name: Cache dependencies
@@ -64,13 +68,8 @@ jobs:
     - name: Start Infrastructure (NATS, Postgres)
       run: docker compose up -d --wait nats postgres
     - name: Generate Certificates
-      run: |
-        mkdir -p tests/certs
-        openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout tests/certs/ca.key -out tests/certs/ca.crt -subj "/CN=Stormchaser CA"
-        openssl genrsa -out tests/certs/tls.key 2048
-        openssl req -new -key tests/certs/tls.key -subj "/CN=stormchaser" -out tests/certs/tls.csr
-        openssl x509 -req -in tests/certs/tls.csr -CA tests/certs/ca.crt -CAkey tests/certs/ca.key -CAcreateserial -out tests/certs/tls.crt -days 365
+      run: ./scripts/generate-certs.sh
     - name: Run Database Migrations
       run: sqlx migrate run --database-url postgres://stormchaser:stormchaser@localhost:5432/stormchaser
     - name: Run Tests
-      run: cargo test --workspace
+      run: cargo test --workspace --all-targets --all-features

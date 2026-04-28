@@ -85,24 +85,8 @@ fi
 # 0. Setup patched ratatui-form locally
 "$REPO_ROOT/scripts/patch-ratatui-form.sh"
 
-# 1. Generate TLS Certificates if they don't exist
-if [ ! -f "$CERT_DIR/tls.crt" ]; then
-    echo -e "${BLUE}>>> Generating self-signed TLS certificates for mTLS...${NC}"
-    mkdir -p "$CERT_DIR"
-    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-        -keyout "$CERT_DIR/ca.key" -out "$CERT_DIR/ca.crt" \
-        -subj "/CN=Stormchaser CA"
-
-    openssl genrsa -out "$CERT_DIR/tls.key" 2048
-    openssl req -new -key "$CERT_DIR/tls.key" \
-        -subj "/CN=stormchaser" \
-        -out "$CERT_DIR/tls.csr"
-
-    openssl x509 -req -in "$CERT_DIR/tls.csr" \
-        -CA "$CERT_DIR/ca.crt" -CAkey "$CERT_DIR/ca.key" \
-        -CAcreateserial -out "$CERT_DIR/tls.crt" -days 365
-    echo -e "${GREEN}>>> Certificates generated in $CERT_DIR${NC}"
-fi
+# 1. Generate TLS Certificates
+"$REPO_ROOT/scripts/generate-certs.sh"
 
 # 2. Setup MicroK8s ONLY if in k8s mode
 if [ "$MODE" == "k8s" ]; then
