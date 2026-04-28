@@ -75,7 +75,7 @@ The project is divided into specialized crates to ensure a clear separation of c
 - **Wiring vs. Logic**: `main.rs` and `lib.rs` must act strictly as wiring facades (configuration, DI, route definitions). All business logic MUST reside in sub-modules.
 - **Domain Isolation**: Every new functional domain (e.g., a new integration, backend type, or API category) MUST start in its own file from inception.
 - **Structure First**: When writing new code write method stubs first then incrementally complete the methods.
-- **Idiomatic Rust**: Follow `clippy` recommendations.
+- **Idiomatic Rust**: Follow `clippy` recommendations. Do not arbitrarily disable clippy checks without confirming with the user.
 - **Documentation**: All public modules and non-trivial functions should have doc comments (`///`).
 - **Tests**: Every new feature must include unit tests. Use `tempfile` for any file-system-related tests to ensure isolation.
 - **Long Methods**: Don't create over long methods when they are not necessary, split them down into more focussed smaller methods.
