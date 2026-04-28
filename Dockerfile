@@ -8,12 +8,16 @@ RUN apt-get update && apt-get install -y \
     libgit2-dev \
     zlib1g-dev \
     curl \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 # Copy the entire workspace
 COPY . .
+
+# Run the ratatui-form patch script
+RUN ./scripts/patch-ratatui-form.sh
 
 # Build argument to specify which binary to build
 ARG BINARY=stormchaser-engine

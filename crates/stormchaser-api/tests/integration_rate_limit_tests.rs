@@ -36,7 +36,9 @@ async fn test_rate_limiting() {
         log_backend: None,
     });
 
-    let addr = SocketAddr::from(([127, 0, 0, 99], 12345));
+    let mut rng = rand::thread_rng();
+    let ip_last_octet = rand::Rng::gen_range(&mut rng, 10..250);
+    let addr = SocketAddr::from(([127, 0, 0, ip_last_octet], 12345));
 
     // We configured: per_second(5), burst_size(10)
     // So 11th request should be rate limited if sent immediately.

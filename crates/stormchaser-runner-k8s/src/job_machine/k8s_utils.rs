@@ -49,19 +49,164 @@ pub fn do_extract_pod_metrics_with_reason(pods: Vec<Pod>) -> (Option<i32>, i32, 
     (exit_code, 1 + max_restart_count, failure_reason)
 }
 
-pub fn do_build_job_spec(
-    job_name: &str,
+fn normalize_resource_name(name: &str, prefix: &str) -> String {
+    format!("{}-{}", prefix, name.to_lowercase().replace('_', "-"))
+}
+
+fn map_dsl_env_to_k8s(env: Vec<stormchaser_model::dsl::EnvVar>) -> Vec<K8sEnvVar> {
+    env.into_iter()
+        .map(|v| K8sEnvVar {
+            name: v.name,
+            value: Some(v.value),
+            ..Default::default()
+        })
+        .collect()
+}
+
+fn build_k8s_resources(cpu: Option<String>, memory: Option<String>) -> K8sResources {
+    let mut requests = BTreeMap::new();
+    let mut limits = BTreeMap::new();
+    if let Some(cpu) = cpu {
+        requests.insert("cpu".to_string(), Quantity(cpu.clone()));
+        limits.insert("cpu".to_string(), Quantity(cpu));
+    }
+    if let Some(mem) = memory {
+        requests.insert("memory".to_string(), Quantity(mem.clone()));
+        limits.insert("memory".to_string(), Quantity(mem));
+    }
+    K8sResources {
+        requests: Some(requests),
+        limits: Some(limits),
+        ..Default::default()
+    }
+}
+
+struct StepSpec {
+    image: String,
+    command: Option<Vec<String>>,
+    args: Option<Vec<String>>,
+    env: Vec<K8sEnvVar>,
+    resources: K8sResources,
+    active_deadline: Option<i64>,
+    backoff_limit: Option<i32>,
+    completions: Option<i32>,
+    parallelism: Option<i32>,
+    ttl_seconds_after_finished: Option<i32>,
+    privileged: Option<bool>,
+    node_selector: Option<BTreeMap<String, String>>,
+    service_account_name: Option<String>,
+    restart_policy: Option<String>,
+    extra_labels: Option<BTreeMap<String, String>>,
+    extra_annotations: Option<BTreeMap<String, String>>,
+    storage_mounts: Vec<stormchaser_model::dsl::StorageMount>,
+    secret_mounts: Vec<stormchaser_model::dsl::SecretMount>,
+    config_map_mounts: Vec<stormchaser_model::dsl::ConfigMapMount>,
+}
+
+fn parse_step_spec(metadata: &JobMetadata) -> Result<StepSpec> {
+    match metadata.step_dsl.r#type.as_str() {
+        "RunContainer" => {
+            let spec: stormchaser_model::dsl::CommonContainerSpec =
+                serde_json::from_value(metadata.step_dsl.spec.clone())
+                    .context("Failed to parse RunContainer spec as CommonContainerSpec")?;
+
+            let env = map_dsl_env_to_k8s(spec.env.unwrap_or_default());
+
+            let resources = build_k8s_resources(spec.cpu, spec.memory);
+
+            Ok(StepSpec {
+                image: spec.image,
+                command: spec.command,
+                args: spec.args,
+                env,
+                resources,
+                active_deadline: None,
+                backoff_limit: None,
+                completions: None,
+                parallelism: None,
+                ttl_seconds_after_finished: None,
+                privileged: spec.privileged,
+                node_selector: None,
+                service_account_name: None,
+                restart_policy: None,
+                extra_labels: None,
+                extra_annotations: None,
+                storage_mounts: spec.storage_mounts.unwrap_or_default(),
+                secret_mounts: Vec::new(),
+                config_map_mounts: Vec::new(),
+            })
+        }
+        "RunK8sJob" => {
+            let spec: K8sJobSpec = serde_json::from_value(metadata.step_dsl.spec.clone())
+                .context("Failed to parse RunK8sJob spec as K8sJobSpec")?;
+
+            let env = map_dsl_env_to_k8s(spec.env.unwrap_or_default());
+
+            Ok(StepSpec {
+                image: spec.image,
+                command: spec.command,
+                args: spec.args,
+                env,
+                resources: spec.resources.unwrap_or_default(),
+                active_deadline: spec.active_deadline_seconds,
+                backoff_limit: spec.backoff_limit,
+                completions: spec.completions,
+                parallelism: spec.parallelism,
+                ttl_seconds_after_finished: spec.ttl_seconds_after_finished,
+                privileged: spec.privileged,
+                node_selector: spec.node_selector,
+                service_account_name: spec.service_account_name,
+                restart_policy: spec.restart_policy,
+                extra_labels: spec.labels,
+                extra_annotations: spec.annotations,
+                storage_mounts: spec.storage_mounts.unwrap_or_default(),
+                secret_mounts: spec.secret_mounts.unwrap_or_default(),
+                config_map_mounts: spec.config_map_mounts.unwrap_or_default(),
+            })
+        }
+        _ => {
+            let params = &metadata.step_dsl.params;
+            let image = params.get("image").map(|s| s.to_string()).context(format!(
+                "Missing 'image' for {} step (neither in spec nor params)",
+                metadata.step_dsl.r#type
+            ))?;
+
+            Ok(StepSpec {
+                image,
+                command: params.get("command").map(|c| vec![c.to_string()]),
+                args: params.get("args").map(|a| vec![a.to_string()]),
+                env: Vec::new(),
+                resources: K8sResources::default(),
+                active_deadline: None,
+                backoff_limit: None,
+                completions: None,
+                parallelism: None,
+                ttl_seconds_after_finished: None,
+                privileged: None,
+                node_selector: None,
+                service_account_name: None,
+                restart_policy: None,
+                extra_labels: None,
+                extra_annotations: None,
+                storage_mounts: Vec::new(),
+                secret_mounts: Vec::new(),
+                config_map_mounts: Vec::new(),
+            })
+        }
+    }
+}
+
+fn build_k8s_volumes(
+    agent_image_present: bool,
+    sfs_pvc_name: Option<&str>,
     metadata: &JobMetadata,
-    agent_image: Option<String>,
-    sfs_pvc_name: Option<String>,
-) -> Result<Job> {
-    let mut volume_mounts = Vec::new();
+    step_spec: &StepSpec,
+) -> (Vec<Volume>, Vec<VolumeMount>) {
     let mut volumes = Vec::new();
-    let mut k8s_env = Vec::new();
-    let mut k8s_resources = K8sResources::default();
+    let mut volume_mounts = Vec::new();
 
     // Add empty dir for agent binary
-    if agent_image.is_some() {
+    if agent_image_present {
         volumes.push(Volume {
             name: "storm-agent".to_string(),
             empty_dir: Some(k8s_openapi::api::core::v1::EmptyDirVolumeSource::default()),
@@ -74,333 +219,126 @@ pub fn do_build_job_spec(
         });
     }
 
-    let (
-        image,
-        command,
-        args,
-        active_deadline,
-        backoff_limit,
-        completions,
-        parallelism,
-        ttl_seconds_after_finished,
-        privileged,
-        node_selector,
-        service_account_name,
-        restart_policy,
-        extra_labels,
-        extra_annotations,
-        storage_mounts,
-    ) = match metadata.step_dsl.r#type.as_str() {
-        "RunContainer" => {
-            let spec: stormchaser_model::dsl::CommonContainerSpec =
-                serde_json::from_value(metadata.step_dsl.spec.clone())
-                    .context("Failed to parse RunContainer spec as CommonContainerSpec")?;
-
-            // Map common fields
-            if let Some(env) = spec.env {
-                k8s_env = env
-                    .into_iter()
-                    .map(|v| K8sEnvVar {
-                        name: v.name,
-                        value: Some(v.value),
-                        ..Default::default()
-                    })
-                    .collect();
-            }
-
-            let mut requests = BTreeMap::new();
-            let mut limits = BTreeMap::new();
-            if let Some(cpu) = spec.cpu {
-                requests.insert("cpu".to_string(), Quantity(cpu.clone()));
-                limits.insert("cpu".to_string(), Quantity(cpu));
-            }
-            if let Some(mem) = spec.memory {
-                requests.insert("memory".to_string(), Quantity(mem.clone()));
-                limits.insert("memory".to_string(), Quantity(mem));
-            }
-            k8s_resources = K8sResources {
-                requests: Some(requests),
-                limits: Some(limits),
+    // Handle secret mounts
+    for sm in &step_spec.secret_mounts {
+        let vol_name = normalize_resource_name(&sm.name, "sec");
+        volumes.push(Volume {
+            name: vol_name.clone(),
+            secret: Some(SecretVolumeSource {
+                secret_name: Some(sm.name.clone()),
                 ..Default::default()
-            };
-
-            (
-                spec.image,
-                spec.command,
-                spec.args,
-                None,
-                None,
-                None,
-                None,
-                None,
-                spec.privileged,
-                None,
-                None,
-                None,
-                None,
-                None,
-                spec.storage_mounts,
-            )
-        }
-        "RunK8sJob" => {
-            let spec: K8sJobSpec = serde_json::from_value(metadata.step_dsl.spec.clone())
-                .context("Failed to parse RunK8sJob spec as K8sJobSpec")?;
-
-            // Handle secret mounts
-            if let Some(mounts) = spec.secret_mounts {
-                for sm in mounts {
-                    let vol_name = format!("sec-{}", sm.name.to_lowercase().replace('_', "-"));
-                    volumes.push(Volume {
-                        name: vol_name.clone(),
-                        secret: Some(SecretVolumeSource {
-                            secret_name: Some(sm.name),
-                            ..Default::default()
-                        }),
-                        ..Default::default()
-                    });
-                    volume_mounts.push(VolumeMount {
-                        name: vol_name,
-                        mount_path: sm.mount_path,
-                        ..Default::default()
-                    });
-                }
-            }
-
-            // Handle config map mounts
-            if let Some(mounts) = spec.config_map_mounts {
-                for cm in mounts {
-                    let vol_name = format!("cm-{}", cm.name.to_lowercase().replace('_', "-"));
-                    volumes.push(Volume {
-                        name: vol_name.clone(),
-                        config_map: Some(ConfigMapVolumeSource {
-                            name: cm.name,
-                            ..Default::default()
-                        }),
-                        ..Default::default()
-                    });
-                    volume_mounts.push(VolumeMount {
-                        name: vol_name,
-                        mount_path: cm.mount_path,
-                        ..Default::default()
-                    });
-                }
-            }
-
-            // Convert env
-            if let Some(env) = spec.env {
-                k8s_env = env
-                    .into_iter()
-                    .map(|v| K8sEnvVar {
-                        name: v.name,
-                        value: Some(v.value),
-                        ..Default::default()
-                    })
-                    .collect();
-            }
-
-            // Convert resources
-            if let Some(r) = spec.resources {
-                k8s_resources = r;
-            }
-
-            (
-                spec.image,
-                spec.command,
-                spec.args,
-                spec.active_deadline_seconds,
-                spec.backoff_limit,
-                spec.completions,
-                spec.parallelism,
-                spec.ttl_seconds_after_finished,
-                spec.privileged,
-                spec.node_selector,
-                spec.service_account_name,
-                spec.restart_policy,
-                spec.labels,
-                spec.annotations,
-                spec.storage_mounts,
-            )
-        }
-        _ => {
-            // Fallback for unknown types or legacy RunContainer behavior
-            let params = &metadata.step_dsl.params;
-            let image = params.get("image").map(|s| s.to_string()).context(format!(
-                "Missing 'image' for {} step (neither in spec nor params)",
-                metadata.step_dsl.r#type
-            ))?;
-
-            (
-                image,
-                params.get("command").map(|c| vec![c.to_string()]),
-                params.get("args").map(|a| vec![a.to_string()]),
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
-        }
-    };
-
-    // Handle storage mounts
-    tracing::info!("do_build_job_spec agent_image: {:?}", agent_image);
-    let mut init_containers = Vec::new();
-    if let Some(agent_img) = &agent_image {
-        init_containers.push(Container {
-            name: "inject-agent".to_string(),
-            image: Some(agent_img.clone()),
-            command: Some(vec!["/bin/sh".to_string(), "-c".to_string(), "cp /usr/local/bin/stormchaser-agent /stormchaser/agent/stormchaser-agent && chmod +x /stormchaser/agent/stormchaser-agent".to_string()]),
-            volume_mounts: Some(vec![VolumeMount {
-                name: "storm-agent".to_string(),
-                mount_path: "/stormchaser/agent".to_string(),
-                ..Default::default()
-            }]),
+            }),
+            ..Default::default()
+        });
+        volume_mounts.push(VolumeMount {
+            name: vol_name,
+            mount_path: sm.mount_path.clone(),
             ..Default::default()
         });
     }
-    let mut storage_names = Vec::new();
 
-    if let Some(ref mounts) = storage_mounts {
-        for mount in mounts {
-            storage_names.push(mount.name.clone());
-            let vol_name = format!("sfs-{}", mount.name.to_lowercase().replace('_', "-"));
-
-            let (volume_source, sub_path) = if let Some(pvc) = &sfs_pvc_name {
-                (
-                    Volume {
-                        name: vol_name.clone(),
-                        persistent_volume_claim: Some(
-                            k8s_openapi::api::core::v1::PersistentVolumeClaimVolumeSource {
-                                claim_name: pvc.clone(),
-                                ..Default::default()
-                            },
-                        ),
-                        ..Default::default()
-                    },
-                    Some(format!("{}/{}", metadata.run_id, mount.name)),
-                )
-            } else {
-                (
-                    Volume {
-                        name: vol_name.clone(),
-                        empty_dir: Some(k8s_openapi::api::core::v1::EmptyDirVolumeSource::default()),
-                        ..Default::default()
-                    },
-                    None,
-                )
-            };
-
-            volumes.push(volume_source);
-
-            volume_mounts.push(VolumeMount {
-                name: vol_name.clone(),
-                mount_path: mount.mount_path.clone(),
-                read_only: mount.read_only,
-                sub_path: sub_path.clone(),
+    // Handle config map mounts
+    for cm in &step_spec.config_map_mounts {
+        let vol_name = normalize_resource_name(&cm.name, "cm");
+        volumes.push(Volume {
+            name: vol_name.clone(),
+            config_map: Some(ConfigMapVolumeSource {
+                name: cm.name.clone(),
                 ..Default::default()
-            });
+            }),
+            ..Default::default()
+        });
+        volume_mounts.push(VolumeMount {
+            name: vol_name,
+            mount_path: cm.mount_path.clone(),
+            ..Default::default()
+        });
+    }
 
-            // Pass URLs via env
-            if let Some(storage_data) = &metadata.storage {
-                if let Some(urls) = storage_data.get(&mount.name) {
-                    if sfs_pvc_name.is_none() {
-                        if let Some(put_url) = urls.get("put_url").and_then(|u| u.as_str()) {
-                            k8s_env.push(K8sEnvVar {
-                                name: format!("STORMCHASER_PUT_URL_{}", mount.name),
-                                value: Some(put_url.to_string()),
-                                ..Default::default()
-                            });
-                            k8s_env.push(K8sEnvVar {
-                                name: format!("STORMCHASER_MOUNT_PATH_{}", mount.name),
-                                value: Some(mount.mount_path.clone()),
-                                ..Default::default()
-                            });
-                        }
-                    }
+    // Handle storage mounts
+    for mount in &step_spec.storage_mounts {
+        let vol_name = normalize_resource_name(&mount.name, "sfs");
 
-                    if let Some(arts) = urls.get("artifacts") {
+        let (volume, sub_path) = if let Some(pvc) = sfs_pvc_name {
+            (
+                Volume {
+                    name: vol_name.clone(),
+                    persistent_volume_claim: Some(
+                        k8s_openapi::api::core::v1::PersistentVolumeClaimVolumeSource {
+                            claim_name: pvc.to_string(),
+                            ..Default::default()
+                        },
+                    ),
+                    ..Default::default()
+                },
+                Some(format!("{}/{}", metadata.run_id, mount.name)),
+            )
+        } else {
+            (
+                Volume {
+                    name: vol_name.clone(),
+                    empty_dir: Some(k8s_openapi::api::core::v1::EmptyDirVolumeSource::default()),
+                    ..Default::default()
+                },
+                None,
+            )
+        };
+
+        volumes.push(volume);
+        volume_mounts.push(VolumeMount {
+            name: vol_name,
+            mount_path: mount.mount_path.clone(),
+            read_only: mount.read_only,
+            sub_path,
+            ..Default::default()
+        });
+    }
+
+    (volumes, volume_mounts)
+}
+
+fn build_k8s_env_vars(
+    metadata: &JobMetadata,
+    step_spec: &StepSpec,
+    sfs_pvc_name: Option<&str>,
+) -> Vec<K8sEnvVar> {
+    let mut k8s_env = step_spec.env.clone();
+
+    // Storage URLs
+    for mount in &step_spec.storage_mounts {
+        if let Some(storage_data) = &metadata.storage {
+            if let Some(urls) = storage_data.get(&mount.name) {
+                if sfs_pvc_name.is_none() {
+                    if let Some(put_url) = urls.get("put_url").and_then(|u| u.as_str()) {
                         k8s_env.push(K8sEnvVar {
-                            name: format!("STORMCHASER_ARTIFACTS_{}", mount.name),
-                            value: Some(arts.to_string()),
+                            name: format!("STORMCHASER_PUT_URL_{}", mount.name),
+                            value: Some(put_url.to_string()),
+                            ..Default::default()
+                        });
+                        k8s_env.push(K8sEnvVar {
+                            name: format!("STORMCHASER_MOUNT_PATH_{}", mount.name),
+                            value: Some(mount.mount_path.clone()),
                             ..Default::default()
                         });
                     }
+                }
 
-                    let has_state = urls.get("expected_hash").and_then(|h| h.as_str()).is_some();
-
-                    if has_state && sfs_pvc_name.is_none() {
-                        if let Some(get_url) = urls.get("get_url").and_then(|u| u.as_str()) {
-                            init_containers.push(Container {
-                                name: format!("unpark-{}", mount.name.to_lowercase().replace('_', "-")),
-                                image: Some(agent_image.clone().unwrap_or_else(|| "alpine:latest".to_string())),
-                                command: Some(vec!["/bin/sh".to_string()]),
-                                args: Some(vec![
-                                    "-c".to_string(),
-                                    format!(
-                                        "mkdir -p \"{}\" && curl -sL \"{}\" | tar -xz -C \"{}\" || true",
-                                        mount.mount_path, get_url, mount.mount_path
-                                    ),
-                                ]),
-                                volume_mounts: Some(vec![VolumeMount {
-                                    name: vol_name.clone(),
-                                    mount_path: mount.mount_path.clone(),
-                                    sub_path: sub_path.clone(),
-                                    ..Default::default()
-                                }]),
-                                ..Default::default()
-                            });
-                        }
-                    } else if let Some(provision) = urls.get("provision").and_then(|p| p.as_array())
-                    {
-                        let mut prov_idx = 0;
-                        for prov in provision {
-                            if let (Some(url), Some(dest)) = (
-                                prov.get("url").and_then(|u| u.as_str()),
-                                prov.get("destination").and_then(|d| d.as_str()),
-                            ) {
-                                let mut full_dest = std::path::PathBuf::from(&mount.mount_path);
-                                if dest != "/" && !dest.is_empty() {
-                                    let relative_dest =
-                                        dest.trim_start_matches('/').replace('/', "");
-                                    full_dest.push(relative_dest);
-                                }
-                                let dest_str = full_dest.to_str().unwrap_or(&mount.mount_path);
-
-                                init_containers.push(Container {
-                                    name: format!("prov-{}-{}", mount.name.to_lowercase().replace('_', "-"), prov_idx),
-                                    image: Some(agent_image.clone().unwrap_or_else(|| "alpine:latest".to_string())),
-                                    command: Some(vec!["/bin/sh".to_string()]),
-                                    args: Some(vec![
-                                        "-c".to_string(),
-                                        format!(
-                                            "if [ -z \"$(ls -A \\\"{}\\\" 2>/dev/null)\" ]; then mkdir -p \"{}\" && curl -sL \"{}\" | tar -xz -C \"{}\" || true; fi",
-                                            dest_str, dest_str, url, dest_str
-                                        ),
-                                    ]),
-                                    volume_mounts: Some(vec![VolumeMount {
-                                        name: vol_name.clone(),
-                                        mount_path: mount.mount_path.clone(),
-                                        sub_path: sub_path.clone(),
-                                        ..Default::default()
-                                    }]),
-                                    ..Default::default()
-                                });
-                                prov_idx += 1;
-                            }
-                        }
-                    }
+                if let Some(arts) = urls.get("artifacts") {
+                    k8s_env.push(K8sEnvVar {
+                        name: format!("STORMCHASER_ARTIFACTS_{}", mount.name),
+                        value: Some(arts.to_string()),
+                        ..Default::default()
+                    });
                 }
             }
         }
     }
 
+    let storage_names: Vec<String> = step_spec
+        .storage_mounts
+        .iter()
+        .map(|m| m.name.clone())
+        .collect();
     if !storage_names.is_empty() {
         k8s_env.push(K8sEnvVar {
             name: "STORMCHASER_STORAGES".to_string(),
@@ -424,117 +362,224 @@ pub fn do_build_job_spec(
         }
     }
 
-    let (final_image, final_command, final_args) = {
-        let mut original_cmd = Vec::new();
-        if let Some(cmd) = &command {
-            original_cmd.extend(cmd.clone());
-        }
-        if let Some(a) = &args {
-            original_cmd.extend(a.clone());
-        }
+    k8s_env
+}
 
-        let step_name = &metadata.step_dsl.name;
+fn wrap_main_command(
+    step_spec: &StepSpec,
+    metadata: &JobMetadata,
+    agent_present: bool,
+) -> (String, Option<Vec<String>>, Option<Vec<String>>) {
+    let mut original_cmd = Vec::new();
+    if let Some(cmd) = &step_spec.command {
+        original_cmd.extend(cmd.clone());
+    }
+    if let Some(a) = &step_spec.args {
+        original_cmd.extend(a.clone());
+    }
 
-        let needs_agent = agent_image.is_some()
-            && (!storage_names.is_empty() || !metadata.step_dsl.reports.is_empty());
+    let step_name = &metadata.step_dsl.name;
+    let needs_agent = agent_present
+        && (!step_spec.storage_mounts.is_empty() || !metadata.step_dsl.reports.is_empty());
 
-        let (cmd_to_use, args_to_use) = if !original_cmd.is_empty() {
-            let wrapped_script = if needs_agent {
-                let mut parking_urls = serde_json::Map::new();
-                let mut mount_paths = serde_json::Map::new();
-                let mut artifact_urls = serde_json::Map::new();
+    if original_cmd.is_empty() {
+        return (
+            step_spec.image.clone(),
+            step_spec.command.clone(),
+            step_spec.args.clone(),
+        );
+    }
 
-                if let Some(storage_data) = &metadata.storage {
-                    for (name, urls) in storage_data {
-                        if urls.get("put_url").is_some() {
-                            parking_urls.insert(name.clone(), urls.clone());
-                        }
-                        if let Some(mount) = storage_mounts
-                            .as_ref()
-                            .and_then(|m| m.iter().find(|x| x.name == *name))
-                        {
-                            mount_paths.insert(
-                                name.clone(),
-                                serde_json::Value::String(mount.mount_path.clone()),
-                            );
-                        }
-                        if let Some(artifacts) = urls.get("artifacts").and_then(|a| a.as_object()) {
-                            for (art_name, art_data) in artifacts {
-                                artifact_urls.insert(art_name.clone(), art_data.clone());
-                            }
-                        }
+    let wrapped_script = if needs_agent {
+        let mut parking_urls = serde_json::Map::new();
+        let mut mount_paths = serde_json::Map::new();
+        let mut artifact_urls = serde_json::Map::new();
+
+        if let Some(storage_data) = &metadata.storage {
+            for (name, urls) in storage_data {
+                if urls.get("put_url").is_some() {
+                    parking_urls.insert(name.clone(), urls.clone());
+                }
+                if let Some(mount) = step_spec.storage_mounts.iter().find(|x| x.name == *name) {
+                    mount_paths.insert(
+                        name.clone(),
+                        serde_json::Value::String(mount.mount_path.clone()),
+                    );
+                }
+                if let Some(artifacts) = urls.get("artifacts").and_then(|a| a.as_object()) {
+                    for (art_name, art_data) in artifacts {
+                        artifact_urls.insert(art_name.clone(), art_data.clone());
                     }
                 }
+            }
+        }
 
-                let parking_urls_json =
-                    serde_json::to_string(&parking_urls).unwrap_or_else(|_| "{}".to_string());
-                let mount_paths_json =
-                    serde_json::to_string(&mount_paths).unwrap_or_else(|_| "{}".to_string());
-                let artifact_urls_json =
-                    serde_json::to_string(&artifact_urls).unwrap_or_else(|_| "{}".to_string());
+        let parking_urls_json =
+            serde_json::to_string(&parking_urls).unwrap_or_else(|_| "{}".to_string());
+        let mount_paths_json =
+            serde_json::to_string(&mount_paths).unwrap_or_else(|_| "{}".to_string());
+        let artifact_urls_json =
+            serde_json::to_string(&artifact_urls).unwrap_or_else(|_| "{}".to_string());
 
-                let mut agent_cmd = format!(
-                    "/stormchaser/agent/stormchaser-agent run --parking-urls '{}' --mount-paths '{}'",
-                    parking_urls_json, mount_paths_json
-                );
+        let mut agent_cmd = format!(
+            "/stormchaser/agent/stormchaser-agent run --parking-urls '{}' --mount-paths '{}'",
+            parking_urls_json, mount_paths_json
+        );
 
-                if !artifact_urls.is_empty() {
-                    agent_cmd.push_str(&format!(" --artifact-urls '{}'", artifact_urls_json));
-                }
+        if !artifact_urls.is_empty() {
+            agent_cmd.push_str(&format!(" --artifact-urls '{}'", artifact_urls_json));
+        }
 
-                format!(
-                    "echo '========================================'; \
-                     echo 'Step Metadata: {}'; \
-                     echo \"Command: $@\"; \
-                     echo '========================================'; \
-                     {} -- \"$@\"; \
-                     RET=$?; \
-                     echo '========================================'; \
-                     echo 'Completion Status: '$RET; \
-                     echo '========================================'; \
-                     exit $RET",
-                    step_name, agent_cmd
-                )
-            } else {
-                format!(
-                    "echo '========================================'; \
-                     echo 'Step Metadata: {}'; \
-                     echo \"Command: $@\"; \
-                     echo '========================================'; \
-                     \"$@\"; \
-                     RET=$?; \
-                     echo '========================================'; \
-                     echo 'Completion Status: '$RET; \
-                     echo '========================================'; \
-                     exit $RET",
-                    step_name
-                )
-            };
-
-            let mut new_args = vec!["-c".to_string(), wrapped_script, "--".to_string()];
-            new_args.extend(original_cmd);
-
-            (Some(vec!["/bin/sh".to_string()]), Some(new_args))
-        } else {
-            (command, args)
-        };
-
-        (image, cmd_to_use, args_to_use)
+        format!(
+            "echo '========================================'; \
+             echo 'Step Metadata: {}'; \
+             echo \"Command: $@\"; \
+             echo '========================================'; \
+             {} -- \"$@\"; \
+             RET=$?; \
+             echo '========================================'; \
+             echo 'Completion Status: '$RET; \
+             echo '========================================'; \
+             exit $RET",
+            step_name, agent_cmd
+        )
+    } else {
+        format!(
+            "echo '========================================'; \
+             echo 'Step Metadata: {}'; \
+             echo \"Command: $@\"; \
+             echo '========================================'; \
+             \"$@\"; \
+             RET=$?; \
+             echo '========================================'; \
+             echo 'Completion Status: '$RET; \
+             echo '========================================'; \
+             exit $RET",
+            step_name
+        )
     };
 
-    let mut container_volume_mounts = volume_mounts.clone();
-    if agent_image.is_some() && !storage_names.is_empty() {
-        // Check if already mounted (might have been added via spec)
-        if !container_volume_mounts
-            .iter()
-            .any(|m| m.mount_path == "/stormchaser/agent")
-        {
-            container_volume_mounts.push(VolumeMount {
+    let mut new_args = vec!["-c".to_string(), wrapped_script, "--".to_string()];
+    new_args.extend(original_cmd);
+
+    (
+        step_spec.image.clone(),
+        Some(vec!["/bin/sh".to_string()]),
+        Some(new_args),
+    )
+}
+
+fn build_k8s_containers(
+    agent_image: Option<String>,
+    sfs_pvc_name: Option<&str>,
+    metadata: &JobMetadata,
+    step_spec: &StepSpec,
+    k8s_env: Vec<K8sEnvVar>,
+    volume_mounts: Vec<VolumeMount>,
+) -> (Container, Vec<Container>) {
+    let mut init_containers = Vec::new();
+
+    // Agent injection
+    if let Some(agent_img) = &agent_image {
+        init_containers.push(Container {
+            name: "inject-agent".to_string(),
+            image: Some(agent_img.clone()),
+            command: Some(vec!["/bin/sh".to_string(), "-c".to_string(), "cp /usr/local/bin/stormchaser-agent /stormchaser/agent/stormchaser-agent && chmod +x /stormchaser/agent/stormchaser-agent".to_string()]),
+            volume_mounts: Some(vec![VolumeMount {
                 name: "storm-agent".to_string(),
                 mount_path: "/stormchaser/agent".to_string(),
                 ..Default::default()
-            });
+            }]),
+            ..Default::default()
+        });
+    }
+
+    // Storage unparking/provisioning
+    for mount in &step_spec.storage_mounts {
+        let vol_name = normalize_resource_name(&mount.name, "sfs");
+        let sub_path = sfs_pvc_name.map(|_| format!("{}/{}", metadata.run_id, mount.name));
+
+        if let Some(storage_data) = &metadata.storage {
+            if let Some(urls) = storage_data.get(&mount.name) {
+                let has_state = urls.get("expected_hash").and_then(|h| h.as_str()).is_some();
+
+                if has_state && sfs_pvc_name.is_none() {
+                    if let Some(get_url) = urls.get("get_url").and_then(|u| u.as_str()) {
+                        init_containers.push(Container {
+                            name: normalize_resource_name(&mount.name, "unpark"),
+                            image: Some(agent_image.clone().unwrap_or_else(|| "alpine:latest".to_string())),
+                            command: Some(vec!["/bin/sh".to_string()]),
+                            args: Some(vec![
+                                "-c".to_string(),
+                                format!(
+                                    "mkdir -p \"{}\" && curl -sL \"{}\" | tar -xz -C \"{}\" || true",
+                                    mount.mount_path, get_url, mount.mount_path
+                                ),
+                            ]),
+                            volume_mounts: Some(vec![VolumeMount {
+                                name: vol_name.clone(),
+                                mount_path: mount.mount_path.clone(),
+                                sub_path: sub_path.clone(),
+                                ..Default::default()
+                            }]),
+                            ..Default::default()
+                        });
+                    }
+                } else if let Some(provision) = urls.get("provision").and_then(|p| p.as_array()) {
+                    for (prov_idx, prov) in provision.iter().enumerate() {
+                        if let (Some(url), Some(dest)) = (
+                            prov.get("url").and_then(|u| u.as_str()),
+                            prov.get("destination").and_then(|d| d.as_str()),
+                        ) {
+                            let mut full_dest = std::path::PathBuf::from(&mount.mount_path);
+                            if dest != "/" && !dest.is_empty() {
+                                let relative_dest = dest.trim_start_matches('/').replace('/', "");
+                                full_dest.push(relative_dest);
+                            }
+                            let dest_str = full_dest.to_str().unwrap_or(&mount.mount_path);
+
+                            init_containers.push(Container {
+                                name: format!("{}-{}", normalize_resource_name(&mount.name, "prov"), prov_idx),
+                                image: Some(agent_image.clone().unwrap_or_else(|| "alpine:latest".to_string())),
+                                command: Some(vec!["/bin/sh".to_string()]),
+                                args: Some(vec![
+                                    "-c".to_string(),
+                                    format!(
+                                        "if [ -z \"$(ls -A \\\"{}\\\" 2>/dev/null)\" ]; then mkdir -p \"{}\" && curl -sL \"{}\" | tar -xz -C \"{}\" || true; fi",
+                                        dest_str, dest_str, url, dest_str
+                                    ),
+                                ]),
+                                volume_mounts: Some(vec![VolumeMount {
+                                    name: vol_name.clone(),
+                                    mount_path: mount.mount_path.clone(),
+                                    sub_path: sub_path.clone(),
+                                    ..Default::default()
+                                }]),
+                                ..Default::default()
+                            });
+                        }
+                    }
+                }
+            }
         }
+    }
+
+    // Wrap script
+    let (final_image, final_command, final_args) =
+        wrap_main_command(step_spec, metadata, agent_image.is_some());
+
+    let mut container_volume_mounts = volume_mounts;
+    if agent_image.is_some()
+        && !step_spec.storage_mounts.is_empty()
+        && !container_volume_mounts
+            .iter()
+            .any(|m| m.mount_path == "/stormchaser/agent")
+    {
+        container_volume_mounts.push(VolumeMount {
+            name: "storm-agent".to_string(),
+            mount_path: "/stormchaser/agent".to_string(),
+            ..Default::default()
+        });
     }
 
     let container = Container {
@@ -548,16 +593,28 @@ pub fn do_build_job_spec(
         command: final_command,
         args: final_args,
         env: Some(k8s_env),
-        resources: Some(k8s_resources),
+        resources: Some(step_spec.resources.clone()),
         volume_mounts: Some(container_volume_mounts),
-        security_context: privileged.map(|p| k8s_openapi::api::core::v1::SecurityContext {
-            privileged: Some(p),
-            ..Default::default()
+        security_context: step_spec.privileged.map(|p| {
+            k8s_openapi::api::core::v1::SecurityContext {
+                privileged: Some(p),
+                ..Default::default()
+            }
         }),
         ..Default::default()
     };
 
-    let pod_template = PodTemplateSpec {
+    (container, init_containers)
+}
+
+fn build_k8s_pod_spec(
+    container: Container,
+    init_containers: Vec<Container>,
+    volumes: Vec<Volume>,
+    metadata: &JobMetadata,
+    step_spec: &StepSpec,
+) -> PodTemplateSpec {
+    PodTemplateSpec {
         metadata: Some(ObjectMeta {
             labels: Some(BTreeMap::from([
                 ("managed-by".to_string(), "stormchaser".to_string()),
@@ -575,14 +632,53 @@ pub fn do_build_job_spec(
         spec: Some(PodSpec {
             containers: vec![container],
             init_containers: Some(init_containers),
-            restart_policy: Some(restart_policy.unwrap_or_else(|| "OnFailure".to_string())),
+            restart_policy: Some(
+                step_spec
+                    .restart_policy
+                    .clone()
+                    .unwrap_or_else(|| "OnFailure".to_string()),
+            ),
             volumes: Some(volumes),
-            node_selector: node_selector.map(|ns| ns.into_iter().collect()),
-            service_account_name,
+            node_selector: step_spec
+                .node_selector
+                .clone()
+                .map(|ns| ns.into_iter().collect()),
+            service_account_name: step_spec.service_account_name.clone(),
             ..Default::default()
         }),
-    };
+    }
+}
 
+pub fn do_build_job_spec(
+    job_name: &str,
+    metadata: &JobMetadata,
+    agent_image: Option<String>,
+    sfs_pvc_name: Option<String>,
+) -> Result<Job> {
+    let step_spec = parse_step_spec(metadata)?;
+
+    let (volumes, volume_mounts) = build_k8s_volumes(
+        agent_image.is_some(),
+        sfs_pvc_name.as_deref(),
+        metadata,
+        &step_spec,
+    );
+
+    let k8s_env = build_k8s_env_vars(metadata, &step_spec, sfs_pvc_name.as_deref());
+
+    let (container, init_containers) = build_k8s_containers(
+        agent_image,
+        sfs_pvc_name.as_deref(),
+        metadata,
+        &step_spec,
+        k8s_env,
+        volume_mounts,
+    );
+
+    let pod_template =
+        build_k8s_pod_spec(container, init_containers, volumes, metadata, &step_spec);
+
+    // Job Labels
     let mut labels = BTreeMap::from([
         ("managed-by".to_string(), "stormchaser".to_string()),
         (
@@ -594,10 +690,11 @@ pub fn do_build_job_spec(
             metadata.step_id.to_string(),
         ),
     ]);
-    if let Some(el) = extra_labels {
+    if let Some(el) = step_spec.extra_labels {
         labels.extend(el);
     }
 
+    // Job Annotations
     let step_dsl_json = serde_json::to_string(&metadata.step_dsl).unwrap_or_default();
     let step_dsl_val = if let Some(key) = &metadata.encryption_key {
         crypto::encrypt_state(&step_dsl_json, key)?
@@ -612,7 +709,7 @@ pub fn do_build_job_spec(
         ),
         ("stormchaser.io/step-dsl".to_string(), step_dsl_val),
     ]);
-    if let Some(ea) = extra_annotations {
+    if let Some(ea) = step_spec.extra_annotations {
         annotations.extend(ea);
     }
 
@@ -632,7 +729,7 @@ pub fn do_build_job_spec(
         },
         spec: Some(JobSpec {
             template: pod_template,
-            backoff_limit: Some(backoff_limit.unwrap_or_else(|| {
+            backoff_limit: Some(step_spec.backoff_limit.unwrap_or_else(|| {
                 metadata
                     .step_dsl
                     .retry
@@ -640,10 +737,10 @@ pub fn do_build_job_spec(
                     .map(|r| r.count as i32)
                     .unwrap_or(0)
             })),
-            completions: Some(completions.unwrap_or(1)),
-            parallelism: Some(parallelism.unwrap_or(1)),
-            active_deadline_seconds: active_deadline,
-            ttl_seconds_after_finished: Some(ttl_seconds_after_finished.unwrap_or(3600)),
+            completions: Some(step_spec.completions.unwrap_or(1)),
+            parallelism: Some(step_spec.parallelism.unwrap_or(1)),
+            active_deadline_seconds: step_spec.active_deadline,
+            ttl_seconds_after_finished: Some(step_spec.ttl_seconds_after_finished.unwrap_or(3600)),
             ..Default::default()
         }),
         ..Default::default()
@@ -854,5 +951,46 @@ mod tests {
             .iter()
             .find(|c| c.name == "unpark-workspace");
         assert!(unpark_container.is_none());
+    }
+
+    #[test]
+    fn test_normalize_resource_name() {
+        assert_eq!(
+            normalize_resource_name("My_Resource", "prefix"),
+            "prefix-my-resource"
+        );
+        assert_eq!(
+            normalize_resource_name("Another-Test", "job"),
+            "job-another-test"
+        );
+    }
+
+    #[test]
+    fn test_map_dsl_env_to_k8s() {
+        let dsl_env = vec![
+            stormchaser_model::dsl::EnvVar {
+                name: "KEY1".to_string(),
+                value: "VAL1".to_string(),
+            },
+            stormchaser_model::dsl::EnvVar {
+                name: "KEY2".to_string(),
+                value: "VAL2".to_string(),
+            },
+        ];
+        let k8s_env = map_dsl_env_to_k8s(dsl_env);
+        assert_eq!(k8s_env.len(), 2);
+        assert_eq!(k8s_env[0].name, "KEY1");
+        assert_eq!(k8s_env[0].value, Some("VAL1".to_string()));
+    }
+
+    #[test]
+    fn test_build_k8s_resources() {
+        let res = build_k8s_resources(Some("500m".to_string()), Some("1Gi".to_string()));
+        let requests = res.requests.unwrap();
+        let limits = res.limits.unwrap();
+        assert_eq!(requests["cpu"].0, "500m");
+        assert_eq!(requests["memory"].0, "1Gi");
+        assert_eq!(limits["cpu"].0, "500m");
+        assert_eq!(limits["memory"].0, "1Gi");
     }
 }

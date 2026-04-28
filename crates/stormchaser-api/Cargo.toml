@@ -61,6 +61,7 @@ utoipa-swagger-ui = { version = "8.0", features = ["axum"] }
 bytes = "1.11.1"
 
 [dev-dependencies]
+rand = "0.8"
 wiremock = "0.6"
 tower = { version = "0.5", features = ["util"] }
 mime = "0.3"
