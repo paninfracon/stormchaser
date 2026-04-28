@@ -1,0 +1,51 @@
+workflow "Approval and Wait Workflow" {
+  version     = "1.0"
+  description = "A workflow demonstrating Human-in-the-loop Approval and Event Waiting"
+
+  step "echo_start" "RunContainer" {
+    spec {
+      image   = "alpine"
+      command = ["echo", "Starting workflow..."]
+    }
+    next = ["manual_approval"]
+  }
+
+  step "manual_approval" "Approval" {
+    spec {
+      approvers = ["group:admins", "user:alice"]
+      inputs = [
+        {
+          name    = "deploy_env"
+          type    = "string"
+          options = ["staging", "production"]
+          default = "staging"
+        }
+      ]
+      timeout = "24h"
+    }
+    next = ["echo_approved", "wait_for_github"]
+  }
+
+  step "echo_approved" "RunContainer" {
+    spec {
+      image   = "alpine"
+      command = ["echo", "Approved! Deploying to ${steps.manual_approval.outputs.deploy_env}"]
+    }
+  }
+
+  step "wait_for_github" "Wait" {
+    spec {
+      correlation_key   = "github.commit.sha"
+      correlation_value = "expected_sha_12345"
+      timeout           = "1h"
+    }
+    next = ["echo_event_received"]
+  }
+
+  step "echo_event_received" "RunContainer" {
+    spec {
+      image   = "alpine"
+      command = ["echo", "Received GitHub event!"]
+    }
+  }
+}

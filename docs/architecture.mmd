@@ -1,0 +1,63 @@
+graph TD
+    subgraph "External Systems"
+        Git[Git Repository<br/>DSL + SOPS Secrets]
+        Webhooks[External Webhooks]
+        Users[CLI / Operators]
+        OIDC[OIDC Provider<br/>Dex / Keycloak]
+        Vault[HashiCorp Vault<br/>Secrets Management]
+        SMTP[SMTP Server<br/>Email Notifications]
+        Lambda[AWS Lambda]
+    end
+
+    subgraph "Control Plane (Rust)"
+        API[API Server]
+        Engine[Orchestration Engine<br/>Distributed Controller Cluster]
+        DB[(Postgres<br/>State + Audit + Cache)]
+        OPA[Open Policy Agent<br/>Authz Policy]
+    end
+
+    subgraph "Event Mesh"
+        NATS{NATS JetStream<br/>Events + Task Queues}
+    end
+
+    subgraph "Execution Plane"
+        subgraph "Runners"
+            K8s[K8s Runner]
+            Docker[Docker Runner]
+        end
+        Agent[Stormchaser Agent<br/>SFS + Artifacts]
+    end
+
+    subgraph "Storage & Observability"
+        S3[(S3 / GCS / Azure<br/>SFS + Artifacts)]
+        Registry[(OCI / JFrog<br/>Artifacts)]
+        Logs[(Loki / Elasticsearch<br/>Log Storage)]
+    end
+
+    %% Flow and Interactions
+    Users -->|Schedule / View Runs| API
+    Webhooks -->|Inbound Events| API
+    API <-->|Auth| OIDC
+    API <-->|Persistence| DB
+    API -->|Publish Events| NATS
+    API <-->|Query Logs| Logs
+
+    Engine <-->|Process State| DB
+    Engine <-->|Subscribe/Publish| NATS
+    Engine -->|Authorize| OPA
+    Engine -->|Fetch Secrets| Vault
+    Engine -->|Sync| Git
+    Engine -->|Notify| SMTP
+    Engine -->|Invoke| Lambda
+    Engine -->|Pre-signed URLs| S3
+
+    NATS <-->|Dispatch Steps / Report Results| K8s
+    NATS <-->|Dispatch Steps / Report Results| Docker
+
+    K8s --- Agent
+    Docker --- Agent
+
+    Agent <-->|Park / Unpark| S3
+    Agent -->|Upload Artifacts| Registry
+    K8s -.->|Push Logs| Logs
+    Docker -.->|Push Logs| Logs

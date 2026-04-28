@@ -1,0 +1,32 @@
+workflow "parallel_test" {
+  description = "A simple parallel workflow with a join"
+
+  steps {
+    step "start" "RunContainer" {
+      image   = "alpine:latest"
+      command = ["echo"]
+      args    = ["Starting parallel branches"]
+      next    = ["branch_a", "branch_b"]
+    }
+
+    step "branch_a" "RunContainer" {
+      image   = "alpine:latest"
+      command = ["echo"]
+      args    = ["Running Branch A"]
+      next    = ["join"]
+    }
+
+    step "branch_b" "RunContainer" {
+      image   = "alpine:latest"
+      command = ["echo"]
+      args    = ["Running Branch B"]
+      next    = ["join"]
+    }
+
+    step "join" "RunContainer" {
+      image   = "alpine:latest"
+      command = ["echo"]
+      args    = ["Branches completed, joining!"]
+    }
+  }
+}

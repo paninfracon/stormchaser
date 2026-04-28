@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  format:
+    name: Check Formatting
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt
+    - name: Run cargo fmt
+      run: cargo fmt --all -- --check
+
+  clippy:
+    name: Run Clippy
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: clippy
+    - name: Cache dependencies
+      uses: Swatinem/rust-cache@v2
+    - name: Run cargo clippy
+      run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+    - name: Cache dependencies
+      uses: Swatinem/rust-cache@v2
+    - name: Start Infrastructure (NATS, Postgres)
+      run: docker-compose up -d nats postgres
+    - name: Run Tests
+      run: cargo test --workspace

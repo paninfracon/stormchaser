@@ -1,0 +1,30 @@
+stormchaser_dsl_version = "1.0"
+
+workflow "SFSParkingTest" {
+  description = "Test Shared File System parking and resuming"
+
+  storage "workspace" {
+    size = "1Gi"
+  }
+
+  steps {
+    step "create_file" "RunContainer" {
+      image = "alpine:latest"
+      storage_mounts = [
+        { name = "workspace", mount_path = "/data" }
+      ]
+      command = ["/bin/sh", "-c"]
+      args    = ["echo 'stormchaser-sfs-test' > /data/test.txt && ls -la /data"]
+      next    = ["verify_file"]
+    }
+
+    step "verify_file" "RunContainer" {
+      image = "alpine:latest"
+      storage_mounts = [
+        { name = "workspace", mount_path = "/data" }
+      ]
+      command = ["/bin/sh", "-c"]
+      args    = ["cat /data/test.txt | grep 'stormchaser-sfs-test'"]
+    }
+  }
+}

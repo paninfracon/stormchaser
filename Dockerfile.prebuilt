@@ -1,0 +1,32 @@
+# Dockerfile for Stormchaser using pre-built binaries
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    jq \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install oras CLI (matching existing Dockerfile)
+RUN curl -LO "https://github.com/oras-project/oras/releases/download/v1.1.0/oras_1.1.0_linux_amd64.tar.gz" && \
+    mkdir -p oras-install/ && \
+    tar -zxf oras_1.1.0_linux_amd64.tar.gz -C oras-install/ && \
+    mv oras-install/oras /usr/local/bin/ && \
+    rm -rf oras_1.1.0_linux_amd64.tar.gz oras-install/
+
+WORKDIR /app
+
+# Build argument to specify which binary we are packaging
+ARG BINARY=stormchaser-api
+ENV BINARY_NAME=${BINARY}
+
+# Copy the pre-built binary from the host context
+# In the dogfood flow, this will be in target/release/
+COPY target/release/${BINARY_NAME} /usr/local/bin/${BINARY_NAME}
+
+# Copy migrations (needed by both API and Engine)
+COPY migrations /app/migrations
+
+# Run the binary
+CMD ["/bin/sh", "-c", "/usr/local/bin/${BINARY_NAME}"]

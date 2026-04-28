@@ -1,0 +1,166 @@
+# Default values for the Stormchaser Umbrella Chart
+
+global:
+  security:
+    allowInsecureImages: true
+
+# ---------------------------------------------------------
+# Sub-Chart Configurations
+# ---------------------------------------------------------
+
+stormchaser-orchestration:
+  enabled: true
+  global:
+    database:
+      # If using the built-in postgres, this is generated dynamically via templates or overridden below.
+      url: "postgres://stormchaser:stormchaserpassword@stormchaser-postgresql:5432/stormchaser?sslmode=disable"
+      existingSecret: ""
+      existingSecretKey: "DATABASE_URL"
+      ssl: false
+    nats:
+      url: "nats://stormchaser-nats:4222"
+    loki:
+      url: "http://stormchaser-loki:3100"
+    opa:
+      url: "http://stormchaser-stormchaser-orchestration-api:8181/v1/data/stormchaser/allow"
+    oidc:
+      issuer: "http://dex:5556/dex"
+      externalIssuer: "http://localhost:5556/dex"
+      clientId: "stormchaser-cli"
+      clientSecret: "stormchaser-cli-secret"
+    otel:
+      endpoint: "http://stormchaser-alloy:4317"
+
+  prometheus:
+    enabled: true
+    server:
+      persistentVolume:
+        enabled: false
+
+  grafana:
+    enabled: true
+    persistence:
+      enabled: false
+    datasources:
+      datasources.yaml:
+        apiVersion: 1
+        datasources:
+          - name: Loki
+            type: loki
+            access: proxy
+            url: http://stormchaser-loki:3100
+            isDefault: false
+          - name: Prometheus
+            type: prometheus
+            access: proxy
+            url: http://stormchaser-prometheus-server:80
+            isDefault: true
+          - name: Tempo
+            type: tempo
+            access: proxy
+            url: http://stormchaser-tempo:3200
+            isDefault: false
+
+stormchaser-runner-k8s:
+  enabled: true
+  config:
+    natsUrl: "nats://stormchaser-nats:4222"
+  rbac:
+    create: true
+
+# ---------------------------------------------------------
+# Third-party Dependencies
+# These are enabled by default for a seamless "quick start" evaluation.
+# For production, set these to false and provide external URLs above.
+# ---------------------------------------------------------
+
+postgresql:
+  enabled: true
+  image:
+    registry: public.ecr.aws
+    repository: bitnami/postgresql
+    tag: 16.4.0-debian-12-r14
+  auth:
+    username: stormchaser
+    password: stormchaserpassword
+    database: stormchaser
+  primary:
+    persistence:
+      enabled: false
+
+nats:
+  enabled: true
+  config:
+    jetstream:
+      enabled: true
+      fileStore:
+        enabled: true
+        pvc:
+          enabled: true
+          size: 10Gi
+      memoryStore:
+        enabled: true
+        maxSize: 1Gi
+
+minio:
+  enabled: true
+  image:
+    registry: public.ecr.aws
+    repository: bitnami/minio
+    tag: 2024.12.18-debian-12-r1
+  minio:
+    auth:
+      rootUser: "stormchaser"
+    persistence:
+      enabled: false
+    resources:
+      requests:
+        ephemeral-storage: "10Gi"
+      limits:
+        ephemeral-storage: "20Gi"
+stormchaser-telemetry:
+  enabled: true
+  alloy:
+    alloy:
+      crds:
+        create: false
+      extraPorts:
+        - name: otlp-grpc
+          port: 4317
+          targetPort: 4317
+          protocol: TCP
+        - name: otlp-http
+          port: 4318
+          targetPort: 4318
+          protocol: TCP
+      extraEnv:
+        - name: LOKI_URL
+          value: "http://stormchaser-loki:3100"
+        - name: PROMETHEUS_URL
+          value: "http://stormchaser-prometheus-server:80"
+        - name: TEMPO_URL
+          value: "stormchaser-tempo:4317"
+
+loki:
+  enabled: true
+  loki:
+    auth_enabled: false
+    commonConfig:
+      replication_factor: 1
+    storage:
+      type: filesystem
+  singleBinary:
+    replicas: 1
+  test:
+    enabled: false
+
+tempo:
+  enabled: true
+  tempo:
+    storage:
+      trace:
+        backend: local
+        local:
+          path: /var/tempo/traces
+        wal:
+          path: /var/tempo/wal

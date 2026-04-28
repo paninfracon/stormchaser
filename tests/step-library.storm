@@ -1,0 +1,54 @@
+stormchaser_dsl_version = "0.1"
+
+workflow "step_library_demo" {
+  description = "A workflow demonstrating the use of step_library for reusable step definitions."
+
+  // Define a reusable step library for a standard python testing environment
+  step_library "python_test_env" {
+    type = "RunContainer"
+
+    // Default parameters that can be overridden by steps
+    params {
+      python_version = "3.11"
+    }
+
+    // Base container specification
+    spec {
+      image  = "python:${inputs.python_version}-slim"
+      cpu    = "500m"
+      memory = "1Gi"
+      env = {
+        PYTHONDONTWRITEBYTECODE = "1"
+        PYTHONUNBUFFERED        = "1"
+      }
+    }
+
+    // Default timeout and retry policies for all steps using this library
+    timeout = "10m"
+    retry {
+      max_attempts     = 3
+      backoff          = "exponential"
+      initial_interval = "5s"
+    }
+  }
+
+  steps {
+    // This step inherits the 'python_test_env' properties
+    step "lint" "python_test_env" {
+      spec {
+        command = ["sh", "-c", "pip install flake8 && flake8 ."]
+      }
+    }
+
+    // This step also inherits 'python_test_env', but overrides the python_version param
+    step "unit_tests" "python_test_env" {
+      params {
+        python_version = "3.12"
+      }
+      spec {
+        command = ["sh", "-c", "pip install pytest && pytest tests/"]
+      }
+      next = ["lint"] // Run tests, then lint
+    }
+  }
+}

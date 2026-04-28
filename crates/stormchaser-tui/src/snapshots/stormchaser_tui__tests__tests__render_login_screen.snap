@@ -1,0 +1,58 @@
+---
+source: crates/stormchaser-tui/src/tests.rs
+expression: terminal.backend()
+---
+TestBackend {
+    buffer: Buffer {
+        area: Rect { x: 0, y: 0, width: 80, height: 24 },
+        content: [
+            "                                                                                ",
+            "                                                                                ",
+            "                                                                                ",
+            "                                                                                ",
+            "                                                                                ",
+            "                                                                                ",
+            "                                                                                ",
+            "                                                                                ",
+            "                                                                                ",
+            "                                                                                ",
+            "                ┌ Login to Stormchaser ────────────────────────┐                ",
+            "                │                                              │                ",
+            "                │                                              │                ",
+            "                └──────────────────────────────────────────────┘                ",
+            "                                                                                ",
+            "                                                                                ",
+            "                                                                                ",
+            "                                                                                ",
+            "                                                                                ",
+            "                                                                                ",
+            "                                                                                ",
+            "                                                                                ",
+            "                                                                                ",
+            "                                                                                ",
+        ],
+        styles: [
+            x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+            x: 16, y: 10, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
+            x: 64, y: 10, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+            x: 16, y: 11, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
+            x: 17, y: 11, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+            x: 63, y: 11, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
+            x: 64, y: 11, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+            x: 16, y: 12, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
+            x: 17, y: 12, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+            x: 63, y: 12, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
+            x: 64, y: 12, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+            x: 16, y: 13, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
+            x: 64, y: 13, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        ]
+    },
+    scrollback: Buffer {
+        area: Rect { x: 0, y: 0, width: 80, height: 0 }
+    },
+    cursor: false,
+    pos: (
+        0,
+        0,
+    ),
+}

@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "stormchaser-orchestration.fullname" . }}-engine
+  labels:
+    {{- include "stormchaser-orchestration.labels" . | nindent 4 }}
+    app.kubernetes.io/component: engine
+spec:
+  replicas: {{ .Values.engine.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "stormchaser-orchestration.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: engine
+  template:
+    metadata:
+      labels:
+        {{- include "stormchaser-orchestration.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: engine
+    spec:
+      containers:
+        - name: engine
+          image: "{{ .Values.engine.image.repository }}:{{ .Values.engine.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.engine.image.pullPolicy }}
+          env:
+            - name: BINARY
+              value: "stormchaser-engine"
+            - name: DATABASE_URL
+              {{- if .Values.global.database.existingSecret }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.database.existingSecret }}
+                  key: {{ .Values.global.database.existingSecretKey }}
+              {{- else }}
+              value: {{ .Values.global.database.url | quote }}
+              {{- end }}
+            - name: STORMCHASER_DB_SSL
+              value: {{ .Values.global.database.ssl | quote }}
+            - name: NATS_URL
+              value: {{ .Values.global.nats.url | quote }}
+            - name: RUST_LOG
+              value: {{ .Values.engine.rustLog | quote }}
+            - name: GIT_CACHE_DIR
+              value: {{ .Values.engine.gitCacheDir | quote }}
+            - name: LOKI_URL
+              value: {{ .Values.global.loki.url | quote }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.global.otel.endpoint | quote }}
+            - name: OTEL_SERVICE_NAME
+              value: "stormchaser-engine"
+            - name: OPA_URL
+              value: {{ .Values.global.opa.url | quote }}
+            {{- if .Values.global.tls.enabled }}
+            - name: TLS_CA_CERT_PATH
+              value: {{ .Values.global.tls.caCertPath | quote }}
+            - name: TLS_CERT_PATH
+              value: {{ .Values.global.tls.certPath | quote }}
+            - name: TLS_KEY_PATH
+              value: {{ .Values.global.tls.keyPath | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.engine.resources | nindent 12 }}
+          volumeMounts:
+            - name: git-cache
+              mountPath: {{ .Values.engine.gitCacheDir }}
+            {{- if .Values.global.tls.enabled }}
+            - name: certs
+              mountPath: /etc/stormchaser/certs
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: git-cache
+          {{- if .Values.engine.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "stormchaser-orchestration.fullname" . }}-engine-git-cache
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- if .Values.global.tls.enabled }}
+        - name: certs
+          secret:
+            secretName: {{ .Values.global.tls.existingSecret }}
+        {{- end }}

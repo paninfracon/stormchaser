@@ -1,0 +1,11 @@
+{{- if .Values.api.opa.sidecar.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "stormchaser-orchestration.fullname" . }}-opa-policy
+  labels:
+    {{- include "stormchaser-orchestration.labels" . | nindent 4 }}
+data:
+  policy.rego: |
+{{ .Values.api.opa.sidecar.policy | indent 4 }}
+{{- end }}

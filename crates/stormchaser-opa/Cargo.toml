@@ -1,0 +1,20 @@
+[package]
+name = "stormchaser-opa"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+stormchaser-model = { path = "../stormchaser-model" }
+anyhow = { workspace = true }
+opa-wasm = { workspace = true }
+wasmtime = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.10"
+tokio = { workspace = true }

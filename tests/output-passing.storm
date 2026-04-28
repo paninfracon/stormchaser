@@ -1,0 +1,22 @@
+workflow "output_passing_test" {
+  description = "A workflow to verify output passing between steps"
+
+  steps {
+    step "producer" "RunContainer" {
+      image   = "alpine:latest"
+      command = ["echo"]
+      args    = ["Producing some metrics"]
+      next    = ["consumer"]
+    }
+
+    step "consumer" "RunContainer" {
+      image   = "alpine:latest"
+      command = ["echo"]
+      args = [
+        <<-EOT
+        Previous step exit code was ${steps.producer.outputs["k8s exit code"]} and it took ${steps.producer.outputs["run duration"]}
+        EOT
+      ]
+    }
+  }
+}

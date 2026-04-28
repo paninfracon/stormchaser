@@ -1,0 +1,35 @@
+issuer: http://dex:5556/dex
+storage:
+  type: postgres
+  config:
+    host: postgres
+    port: 5432
+    database: stormchaser
+    user: stormchaser
+    password: stormchaser
+    ssl:
+      mode: disable
+
+web:
+  http: 0.0.0.0:5556
+
+enablePasswordDB: true
+
+telemetry:
+  http: 0.0.0.0:5558
+
+staticClients:
+  - id: stormchaser-cli
+    redirectURIs:
+      - 'http://localhost:8080/callback'
+      - 'http://127.0.0.1:8080/callback'
+    name: 'Stormchaser CLI'
+    secret: stormchaser-cli-secret
+    public: false
+
+staticPasswords:
+  - email: "stormchaser-admin@paninfracon.net"
+    # bcrypted "password"
+    hash: "$2b$10$8eK2iVu1UUwg89yFvA5t3./BFy1k1l3XculFi0KvksfZ0n0jmOQoW"
+    username: "admin"
+    userID: "08a8684b-db88-4b73-90a9-3dd1661f5466"

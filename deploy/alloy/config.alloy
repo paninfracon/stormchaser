@@ -1,0 +1,122 @@
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+  refresh_interval = "5s"
+}
+
+discovery.relabel "docker_logs" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "job_name"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_managed_by"]
+    target_label  = "managed_by"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_stormchaser_run_id"]
+    target_label  = "run_id"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_stormchaser_step_id"]
+    target_label  = "step_id"
+  }
+
+  rule {
+    target_label = "job"
+    replacement  = "docker-containers"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_id"]
+    target_label  = "__path__"
+    replacement   = "/var/lib/docker/containers/$1/$1-json.log"
+  }
+}
+
+loki.source.file "docker" {
+  targets    = discovery.relabel.docker_logs.output
+  forward_to = [loki.process.docker.receiver]
+}
+
+loki.process "docker" {
+  forward_to = [loki.write.local.receiver]
+
+  stage.json {
+    expressions = {
+      log    = "log",
+      stream = "stream",
+      time   = "time",
+    }
+  }
+
+  stage.labels {
+    values = {
+      stream = "",
+    }
+  }
+
+  stage.timestamp {
+    source = "time"
+    format = "RFC3339Nano"
+  }
+
+  stage.output {
+    source = "log"
+  }
+}
+
+loki.write "local" {
+  endpoint {
+    url = sys.env("LOKI_URL") + "/loki/api/v1/push"
+  }
+}
+
+otelcol.receiver.otlp "default" {
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+  output {
+    metrics = [otelcol.exporter.prometheus.default.input]
+    traces  = [otelcol.exporter.otlp.tempo.input]
+  }
+}
+
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = sys.env("TEMPO_URL")
+    tls {
+      insecure = true
+      insecure_skip_verify = true
+    }
+  }
+}
+
+otelcol.exporter.prometheus "default" {
+  forward_to = [prometheus.remote_write.local.receiver]
+}
+
+prometheus.remote_write "local" {
+  endpoint {
+    url = sys.env("PROMETHEUS_URL") + "/api/v1/write"
+  }
+}

@@ -1,0 +1,86 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/stormchaser-api",
+    "crates/stormchaser-cli",
+    "crates/stormchaser-dsl",
+    "crates/stormchaser-engine",
+    "crates/stormchaser-model",
+    "crates/stormchaser-runner-k8s",
+    "crates/stormchaser-runner-docker",
+    "crates/stormchaser-agent",
+    "crates/stormchaser-tls",
+    "crates/stormchaser-opa",
+    "crates/stormchaser-tui",
+]
+
+[workspace.package]
+version = "0.1.0"
+authors = ["Stormchaser Core Team"]
+description = "A robust, distributed workflow engine for event-driven and human-triggered workflows."
+repository = "https://github.com/your-org/stormchaser"
+license = "MIT OR Apache-2.0"
+edition = "2021"
+
+[workspace.dependencies]
+stormchaser-model = { path = "crates/stormchaser-model" }
+stormchaser-dsl = { path = "crates/stormchaser-dsl" }
+stormchaser-tls = { path = "crates/stormchaser-tls" }
+
+tokio = { version = "1", features = ["full"] }
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json"] }
+axum = "0.7"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+async-nats = "0.38"
+async-trait = "0.1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+log = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4", features = ["derive"] }
+anyhow = "1.0"
+thiserror = "2.0"
+futures = "0.3"
+tower-http = { version = "0.5", features = ["trace"] }
+reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"] }
+reqwest-middleware = { version = "0.4", features = ["json"] }
+reqwest-retry = "0.7"
+tower = { version = "0.5", features = ["util"] }
+once_cell = "1.20"
+parking_lot = "0.12"
+dashmap = "6.1"
+schemars = { version = "0.8", features = ["uuid1"] }
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+hcl-rs = { version = "0.19" }
+wasmtime = "43.0"
+opa-wasm = "0.2.0"
+regex = "1.12.3"
+base64 = "0.22.1"
+aes-gcm = "0.10"
+aead = "0.5"
+vaultrs = "0.7"
+aws-config = "1.5"
+aws-sdk-s3 = "1.65"
+aws-sdk-ses = "1.61"
+aws-sdk-lambda = "1.63"
+aws-sdk-sts = "1.63"
+lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "builder", "smtp-transport"] }
+minijinja = { version = "2.1", features = ["json"] }
+opentelemetry = "0.27"
+opentelemetry_sdk = { version = "0.27", features = ["rt-tokio", "metrics"] }
+opentelemetry-otlp = "0.27"
+tracing-opentelemetry = "0.28"
+opentelemetry-semantic-conventions = "0.27"
+vergen = { version = "8.3", features = ["build", "cargo", "git", "gitcl", "rustc", "si"] }
+jsonwebtoken = "9"
+jaq-core = "2.0"
+jaq-json = { version = "1.0", features = ["serde_json"] }
+jaq-std = "2.0"
+rustls = { version = "0.23", features = ["ring"] }
+quick-xml = { version = "0.37", features = ["serialize"] }
+tar = "0.4"
+flate2 = "1.0"

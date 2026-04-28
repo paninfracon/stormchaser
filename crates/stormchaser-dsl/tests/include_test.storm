@@ -1,0 +1,20 @@
+workflow "main" {
+  description = "Main Workflow"
+
+  step_library "common_build" {
+    type = "RunContainer"
+    spec {
+      image = "ubuntu:latest"
+    }
+  }
+
+  step "build" "common_build" {
+    params = {
+      tag = "v1"
+    }
+  }
+
+  include "sub_flow" {
+    workflow = "my_template"
+  }
+}

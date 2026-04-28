@@ -1,0 +1,29 @@
+[package]
+name = "stormchaser-cli"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+stormchaser-model = { workspace = true }
+tokio = { workspace = true }
+clap = { workspace = true, features = ["env"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+uuid = { workspace = true }
+reqwest = { workspace = true }
+reqwest-middleware = { workspace = true }
+reqwest-retry = { workspace = true }
+eventsource-stream = "0.2.3"
+futures.workspace = true
+tokio-stream = "0.1.18"
+urlencoding = "2.1.3"
+open = "5.3.4"
+url = "2.5.8"
+serde_urlencoded = "0.7.1"
+
+[build-dependencies]
+vergen = { workspace = true }

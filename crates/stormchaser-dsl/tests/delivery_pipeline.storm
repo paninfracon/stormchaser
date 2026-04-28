@@ -1,0 +1,131 @@
+stormchaser_dsl_version = "1.0"
+
+workflow "ModernDeliveryPipeline" {
+  description = "A full CI/CD pipeline including container builds, parallel testing, and production deployment."
+
+  strategy {
+    affinity  = "isolated"
+    fail_fast = true
+  }
+
+  quotas {
+    max_concurrency = 20
+    max_cpu         = "10.0"
+    max_memory      = "32Gi"
+    timeout         = "1h"
+  }
+
+  inputs {
+    input "image_tag" {
+      type        = "string"
+      description = "The container image tag to apply."
+    }
+    input "environment" {
+      type    = "enum"
+      options = ["staging", "production"]
+      default = "staging"
+    }
+  }
+
+  storage "workspace" {
+    size = "10Gi"
+    provision {
+      secret "docker_config" {
+        source      = "secrets/docker-config"
+        destination = ".docker/config.json"
+        mode        = "0600"
+      }
+    }
+    preserve = ["target/**", "node_modules/**"]
+  }
+
+  steps {
+    step "checkout" "GitCheckout" {
+      params {
+        url    = "git@github.com:acme/web-app.git"
+        branch = "main"
+      }
+      next = ["build"]
+    }
+
+    step "build" "RunContainer" {
+      image = "rust:1.80-slim"
+      args  = ["cargo", "build", "--release"]
+      next  = ["test_suite"]
+    }
+
+    step "test_suite" "Parallel" {
+      iterate = ["unit", "integration", "e2e"]
+      as      = "test_type"
+
+      strategy {
+        max_parallel = 3
+        affinity     = "shared"
+      }
+
+      steps {
+        step "run_test" "RunContainer" {
+          image = "rust:1.80-slim"
+          args  = ["cargo", "test", "--test", "${test_type}"]
+        }
+      }
+
+      aggregation "test_results" {
+        value = "iterations.map(i, i.steps.run_test.outputs.status)"
+      }
+
+      next = ["deploy_staging"]
+    }
+
+    step "deploy_staging" "RunContainer" {
+      condition = "inputs.environment == 'staging'"
+      image     = "bitnami/kubectl:latest"
+      args      = ["set", "image", "deployment/web-app", "app=myrepo/web-app:${inputs.image_tag}"]
+      next      = ["manual_approval"]
+    }
+
+    step "manual_approval" "WaitForEvent" {
+      condition         = "inputs.environment == 'production'"
+      require_approvals = 2
+      approvers         = ["ops-leads", "security-team"]
+
+      initiate {
+        type = "SendEmail"
+        params {
+          to      = "releases@acme.com"
+          subject = "Approve production deployment for ${inputs.image_tag}"
+        }
+      }
+
+      correlation {
+        key   = "run_id"
+        value = run.id
+      }
+
+      next = ["deploy_prod"]
+    }
+
+    step "deploy_prod" "RunContainer" {
+      image = "bitnami/kubectl:latest"
+      args  = ["set", "image", "deployment/web-app-prod", "app=myrepo/web-app:${inputs.image_tag}"]
+    }
+  }
+
+  on_failure {
+    step "notify_failure" "slack/slack_alert" {
+      params {
+        channel = "#alerts"
+        message = "Pipeline failed for ${inputs.image_tag}!"
+      }
+    }
+  }
+
+  finally {
+    step "cleanup" "aws/LambdaInvoke" {
+      params {
+        function_name = "teardown-pipeline-resources"
+        payload       = run.id
+      }
+    }
+  }
+}

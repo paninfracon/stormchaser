@@ -1,0 +1,124 @@
+global:
+  loki:
+    url: "http://loki:3100"
+
+alloy:
+  alloy:
+    configMap:
+      create: true
+      content: |-
+        logging {
+          level  = "info"
+          format = "logfmt"
+        }
+
+        discovery.kubernetes "pods" {
+          role = "pod"
+        }
+
+        discovery.relabel "pod_logs" {
+          targets = discovery.kubernetes.pods.targets
+
+          rule {
+            action = "keep"
+            source_labels = ["__meta_kubernetes_pod_label_managed_by"]
+            regex = "stormchaser"
+          }
+          rule {
+            source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_name", "__meta_kubernetes_pod_uid"]
+            separator = "_"
+            target_label = "__pod_dir__"
+          }
+          rule {
+            source_labels = ["__pod_dir__", "__meta_kubernetes_pod_container_name"]
+            separator = "/"
+            action = "replace"
+            replacement = "/var/log/pods/$1/*.log"
+            target_label = "__path__"
+          }
+          rule {
+            source_labels = ["__meta_kubernetes_namespace"]
+            target_label  = "namespace"
+          }
+          rule {
+            source_labels = ["__meta_kubernetes_pod_name"]
+            target_label  = "pod"
+          }
+          rule {
+            source_labels = ["__meta_kubernetes_pod_container_name"]
+            target_label  = "container"
+          }
+          rule {
+            source_labels = ["__meta_kubernetes_pod_label_stormchaser_run_id"]
+            target_label = "stormchaser_run_id"
+          }
+          rule {
+            source_labels = ["__meta_kubernetes_pod_label_stormchaser_step_id"]
+            target_label = "stormchaser_step_id"
+          }
+          rule {
+            source_labels = ["__meta_kubernetes_pod_label_job_name"]
+            target_label = "job_name"
+          }
+          rule {
+            target_label = "job"
+            replacement  = "kubernetes-pods"
+          }
+        }
+
+        local.file_match "pod_logs" {
+          path_targets = discovery.relabel.pod_logs.output
+        }
+
+        loki.source.file "pod_logs" {
+          targets    = local.file_match.pod_logs.targets
+          forward_to = [loki.write.local.receiver]
+        }
+
+        loki.write "local" {
+          endpoint {
+            url = sys.env("LOKI_URL") + "/loki/api/v1/push"
+          }
+        }
+
+        otelcol.receiver.otlp "default" {
+          http {
+            endpoint = "0.0.0.0:4318"
+          }
+          grpc {
+            endpoint = "0.0.0.0:4317"
+          }
+          output {
+            metrics = [otelcol.exporter.prometheus.default.input]
+            traces  = [otelcol.exporter.otlp.tempo.input]
+          }
+        }
+
+        otelcol.exporter.otlp "tempo" {
+          client {
+            endpoint = sys.env("TEMPO_URL")
+            tls {
+              insecure = true
+              insecure_skip_verify = true
+            }
+          }
+        }
+
+        otelcol.exporter.prometheus "default" {
+          forward_to = [prometheus.remote_write.local.receiver]
+        }
+
+        prometheus.remote_write "local" {
+          endpoint {
+            url = sys.env("PROMETHEUS_URL") + "/api/v1/write"
+          }
+        }
+    mounts:
+      varlog: true
+    extraEnv:
+      - name: LOKI_URL
+        value: "http://loki:3100"
+      - name: PROMETHEUS_URL
+        value: "http://prometheus-server:80"
+      - name: TEMPO_URL
+        value: "tempo-distributor:4317"

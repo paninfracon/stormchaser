@@ -1,0 +1,85 @@
+[package]
+name = "stormchaser-engine"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[features]
+default = []
+aws-lambda = ["dep:aws-sdk-lambda", "aws-sdk-sts"]
+aws-ses = ["dep:aws-sdk-ses", "aws-sdk-sts"]
+email = ["dep:lettre"]
+vault = ["dep:vaultrs"]
+aws-sdk-sts = ["dep:aws-sdk-sts"]
+rustls-native-certs = ["dep:rustls-native-certs"]
+
+[lib]
+name = "stormchaser_engine"
+path = "src/lib.rs"
+
+[[bin]]
+name = "stormchaser-engine"
+path = "src/main.rs"
+
+[dependencies]
+stormchaser-model = { workspace = true }
+stormchaser-dsl = { workspace = true }
+stormchaser-tls = { workspace = true }
+stormchaser-opa = { path = "../stormchaser-opa" }
+rustls = { version = "0.23", features = ["ring"] }
+tokio = { workspace = true }
+sqlx = { workspace = true }
+log = { workspace = true }
+async-nats = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+futures = "0.3"
+git2 = "0.19"
+humantime = "2.1"
+once_cell = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+opentelemetry-otlp = { workspace = true, features = ["grpc-tonic"] }
+tracing-opentelemetry = { workspace = true }
+opentelemetry-semantic-conventions = { workspace = true }
+parking_lot = { workspace = true }
+hex = "0.4"
+sha2 = "0.10"
+hcl-rs = { workspace = true }
+wasmtime = { workspace = true }
+regex = "1.12.3"
+base64 = "0.22.1"
+aes-gcm = { workspace = true }
+aead = { workspace = true }
+aws-config = { workspace = true }
+aws-sdk-s3 = { workspace = true }
+aws-sdk-lambda = { workspace = true, optional = true }
+aws-sdk-ses = { workspace = true, optional = true }
+aws-sdk-sts = { workspace = true, optional = true }
+lettre = { workspace = true, optional = true }
+minijinja = { workspace = true }
+reqwest = { workspace = true }
+vaultrs = { workspace = true, optional = true }
+jaq-core = { workspace = true }
+jaq-json = { workspace = true }
+jaq-std = { workspace = true }
+quick-xml = { workspace = true }
+tar = { workspace = true }
+flate2 = { workspace = true }
+rustls-native-certs = { version = "0.8.3", optional = true }
+
+[dev-dependencies]
+tempfile = "3.10"
+wat = "1.211"
+
+[build-dependencies]
+vergen = { workspace = true }

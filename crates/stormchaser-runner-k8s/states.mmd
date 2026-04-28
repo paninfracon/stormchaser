@@ -1,0 +1,72 @@
+stateDiagram-v2
+    direction TB
+
+    state "Stormchaser Step Instance (Runner)" as SC_MACHINE {
+        [*] --> INITIALIZING : NATS Task Received
+
+        state INITIALIZING {
+            [*] --> PARSING_SPEC
+            PARSING_SPEC --> VERSION_CHECK : K8sJobSpec valid
+            VERSION_CHECK --> [*] : v1.21.0+ (or custom min)
+        }
+
+        INITIALIZING --> DISPATCHING : Validation OK
+        INITIALIZING --> REPORT_FAILURE : Version/Spec Error
+
+        state DISPATCHING {
+            [*] --> BUILDING_JOB_SPEC
+            BUILDING_JOB_SPEC --> CREATING_IN_K8S : Post /api/v1/jobs
+            CREATING_IN_K8S --> [*] : 201 Created
+        }
+
+        DISPATCHING --> EXECUTING : Job Established
+
+        state EXECUTING {
+            direction LR
+            state "K8s Runtime Machine (Job Controller)" as K8S_RUNTIME {
+                [*] --> K8S_PENDING : Pods unscheduled
+                K8S_PENDING --> K8S_RUNNING : Pod Scheduled / Container Start
+                K8S_RUNNING --> K8S_RUNNING : Watch Stream Update
+
+                K8S_RUNNING --> K8S_RETRY_BACKOFF : Container Exit != 0
+                K8S_RETRY_BACKOFF --> K8S_RUNNING : Re-scheduling Pod
+
+                K8S_RUNNING --> K8S_SUCCEEDED : Job.status.succeeded > 0
+                K8S_RUNNING --> K8S_FAILED : Job.status.failed > 0
+                K8S_RETRY_BACKOFF --> K8S_FAILED : backoffLimit Reached
+            }
+        }
+
+        EXECUTING --> COLLECTING_METRICS : Watch Stream Terminal
+
+        state COLLECTING_METRICS {
+            [*] --> LISTING_PODS : job-name selector
+            LISTING_PODS --> EXTRACTING_EXIT_CODES
+            EXTRACTING_EXIT_CODES --> CALCULATING_ATTEMPTS
+            CALCULATING_ATTEMPTS --> [*]
+        }
+
+        COLLECTING_METRICS --> CLEANING_UP
+
+        state CLEANING_UP {
+            [*] --> DELETE_JOB_OBJECT : Propagation=Background
+            DELETE_JOB_OBJECT --> [*]
+        }
+
+        CLEANING_UP --> REPORT_SUCCESS : K8S_SUCCEEDED
+        CLEANING_UP --> REPORT_FAILURE : K8S_FAILED / System Error
+
+        state REPORT_SUCCESS {
+            [*] --> PUBLISH_COMPLETED : outputs={duration, latency, ...}
+        }
+
+        state REPORT_FAILURE {
+            [*] --> PUBLISH_FAILED : error=msg, outputs={...}
+        }
+
+        REPORT_SUCCESS --> [*]
+        REPORT_FAILURE --> [*]
+    }
+
+    [*] --> SC_MACHINE : stormchaser.step.scheduled.*
+    SC_MACHINE --> [*] : stormchaser.step.completed / failed

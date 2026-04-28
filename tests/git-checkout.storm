@@ -1,0 +1,41 @@
+stormchaser_dsl_version = "0.1"
+
+workflow "GitCheckoutExample" {
+  description = "A workflow demonstrating the GitCheckout step with sparse checkout and SFS."
+
+  storage "workspace" {
+    size = "1Gi"
+  }
+
+  steps {
+    step "checkout_code" "GitCheckout" {
+      spec {
+        repo            = "https://github.com/torvalds/linux.git"
+        ref             = "master"
+        depth           = 1
+        sparse_checkout = ["Makefile", "Kbuild"]
+        destination     = "/workspace/repo"
+        storage_mounts = [
+          {
+            name       = "workspace"
+            mount_path = "/workspace"
+          }
+        ]
+      }
+      next = ["verify_checkout"]
+    }
+
+    step "verify_checkout" "RunContainer" {
+      spec {
+        image   = "alpine:latest"
+        command = ["sh", "-c", "ls -la /workspace/repo && cat /workspace/repo/Makefile | head -n 5"]
+        storage_mounts = [
+          {
+            name       = "workspace"
+            mount_path = "/workspace"
+          }
+        ]
+      }
+    }
+  }
+}

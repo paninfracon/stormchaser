@@ -1,0 +1,49 @@
+# Rust
+/target/
+Cargo.lock
+
+# IDEs & Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Emacs
+\#*\#
+.\#*
+auto-save-list/
+tramp
+*_archive
+*_flycheck.el
+
+# OS Specific
+.DS_Store
+Thumbs.db
+
+# Environment & Secrets
+.env
+.env.*
+! .env.example
+*.sops.yaml
+
+# Project Specific
+architecture.png
+mmd_b64.txt
+.t
+gmp/
+
+# Temporary commit messages
+commit_msg.txt
+
+# Temp dirs
+.tmp/
+scripts/.tmp/
+
+# Log files
+*.log
+
+# Ignored test certificates
+tests/certs/*.key
+tests/certs/*.crt
+tests/certs/*.csr

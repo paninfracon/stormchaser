@@ -1,0 +1,21 @@
+stateDiagram-v2
+    [*] --> Queued: new()
+
+    Queued --> Resolving: start_resolving()
+    Queued --> Aborted: abort()
+
+    Resolving --> StartPending: start_pending()
+    Resolving --> Failed: fail(error)
+    Resolving --> Aborted: abort()
+
+    StartPending --> Running: start()
+    StartPending --> Failed: fail(error)
+    StartPending --> Aborted: abort()
+
+    Running --> Succeeded: succeed()
+    Running --> Failed: fail(error)
+    Running --> Aborted: abort()
+
+    Succeeded --> [*]
+    Failed --> [*]
+    Aborted --> [*]

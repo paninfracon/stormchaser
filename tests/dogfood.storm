@@ -1,0 +1,112 @@
+stormchaser_dsl_version = "v1"
+
+workflow "dogfood" {
+  description = "Stormchaser dogfooding workflow: Build, Test, Image, Deploy"
+
+  input "repo_url" { type = "string" }
+  input "host_ip" { type = "string" }
+  input "kubeconfig" { type = "string" }
+  input "port_api" { type = "string" }
+  input "port_db" { type = "string" }
+  input "port_nats" { type = "string" }
+  input "port_loki" { type = "string" }
+  input "port_dex" { type = "string" }
+  input "port_s3" { type = "string" }
+  input "port_reg" { type = "string" }
+  input "port_opa" { type = "string" }
+
+  storage "workspace" {
+    size = "10Gi"
+    provision "repo" {
+      resource_type = "download"
+      url           = inputs.repo_url
+      destination   = "/"
+    }
+    artifact "api_binary" {
+      path      = "target/release/stormchaser-api"
+      retention = "7d"
+    }
+  }
+
+  steps {
+    step "build" "RunContainer" {
+      image = "rustlang/rust:nightly"
+      storage_mounts = [
+        { name = "workspace", mount_path = "/app" }
+      ]
+      env = [
+        { name = "DATABASE_URL", value = "postgres://stormchaser:stormchaser@${inputs.host_ip}:${inputs.port_db}/stormchaser" }
+      ]
+      command = ["/bin/sh", "-c"]
+      args = [
+        "apt-get update && apt-get install -y pkg-config libssl-dev libgit2-dev zlib1g-dev curl && cd /app && SQLX_OFFLINE=true cargo build --release -p stormchaser-api 2>&1 | tee build.log"
+      ]
+      artifacts = ["api_binary"]
+      next      = ["test"]
+    }
+
+    step "test" "RunContainer" {
+      image = "rustlang/rust:nightly"
+      storage_mounts = [
+        { name = "workspace", mount_path = "/app" }
+      ]
+      env = [
+        { name = "DATABASE_URL", value = "postgres://stormchaser:stormchaser@${inputs.host_ip}:${inputs.port_db}/stormchaser" },
+        { name = "NATS_URL", value = "nats://${inputs.host_ip}:${inputs.port_nats}" }
+      ]
+      command = ["/bin/sh", "-c"]
+      args = [
+        "apt-get update && apt-get install -y pkg-config libssl-dev libgit2-dev zlib1g-dev curl && cd /app && SQLX_OFFLINE=true cargo test --release -p stormchaser-api -- --test-threads=1 -Z unstable-options --format junit | tee tests.xml"
+      ]
+      reports {
+        report "api_tests" {
+          path   = "/app/tests.xml"
+          format = "junit"
+        }
+      }
+      next = ["build_images"]
+    }
+
+    step "build_images" "RunContainer" {
+      image      = "quay.io/buildah/stable:v1.35"
+      privileged = true
+      storage_mounts = [
+        { name = "workspace", mount_path = "/app" }
+      ]
+      command = ["/bin/sh", "-c"]
+      args = [
+        "cd /app && buildah bud --storage-driver vfs -t ${inputs.host_ip}:${inputs.port_reg}/stormchaser-api:dogfood -f Dockerfile.prebuilt --build-arg BINARY=stormchaser-api . && buildah push --storage-driver vfs --tls-verify=false ${inputs.host_ip}:${inputs.port_reg}/stormchaser-api:dogfood"
+      ]
+      next = ["setup_certs"]
+    }
+
+    step "setup_certs" "RunContainer" {
+      image = "bitnami/kubectl:latest"
+      storage_mounts = [
+        { name = "workspace", mount_path = "/app" }
+      ]
+      env = [
+        { name = "KUBECONFIG_DATA", value = inputs.kubeconfig }
+      ]
+      command = ["/bin/sh", "-c"]
+      args = [
+        "mkdir -p ~/.kube && echo \"$KUBECONFIG_DATA\" > ~/.kube/config && export KUBECONFIG=~/.kube/config && kubectl create namespace stormchaser-dogfood --dry-run=client -o yaml | kubectl apply -f - && kubectl get secret stormchaser-tls-certs -n stormchaser -o yaml | grep -v -E '^( +namespace:| +uid:| +resourceVersion:| +creationTimestamp:)' | kubectl apply -n stormchaser-dogfood -f -"
+      ]
+      next = ["deploy"]
+    }
+
+    step "deploy" "RunContainer" {
+      image = "alpine/helm:3.12.0"
+      storage_mounts = [
+        { name = "workspace", mount_path = "/app" }
+      ]
+      env = [
+        { name = "KUBECONFIG_DATA", value = inputs.kubeconfig }
+      ]
+      command = ["/bin/sh", "-c"]
+      args = [
+        "mkdir -p ~/.kube && echo \"$KUBECONFIG_DATA\" > ~/.kube/config && export KUBECONFIG=~/.kube/config && helm upgrade --install stormchaser-dogfood /app/deploy/charts/stormchaser-orchestration --set global.image.repository=${inputs.host_ip}:${inputs.port_reg}/stormchaser-api --set global.image.tag=dogfood --set global.database.ssl=false --set global.database.url=postgres://stormchaser:stormchaser@${inputs.host_ip}:${inputs.port_db}/stormchaser --set global.nats.url=nats://${inputs.host_ip}:${inputs.port_nats} --set global.loki.url=http://${inputs.host_ip}:${inputs.port_loki} --set global.opa.url=http://${inputs.host_ip}:${inputs.port_opa}/v1/data/stormchaser/allow --set global.oidc.issuer=http://${inputs.host_ip}:${inputs.port_dex}/dex"
+      ]
+    }
+  }
+}

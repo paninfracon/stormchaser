@@ -1,0 +1,20 @@
+image:
+  repository: stormchaser
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Restrict the daemonset to specific nodes (e.g. nodes labeled for docker runner)
+nodeSelector: {}
+
+tolerations: []
+
+# Configuration for the docker runner
+config:
+  natsUrl: "nats://nats:4222"
+  rustLog: "stormchaser_runner_docker=info"
+
+# Configure the hostPath for docker socket
+dockerSocketPath: "/var/run/docker.sock"

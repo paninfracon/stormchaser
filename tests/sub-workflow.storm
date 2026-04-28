@@ -1,0 +1,55 @@
+stormchaser_dsl_version = "0.1"
+
+// Declaring this as a workflow_template marks it as a reusable module
+workflow_template "standard_deployment" {
+  description = "A standard deployment sub-workflow to be included by other workflows."
+
+  input "service_name" {
+    type        = "string"
+    description = "The name of the service to deploy"
+  }
+
+  input "environment" {
+    type    = "string"
+    default = "staging"
+  }
+
+  input "image_tag" {
+    type = "string"
+  }
+
+  steps {
+    step "notify_start" "WebhookInvoke" {
+      spec {
+        url    = "https://events.example.com/deploy/start"
+        method = "POST"
+        body = {
+          service = "${inputs.service_name}"
+          env     = "${inputs.environment}"
+          tag     = "${inputs.image_tag}"
+        }
+      }
+      next = ["deploy_k8s"]
+    }
+
+    step "deploy_k8s" "RunContainer" {
+      spec {
+        image   = "bitnami/kubectl:latest"
+        command = ["sh", "-c", "kubectl set image deployment/${inputs.service_name} ${inputs.service_name}=myregistry.com/${inputs.service_name}:${inputs.image_tag} -n ${inputs.environment}"]
+      }
+      next = ["notify_success"]
+    }
+
+    step "notify_success" "WebhookInvoke" {
+      spec {
+        url    = "https://events.example.com/deploy/success"
+        method = "POST"
+        body = {
+          service = "${inputs.service_name}"
+          env     = "${inputs.environment}"
+          status  = "Success"
+        }
+      }
+    }
+  }
+}

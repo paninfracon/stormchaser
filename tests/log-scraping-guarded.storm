@@ -1,0 +1,36 @@
+workflow "log_scraping_guarded" {
+  description = "A workflow to verify log scraping with guards"
+
+  steps {
+    step "producer" "RunContainer" {
+      image   = "alpine:latest"
+      command = ["sh", "-c"]
+      args    = ["echo 'Spurious RESULT: fail'; echo '--- OUTPUT ---'; echo 'RESULT: success'; echo 'VALUE: 12345'; echo 'MESSAGE: Operation completed'; echo '--- END OUTPUT ---'; echo 'Another spurious RESULT: fail'"]
+
+      outputs {
+        start_marker = "--- OUTPUT ---"
+        end_marker   = "--- END OUTPUT ---"
+
+        output "extracted_result" {
+          source = "logs"
+          regex  = "RESULT: (.*)"
+        }
+        output "extracted_value" {
+          source = "logs"
+          regex  = "VALUE: (.*)"
+        }
+        output "extracted_message" {
+          source = "logs"
+          regex  = "MESSAGE: (.*)"
+        }
+      }
+    }
+
+    step "consumer" "RunContainer" {
+      next    = ["producer"]
+      image   = "alpine:latest"
+      command = ["echo"]
+      args    = ["Scraped result: ${steps.producer.outputs.extracted_result}, value: ${steps.producer.outputs.extracted_value}, message: ${steps.producer.outputs.extracted_message}"]
+    }
+  }
+}

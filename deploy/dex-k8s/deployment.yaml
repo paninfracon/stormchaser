@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dex
+  namespace: stormchaser
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dex
+  template:
+    metadata:
+      labels:
+        app: dex
+    spec:
+      initContainers:
+      - name: inject-config
+        image: alpine
+        command:
+        - sh
+        - -c
+        - "sed 's|PASSWORD_HASH_PLACEHOLDER|'\"$DEX_ADMIN_HASH\"'|g' /config-template/config.yaml > /etc/dex/config.yaml"
+        env:
+        - name: DEX_ADMIN_HASH
+          valueFrom:
+            secretKeyRef:
+              name: dex-admin-secret
+              key: hash
+        volumeMounts:
+        - name: config-template
+          mountPath: /config-template
+        - name: config
+          mountPath: /etc/dex
+      containers:
+      - command:
+        - dex
+        - serve
+        - /etc/dex/config.yaml
+        image: dexidp/dex:v2.41.1
+        name: dex
+        ports:
+        - containerPort: 5556
+          name: http
+        volumeMounts:
+        - mountPath: /etc/dex
+          name: config
+      volumes:
+      - configMap:
+          name: dex-config
+        name: config-template
+      - emptyDir: {}
+        name: config

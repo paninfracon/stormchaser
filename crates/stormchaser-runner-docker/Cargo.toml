@@ -1,0 +1,37 @@
+[package]
+name = "stormchaser-runner-docker"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+stormchaser-model = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+async-nats = { workspace = true }
+rustls = { version = "0.23", features = ["ring"] }
+axum = { workspace = true }
+dashmap = { workspace = true }
+schemars = { workspace = true }
+bollard = "0.18"
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+http = "1.4.0"
+aes-gcm = { workspace = true }
+aead = { workspace = true }
+sha2 = { workspace = true }
+base64 = { workspace = true }
+rand = "0.8"
+getrandom = { version = "0.2", features = ["js"] }
+async-trait.workspace = true
+bytes = "1.11.1"
+
+[dev-dependencies]
+mockall = "0.14.0"

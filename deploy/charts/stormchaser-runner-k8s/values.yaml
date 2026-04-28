@@ -1,0 +1,88 @@
+# Default values for stormchaser-runner-k8s.
+
+replicaCount: 1
+
+image:
+  repository: stormchaser-runner-k8s
+  pullPolicy: Never
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: "v1"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/metrics"
+
+podLabels: {}
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: chart-example.local
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls: []
+
+resources: {}
+  # limits:
+  #   cpu: 100m
+  #   memory: 128Mi
+  # requests:
+  #   cpu: 100m
+  #   memory: 128Mi
+
+# Runner Configuration
+config:
+  natsUrl: "nats://172.17.0.1:4222"
+  runnerId: "" # If empty, a UUID will be generated on startup
+  rustLog: "stormchaser_runner_k8s=info"
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+rbac:
+  create: true
+  # If you want to restrict the runner to a specific namespace for Jobs
+  # By default it operates in its own namespace
+  targetNamespace: ""
+
+global:
+  agent:
+    image:
+      repository: stormchaser-agent
+      tag: latest
+      pullPolicy: Never

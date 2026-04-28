@@ -1,0 +1,53 @@
+# Pre-commit configuration for Stormchaser
+# Using prek (Rust version of pre-commit)
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-json
+      - id: check-yaml
+        exclude: ^deploy/charts/.*$
+      - id: check-toml
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: check-symlinks
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+  - repo: https://github.com/doublify/pre-commit-rust
+    rev: v1.0
+    hooks:
+      - id: fmt
+      - id: clippy
+        args: ["--workspace", "--all-targets", "--all-features", "--", "-D", "warnings"]
+
+  - repo: https://github.com/EmbarkStudios/cargo-deny
+    rev: 0.19.4
+    hooks:
+      - id: cargo-deny
+
+  - repo: https://github.com/koalaman/shellcheck-precommit
+    rev: v0.10.0
+    hooks:
+      - id: shellcheck
+        args: ["--severity=warning"]
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.2
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.39.0
+    hooks:
+      - id: markdownlint
+        args: ["--fix"]
+
+  - repo: local
+    hooks:
+      - id: hcl-fmt
+        name: HCL Format
+        entry: bash -c 'for f in "$@"; do terraform fmt - < "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"; done' --
+        language: system
+        files: \.(hcl|tf|storm)$

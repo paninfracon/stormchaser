@@ -1,0 +1,25 @@
+workflow "sequential_test" {
+  description = "A simple sequential workflow"
+
+  steps {
+    step "step1" "RunContainer" {
+      image   = "alpine:latest"
+      command = ["echo"]
+      args    = ["Running Step 1"]
+      next    = ["step2"]
+    }
+
+    step "step2" "RunContainer" {
+      image   = "alpine:latest"
+      command = ["echo"]
+      args    = ["Running Step 2"]
+      next    = ["step3"]
+    }
+
+    step "step3" "RunContainer" {
+      image   = "alpine:latest"
+      command = ["echo"]
+      args    = ["Running Step 3"]
+    }
+  }
+}

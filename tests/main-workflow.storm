@@ -1,0 +1,41 @@
+stormchaser_dsl_version = "0.1"
+
+workflow "main_api_deployment" {
+  description = "Main workflow that builds the API and includes a standard deployment sub-workflow."
+
+  input "git_commit" {
+    type = "string"
+  }
+
+  steps {
+    // Main workflow specific step
+    step "build_image" "RunContainer" {
+      spec {
+        image   = "docker:dind"
+        command = ["sh", "-c", "docker build -t myregistry.com/backend-api:${inputs.git_commit} . && docker push myregistry.com/backend-api:${inputs.git_commit}"]
+      }
+    }
+  }
+
+  // Include the reusable deployment workflow
+  include "deploy_to_staging" {
+    workflow = "sub-workflow.storm"
+
+    // Map inputs into the sub-workflow
+    inputs = {
+      service_name = "backend-api"
+      environment  = "staging"
+      image_tag    = "${inputs.git_commit}"
+    }
+  }
+
+  // You can include the same sub-workflow multiple times with different parameters
+  include "deploy_to_prod" {
+    workflow = "sub-workflow.storm"
+    inputs = {
+      service_name = "backend-api"
+      environment  = "production"
+      image_tag    = "${inputs.git_commit}"
+    }
+  }
+}

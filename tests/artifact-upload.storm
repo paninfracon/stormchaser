@@ -1,0 +1,23 @@
+stormchaser_dsl_version = "v1"
+workflow "Artifact Upload Test" {
+  description = "Tests artifact upload from a storage"
+
+  storage "workspace" {
+    size = "1Gi"
+    artifact "test_artifact" {
+      path      = "test_file.txt"
+      retention = "7d"
+    }
+  }
+
+  steps {
+    step "CreateArtifact" "RunContainer" {
+      image   = "alpine:latest"
+      command = ["/bin/sh", "-c"]
+      args    = ["echo 'hello world' > /workspace/test_file.txt"]
+      storage_mounts = [
+        { name = "workspace", mount_path = "/workspace" }
+      ]
+    }
+  }
+}

@@ -1,0 +1,36 @@
+[package]
+name = "stormchaser-model"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+sqlx = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+opa-wasm = { workspace = true }
+rustls = { version = "0.23", features = ["ring"] }
+reqwest = { workspace = true }
+reqwest-middleware = { workspace = true }
+reqwest-retry = { workspace = true }
+tracing = { workspace = true }
+tokio.workspace = true
+tokio-tungstenite = "0.29.0"
+tokio-stream = "0.1.18"
+futures.workspace = true
+tungstenite = "0.29.0"
+urlencoding = "2.1.3"
+utoipa = { version = "5.4.0", features = ["uuid", "chrono"] }
+hcl-rs.workspace = true
+regex.workspace = true
+
+[dev-dependencies]
+wiremock = "0.6.5"

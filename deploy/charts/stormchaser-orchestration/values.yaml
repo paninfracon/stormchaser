@@ -1,0 +1,116 @@
+# Default values for stormchaser-orchestration.
+
+global:
+  image:
+    repository: stormchaser
+    pullPolicy: IfNotPresent
+    tag: "latest"
+  database:
+    url: "postgres://stormchaser:stormchaser@postgres:5432/stormchaser"
+    existingSecret: ""
+    existingSecretKey: "DATABASE_URL"
+    ssl: true
+  nats:
+    url: "nats://nats:4222"
+  loki:
+    url: "http://loki:3100"
+  opa:
+    url: "http://127.0.0.1:8181/v1/data/stormchaser/allow"
+  oidc:
+    issuer: "http://dex:5556/dex"
+    externalIssuer: ""
+    clientId: "stormchaser-cli"
+    clientSecret: "stormchaser-cli-secret"
+  otel:
+    endpoint: "http://alloy:4317"
+  tls:
+    enabled: true
+    caCertPath: "/etc/stormchaser/certs/ca.crt"
+    certPath: "/etc/stormchaser/certs/tls.crt"
+    keyPath: "/etc/stormchaser/certs/tls.key"
+    existingSecret: "stormchaser-tls-certs"
+
+api:
+  image:
+    repository: stormchaser-api
+    pullPolicy: IfNotPresent
+    tag: "latest"
+  replicaCount: 1
+  rustLog: "stormchaser_api=info"
+  rateLimitPerSecond: 5
+  rateLimitBurstSize: 10
+  service:
+    type: ClusterIP
+    port: 3000
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: stormchaser.local
+        paths:
+          - path: /
+            pathType: ImplementationSpecific
+    tls: []
+  resources: {}
+  opa:
+    sidecar:
+      enabled: true
+      image:
+        repository: openpolicyagent/opa
+        tag: 0.62.1
+      resources: {}
+      policy: |
+        package stormchaser
+
+        default allow := false
+
+        # Allow all requests for local development
+        allow := true if {
+            true
+        }
+
+engine:
+  image:
+    repository: stormchaser-engine
+    pullPolicy: IfNotPresent
+    tag: "latest"
+  replicaCount: 1
+  rustLog: "stormchaser_engine=info"
+  gitCacheDir: "/tmp/stormchaser/git-cache"
+  resources: {}
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+
+prometheus:
+  enabled: false
+  server:
+    persistentVolume:
+      enabled: false
+
+grafana:
+  enabled: false
+  persistence:
+    enabled: false
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: Loki
+          type: loki
+          access: proxy
+          url: http://loki:3100
+          isDefault: false
+        - name: Prometheus
+          type: prometheus
+          access: proxy
+          url: http://prometheus-server:80
+          isDefault: true
+        - name: Tempo
+          type: tempo
+          access: proxy
+          url: http://tempo:3200
+          isDefault: false

@@ -1,0 +1,19 @@
+workflow "hello_parameter" {
+  description = "A simple hello workflow using an input parameter"
+
+  inputs {
+    input "target" {
+      type        = "string"
+      description = "The entity to say hello to"
+      default     = "world"
+    }
+  }
+
+  steps {
+    step "hello" "RunContainer" {
+      image   = "alpine:latest"
+      command = ["echo"]
+      args    = ["Hello, ${inputs.target}!"]
+    }
+  }
+}

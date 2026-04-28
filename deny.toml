@@ -1,0 +1,63 @@
+# This template contains all of the possible sections and their default values
+[graph]
+targets = [
+    { triple = "x86_64-unknown-linux-gnu" },
+]
+
+[advisories]
+# The path where the advisory databases are cloned/fetched into
+#db-path = "$CARGO_HOME/advisory-dbs"
+# The url(s) of the advisory databases to use
+#db-urls = ["https://github.com/rustsec/advisory-db"]
+# A list of advisory IDs to ignore. Note that ignored advisories will still
+# output a note when they are encountered.
+ignore = [
+    "RUSTSEC-2024-0436",
+    "RUSTSEC-2025-0012",
+    "RUSTSEC-2026-0008",
+    "RUSTSEC-2024-0384",
+    "RUSTSEC-2025-0134",
+    "RUSTSEC-2026-0098",
+    "RUSTSEC-2026-0099",
+    "RUSTSEC-2026-0104",
+    "RUSTSEC-2026-0049"
+]
+# If this is true, then cargo deny will use the git executable to fetch advisory database.
+# If this is false, then it uses a built-in git library.
+# Setting this to true can be helpful if you have special authentication requirements that cargo-deny does not support.
+# See Git Authentication for more information about setting up git authentication.
+#git-fetch-with-cli = true
+
+[licenses]
+allow = [
+    "MIT",
+    "MIT-0",  # Compatibility verified - JAC
+    "Zlib",  # Compatibility verified - JAC
+    "Apache-2.0",
+    "Unicode-3.0", # Compatibility verified - JAC
+    "ISC", # Compatibility verified - JAC
+    "OpenSSL", # Compatibility verified - JAC
+    "BSD-3-Clause", # Compatibility verified - JAC
+    "CC0-1.0", # Sus. Clarifcation needed - JAC
+    "BSL-1.0", # Compatibility verified - JAC
+    "CDLA-Permissive-2.0", # Compatibility verified - JAC
+    "MPL-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "0BSD"
+]
+
+confidence-threshold = 0.92
+exceptions = []
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+highlight = "all"
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

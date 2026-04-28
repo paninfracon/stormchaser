@@ -1,0 +1,16 @@
+[package]
+name = "stormchaser-dsl"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+stormchaser-model = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tree-sitter = "0.24"
+hcl-rs = "0.18"
+anyhow = { workspace = true }
+thiserror = { workspace = true }

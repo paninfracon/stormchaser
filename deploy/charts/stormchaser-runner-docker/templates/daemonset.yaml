@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "stormchaser-runner-docker.fullname" . }}
+  labels:
+    {{- include "stormchaser-runner-docker.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "stormchaser-runner-docker.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "stormchaser-runner-docker.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: runner
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: BINARY
+              value: "stormchaser-runner-docker"
+            - name: NATS_URL
+              value: {{ .Values.config.natsUrl | quote }}
+            - name: RUST_LOG
+              value: {{ .Values.config.rustLog | quote }}
+            - name: DOCKER_HOST
+              value: "unix:///var/run/docker.sock"
+          volumeMounts:
+            - name: docker-socket
+              mountPath: /var/run/docker.sock
+      volumes:
+        - name: docker-socket
+          hostPath:
+            path: {{ .Values.dockerSocketPath }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

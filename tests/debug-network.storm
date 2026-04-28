@@ -1,0 +1,15 @@
+stormchaser_dsl_version = "v1"
+
+workflow "debug-network" {
+  description = "Debug network connectivity within the runner"
+
+  steps {
+    step "check" "RunContainer" {
+      image   = "alpine:3.18"
+      command = ["/bin/sh", "-c"]
+      args = [
+        "echo 'Checking postgres...'; ping -c 1 postgres; echo 'Checking nats...'; ping -c 1 nats; echo 'Checking registry...'; ping -c 1 stormchaser-registry-1; echo 'Done.'"
+      ]
+    }
+  }
+}

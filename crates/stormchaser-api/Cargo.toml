@@ -1,0 +1,72 @@
+[package]
+name = "stormchaser-api"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[lib]
+name = "stormchaser_api"
+path = "src/lib.rs"
+
+[dependencies]
+stormchaser-model = { workspace = true }
+stormchaser-tls = { workspace = true }
+stormchaser-opa = { path = "../stormchaser-opa" }
+tokio = { workspace = true }
+rustls = { version = "0.23", features = ["ring"] }
+axum = { workspace = true }
+kube = { version = "0.98", features = ["runtime", "derive", "config"] }
+k8s-openapi = { version = "0.24", features = ["v1_31", "schemars"] }
+bollard = "0.18"
+reqwest = { workspace = true }
+reqwest-middleware = { workspace = true }
+reqwest-retry = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+log = { workspace = true }
+async-trait = { workspace = true }
+async-nats = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tower-http = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+anyhow = { workspace = true }
+hmac = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+hcl-rs = { workspace = true }
+regex = { workspace = true }
+base64 = { workspace = true }
+aes-gcm = { workspace = true }
+aead = { workspace = true }
+jsonwebtoken = { workspace = true }
+axum-extra = { version = "0.9", features = ["typed-header"] }
+tower = { workspace = true }
+tower_governor = "0.4"
+once_cell = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+opentelemetry-otlp = { workspace = true, features = ["grpc-tonic"] }
+tracing-opentelemetry = { workspace = true }
+opentelemetry-semantic-conventions = { workspace = true }
+urlencoding = "2.1"
+tokio-stream = "0.1.18"
+futures.workspace = true
+utoipa = { version = "5.4.0", features = ["axum_extras", "uuid", "chrono"] }
+utoipa-swagger-ui = { version = "8.0", features = ["axum"] }
+bytes = "1.11.1"
+
+[dev-dependencies]
+wiremock = "0.6"
+tower = { version = "0.5", features = ["util"] }
+mime = "0.3"
+chrono = { workspace = true }
+serde_json = { workspace = true }
+dotenvy = "0.15.7"
+
+[build-dependencies]
+vergen = { workspace = true }
