@@ -136,6 +136,52 @@ else
     export PORT_OPA=8181
 fi
 
+# 2.5 Generate Dex config if missing or cleanup requested
+if [ "$CLEANUP" = true ] || [ ! -f "$REPO_ROOT/deploy/dex/config.generated.yaml" ]; then
+    echo -e "${BLUE}>>> Generating random passwords for Dex personas...${NC}"
+    export REPO_ROOT
+    python3 - << 'EOF'
+import os
+import secrets
+try:
+    from passlib.hash import bcrypt
+except ImportError:
+    print("\033[0;31mError: passlib is not installed. Please pip install passlib bcrypt.\033[0m")
+    exit(1)
+
+def gen_and_hash():
+    pw = secrets.token_urlsafe(16)
+    return pw, bcrypt.hash(pw)
+
+roles = ["ADMIN", "DEV", "OPS", "SEC"]
+repo_root = os.environ.get("REPO_ROOT", ".")
+template_path = os.path.join(repo_root, "deploy/dex/config.yaml")
+out_path = os.path.join(repo_root, "deploy/dex/config.generated.yaml")
+
+with open(template_path, "r") as f:
+    content = f.read()
+
+print("\n--- Generated Dex Passwords ---")
+for role in roles:
+    pw, phash = gen_and_hash()
+    role_email = role.lower()
+    if role == "ADMIN":
+        role_email = "admin"
+    elif role == "DEV":
+        role_email = "dev"
+    elif role == "OPS":
+        role_email = "ops"
+    elif role == "SEC":
+        role_email = "sec"
+    print(f"{role} (stormchaser-{role_email}@paninfracon.net): {pw}")
+    content = content.replace(f"PASSWORD_HASH_{role}", phash)
+print("-------------------------------\n")
+
+with open(out_path, "w") as f:
+    f.write(content)
+EOF
+fi
+
 # 3. Start Docker Services
 echo -e "${BLUE}>>> Starting Stormchaser backend in Docker ($MODE mode)...${NC}"
 COMPOSE_PROFILES="$MODE"

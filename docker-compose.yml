@@ -25,7 +25,7 @@ services:
   dex:
     image: dexidp/dex:v2.41.1
     volumes:
-      - ./deploy/dex/config.yaml:/etc/dex/config.docker.yaml
+      - ./deploy/dex/config.generated.yaml:/etc/dex/config.docker.yaml
     ports:
       - "${PORT_DEX:-5556}:5556"
     command: dex serve /etc/dex/config.docker.yaml

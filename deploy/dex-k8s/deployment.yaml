@@ -19,12 +19,27 @@ spec:
         command:
         - sh
         - -c
-        - "sed 's|PASSWORD_HASH_PLACEHOLDER|'\"$DEX_ADMIN_HASH\"'|g' /config-template/config.yaml > /etc/dex/config.yaml"
+        - "sed -e \"s|PASSWORD_HASH_ADMIN|$DEX_ADMIN_HASH|g\" -e \"s|PASSWORD_HASH_DEV|$DEX_DEV_HASH|g\" -e \"s|PASSWORD_HASH_OPS|$DEX_OPS_HASH|g\" -e \"s|PASSWORD_HASH_SEC|$DEX_SEC_HASH|g\" /config-template/config.yaml > /etc/dex/config.yaml"
         env:
         - name: DEX_ADMIN_HASH
           valueFrom:
             secretKeyRef:
               name: dex-admin-secret
+              key: hash
+        - name: DEX_DEV_HASH
+          valueFrom:
+            secretKeyRef:
+              name: dex-dev-secret
+              key: hash
+        - name: DEX_OPS_HASH
+          valueFrom:
+            secretKeyRef:
+              name: dex-ops-secret
+              key: hash
+        - name: DEX_SEC_HASH
+          valueFrom:
+            secretKeyRef:
+              name: dex-sec-secret
               key: hash
         volumeMounts:
         - name: config-template

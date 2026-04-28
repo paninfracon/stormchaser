@@ -31,6 +31,22 @@ data:
         public: false
     staticPasswords:
       - email: "stormchaser-admin@paninfracon.net"
-        hash: "PASSWORD_HASH_PLACEHOLDER"
+        hash: "PASSWORD_HASH_ADMIN"
         username: "admin"
         userID: "08a8684b-db88-4b73-90a9-3dd1661f5466"
+        groups: ["admin"]
+      - email: "stormchaser-dev@paninfracon.net"
+        hash: "PASSWORD_HASH_DEV"
+        username: "developer"
+        userID: "18a8684b-db88-4b73-90a9-3dd1661f5466"
+        groups: ["developer"]
+      - email: "stormchaser-ops@paninfracon.net"
+        hash: "PASSWORD_HASH_OPS"
+        username: "operator"
+        userID: "28a8684b-db88-4b73-90a9-3dd1661f5466"
+        groups: ["operator"]
+      - email: "stormchaser-sec@paninfracon.net"
+        hash: "PASSWORD_HASH_SEC"
+        username: "security"
+        userID: "38a8684b-db88-4b73-90a9-3dd1661f5466"
+        groups: ["security"]
