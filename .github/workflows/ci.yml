@@ -30,6 +30,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+    - name: Maximize Disk Space
+      run: |
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /usr/local/lib/android
+        sudo rm -rf /opt/ghc
     - name: Setup Rust
       uses: dtolnay/rust-toolchain@stable
       with:
@@ -53,6 +58,11 @@ jobs:
       API_RATE_LIMIT_PER_SECOND: 1000
     steps:
     - uses: actions/checkout@v4
+    - name: Maximize Disk Space
+      run: |
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /usr/local/lib/android
+        sudo rm -rf /opt/ghc
     - name: Setup Rust
       uses: dtolnay/rust-toolchain@stable
       with:
@@ -72,4 +82,4 @@ jobs:
     - name: Run Database Migrations
       run: sqlx migrate run --database-url postgres://stormchaser:stormchaser@localhost:5432/stormchaser
     - name: Run Tests
-      run: cargo test --workspace --all-targets --all-features
+      run: cargo test --workspace --all-features
