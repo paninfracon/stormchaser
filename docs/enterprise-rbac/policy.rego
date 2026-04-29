@@ -25,6 +25,7 @@ allow if {
     # 2. Check if it's an Engine request (has workflow_ast/inputs)
     input.workflow_ast
     input.inputs
+    is_valid_engine_user
     has_engine_permission
 }
 
@@ -108,6 +109,12 @@ is_valid_domain if {
 }
 
 # --- Engine ABAC Policies ---
+
+# Validate that the engine's initiating_user comes from an approved domain
+is_valid_engine_user if {
+    some domain in data.allowed_email_domains
+    endswith(input.initiating_user, concat("", ["@", domain]))
+}
 
 # Engine rule: Allow execution unless explicitly denied
 has_engine_permission if {

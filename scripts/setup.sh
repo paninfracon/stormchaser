@@ -152,6 +152,11 @@ fi
 if [ "$REGENERATE_DEX_CONFIG" = true ]; then
     echo -e "${BLUE}>>> Generating random passwords for Dex personas...${NC}"
     export REPO_ROOT
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo -e "${RED}Error: python3 is required to generate the Dex config but was not found in PATH.${NC}" >&2
+        echo -e "${RED}Please install Python 3 and re-run this script.${NC}" >&2
+        exit 1
+    fi
     python3 - << 'EOF'
 import os
 import stat
@@ -182,6 +187,14 @@ with open(cred_path, "w") as cred_file:
         pw, phash = gen_and_hash()
         cred_file.write(f"stormchaser-{role_email}@paninfracon.net: {pw}\n")
         content = content.replace(f"PASSWORD_HASH_{role}", phash)
+
+# Verify all placeholders were replaced
+remaining = [line for line in content.splitlines() if "PASSWORD_HASH_" in line]
+if remaining:
+    print(f"\033[0;31mError: unreplaced PASSWORD_HASH_ placeholders found in generated config:\033[0m", file=sys.stderr)
+    for line in remaining:
+        print(f"  {line.strip()}", file=sys.stderr)
+    sys.exit(1)
 
 os.chmod(cred_path, stat.S_IRUSR | stat.S_IWUSR)
 

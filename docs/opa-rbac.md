@@ -150,7 +150,7 @@ deny if {
     endswith(input.path, "/approve")
 
     # Does the current user's email match the initiating user?
-    token_payload.email == input.resource.initiating_user
+    token_payload.email == input.initiating_user
 }
 ```
 
@@ -198,8 +198,16 @@ allow if {
     has_permission
 }
 
-# Decode the raw JWT string from input.token and extract its payload (claims).
-token_payload := io.jwt.decode(input.token)[1]
+# Read the raw JWT string safely (token is null when absent).
+raw_token := object.get(input, "token", null)
+
+# Default to an empty payload when no token is present.
+default token_payload := {}
+
+# Decode the JWT and extract its payload (claims) only when a token exists.
+token_payload := io.jwt.decode(raw_token)[1] if {
+    raw_token != null
+}
 
 # --- Helper Rules ---
 
