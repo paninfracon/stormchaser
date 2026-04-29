@@ -136,8 +136,18 @@ else
     export PORT_OPA=8181
 fi
 
-# 2.5 Generate Dex config if missing or cleanup requested
-if [ "$CLEANUP" = true ] || [ ! -f "$REPO_ROOT/deploy/dex/config.generated.yaml" ]; then
+# 2.5 Generate Dex config if missing, cleanup requested, or template changed
+DEX_TEMPLATE_PATH="$REPO_ROOT/deploy/dex/config.yaml"
+DEX_GENERATED_PATH="$REPO_ROOT/deploy/dex/config.generated.yaml"
+REGENERATE_DEX_CONFIG=false
+
+if [ "$CLEANUP" = true ] || [ ! -f "$DEX_GENERATED_PATH" ]; then
+    REGENERATE_DEX_CONFIG=true
+elif [ -f "$DEX_TEMPLATE_PATH" ] && [ "$DEX_TEMPLATE_PATH" -nt "$DEX_GENERATED_PATH" ]; then
+    REGENERATE_DEX_CONFIG=true
+fi
+
+if [ "$REGENERATE_DEX_CONFIG" = true ]; then
     echo -e "${BLUE}>>> Generating random passwords for Dex personas...${NC}"
     export REPO_ROOT
     python3 - << 'EOF'
