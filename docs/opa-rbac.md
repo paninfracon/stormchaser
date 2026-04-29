@@ -169,14 +169,61 @@ modules directly.
 
 ### Compile the Rego Policy
 
-You can use the `opa` CLI to compile your `.rego` file into a WASM module. You
-must specify the entrypoint (the rule you want to evaluate) using the `-e` flag.
+You can use the `opa` CLI to compile your `.rego` file into a single WASM module.
+You must specify the entrypoint (the primary rule you want Stormchaser to evaluate)
+using the `-e` flag.
+
+**Do I need multiple WASM files for multiple rules?**
+No. A single entrypoint (like `stormchaser/allow`) acts as the "root" of the
+evaluation tree. When Stormchaser asks OPA to evaluate `stormchaser/allow`, OPA
+will automatically traverse and evaluate all other rules, functions, and data
+references (e.g., `user_has_role`, `has_api_permission`, `engine_deny`) that
+are invoked from within that root rule.
+
+You only need one compiled `policy.wasm` file containing all of your RBAC and
+ABAC logic, as long as it's all reachable from the single entrypoint you specify.
+
+For example, if your entrypoint is `stormchaser/allow`, your Rego file might
+look like this:
+
+```rego
+package stormchaser
+
+# This is the "root" rule (entrypoint) evaluated by Stormchaser
+default allow := false
+
+allow if {
+    # It evaluates to true if BOTH of these helper rules are true
+    is_valid_domain
+    has_permission
+}
+
+# --- Helper Rules ---
+
+is_valid_domain if {
+    # Custom logic here...
+    endswith(input.token.email, "@yourcompany.com")
+}
+
+has_permission if {
+    # Evaluates to true if the user is an admin
+    "admin" in input.token.groups
+}
+
+has_permission if {
+    # OR it evaluates to true if they are a developer reading runs
+    "developer" in input.token.groups
+    input.method == "GET"
+    startswith(input.path, "/api/v1/runs")
+}
+```
 
 ```bash
-# Compile the policy targeting WASM
+# Compile the entire policy targeting WASM.
+# We set 'stormchaser/allow' as the root entrypoint.
 opa build -t wasm -e stormchaser/allow docs/opa-rbac-example.rego
 
-# The build outputs a bundle.tar.gz file. Extract it to get the policy.wasm
+# The build outputs a bundle.tar.gz file. Extract it to get the single policy.wasm
 tar -xzf bundle.tar.gz /policy.wasm
 ```
 
