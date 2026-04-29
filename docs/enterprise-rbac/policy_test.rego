@@ -26,7 +26,9 @@ test_admin_can_access_anything if {
         "method": "DELETE",
         "path": "/api/v1/critical-system",
         "token": mock_token("admin@paninfracon.net", ["Okta-Global-Admins"])
-    } with data as mock_data
+    }
+        with data.role_mappings as mock_data.role_mappings
+        with data.allowed_email_domains as mock_data.allowed_email_domains
 }
 
 test_developer_can_start_run if {
@@ -34,7 +36,9 @@ test_developer_can_start_run if {
         "method": "POST",
         "path": "/api/v1/runs",
         "token": mock_token("dev@paninfracon.net", ["Okta-Engineering"])
-    } with data as mock_data
+    }
+        with data.role_mappings as mock_data.role_mappings
+        with data.allowed_email_domains as mock_data.allowed_email_domains
 }
 
 test_developer_cannot_delete_webhooks if {
@@ -42,7 +46,9 @@ test_developer_cannot_delete_webhooks if {
         "method": "DELETE",
         "path": "/api/v1/webhooks/123",
         "token": mock_token("dev@paninfracon.net", ["Okta-Engineering"])
-    } with data as mock_data
+    }
+        with data.role_mappings as mock_data.role_mappings
+        with data.allowed_email_domains as mock_data.allowed_email_domains
 }
 
 test_invalid_domain_is_rejected if {
@@ -50,5 +56,7 @@ test_invalid_domain_is_rejected if {
         "method": "POST",
         "path": "/api/v1/runs",
         "token": mock_token("hacker@evil.com", ["Okta-Global-Admins"]) # Has admin group, but wrong domain
-    } with data as mock_data
+    }
+        with data.role_mappings as mock_data.role_mappings
+        with data.allowed_email_domains as mock_data.allowed_email_domains
 }

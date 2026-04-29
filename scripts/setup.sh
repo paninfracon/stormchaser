@@ -141,7 +141,9 @@ DEX_TEMPLATE_PATH="$REPO_ROOT/deploy/dex/config.yaml"
 DEX_GENERATED_PATH="$REPO_ROOT/deploy/dex/config.generated.yaml"
 REGENERATE_DEX_CONFIG=false
 
-if [ "$CLEANUP" = true ] || [ ! -f "$DEX_GENERATED_PATH" ]; then
+DEX_CREDENTIALS_PATH="$REPO_ROOT/deploy/dex/credentials.generated"
+
+if [ "$CLEANUP" = true ] || [ ! -f "$DEX_GENERATED_PATH" ] || [ ! -f "$DEX_CREDENTIALS_PATH" ]; then
     REGENERATE_DEX_CONFIG=true
 elif [ -f "$DEX_TEMPLATE_PATH" ] && [ "$DEX_TEMPLATE_PATH" -nt "$DEX_GENERATED_PATH" ]; then
     REGENERATE_DEX_CONFIG=true
