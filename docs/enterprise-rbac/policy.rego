@@ -4,67 +4,125 @@ import rego.v1
 
 default allow := false
 
-# Decode the JWT token passed by Stormchaser
+# Handle JWT decoding safely: if there is no token (e.g. EngineContext), use an empty list
 token_payload := payload if {
     [_, payload, _] := io.jwt.decode(input.token)
+} else := {"groups": [], "email": ""} if {
+    not input.token
 }
 
 # --- Core Authorization Logic ---
 
 allow if {
+    # 1. Check if it's an API request (has method/path)
+    input.method
+    input.path
     is_valid_domain
-    has_permission
+    has_api_permission
+}
+
+allow if {
+    # 2. Check if it's an Engine request (has workflow_ast/inputs)
+    input.workflow_ast
+    input.inputs
+    has_engine_permission
 }
 
 # --- Data-Driven RBAC ---
 
 # Check if the user's groups in the JWT overlap with the allowed IDP groups for a specific Stormchaser role
 user_has_role(role_name) if {
-    # Get the list of IDP groups mapped to this role from roles.json (loaded via data.role_mappings)
     allowed_idp_groups := data.role_mappings[role_name]
-
-    # Check if any group in the user's token exists in the allowed IDP groups
     some user_group in token_payload.groups
     user_group in allowed_idp_groups
 }
 
-# --- Permissions Mapping ---
+# Check if an email belongs to a role (for Engine Context where we only have initiating_user email)
+email_has_role(email, role_name) if {
+    # In a real environment, this mapping would come from an external data source or token propagation
+    # For this example, we mock a mapping
+    mock_email_to_group := {
+        "admin@paninfracon.net": "Okta-Global-Admins",
+        "dev@paninfracon.net": "Okta-Engineering",
+        "ops@paninfracon.net": "Okta-SRE",
+        "sec@paninfracon.net": "EntraID-SecOps"
+    }
+    user_group := mock_email_to_group[email]
+    allowed_idp_groups := data.role_mappings[role_name]
+    user_group in allowed_idp_groups
+}
 
-# Admins can do anything
-has_permission if {
+# --- API Permissions Mapping ---
+
+# Admins can do anything in the API
+has_api_permission if {
     user_has_role("admin")
 }
 
 # Developers can view and start runs
-has_permission if {
+has_api_permission if {
     user_has_role("developer")
     input.method in ["GET", "POST"]
     startswith(input.path, "/api/v1/runs")
 }
 
+# Operators can view runs
+has_api_permission if {
+    user_has_role("operator")
+    input.method == "GET"
+    startswith(input.path, "/api/v1/runs")
+}
+
 # Operators can manage webhooks and cron workflows
-has_permission if {
+has_api_permission if {
     user_has_role("operator")
     input.method in ["GET", "POST", "DELETE"]
     startswith(input.path, "/api/v1/webhooks")
 }
-has_permission if {
+has_api_permission if {
     user_has_role("operator")
     input.method in ["GET", "POST", "DELETE"]
     startswith(input.path, "/api/v1/cron-workflows")
 }
 
-# Security can only view reports
-has_permission if {
+# Security can view reports
+has_api_permission if {
     user_has_role("security")
     input.method == "GET"
     startswith(input.path, "/api/v1/reports")
 }
 
-# --- General Security Policies ---
+# Security can view runs
+has_api_permission if {
+    user_has_role("security")
+    input.method == "GET"
+    startswith(input.path, "/api/v1/runs")
+}
+
+# --- General Security Policies (API) ---
 
 # Only allow users from approved corporate domains
 is_valid_domain if {
     some domain in data.allowed_email_domains
     endswith(token_payload.email, concat("", ["@", domain]))
+}
+
+# --- Engine ABAC Policies ---
+
+# Engine rule: Allow execution unless explicitly denied
+has_engine_permission if {
+    not engine_deny
+}
+
+# ABAC Example 1: Prevent deployment to 'production' if user is not in 'operator' role
+engine_deny if {
+    input.inputs.env == "production"
+    not email_has_role(input.initiating_user, "operator")
+}
+
+# ABAC Example 2: Prevent running containers with 'privileged' flag unless admin
+engine_deny if {
+    input.workflow_ast.step_type == "RunContainer"
+    input.workflow_ast.config.privileged == true
+    not email_has_role(input.initiating_user, "admin")
 }
