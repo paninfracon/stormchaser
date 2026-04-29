@@ -1,0 +1,24 @@
+{
+  "role_mappings": {
+    "admin": [
+      "Okta-Global-Admins",
+      "EntraID-Platform-Owners"
+    ],
+    "developer": [
+      "Okta-Engineering",
+      "EntraID-Developers"
+    ],
+    "operator": [
+      "Okta-DevOps",
+      "Okta-SRE"
+    ],
+    "security": [
+      "Okta-Security-Auditors",
+      "EntraID-SecOps"
+    ]
+  },
+  "allowed_email_domains": [
+    "paninfracon.net",
+    "example.com"
+  ]
+}

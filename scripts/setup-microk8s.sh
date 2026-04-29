@@ -118,16 +118,29 @@ helm upgrade --install stormchaser . \
   --set "global.agent.image.pullPolicy=Never"
 
 echo -e "${BLUE}>>> Deploying Dex Identity Provider...${NC}"
-if ! microk8s kubectl get secret dex-admin-secret -n "$NAMESPACE" >/dev/null 2>&1; then
-    echo -e "${BLUE}>>> Generating random admin password for Dex...${NC}"
-    DEX_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
-    DEX_HASH=$(python3 -c "from passlib.hash import bcrypt; print(bcrypt.hash('$DEX_PASSWORD'))")
-    microk8s kubectl create secret generic dex-admin-secret \
-        --namespace "$NAMESPACE" \
-        --from-literal=password="$DEX_PASSWORD" \
-        --from-literal=hash="$DEX_HASH"
-    echo -e "${GREEN}>>> Generated Dex admin password and stored in dex-admin-secret.${NC}"
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "Error: python3 is required to generate Dex password hashes. Install python3 and rerun this script." >&2
+    exit 1
 fi
+if ! python3 -c 'from passlib.hash import bcrypt' >/dev/null 2>&1; then
+    echo "Error: python3 package 'passlib' is required to generate Dex password hashes. Install it (for example: pip3 install 'passlib[bcrypt]') and rerun this script." >&2
+    exit 1
+fi
+
+for persona in admin dev ops sec; do
+    secret_name="dex-${persona}-secret"
+    if ! microk8s kubectl get secret "$secret_name" -n "$NAMESPACE" >/dev/null 2>&1; then
+        echo -e "${BLUE}>>> Generating random password for Dex persona $persona...${NC}"
+        DEX_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
+        DEX_HASH=$(DEX_PASSWORD="$DEX_PASSWORD" python3 -c 'import os; from passlib.hash import bcrypt; print(bcrypt.hash(os.environ["DEX_PASSWORD"]))')
+        microk8s kubectl create secret generic "$secret_name" \
+            --namespace "$NAMESPACE" \
+            --from-literal=password="$DEX_PASSWORD" \
+            --from-literal=hash="$DEX_HASH"
+        echo -e "${GREEN}>>> Generated Dex credentials for $persona and stored them in secret $secret_name.${NC}"
+        echo "    Retrieve the password if needed with: microk8s kubectl get secret $secret_name -n $NAMESPACE -o jsonpath='{.data.password}' | base64 -d"
+    fi
+done
 
 microk8s kubectl apply -f "$REPO_ROOT/deploy/dex-k8s/"
 

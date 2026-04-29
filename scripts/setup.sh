@@ -136,6 +136,76 @@ else
     export PORT_OPA=8181
 fi
 
+# 2.5 Generate Dex config if missing, cleanup requested, or template changed
+DEX_TEMPLATE_PATH="$REPO_ROOT/deploy/dex/config.yaml"
+DEX_GENERATED_PATH="$REPO_ROOT/deploy/dex/config.generated.yaml"
+REGENERATE_DEX_CONFIG=false
+
+DEX_CREDENTIALS_PATH="$REPO_ROOT/deploy/dex/credentials.generated"
+
+if [ "$CLEANUP" = true ] || [ ! -f "$DEX_GENERATED_PATH" ] || [ ! -f "$DEX_CREDENTIALS_PATH" ]; then
+    REGENERATE_DEX_CONFIG=true
+elif [ -f "$DEX_TEMPLATE_PATH" ] && [ "$DEX_TEMPLATE_PATH" -nt "$DEX_GENERATED_PATH" ]; then
+    REGENERATE_DEX_CONFIG=true
+fi
+
+if [ "$REGENERATE_DEX_CONFIG" = true ]; then
+    echo -e "${BLUE}>>> Generating random passwords for Dex personas...${NC}"
+    export REPO_ROOT
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo -e "${RED}Error: python3 is required to generate the Dex config but was not found in PATH.${NC}" >&2
+        echo -e "${RED}Please install Python 3 and re-run this script.${NC}" >&2
+        exit 1
+    fi
+    python3 - << 'EOF'
+import os
+import stat
+import secrets
+import sys
+try:
+    from passlib.hash import bcrypt
+except ImportError:
+    print("\033[0;31mError: passlib is not installed. Please pip install passlib[bcrypt].\033[0m", file=sys.stderr)
+    exit(1)
+
+def gen_and_hash():
+    pw = secrets.token_urlsafe(16)
+    return pw, bcrypt.hash(pw)
+
+repo_root = os.environ.get("REPO_ROOT", ".")
+template_path = os.path.join(repo_root, "deploy/dex/config.yaml")
+out_path = os.path.join(repo_root, "deploy/dex/config.generated.yaml")
+cred_path = os.path.join(repo_root, "deploy/dex/credentials.generated")
+role_map = {"ADMIN": "admin", "DEV": "dev", "OPS": "ops", "SEC": "sec"}
+
+with open(template_path, "r") as f:
+    content = f.read()
+
+with open(cred_path, "w") as cred_file:
+    cred_file.write("# Dex persona credentials — keep secret, do not commit\n")
+    for role, role_email in role_map.items():
+        pw, phash = gen_and_hash()
+        cred_file.write(f"stormchaser-{role_email}@paninfracon.net: {pw}\n")
+        content = content.replace(f"PASSWORD_HASH_{role}", phash)
+
+# Verify all placeholders were replaced
+remaining = [line for line in content.splitlines() if "PASSWORD_HASH_" in line]
+if remaining:
+    print(f"\033[0;31mError: unreplaced PASSWORD_HASH_ placeholders found in generated config:\033[0m", file=sys.stderr)
+    for line in remaining:
+        print(f"  {line.strip()}", file=sys.stderr)
+    sys.exit(1)
+
+os.chmod(cred_path, stat.S_IRUSR | stat.S_IWUSR)
+
+with open(out_path, "w") as f:
+    f.write(content)
+os.chmod(out_path, stat.S_IRUSR | stat.S_IWUSR)
+
+print(f"Dex credentials written to {cred_path} (mode 0600).")
+EOF
+fi
+
 # 3. Start Docker Services
 echo -e "${BLUE}>>> Starting Stormchaser backend in Docker ($MODE mode)...${NC}"
 COMPOSE_PROFILES="$MODE"
