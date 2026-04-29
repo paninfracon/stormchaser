@@ -118,6 +118,10 @@ helm upgrade --install stormchaser . \
   --set "global.agent.image.pullPolicy=Never"
 
 echo -e "${BLUE}>>> Deploying Dex Identity Provider...${NC}"
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "Error: python3 is required to generate Dex password hashes. Install python3 and rerun this script." >&2
+    exit 1
+fi
 if ! python3 -c 'from passlib.hash import bcrypt' >/dev/null 2>&1; then
     echo "Error: python3 package 'passlib' is required to generate Dex password hashes. Install it (for example: pip3 install 'passlib[bcrypt]') and rerun this script." >&2
     exit 1
