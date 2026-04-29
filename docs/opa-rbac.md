@@ -14,6 +14,18 @@ into the policy evaluation under the `input` document:
 }
 ```
 
+> ⚠️ **Important:** `token` is `null` for unauthenticated requests (e.g., the login
+> endpoint). Policies **must** guard against `null` before calling `io.jwt.decode`.
+> The `ApiOpaContext` serializes `None` as JSON `null`, not as a missing field:
+>
+> ```json
+> {
+>   "path": "/api/v1/auth/login",
+>   "method": "GET",
+>   "token": null
+> }
+> ```
+
 The `token` is the raw JWT access token provided by the client (if available).
 
 > 💡 **Tip:** The fastest way to learn and debug Rego policies is the
@@ -144,15 +156,14 @@ allow if {
 **Approval Separation of Duties (SoD)**
 Prevent the person who initiated a run from approving their own manual steps.
 
-> **Note:** The Engine OPA context (`EngineOpaContext`) includes `initiating_user` at the top
-> level of `input`. The API context only contains `path`, `method`, and `token`. This SoD
-> rule is therefore evaluated during engine execution, not API authorization.
+> **Note:** This rule is intended to be evaluated during engine execution for approval-step
+> actions. The Engine OPA context (`EngineOpaContext`) includes `initiating_user` at the top
+> level of `input`, whereas the API authorization context only contains `path`, `method`, and
+> `token`. The `input.path` field is **not** available in the engine context, so this rule
+> relies solely on `input.initiating_user`.
 
 ```rego
 deny if {
-    # Is this an approval action?
-    endswith(input.path, "/approve")
-
     # Does the current user's email match the initiating user?
     # input.initiating_user is provided by the EngineOpaContext
     token_payload.email == input.initiating_user
