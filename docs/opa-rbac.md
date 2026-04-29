@@ -198,21 +198,24 @@ allow if {
     has_permission
 }
 
+# Decode the raw JWT string from input.token and extract its payload (claims).
+token_payload := io.jwt.decode(input.token)[1]
+
 # --- Helper Rules ---
 
 is_valid_domain if {
     # Custom logic here...
-    endswith(input.token.email, "@yourcompany.com")
+    endswith(token_payload.email, "@yourcompany.com")
 }
 
 has_permission if {
     # Evaluates to true if the user is an admin
-    "admin" in input.token.groups
+    "admin" in token_payload.groups
 }
 
 has_permission if {
     # OR it evaluates to true if they are a developer reading runs
-    "developer" in input.token.groups
+    "developer" in token_payload.groups
     input.method == "GET"
     startswith(input.path, "/api/v1/runs")
 }
