@@ -5,6 +5,10 @@ use std::time::Duration;
 use stormchaser_model::auth::{EngineOpaContext, OpaClient};
 use uuid::Uuid;
 
+/// Pinned OPA image used by integration tests.  Update this constant (and re-run
+/// the tests locally) when upgrading OPA to ensure CI remains reproducible.
+const OPA_IMAGE: &str = "openpolicyagent/opa:0.68.0";
+
 /// Helper to get a random available port
 fn get_free_port() -> u16 {
     TcpListener::bind("127.0.0.1:0")
@@ -53,7 +57,7 @@ async fn test_enterprise_opa_abac_integration() {
         .arg(format!("{}:8181", port))
         .arg("-v")
         .arg(format!("{}:/etc/opa:ro", policy_dir.display()))
-        .arg("openpolicyagent/opa:latest")
+        .arg(OPA_IMAGE)
         .arg("run")
         .arg("--server")
         .arg("--addr")
