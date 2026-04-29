@@ -49,7 +49,7 @@ is_public_api_route if {
 
 is_public_api_route if {
     input.method == "GET"
-    input.path == "/health"
+    input.path == "/api/health"
 }
 
 is_public_api_route if {
@@ -59,27 +59,12 @@ is_public_api_route if {
 
 is_public_api_route if {
     input.method == "GET"
-    input.path == ["healthz"]
-}
-
-is_public_api_route if {
-    input.method == "GET"
     input.path == "/readyz"
 }
 
 is_public_api_route if {
     input.method == "GET"
-    input.path == ["readyz"]
-}
-
-is_public_api_route if {
-    input.method == "GET"
     input.path == "/livez"
-}
-
-is_public_api_route if {
-    input.method == "GET"
-    input.path == ["livez"]
 }
 # --- Data-Driven RBAC ---
 
