@@ -86,7 +86,11 @@ Stormchaser Agent).
 
 ## 🚀 Quick Start
 
-Ensure you have Rust, Docker, and `docker-compose` installed.
+Ensure you have Rust, Docker, `docker-compose`, and Python 3 with `passlib[bcrypt]` installed.
+
+```bash
+pip3 install 'passlib[bcrypt]'
+```
 
 1. **Clone the repository:**
 
@@ -95,25 +99,25 @@ Ensure you have Rust, Docker, and `docker-compose` installed.
    cd stormchaser
    ```
 
-2. **Start the infrastructure (Postgres, NATS, Loki):**
-
-   ```bash
-   docker-compose up -d
-   ```
-
-3. **Run the setup script to initialize the database:**
+2. **Run the setup script:**
 
    ```bash
    ./scripts/setup.sh
    ```
 
-4. **Run a test workflow:**
+   This generates TLS certificates, creates Dex identity provider credentials
+   (stored in `deploy/dex/credentials.generated`, mode 0600), and starts all
+   Docker services (Postgres, NATS, Loki, Dex, MinIO, OPA). The `docker compose`
+   step is handled internally by the script, so there is no need to run it
+   separately before or after.
+
+3. **Run a test workflow:**
 
    ```bash
    ./run-cli.sh run tests/hello-world.storm
    ```
 
-5. **Monitor with the TUI:**
+4. **Monitor with the TUI:**
 
    ```bash
    cargo run -p stormchaser-tui
