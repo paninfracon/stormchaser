@@ -13,7 +13,7 @@ data:
         port: 5432
         database: stormchaser
         user: stormchaser
-        password: stormchaserpassword
+        password: <CHANGE_ME_IN_PRODUCTION>
         ssl:
           mode: disable
     web:

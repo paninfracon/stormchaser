@@ -5,7 +5,16 @@ workflow "log_scraping_guarded" {
     step "producer" "RunContainer" {
       image   = "alpine:latest"
       command = ["sh", "-c"]
-      args    = ["echo 'Spurious RESULT: fail'; echo '--- OUTPUT ---'; echo 'RESULT: success'; echo 'VALUE: 12345'; echo 'MESSAGE: Operation completed'; echo '--- END OUTPUT ---'; echo 'Another spurious RESULT: fail'"]
+      args = [<<-EOF
+        echo 'Spurious RESULT: fail'
+        echo '--- OUTPUT ---'
+        echo 'RESULT: success'
+        echo 'VALUE: 12345'
+        echo 'MESSAGE: Operation completed'
+        echo '--- END OUTPUT ---'
+        echo 'Another spurious RESULT: fail'
+      EOF
+      ]
 
       outputs {
         start_marker = "--- OUTPUT ---"

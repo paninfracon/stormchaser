@@ -24,7 +24,11 @@ fi
 
 echo ">>> Ensuring Minio bucket 'stormchaser-sfs' exists..."
 export AWS_ACCESS_KEY_ID="stormchaser"
-export AWS_SECRET_ACCESS_KEY="stormchaser"
+if [ -z "$STORMCHASER_MINIO_PASSWORD" ]; then
+    echo -e "\033[0;31mError: STORMCHASER_MINIO_PASSWORD is not set.\033[0m" >&2
+    exit 1
+fi
+export AWS_SECRET_ACCESS_KEY="$STORMCHASER_MINIO_PASSWORD"
 export AWS_DEFAULT_REGION="us-east-1"
 aws --endpoint-url "http://localhost:9000" s3 mb "s3://stormchaser-sfs" 2>/dev/null || true
 

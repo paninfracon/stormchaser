@@ -136,6 +136,26 @@ else
     export PORT_OPA=8181
 fi
 
+# 2.25 Generate random dev passwords in .env if missing
+ENV_FILE="$REPO_ROOT/.env"
+if [ "$CLEANUP" = true ] || [ ! -f "$ENV_FILE" ]; then
+    echo -e "${BLUE}>>> Generating random dev passwords in .env...${NC}"
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo -e "${RED}Error: python3 is required to generate passwords.${NC}" >&2
+        exit 1
+    fi
+    STORMCHASER_DEV_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
+    STORMCHASER_MINIO_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
+    if [ -z "$STORMCHASER_DEV_PASSWORD" ] || [ -z "$STORMCHASER_MINIO_PASSWORD" ]; then
+        echo -e "${RED}Error: Failed to generate random passwords.${NC}" >&2
+        exit 1
+    fi
+    cat <<EOF > "$ENV_FILE"
+STORMCHASER_DEV_PASSWORD=$STORMCHASER_DEV_PASSWORD
+STORMCHASER_MINIO_PASSWORD=$STORMCHASER_MINIO_PASSWORD
+EOF
+fi
+
 # 2.5 Generate Dex config if missing, cleanup requested, or template changed
 DEX_TEMPLATE_PATH="$REPO_ROOT/deploy/dex/config.yaml"
 DEX_GENERATED_PATH="$REPO_ROOT/deploy/dex/config.generated.yaml"

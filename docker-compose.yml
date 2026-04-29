@@ -3,7 +3,7 @@ services:
     image: postgres:16
     environment:
       POSTGRES_USER: stormchaser
-      POSTGRES_PASSWORD: stormchaser
+      POSTGRES_PASSWORD: ${STORMCHASER_DEV_PASSWORD:-stormchaser_dev_password}
       POSTGRES_DB: stormchaser
     ports:
       - "${PORT_DB:-5432}:5432"
@@ -96,7 +96,7 @@ services:
       - "${PORT_S3_CONS:-9001}:9001"
     environment:
       MINIO_ROOT_USER: stormchaser
-      MINIO_ROOT_PASSWORD: stormchaser
+      MINIO_ROOT_PASSWORD: ${STORMCHASER_MINIO_PASSWORD:-stormchaser_dev_password}
     command: server /data --console-address ":9001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
@@ -126,7 +126,7 @@ services:
       args:
         BINARY: stormchaser-engine
     environment:
-      DATABASE_URL: postgres://stormchaser:stormchaser@postgres:5432/stormchaser
+      DATABASE_URL: 'postgres://stormchaser:${STORMCHASER_DEV_PASSWORD?Error: STORMCHASER_DEV_PASSWORD is not set}@postgres:5432/stormchaser'
       NATS_URL: nats://nats:4222
       RUST_LOG: stormchaser_engine=debug
       GIT_CACHE_DIR: /tmp/stormchaser/git-cache
@@ -135,7 +135,7 @@ services:
       OTEL_SERVICE_NAME: stormchaser-engine
       OPA_URL: http://opa:8181/v1/data/stormchaser/allow
       AWS_ACCESS_KEY_ID: stormchaser
-      AWS_SECRET_ACCESS_KEY: stormchaser
+      AWS_SECRET_ACCESS_KEY: ${STORMCHASER_MINIO_PASSWORD:-stormchaser_dev_password}
       AWS_DEFAULT_REGION: us-east-1
       S3_INTERNAL_URL: http://s3:9000
       TLS_CA_CERT_PATH: /etc/engine/certs/ca.crt
@@ -159,7 +159,7 @@ services:
       args:
         BINARY: stormchaser-api
     environment:
-      DATABASE_URL: postgres://stormchaser:stormchaser@postgres:5432/stormchaser
+      DATABASE_URL: 'postgres://stormchaser:${STORMCHASER_DEV_PASSWORD?Error: STORMCHASER_DEV_PASSWORD is not set}@postgres:5432/stormchaser'
       NATS_URL: nats://nats:4222
       RUST_LOG: stormchaser_api=debug
       OIDC_ISSUER: http://dex:5556/dex
@@ -225,4 +225,7 @@ services:
 
 volumes:
   git-cache:
+  postgres-data:
+ta:
+it-cache:
   postgres-data:

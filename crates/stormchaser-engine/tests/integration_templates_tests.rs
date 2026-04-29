@@ -9,7 +9,12 @@ mod common {
     use stormchaser_model::auth::{self, OpaClient};
     pub async fn get_pool() -> sqlx::PgPool {
         let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://stormchaser:stormchaser@localhost:5432/stormchaser".to_string()
+            dotenvy::dotenv().ok();
+            format!(
+                "postgres://stormchaser:{}@localhost:5432/stormchaser",
+                std::env::var("STORMCHASER_DEV_PASSWORD")
+                    .unwrap_or_else(|_| "stormchaser".to_string())
+            )
         });
         sqlx::PgPool::connect(&db_url).await.unwrap()
     }

@@ -14,8 +14,12 @@ workflow "SFSParkingTest" {
         { name = "workspace", mount_path = "/data" }
       ]
       command = ["/bin/sh", "-c"]
-      args    = ["echo 'stormchaser-sfs-test' > /data/test.txt && ls -la /data"]
-      next    = ["verify_file"]
+      args = [<<-EOF
+        echo 'stormchaser-sfs-test' > /data/test.txt
+        ls -la /data
+      EOF
+      ]
+      next = ["verify_file"]
     }
 
     step "verify_file" "RunContainer" {

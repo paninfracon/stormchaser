@@ -95,7 +95,7 @@ pip3 install 'passlib[bcrypt]'
 1. **Clone the repository:**
 
    ```bash
-   git clone https://github.com/your-org/stormchaser.git
+   git clone https://github.com/paninfracon/stormchaser.git
    cd stormchaser
    ```
 

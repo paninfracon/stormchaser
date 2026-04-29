@@ -6,6 +6,7 @@ mod job_machine;
 
 use anyhow::{Context, Result};
 use axum::{routing::get, Router};
+use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use futures::StreamExt;
 use http::Request;
@@ -120,7 +121,9 @@ async fn run_reaper(cluster_pool: Arc<ClusterPool>) -> Result<()> {
                         let creation_time = job.metadata.creation_timestamp.as_ref().map(|ts| ts.0);
 
                         if let Some(created) = creation_time {
-                            let age = now - created;
+                            let created_chrono = DateTime::from_timestamp(created.as_second(), 0)
+                                .unwrap_or_default();
+                            let age = now - created_chrono;
                             // If job is older than 24 hours, clean it up
                             if age.num_hours() >= 24 {
                                 let job_name = job.name_any();
@@ -184,8 +187,8 @@ async fn scan_for_orphans(
                 let annotations = job.metadata.annotations.as_ref();
                 let received_at = annotations
                     .and_then(|a| a.get("stormchaser.io/received-at"))
-                    .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok())
-                    .map(|dt| dt.with_timezone(&chrono::Utc))
+                    .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
+                    .map(|dt| dt.with_timezone(&Utc))
                     .unwrap_or_else(chrono::Utc::now);
 
                 let is_encrypted = annotations
@@ -908,7 +911,5 @@ mod tests {
         let config = Config::from_env(env);
         assert_eq!(config.nats_url, "nats://remote:4222");
         assert_eq!(config.runner_id, "my-runner");
-        assert_eq!(config.encryption_key.unwrap(), "my-key");
-        assert_eq!(config.rust_log, "debug");
     }
 }

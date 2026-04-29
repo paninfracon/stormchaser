@@ -21,8 +21,13 @@ async fn test_rate_limiting() {
     let nats_client = async_nats::connect(nats_url)
         .await
         .expect("Failed to connect to NATS");
-    let db_url = std::env::var("DATABASE_URL")
-        .unwrap_or("postgres://stormchaser:stormchaser@localhost:5432/stormchaser".into());
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        dotenvy::dotenv().ok();
+        format!(
+            "postgres://stormchaser:{}@localhost:5432/stormchaser",
+            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
+        )
+    });
     let pool = PgPoolOptions::new()
         .connect(&db_url)
         .await

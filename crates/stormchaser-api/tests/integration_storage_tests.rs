@@ -39,8 +39,13 @@ async fn test_storage_backend_crud() {
         Ok(c) => c,
         Err(_) => return,
     };
-    let db_url = std::env::var("DATABASE_URL")
-        .unwrap_or("postgres://stormchaser:stormchaser@localhost:5432/stormchaser".into());
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        dotenvy::dotenv().ok();
+        format!(
+            "postgres://stormchaser:{}@localhost:5432/stormchaser",
+            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
+        )
+    });
     let pool = match PgPoolOptions::new().connect(&db_url).await {
         Ok(p) => p,
         Err(_) => return,
@@ -161,8 +166,13 @@ async fn test_artifact_listing() {
         Ok(c) => c,
         Err(_) => return,
     };
-    let db_url = std::env::var("DATABASE_URL")
-        .unwrap_or("postgres://stormchaser:stormchaser@localhost:5432/stormchaser".into());
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        dotenvy::dotenv().ok();
+        format!(
+            "postgres://stormchaser:{}@localhost:5432/stormchaser",
+            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
+        )
+    });
     let pool = match PgPoolOptions::new().connect(&db_url).await {
         Ok(p) => p,
         Err(_) => return,

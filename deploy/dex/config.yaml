@@ -24,7 +24,7 @@ staticClients:
       - 'http://localhost:8080/callback'
       - 'http://127.0.0.1:8080/callback'
     name: 'Stormchaser CLI'
-    secret: stormchaser-cli-secret
+    secret: <CHANGE_ME_IN_PRODUCTION>
     public: false
 
 staticPasswords:

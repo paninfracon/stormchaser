@@ -52,11 +52,17 @@ curl -s -X POST "$API_URL/api/v1/storage-backends" \
     }
   }' > /dev/null
 
+if [ -z "$STORMCHASER_DEV_PASSWORD" ] && [ -z "$1" ]; then
+    echo -e "${RED}Error: STORMCHASER_DEV_PASSWORD is not set and no password was passed as argument.${NC}" >&2
+    exit 1
+fi
+DB_PASSWORD="${1:-$STORMCHASER_DEV_PASSWORD}"
+
 KUBECONFIG_DATA=$(microk8s config | sed 's|https://127.0.0.1:16443|https://kubernetes.default.svc:443|g' | sed 's|certificate-authority-data:.*|insecure-skip-tls-verify: true|g')
 
 echo -e "${BLUE}>>> Triggering CLI to launch workflow...${NC}"
 # Use the CLI to run the workflow and parse the run ID
-RUN_JSON=$(cargo run -q -p stormchaser-cli -- --url "$API_URL" --token "$TOKEN" run tests/dogfood-k8s.storm --input repo_url="$REPO_URL" --input kubeconfig="$KUBECONFIG_DATA")
+RUN_JSON=$(cargo run -q -p stormchaser-cli -- --url "$API_URL" --token "$TOKEN" run tests/dogfood-k8s.storm --input repo_url="$REPO_URL" --input kubeconfig="$KUBECONFIG_DATA" --input db_password="$DB_PASSWORD")
 RUN_ID=$(echo "$RUN_JSON" | grep -oP '(?<="run_id": ")[^"]*')
 
 if [ -z "$RUN_ID" ]; then

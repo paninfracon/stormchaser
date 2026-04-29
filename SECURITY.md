@@ -13,7 +13,7 @@ Currently, Stormchaser is in active development. Only the latest version is supp
 
 We take the security of Stormchaser seriously, especially given its role in orchestrating workloads and handling secrets.
 
-If you discover a security vulnerability, please **DO NOT** open a public issue. Instead, send an email to the core team at `security@example.com` (replace with actual security email before public launch).
+If you discover a security vulnerability, please **DO NOT** open a public issue. Instead, send an email to the core team at `security@paninfracon.net`.
 
 Please include the following information:
 

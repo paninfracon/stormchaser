@@ -13,7 +13,7 @@ stormchaser-orchestration:
   global:
     database:
       # If using the built-in postgres, this is generated dynamically via templates or overridden below.
-      url: "postgres://stormchaser:stormchaserpassword@stormchaser-postgresql:5432/stormchaser?sslmode=disable"
+      url: "postgres://stormchaser:<CHANGE_ME_IN_PRODUCTION>@stormchaser-postgresql:5432/stormchaser?sslmode=disable"
       existingSecret: ""
       existingSecretKey: "DATABASE_URL"
       ssl: false
@@ -82,7 +82,7 @@ postgresql:
     tag: 16.4.0-debian-12-r14
   auth:
     username: stormchaser
-    password: stormchaserpassword
+    password: <CHANGE_ME_IN_PRODUCTION>
     database: stormchaser
   primary:
     persistence:
