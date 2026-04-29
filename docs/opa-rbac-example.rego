@@ -3,13 +3,16 @@ package stormchaser
 import rego.v1
 
 default allow := false
+default token_payload := {}
 
 # Helper to decode and verify JWT token.
 # In production, io.jwt.verify_rs256 or similar should be used if the API
 # hasn't already verified the signature. Since the API passes the raw token
 # in `input.token`, we decode it here to read claims.
 token_payload := payload if {
-    [_, payload, _] := io.jwt.decode(input.token)
+    token := object.get(input, "token", null)
+    token != null
+    [_, payload, _] := io.jwt.decode(token)
 }
 
 # ---------------------------------------------------------------------------
