@@ -154,10 +154,11 @@ if [ "$REGENERATE_DEX_CONFIG" = true ]; then
 import os
 import stat
 import secrets
+import sys
 try:
     from passlib.hash import bcrypt
 except ImportError:
-    print("\033[0;31mError: passlib is not installed. Please pip install passlib bcrypt.\033[0m")
+    print("\033[0;31mError: passlib is not installed. Please pip install passlib[bcrypt].\033[0m", file=sys.stderr)
     exit(1)
 
 def gen_and_hash():
