@@ -86,7 +86,7 @@ Stormchaser Agent).
 
 ## 🚀 Quick Start
 
-Ensure you have Rust, Docker, `docker-compose`, and Python 3 with `passlib[bcrypt]` installed.
+Ensure you have Rust, Docker, Docker Compose v2 (`docker compose`) or the legacy `docker-compose` wrapper, and Python 3 with `passlib[bcrypt]` installed.
 
 ```bash
 pip3 install 'passlib[bcrypt]'
