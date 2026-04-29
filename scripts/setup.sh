@@ -142,6 +142,7 @@ if [ "$CLEANUP" = true ] || [ ! -f "$REPO_ROOT/deploy/dex/config.generated.yaml"
     export REPO_ROOT
     python3 - << 'EOF'
 import os
+import stat
 import secrets
 try:
     from passlib.hash import bcrypt
@@ -153,32 +154,29 @@ def gen_and_hash():
     pw = secrets.token_urlsafe(16)
     return pw, bcrypt.hash(pw)
 
-roles = ["ADMIN", "DEV", "OPS", "SEC"]
 repo_root = os.environ.get("REPO_ROOT", ".")
 template_path = os.path.join(repo_root, "deploy/dex/config.yaml")
 out_path = os.path.join(repo_root, "deploy/dex/config.generated.yaml")
+cred_path = os.path.join(repo_root, "deploy/dex/credentials.generated")
+role_map = {"ADMIN": "admin", "DEV": "dev", "OPS": "ops", "SEC": "sec"}
 
 with open(template_path, "r") as f:
     content = f.read()
 
-print("\n--- Generated Dex Passwords ---")
-for role in roles:
-    pw, phash = gen_and_hash()
-    role_email = role.lower()
-    if role == "ADMIN":
-        role_email = "admin"
-    elif role == "DEV":
-        role_email = "dev"
-    elif role == "OPS":
-        role_email = "ops"
-    elif role == "SEC":
-        role_email = "sec"
-    print(f"{role} (stormchaser-{role_email}@paninfracon.net): {pw}")
-    content = content.replace(f"PASSWORD_HASH_{role}", phash)
-print("-------------------------------\n")
+with open(cred_path, "w") as cred_file:
+    cred_file.write("# Dex persona credentials — keep secret, do not commit\n")
+    for role, role_email in role_map.items():
+        pw, phash = gen_and_hash()
+        cred_file.write(f"stormchaser-{role_email}@paninfracon.net: {pw}\n")
+        content = content.replace(f"PASSWORD_HASH_{role}", phash)
+
+os.chmod(cred_path, stat.S_IRUSR | stat.S_IWUSR)
 
 with open(out_path, "w") as f:
     f.write(content)
+os.chmod(out_path, stat.S_IRUSR | stat.S_IWUSR)
+
+print(f"Dex credentials written to {cred_path} (mode 0600).")
 EOF
 fi
 

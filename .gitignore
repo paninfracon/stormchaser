@@ -48,3 +48,4 @@ tests/certs/*.key
 tests/certs/*.crt
 tests/certs/*.csr
 deploy/dex/config.generated.yaml
+deploy/dex/credentials.generated
