@@ -1,7 +1,7 @@
 use std::net::TcpListener;
 use std::process::Command;
 use std::time::Duration;
-use stormchaser_model::auth::{ApiOpaContext, OpaClient};
+use stormchaser_model::auth::{ApiOpaContext, OpaAuthorizer, OpaClient};
 use uuid::Uuid;
 
 /// Helper to get a random available port
@@ -30,7 +30,7 @@ impl Drop for ContainerGuard {
 
 /// Helper to mock a JWT token (only signature is mocked, claims are real for testing)
 fn mock_token(email: &str, groups: Vec<&str>) -> String {
-    use jsonwebtoken::{EncodingKey, Header, encode};
+    use jsonwebtoken::{encode, EncodingKey, Header};
     use serde::{Deserialize, Serialize};
 
     #[derive(Debug, Serialize, Deserialize)]
