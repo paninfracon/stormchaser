@@ -4,12 +4,12 @@ import rego.v1
 
 default allow := false
 
-# Handle JWT decoding safely: if there is no token (e.g. EngineContext), use an empty list
+# Handle JWT decoding safely: guard against a null/absent token (e.g. EngineContext)
+# before calling io.jwt.decode, which would raise a built-in type error on null input.
 token_payload := payload if {
+    input.token != null
     [_, payload, _] := io.jwt.decode(input.token)
-} else := {"groups": [], "email": ""} if {
-    not input.token
-}
+} else := {"groups": [], "email": ""}
 
 # --- Core Authorization Logic ---
 
