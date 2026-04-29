@@ -14,7 +14,14 @@ token_payload := payload if {
 # --- Core Authorization Logic ---
 
 allow if {
-    # 1. Check if it's an API request (has method/path)
+    # 1. Allow unauthenticated/public API routes explicitly.
+    input.method
+    input.path
+    is_public_api_route
+}
+
+allow if {
+    # 2. Check if it's an API request (has method/path)
     input.method
     input.path
     is_valid_domain
@@ -22,13 +29,73 @@ allow if {
 }
 
 allow if {
-    # 2. Check if it's an Engine request (has workflow_ast/inputs)
+    # 3. Check if it's an Engine request (has workflow_ast/inputs)
     input.workflow_ast
     input.inputs
     is_valid_engine_user
     has_engine_permission
 }
 
+# Public API endpoints that must remain accessible without a token.
+is_public_api_route if {
+    input.method == "POST"
+    input.path == "/api/v1/auth/login"
+}
+
+is_public_api_route if {
+    input.method == "POST"
+    input.path == ["api", "v1", "auth", "login"]
+}
+
+is_public_api_route if {
+    input.method == "POST"
+    input.path == "/api/v1/auth/exchange"
+}
+
+is_public_api_route if {
+    input.method == "POST"
+    input.path == ["api", "v1", "auth", "exchange"]
+}
+
+is_public_api_route if {
+    input.method == "GET"
+    input.path == "/health"
+}
+
+is_public_api_route if {
+    input.method == "GET"
+    input.path == ["health"]
+}
+
+is_public_api_route if {
+    input.method == "GET"
+    input.path == "/healthz"
+}
+
+is_public_api_route if {
+    input.method == "GET"
+    input.path == ["healthz"]
+}
+
+is_public_api_route if {
+    input.method == "GET"
+    input.path == "/readyz"
+}
+
+is_public_api_route if {
+    input.method == "GET"
+    input.path == ["readyz"]
+}
+
+is_public_api_route if {
+    input.method == "GET"
+    input.path == "/livez"
+}
+
+is_public_api_route if {
+    input.method == "GET"
+    input.path == ["livez"]
+}
 # --- Data-Driven RBAC ---
 
 # Check if the user's groups in the JWT overlap with the allowed IDP groups for a specific Stormchaser role
