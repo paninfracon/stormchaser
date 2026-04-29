@@ -38,13 +38,8 @@ allow if {
 
 # Public API endpoints that must remain accessible without a token.
 is_public_api_route if {
-    input.method == "POST"
+    input.method == "GET"
     input.path == "/api/v1/auth/login"
-}
-
-is_public_api_route if {
-    input.method == "POST"
-    input.path == ["api", "v1", "auth", "login"]
 }
 
 is_public_api_route if {
@@ -53,18 +48,8 @@ is_public_api_route if {
 }
 
 is_public_api_route if {
-    input.method == "POST"
-    input.path == ["api", "v1", "auth", "exchange"]
-}
-
-is_public_api_route if {
     input.method == "GET"
     input.path == "/health"
-}
-
-is_public_api_route if {
-    input.method == "GET"
-    input.path == ["health"]
 }
 
 is_public_api_route if {
