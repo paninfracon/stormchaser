@@ -79,7 +79,7 @@ Attribute-Based Access Control. This `EngineOpaContext` is injected as:
 
 ```json
 {
-  "run_id": "e4b2d1c... ",
+  "run_id": "e4b2d1c...",
   "initiating_user": "developer@example.com",
   "workflow_ast": { ... },
   "inputs": { ... }
