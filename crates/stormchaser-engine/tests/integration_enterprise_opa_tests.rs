@@ -20,8 +20,8 @@ async fn test_enterprise_opa_abac_integration() {
     let container_name = format!("opa-engine-test-{}", Uuid::new_v4());
 
     // 1. Start OPA Container with Enterprise Policies
-    let repo_root = std::env::current_dir()
-        .unwrap()
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let repo_root = std::path::Path::new(&manifest_dir)
         .parent()
         .unwrap()
         .parent()
@@ -50,8 +50,20 @@ async fn test_enterprise_opa_abac_integration() {
 
     assert!(status.success(), "Failed to start OPA container");
 
-    // Give OPA a second to start
-    tokio::time::sleep(Duration::from_millis(2000)).await;
+    // Wait for OPA to be healthy
+    let health_url = format!("http://127.0.0.1:{}/health", port);
+    let client = reqwest::Client::new();
+    let mut ready = false;
+    for _ in 0..30 {
+        if let Ok(resp) = client.get(&health_url).send().await {
+            if resp.status().is_success() {
+                ready = true;
+                break;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    assert!(ready, "OPA container did not become ready in time");
 
     // 2. Setup Client pointing to the specific package entrypoint
     let opa_url = format!(
