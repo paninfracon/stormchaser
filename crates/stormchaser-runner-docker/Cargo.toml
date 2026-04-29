@@ -1,5 +1,5 @@
 [package]
-publish = false
+publish = true
 name = "stormchaser-runner-docker"
 version.workspace = true
 edition.workspace = true

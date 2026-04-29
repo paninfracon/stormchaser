@@ -1,5 +1,5 @@
 [package]
-publish = false
+publish = true
 name = "stormchaser-cli"
 version.workspace = true
 edition.workspace = true

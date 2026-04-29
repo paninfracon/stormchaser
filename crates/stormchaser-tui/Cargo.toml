@@ -1,5 +1,5 @@
 [package]
-publish = false
+publish = true
 name = "stormchaser-tui"
 version.workspace = true
 edition.workspace = true
