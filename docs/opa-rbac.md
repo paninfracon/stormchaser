@@ -144,12 +144,17 @@ allow if {
 **Approval Separation of Duties (SoD)**
 Prevent the person who initiated a run from approving their own manual steps.
 
+> **Note:** The Engine OPA context (`EngineOpaContext`) includes `initiating_user` at the top
+> level of `input`. The API context only contains `path`, `method`, and `token`. This SoD
+> rule is therefore evaluated during engine execution, not API authorization.
+
 ```rego
 deny if {
     # Is this an approval action?
     endswith(input.path, "/approve")
 
     # Does the current user's email match the initiating user?
+    # input.initiating_user is provided by the EngineOpaContext
     token_payload.email == input.initiating_user
 }
 ```
@@ -201,12 +206,26 @@ allow if {
 # Read the raw JWT string safely (token is null when absent).
 raw_token := object.get(input, "token", null)
 
-# Default to an empty payload when no token is present.
+# Default to an empty payload when no token is present or the token is malformed.
 default token_payload := {}
 
-# Decode the JWT and extract its payload (claims) only when a token exists.
+# Guard: check the token has basic JWT structure (3 non-empty dot-separated segments)
+# before attempting to decode it, so malformed tokens result in deny rather than an
+# OPA evaluation error (which would return 500 from the middleware).
+has_jwt_structure if {
+    is_string(raw_token)
+    raw_token != ""
+    segments := split(raw_token, ".")
+    count(segments) == 3
+    segments[0] != ""
+    segments[1] != ""
+    segments[2] != ""
+}
+
+# Decode the JWT and extract its payload (claims) only when the token
+# passes the structural guard. Otherwise, the default empty payload is used.
 token_payload := io.jwt.decode(raw_token)[1] if {
-    raw_token != null
+    has_jwt_structure
 }
 
 # --- Helper Rules ---

@@ -12,6 +12,7 @@ default token_payload := {}
 token_payload := payload if {
     token := object.get(input, "token", null)
     token != null
+    regex.match(`^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$`, token)
     [_, payload, _] := io.jwt.decode(token)
 }
 
