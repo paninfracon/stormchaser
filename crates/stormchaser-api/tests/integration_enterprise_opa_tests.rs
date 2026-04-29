@@ -1,7 +1,7 @@
 use std::net::TcpListener;
 use std::process::Command;
 use std::time::Duration;
-use stormchaser_model::auth::{ApiOpaContext, OpaAuthorizer, OpaClient};
+use stormchaser_model::auth::{ApiOpaContext, OpaClient};
 use uuid::Uuid;
 
 /// Helper to get a random available port
@@ -13,9 +13,24 @@ fn get_free_port() -> u16 {
         .port()
 }
 
+/// RAII guard that ensures a Docker container is removed even if the test panics.
+struct ContainerGuard {
+    name: String,
+}
+
+impl Drop for ContainerGuard {
+    fn drop(&mut self) {
+        let _ = Command::new("docker")
+            .arg("rm")
+            .arg("-f")
+            .arg(&self.name)
+            .status();
+    }
+}
+
 /// Helper to mock a JWT token (only signature is mocked, claims are real for testing)
 fn mock_token(email: &str, groups: Vec<&str>) -> String {
-    use jsonwebtoken::{encode, EncodingKey, Header};
+    use jsonwebtoken::{EncodingKey, Header, encode};
     use serde::{Deserialize, Serialize};
 
     #[derive(Debug, Serialize, Deserialize)]
@@ -74,6 +89,10 @@ async fn test_enterprise_opa_rbac_integration() {
         .expect("Failed to start OPA container");
 
     assert!(status.success(), "Failed to start OPA container");
+    // Guard ensures `docker rm -f` runs on drop, even if the test panics.
+    let _guard = ContainerGuard {
+        name: container_name.clone(),
+    };
 
     // Wait for OPA to be healthy
     let health_url = format!("http://127.0.0.1:{}/health", port);
@@ -208,12 +227,4 @@ async fn test_enterprise_opa_rbac_integration() {
         !client.check(sec_start_runs_ctx).await.unwrap(),
         "Security cannot start runs"
     );
-
-    // 4. Cleanup
-    Command::new("docker")
-        .arg("rm")
-        .arg("-f")
-        .arg(&container_name)
-        .status()
-        .expect("Failed to remove OPA container");
 }

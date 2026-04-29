@@ -14,6 +14,21 @@ fn get_free_port() -> u16 {
         .port()
 }
 
+/// RAII guard that ensures a Docker container is removed even if the test panics.
+struct ContainerGuard {
+    name: String,
+}
+
+impl Drop for ContainerGuard {
+    fn drop(&mut self) {
+        let _ = Command::new("docker")
+            .arg("rm")
+            .arg("-f")
+            .arg(&self.name)
+            .status();
+    }
+}
+
 #[tokio::test]
 async fn test_enterprise_opa_abac_integration() {
     let port = get_free_port();
@@ -49,6 +64,10 @@ async fn test_enterprise_opa_abac_integration() {
         .expect("Failed to start OPA container");
 
     assert!(status.success(), "Failed to start OPA container");
+    // Guard ensures `docker rm -f` runs on drop, even if the test panics.
+    let _guard = ContainerGuard {
+        name: container_name.clone(),
+    };
 
     // Wait for OPA to be healthy
     let health_url = format!("http://127.0.0.1:{}/health", port);
@@ -159,12 +178,4 @@ async fn test_enterprise_opa_abac_integration() {
         client.check_context(dev_unprivileged_ctx).await.unwrap(),
         "Developer can run unprivileged container"
     );
-
-    // 4. Cleanup
-    Command::new("docker")
-        .arg("rm")
-        .arg("-f")
-        .arg(&container_name)
-        .status()
-        .expect("Failed to remove OPA container");
 }
