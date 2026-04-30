@@ -185,7 +185,7 @@ pub async fn run_server(config: Config) -> anyhow::Result<()> {
         .await?;
 
     tracing::info!("Running database migrations...");
-    sqlx::migrate!("../../migrations").run(&pool).await?;
+    sqlx::migrate!("./migrations").run(&pool).await?;
 
     let nats_options = async_nats::ConnectOptions::new()
         .tls_client_config((*tls_reloader.client_config()).clone());

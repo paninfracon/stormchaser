@@ -192,7 +192,7 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
         .await?;
 
     tracing::info!("Running database migrations...");
-    sqlx::migrate!("../../migrations").run(&pool).await?;
+    sqlx::migrate!("./migrations").run(&pool).await?;
     tracing::info!("Database migrations completed successfully");
 
     let git_cache = Arc::new(GitCache::new(config.git_cache_dir.clone()));
