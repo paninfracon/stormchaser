@@ -6,7 +6,7 @@ storage:
     port: 5432
     database: stormchaser
     user: stormchaser
-    password: stormchaser
+    password: DEX_DB_PASSWORD
     ssl:
       mode: disable
 
@@ -24,7 +24,7 @@ staticClients:
       - 'http://localhost:8080/callback'
       - 'http://127.0.0.1:8080/callback'
     name: 'Stormchaser CLI'
-    secret: <CHANGE_ME_IN_PRODUCTION>
+    secret: DEX_CLIENT_SECRET
     public: false
 
 staticPasswords:

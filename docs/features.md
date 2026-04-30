@@ -2,7 +2,7 @@
 
 ## Features
 
-1. ✅ Graph based DSL for definining workflows (NOT YAML!)
+1. ✅ Graph based DSL for defining workflows (NOT YAML!)
 2. ✅ Reads workflow definitions and static secrets from Git (SOPS encrypted)
    and syncs to DB for fast execution context
 3. ✅ Workflow runtime status and historical audit logs in a Postgres db

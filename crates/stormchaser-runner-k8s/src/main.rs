@@ -123,8 +123,15 @@ async fn run_reaper(cluster_pool: Arc<ClusterPool>) -> Result<()> {
                         let creation_time = job.metadata.creation_timestamp.as_ref().map(|ts| ts.0);
 
                         if let Some(created) = creation_time {
-                            let created_chrono = DateTime::from_timestamp(created.as_second(), 0)
-                                .unwrap_or_default();
+                            let Some(created_chrono) =
+                                DateTime::from_timestamp(created.as_second(), 0)
+                            else {
+                                warn!(
+                                    "Job {} has an unconvertible creation timestamp; skipping reap check",
+                                    job.name_any()
+                                );
+                                continue;
+                            };
                             let age = now - created_chrono;
                             // If job is older than 24 hours, clean it up
                             if age.num_hours() >= 24 {
@@ -920,5 +927,7 @@ mod tests {
         let config = Config::from_env(env);
         assert_eq!(config.nats_url, "nats://remote:4222");
         assert_eq!(config.runner_id, "my-runner");
+        assert_eq!(config.encryption_key.as_deref(), Some("my-key"));
+        assert_eq!(config.rust_log, "debug");
     }
 }

@@ -39,7 +39,7 @@ workflow "dogfood" {
         { name = "workspace", mount_path = "/app" }
       ]
       env = [
-        { name = "DATABASE_URL", value = "postgres://${inputs.db_password}@${inputs.host_ip}:${inputs.port_db}/stormchaser" }
+        { name = "DATABASE_URL", value = "postgres://stormchaser:${inputs.db_password}@${inputs.host_ip}:${inputs.port_db}/stormchaser" }
       ]
       command = ["/bin/sh", "-c"]
       args = [<<-EOF
@@ -60,7 +60,7 @@ workflow "dogfood" {
         { name = "workspace", mount_path = "/app" }
       ]
       env = [
-        { name = "DATABASE_URL", value = "postgres://${inputs.db_password}@${inputs.host_ip}:${inputs.port_db}/stormchaser" },
+        { name = "DATABASE_URL", value = "postgres://stormchaser:${inputs.db_password}@${inputs.host_ip}:${inputs.port_db}/stormchaser" },
         { name = "NATS_URL", value = "nats://${inputs.host_ip}:${inputs.port_nats}" }
       ]
       command = ["/bin/sh", "-c"]
@@ -140,7 +140,7 @@ workflow "dogfood" {
           --set global.image.repository=${inputs.host_ip}:${inputs.port_reg}/stormchaser-api \
           --set global.image.tag=dogfood \
           --set global.database.ssl=false \
-          --set global.database.url=postgres://${inputs.db_password}@${inputs.host_ip}:${inputs.port_db}/stormchaser \
+          --set global.database.url=postgres://stormchaser:${inputs.db_password}@${inputs.host_ip}:${inputs.port_db}/stormchaser \
           --set global.nats.url=nats://${inputs.host_ip}:${inputs.port_nats} \
           --set global.loki.url=http://${inputs.host_ip}:${inputs.port_loki} \
           --set global.opa.url=http://${inputs.host_ip}:${inputs.port_opa}/v1/data/stormchaser/allow \

@@ -53,6 +53,12 @@ spec:
         - /etc/dex/config.yaml
         image: dexidp/dex:v2.41.1
         name: dex
+        env:
+        - name: STORMCHASER_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: stormchaser-db-secret
+              key: password
         ports:
         - containerPort: 5556
           name: http

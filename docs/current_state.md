@@ -251,9 +251,5 @@ Wasm
   state on startup.
 - **Dry-run and Linting Mode:** Validating workflows without triggering side
   effects.
-kflows stuck in the `resolving`
-  state on startup.
-- **Dry-run and Linting Mode:** Validating workflows without triggering side
-  effects.
 - **Built-in Mermaid Rendering:** Currently requires an external CLI container;
   integration directly into the application is planned.
