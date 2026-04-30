@@ -1,3 +1,4 @@
+/// OPA integration for authorization
 pub mod opa;
 
 use crate::AppState;
@@ -10,8 +11,10 @@ use serde::{Deserialize, Serialize};
 
 pub use stormchaser_model::auth::Claims;
 
+/// Fallback JWT secret for local development
 pub const JWT_SECRET: &[u8] = b"stormchaser-secret-dev-only"; // Fallback for local dev
 
+/// Extractor for authenticated user claims
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthClaims(pub Claims);
 

@@ -36,8 +36,13 @@ async fn setup_app() -> Option<axum::Router> {
     let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = async_nats::connect(nats_url).await.ok()?;
 
-    let db_url = std::env::var("DATABASE_URL")
-        .unwrap_or("postgres://stormchaser:stormchaser@localhost:5432/stormchaser".into());
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        dotenvy::dotenv().ok();
+        format!(
+            "postgres://stormchaser:{}@localhost:5432/stormchaser",
+            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
+        )
+    });
     let pool = PgPoolOptions::new().connect(&db_url).await.ok()?;
 
     Some(app(AppState {
@@ -235,8 +240,13 @@ async fn test_create_event_rule() {
         None => return,
     };
 
-    let db_url = std::env::var("DATABASE_URL")
-        .unwrap_or("postgres://stormchaser:stormchaser@localhost:5432/stormchaser".into());
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        dotenvy::dotenv().ok();
+        format!(
+            "postgres://stormchaser:{}@localhost:5432/stormchaser",
+            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
+        )
+    });
     let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
     let webhook_id = Uuid::new_v4();
     let webhook_name = format!("test-hook-{}", webhook_id);
@@ -288,8 +298,13 @@ async fn test_stream_run_status() {
 
     let run_id = Uuid::new_v4();
     let workflow_name = format!("test-workflow-{}", run_id);
-    let db_url = std::env::var("DATABASE_URL")
-        .unwrap_or("postgres://stormchaser:stormchaser@localhost:5432/stormchaser".into());
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        dotenvy::dotenv().ok();
+        format!(
+            "postgres://stormchaser:{}@localhost:5432/stormchaser",
+            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
+        )
+    });
     let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
     sqlx::query("INSERT INTO workflow_runs (id, workflow_name, initiating_user, repo_url, workflow_path, git_ref, status, fencing_token) VALUES ($1, $2, 'user', 'url', 'path', 'ref', 'running'::run_status, 1)")
         .bind(run_id)
@@ -333,8 +348,13 @@ async fn test_delete_cron_workflow() {
     };
 
     let id = Uuid::new_v4();
-    let db_url = std::env::var("DATABASE_URL")
-        .unwrap_or("postgres://stormchaser:stormchaser@localhost:5432/stormchaser".into());
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        dotenvy::dotenv().ok();
+        format!(
+            "postgres://stormchaser:{}@localhost:5432/stormchaser",
+            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
+        )
+    });
     let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
 
     sqlx::query("INSERT INTO cron_workflows (id, name, description, cronspec, workflow_name, repo_url, workflow_path, git_ref, inputs, secret_token, external_job_id) VALUES ($1, $2, '', '0 0 * * *', 'wf', 'repo', 'path', 'main', '{}', 'secret', 'ext_id')")
@@ -375,8 +395,13 @@ async fn test_trigger_cron_workflow() {
     };
 
     let id = Uuid::new_v4();
-    let db_url = std::env::var("DATABASE_URL")
-        .unwrap_or("postgres://stormchaser:stormchaser@localhost:5432/stormchaser".into());
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        dotenvy::dotenv().ok();
+        format!(
+            "postgres://stormchaser:{}@localhost:5432/stormchaser",
+            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
+        )
+    });
     let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
     let secret = "my-secret-token";
 
@@ -478,8 +503,13 @@ async fn test_stream_step_logs() {
 
     let run_id = Uuid::new_v4();
     let step_id = Uuid::new_v4();
-    let db_url = std::env::var("DATABASE_URL")
-        .unwrap_or("postgres://stormchaser:stormchaser@localhost:5432/stormchaser".into());
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        dotenvy::dotenv().ok();
+        format!(
+            "postgres://stormchaser:{}@localhost:5432/stormchaser",
+            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
+        )
+    });
     let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
 
     sqlx::query("INSERT INTO workflow_runs (id, workflow_name, initiating_user, repo_url, workflow_path, git_ref, status, fencing_token) VALUES ($1, 'wf', 'u', 'r', 'p', 'g', 'running'::run_status, 1)")
@@ -591,8 +621,13 @@ async fn test_delete_workflow_run() {
     };
 
     let run_id = Uuid::new_v4();
-    let db_url = std::env::var("DATABASE_URL")
-        .unwrap_or("postgres://stormchaser:stormchaser@localhost:5432/stormchaser".into());
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        dotenvy::dotenv().ok();
+        format!(
+            "postgres://stormchaser:{}@localhost:5432/stormchaser",
+            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
+        )
+    });
     let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
 
     sqlx::query("INSERT INTO workflow_runs (id, workflow_name, initiating_user, repo_url, workflow_path, git_ref, status, fencing_token) VALUES ($1, 'wf', 'u', 'r', 'p', 'g', 'running'::run_status, 1)")

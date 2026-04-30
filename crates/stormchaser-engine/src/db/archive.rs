@@ -1,6 +1,7 @@
 use sqlx::PgConnection;
 use uuid::Uuid;
 
+/// Archive and delete workflow run.
 pub async fn archive_and_delete_workflow_run(
     conn: &mut PgConnection,
     run_id: Uuid,

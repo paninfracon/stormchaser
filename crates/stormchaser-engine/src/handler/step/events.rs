@@ -27,6 +27,7 @@ use stormchaser_model::LogBackend;
 use stormchaser_model::StorageBackend;
 
 #[tracing::instrument(skip(payload, pool), fields(run_id = tracing::field::Empty, step_id = tracing::field::Empty))]
+/// Handle step unpacking sfs.
 pub async fn handle_step_unpacking_sfs(payload: Value, pool: PgPool) -> Result<()> {
     let run_id_str = payload["run_id"].as_str().context("Missing run_id")?;
     let run_id = Uuid::parse_str(run_id_str)?;
@@ -56,6 +57,7 @@ pub async fn handle_step_unpacking_sfs(payload: Value, pool: PgPool) -> Result<(
 }
 
 #[tracing::instrument(skip(payload, pool), fields(run_id = tracing::field::Empty, step_id = tracing::field::Empty))]
+/// Handle step packing sfs.
 pub async fn handle_step_packing_sfs(payload: Value, pool: PgPool) -> Result<()> {
     let run_id_str = payload["run_id"].as_str().context("Missing run_id")?;
     let run_id = Uuid::parse_str(run_id_str)?;
@@ -79,6 +81,7 @@ pub async fn handle_step_packing_sfs(payload: Value, pool: PgPool) -> Result<()>
 }
 
 #[tracing::instrument(skip(payload, pool), fields(run_id = tracing::field::Empty, step_id = tracing::field::Empty))]
+/// Handle step running.
 pub async fn handle_step_running(payload: Value, pool: PgPool) -> Result<()> {
     let run_id_str = payload["run_id"].as_str().context("Missing run_id")?;
     let run_id = Uuid::parse_str(run_id_str)?;
@@ -120,6 +123,7 @@ pub async fn handle_step_running(payload: Value, pool: PgPool) -> Result<()> {
 }
 
 #[tracing::instrument(skip(payload, pool, nats_client, log_backend, tls_reloader), fields(run_id = tracing::field::Empty, step_id = tracing::field::Empty))]
+/// Handle step completed.
 pub async fn handle_step_completed(
     payload: Value,
     pool: PgPool,
@@ -494,6 +498,7 @@ pub async fn handle_step_completed(
 }
 
 #[tracing::instrument(skip(payload, pool, nats_client, tls_reloader), fields(run_id = tracing::field::Empty, step_id = tracing::field::Empty))]
+/// Handle step failed.
 pub async fn handle_step_failed(
     payload: Value,
     pool: PgPool,
@@ -741,6 +746,7 @@ async fn persist_step_test_reports(
     Ok(())
 }
 
+/// Handles incoming queries for step status or output data over NATS.
 pub async fn handle_step_query(
     payload: Value,
     pool: PgPool,

@@ -8,6 +8,7 @@ use axum::{
 };
 use uuid::Uuid;
 
+/// Creates a storage backend.
 pub async fn create_storage_backend(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -54,6 +55,7 @@ pub async fn create_storage_backend(
     Ok((StatusCode::CREATED, Json(serde_json::json!({ "id": id }))))
 }
 
+/// List storage backends.
 pub async fn list_storage_backends(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -65,6 +67,7 @@ pub async fn list_storage_backends(
     Ok(Json(backends))
 }
 
+/// Get storage backend.
 pub async fn get_storage_backend(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -78,6 +81,7 @@ pub async fn get_storage_backend(
     Ok(Json(backend))
 }
 
+/// Update storage backend.
 pub async fn update_storage_backend(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -110,6 +114,7 @@ pub async fn update_storage_backend(
     Ok(StatusCode::OK)
 }
 
+/// Deletes a storage backend.
 pub async fn delete_storage_backend(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -122,6 +127,7 @@ pub async fn delete_storage_backend(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Lists run artifacts.
 pub async fn list_run_artifacts(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -134,6 +140,7 @@ pub async fn list_run_artifacts(
     Ok(Json(artifacts))
 }
 
+/// Lists run test reports.
 pub async fn list_run_test_reports(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -146,6 +153,7 @@ pub async fn list_run_test_reports(
     Ok(Json(reports))
 }
 
+/// Lists run test summaries.
 pub async fn list_run_test_summaries(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -158,6 +166,7 @@ pub async fn list_run_test_summaries(
     Ok(Json(summaries))
 }
 
+/// Gets a test report.
 pub async fn get_test_report(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,

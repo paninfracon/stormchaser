@@ -1,4 +1,5 @@
 [package]
+publish = true
 name = "stormchaser-model"
 version.workspace = true
 edition.workspace = true

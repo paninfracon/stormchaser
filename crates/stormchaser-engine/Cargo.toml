@@ -1,4 +1,5 @@
 [package]
+publish = true
 name = "stormchaser-engine"
 version.workspace = true
 edition.workspace = true
@@ -27,7 +28,7 @@ path = "src/main.rs"
 stormchaser-model = { workspace = true }
 stormchaser-dsl = { workspace = true }
 stormchaser-tls = { workspace = true }
-stormchaser-opa = { path = "../stormchaser-opa" }
+stormchaser-opa = { version = "0.1.0", path = "../stormchaser-opa" }
 rustls = { version = "0.23", features = ["ring"] }
 tokio = { workspace = true }
 sqlx = { workspace = true }
@@ -43,7 +44,7 @@ thiserror = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
 futures = "0.3"
-git2 = "0.19"
+git2 = "0.20"
 humantime = "2.1"
 once_cell = { workspace = true }
 opentelemetry = { workspace = true }
@@ -78,6 +79,7 @@ flate2 = { workspace = true }
 rustls-native-certs = { version = "0.8.3", optional = true }
 
 [dev-dependencies]
+dotenvy = "0.15"
 tempfile = "3.10"
 wat = "1.211"
 

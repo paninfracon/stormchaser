@@ -28,8 +28,13 @@ impl OpaAuthorizer for MockAuthorizer {
 
 async fn mock_state(auth: MockAuthorizer) -> AppState {
     use sqlx::postgres::PgPoolOptions;
-    let db_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://stormchaser:stormchaser@localhost:5432/stormchaser".into());
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        dotenvy::dotenv().ok();
+        format!(
+            "postgres://stormchaser:{}@localhost:5432/stormchaser",
+            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
+        )
+    });
     let pool = PgPoolOptions::new()
         .max_connections(1)
         .connect(&db_url)

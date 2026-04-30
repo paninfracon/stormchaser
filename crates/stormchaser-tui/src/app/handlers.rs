@@ -6,6 +6,8 @@ use stormchaser_model::workflow::RunStatus;
 use uuid::Uuid;
 
 impl<'a> App<'a> {
+    /// Handles an incoming status update for a specific workflow run.
+    /// Supports special "refresh" strings to trigger a full refetch.
     pub fn handle_status_update(&mut self, run_id: Uuid, status: String) {
         if status == "refresh" || status == "force_refresh" {
             if let Some(cached) = self.cached_runs.get(&run_id).cloned() {
@@ -84,6 +86,7 @@ impl<'a> App<'a> {
         }
     }
 
+    /// Handles a complete update of a workflow run, including its steps and details.
     pub fn handle_full_run_update(&mut self, mut full_detail: WorkflowRunFullDetail) {
         let current_selected_id = self.runs_state.selected().map(|i| self.runs[i].id);
 
@@ -174,6 +177,7 @@ impl<'a> App<'a> {
         }
     }
 
+    /// Handles a status update for a specific step within a workflow run.
     pub fn handle_step_update(&mut self, run_id: Uuid, step_name: String, status: String) {
         if let Some(run) = &mut self.selected_run {
             if run.detail.id == run_id {
@@ -211,6 +215,7 @@ impl<'a> App<'a> {
         }
     }
 
+    /// Appends a new log line to the appropriate step within the selected run.
     pub fn handle_log_line(&mut self, run_id: Uuid, line: String) {
         let line = line.replace('\r', "");
         if let Some(run) = &mut self.selected_run {
@@ -252,6 +257,7 @@ impl<'a> App<'a> {
         }
     }
 
+    /// Handles a partial summary update for a workflow run, usually from the global run list stream.
     pub fn handle_workflow_update(&mut self, run_detail: WorkflowRunDetail) {
         if let Some(run) = self.runs.iter_mut().find(|r| r.id == run_detail.id) {
             *run = run_detail.clone();

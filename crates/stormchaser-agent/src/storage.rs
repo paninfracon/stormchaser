@@ -9,6 +9,7 @@ use std::io::{Read, Write};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
+/// Downloads and extracts an SFS storage tarball to the specified destination.
 pub async fn unpark_storage(
     url: &str,
     expected_hash: Option<&str>,
@@ -65,6 +66,7 @@ pub async fn unpark_storage(
     Ok(())
 }
 
+/// Park storage.
 pub async fn park_storage(urls: Value, paths: Value) -> Result<HashMap<String, String>> {
     let client = reqwest::Client::new();
     let mut hashes = HashMap::new();

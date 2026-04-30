@@ -7,13 +7,20 @@ use uuid::Uuid;
 mod common {
     use std::sync::Arc;
     use stormchaser_model::auth::{self, OpaClient};
+    /// Get pool.
     pub async fn get_pool() -> sqlx::PgPool {
         let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://stormchaser:stormchaser@localhost:5432/stormchaser".to_string()
+            dotenvy::dotenv().ok();
+            format!(
+                "postgres://stormchaser:{}@localhost:5432/stormchaser",
+                std::env::var("STORMCHASER_DEV_PASSWORD")
+                    .unwrap_or_else(|_| "stormchaser".to_string())
+            )
         });
         sqlx::PgPool::connect(&db_url).await.unwrap()
     }
 
+    /// Setup test env.
     pub async fn setup_test_env() -> (sqlx::PgPool, async_nats::Client, Arc<auth::OpaClient>) {
         let pool = get_pool().await;
         let nats_client = async_nats::connect("nats://localhost:4222").await.unwrap();

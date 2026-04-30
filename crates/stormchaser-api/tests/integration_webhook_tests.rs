@@ -17,8 +17,15 @@ use uuid::Uuid;
 
 #[tokio::test]
 async fn test_webhook_trigger() {
-    let db_url = std::env::var("DATABASE_URL")
-        .unwrap_or("postgres://stormchaser:stormchaser@localhost:5432/stormchaser".into());
+    std::env::set_var("API_RATE_LIMIT_PER_SECOND", "1000");
+    std::env::set_var("API_RATE_LIMIT_BURST_SIZE", "1000");
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        dotenvy::dotenv().ok();
+        format!(
+            "postgres://stormchaser:{}@localhost:5432/stormchaser",
+            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
+        )
+    });
     let pool = PgPoolOptions::new()
         .max_connections(5)
         .connect(&db_url)
@@ -132,8 +139,15 @@ async fn test_github_webhook_signature() {
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
 
-    let db_url = std::env::var("DATABASE_URL")
-        .unwrap_or("postgres://stormchaser:stormchaser@localhost:5432/stormchaser".into());
+    std::env::set_var("API_RATE_LIMIT_PER_SECOND", "1000");
+    std::env::set_var("API_RATE_LIMIT_BURST_SIZE", "1000");
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        dotenvy::dotenv().ok();
+        format!(
+            "postgres://stormchaser:{}@localhost:5432/stormchaser",
+            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
+        )
+    });
     let pool = PgPoolOptions::new()
         .max_connections(5)
         .connect(&db_url)

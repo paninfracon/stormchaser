@@ -23,7 +23,11 @@ TEMP_TAR="/tmp/stormchaser-dogfood.tar.gz"
 # 3. Upload to Local S3 (MinIO)
 echo -e "${BLUE}>>> Uploading tarball to local S3...${NC}"
 export AWS_ACCESS_KEY_ID="stormchaser"
-export AWS_SECRET_ACCESS_KEY="stormchaser"
+if [ -z "$STORMCHASER_MINIO_PASSWORD" ]; then
+    echo -e "${RED}Error: STORMCHASER_MINIO_PASSWORD is not set.${NC}" >&2
+    exit 1
+fi
+export AWS_SECRET_ACCESS_KEY="$STORMCHASER_MINIO_PASSWORD"
 export AWS_DEFAULT_REGION="us-east-1"
 
 # Ensure bucket exists

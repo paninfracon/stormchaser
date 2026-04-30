@@ -11,6 +11,7 @@ use crate::handler::fetch_step_instance;
 #[cfg(feature = "email")]
 use crate::handler::handle_email_send;
 
+/// Attempts to dispatch an email step instance.
 pub async fn try_dispatch(
     run_id: Uuid,
     step_instance_id: Uuid,

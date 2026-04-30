@@ -11,6 +11,7 @@ use tokio::time::sleep;
 use uuid::Uuid;
 
 impl<'a> App<'a> {
+    /// Helper method to make an API request to the backend.
     pub async fn api_request(
         &self,
         method: reqwest::Method,
@@ -28,6 +29,7 @@ impl<'a> App<'a> {
         Ok(req.send().await?)
     }
 
+    /// Initiates the OAuth login flow, opens a browser, and waits for the callback.
     pub async fn login(&mut self) -> Result<()> {
         self.state = AppState::LoggingIn;
         self.error = None;
@@ -142,6 +144,7 @@ impl<'a> App<'a> {
         Ok(())
     }
 
+    /// Refreshes the access token using the stored refresh token.
     pub async fn refresh_session(&mut self) -> Result<bool> {
         if let Some(refresh_token) = self.refresh_token.clone() {
             let res = self
@@ -169,6 +172,7 @@ impl<'a> App<'a> {
         Ok(false)
     }
 
+    /// Fetches the latest list of workflow runs from the API based on active filters.
     pub async fn refresh_runs(&mut self) -> Result<()> {
         if self.token.is_none() {
             return Ok(());
@@ -232,6 +236,7 @@ impl<'a> App<'a> {
         Ok(())
     }
 
+    /// Fetches the full details for a specific workflow run.
     pub async fn fetch_run_detail(&mut self, run_id: Uuid) -> Result<()> {
         if self.token.is_none() {
             return Ok(());
@@ -259,6 +264,7 @@ impl<'a> App<'a> {
         Ok(())
     }
 
+    /// Starts a background task to listen for global workflow run updates via SSE.
     pub async fn start_listening_for_workflows(&mut self) {
         if let Some(handle) = self.workflow_handle.take() {
             handle.abort();

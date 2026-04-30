@@ -4,6 +4,7 @@ use anyhow::Result;
 use base64::{engine::general_purpose, Engine as _};
 use sha2::{Digest, Sha256};
 
+/// Encrypts the provided string data using the provided key string with AES-256-GCM.
 pub fn encrypt_state(data: &str, key_str: &str) -> Result<String> {
     let mut hasher = Sha256::new();
     hasher.update(key_str.as_bytes());
@@ -22,6 +23,7 @@ pub fn encrypt_state(data: &str, key_str: &str) -> Result<String> {
     Ok(general_purpose::STANDARD.encode(combined))
 }
 
+/// Decrypts the provided base64 encoded string data using the provided key string with AES-256-GCM.
 pub fn decrypt_state(encoded: &str, key_str: &str) -> Result<String> {
     let mut hasher = Sha256::new();
     hasher.update(key_str.as_bytes());

@@ -1,3 +1,7 @@
+//! Cryptographic utilities for job state.
+//!
+//! Provides functions to encrypt and decrypt sensitive state data.
+
 use aes_gcm::{
     aead::{Aead, AeadCore, KeyInit, OsRng},
     Aes256Gcm, Nonce,
@@ -6,6 +10,7 @@ use anyhow::Result;
 use base64::{engine::general_purpose, Engine as _};
 use sha2::{Digest, Sha256};
 
+/// Encrypts the provided string data using AES-256-GCM with a SHA-256 derived key.
 pub fn encrypt_state(data: &str, key_str: &str) -> Result<String> {
     let mut hasher = Sha256::new();
     hasher.update(key_str.as_bytes());
@@ -24,6 +29,7 @@ pub fn encrypt_state(data: &str, key_str: &str) -> Result<String> {
     Ok(general_purpose::STANDARD.encode(combined))
 }
 
+/// Decrypts a Base64-encoded AES-256-GCM ciphertext using a SHA-256 derived key.
 pub fn decrypt_state(encoded: &str, key_str: &str) -> Result<String> {
     let mut hasher = Sha256::new();
     hasher.update(key_str.as_bytes());

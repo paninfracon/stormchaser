@@ -6,6 +6,7 @@ mod job_machine;
 
 use anyhow::{Context, Result};
 use axum::{routing::get, Router};
+use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use futures::StreamExt;
 use http::Request;
@@ -27,6 +28,7 @@ use uuid::Uuid;
 /// Pool of Kubernetes cluster connections
 use stormchaser_model::dsl;
 
+/// Clusterpool.
 pub struct ClusterPool {
     clients: DashMap<String, (Client, String)>, // (Client, Version)
 }
@@ -38,6 +40,7 @@ impl Default for ClusterPool {
 }
 
 impl ClusterPool {
+    /// New.
     pub fn new() -> Self {
         Self {
             clients: DashMap::new(),
@@ -120,7 +123,16 @@ async fn run_reaper(cluster_pool: Arc<ClusterPool>) -> Result<()> {
                         let creation_time = job.metadata.creation_timestamp.as_ref().map(|ts| ts.0);
 
                         if let Some(created) = creation_time {
-                            let age = now - created;
+                            let Some(created_chrono) =
+                                DateTime::from_timestamp(created.as_second(), 0)
+                            else {
+                                warn!(
+                                    "Job {} has an unconvertible creation timestamp; skipping reap check",
+                                    job.name_any()
+                                );
+                                continue;
+                            };
+                            let age = now - created_chrono;
                             // If job is older than 24 hours, clean it up
                             if age.num_hours() >= 24 {
                                 let job_name = job.name_any();
@@ -184,8 +196,8 @@ async fn scan_for_orphans(
                 let annotations = job.metadata.annotations.as_ref();
                 let received_at = annotations
                     .and_then(|a| a.get("stormchaser.io/received-at"))
-                    .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok())
-                    .map(|dt| dt.with_timezone(&chrono::Utc))
+                    .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
+                    .map(|dt| dt.with_timezone(&Utc))
                     .unwrap_or_else(chrono::Utc::now);
 
                 let is_encrypted = annotations
@@ -385,14 +397,20 @@ async fn scan_for_orphans(
 }
 
 #[derive(Debug, Clone)]
+/// Config.
 pub struct Config {
+    /// The nats url.
     pub nats_url: String,
+    /// The runner id.
     pub runner_id: String,
+    /// The encryption key.
     pub encryption_key: Option<String>,
+    /// The rust log.
     pub rust_log: String,
 }
 
 impl Config {
+    /// From env.
     pub fn from_env<I, K, V>(env: I) -> Self
     where
         I: IntoIterator<Item = (K, V)>,
@@ -429,6 +447,7 @@ async fn main() -> Result<()> {
     run_runner(config).await
 }
 
+/// Run runner.
 pub async fn run_runner(config: Config) -> Result<()> {
     rustls::crypto::ring::default_provider()
         .install_default()
@@ -908,7 +927,7 @@ mod tests {
         let config = Config::from_env(env);
         assert_eq!(config.nats_url, "nats://remote:4222");
         assert_eq!(config.runner_id, "my-runner");
-        assert_eq!(config.encryption_key.unwrap(), "my-key");
+        assert_eq!(config.encryption_key.as_deref(), Some("my-key"));
         assert_eq!(config.rust_log, "debug");
     }
 }

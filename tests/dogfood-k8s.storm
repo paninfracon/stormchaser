@@ -5,6 +5,10 @@ workflow "dogfood" {
 
   input "repo_url" { type = "string" }
   input "kubeconfig" { type = "string" }
+  input "db_password" {
+    type   = "string"
+    secret = true
+  }
 
   storage "workspace" {
     size     = "10Gi"
@@ -27,11 +31,16 @@ workflow "dogfood" {
         { name = "workspace", mount_path = "/app" }
       ]
       env = [
-        { name = "DATABASE_URL", value = "postgres://stormchaser:stormchaserpassword@stormchaser-postgresql.stormchaser.svc.cluster.local:5432/stormchaser" }
+        { name = "DATABASE_URL", value = "postgres://stormchaser:${inputs.db_password}@stormchaser-postgresql.stormchaser.svc.cluster.local:5432/stormchaser" }
       ]
       command = ["/bin/sh", "-c"]
-      args = [
-        "set -eo pipefail; apt-get update && apt-get install -y pkg-config libssl-dev libgit2-dev zlib1g-dev curl && cd /app && SQLX_OFFLINE=true cargo build --release -p stormchaser-api 2>&1 | tee build.log"
+      args = [<<-EOF
+        set -eo pipefail
+        apt-get update
+        apt-get install -y pkg-config libssl-dev libgit2-dev zlib1g-dev curl
+        cd /app
+        SQLX_OFFLINE=true cargo build --release -p stormchaser-api 2>&1 | tee build.log
+      EOF
       ]
       artifacts = ["api_binary"]
       next      = ["test"]
@@ -43,12 +52,17 @@ workflow "dogfood" {
         { name = "workspace", mount_path = "/app" }
       ]
       env = [
-        { name = "DATABASE_URL", value = "postgres://stormchaser:stormchaserpassword@stormchaser-postgresql.stormchaser.svc.cluster.local:5432/stormchaser" },
+        { name = "DATABASE_URL", value = "postgres://stormchaser:${inputs.db_password}@stormchaser-postgresql.stormchaser.svc.cluster.local:5432/stormchaser" },
         { name = "NATS_URL", value = "nats://stormchaser-nats.stormchaser.svc.cluster.local:4222" }
       ]
       command = ["/bin/sh", "-c"]
-      args = [
-        "set -eo pipefail; apt-get update && apt-get install -y pkg-config libssl-dev libgit2-dev zlib1g-dev curl && cd /app && SQLX_OFFLINE=true cargo test --release -p stormchaser-api --lib -- --test-threads=1 -Z unstable-options --format junit | tee tests.xml"
+      args = [<<-EOF
+        set -eo pipefail
+        apt-get update
+        apt-get install -y pkg-config libssl-dev libgit2-dev zlib1g-dev curl
+        cd /app
+        SQLX_OFFLINE=true cargo test --release -p stormchaser-api --lib -- --test-threads=1 -Z unstable-options --format junit | tee tests.xml
+      EOF
       ]
       reports {
         report "api_tests" {
@@ -66,8 +80,14 @@ workflow "dogfood" {
         { name = "workspace", mount_path = "/app" }
       ]
       command = ["/bin/sh", "-c"]
-      args = [
-        "set -eo pipefail; cd /app && rm -f .dockerignore && ls -la /app/target/release/ || true && buildah bud --storage-driver vfs -t registry.container-registry.svc.cluster.local:5000/stormchaser-api:dogfood -f Dockerfile.prebuilt --build-arg BINARY=stormchaser-api . && buildah push --storage-driver vfs --tls-verify=false registry.container-registry.svc.cluster.local:5000/stormchaser-api:dogfood"
+      args = [<<-EOF
+        set -eo pipefail
+        cd /app
+        rm -f .dockerignore
+        ls -la /app/target/release/ || true
+        buildah bud --storage-driver vfs -t registry.container-registry.svc.cluster.local:5000/stormchaser-api:dogfood -f Dockerfile.prebuilt --build-arg BINARY=stormchaser-api .
+        buildah push --storage-driver vfs --tls-verify=false registry.container-registry.svc.cluster.local:5000/stormchaser-api:dogfood
+      EOF
       ]
       next = ["setup_certs"]
     }
@@ -81,8 +101,16 @@ workflow "dogfood" {
         { name = "KUBECONFIG_DATA", value = inputs.kubeconfig }
       ]
       command = ["/bin/sh", "-c"]
-      args = [
-        "mkdir -p ~/.kube && printf '%b\\n' \"$KUBECONFIG_DATA\" > ~/.kube/config && export KUBECONFIG=~/.kube/config && kubectl create namespace stormchaser-dogfood --dry-run=client -o yaml | kubectl apply -f - && kubectl get secret stormchaser-tls-certs -n stormchaser -o yaml | grep -v -E '^( +namespace:| +uid:| +resourceVersion:| +creationTimestamp:)' | kubectl apply -n stormchaser-dogfood -f -"
+      args = [<<-EOF
+        set -eo pipefail
+        mkdir -p ~/.kube
+        printf '%b\n' "$KUBECONFIG_DATA" > ~/.kube/config
+        export KUBECONFIG=~/.kube/config
+        kubectl create namespace stormchaser-dogfood --dry-run=client -o yaml | kubectl apply -f -
+        kubectl get secret stormchaser-tls-certs -n stormchaser -o yaml \
+          | grep -v -E '^( +namespace:| +uid:| +resourceVersion:| +creationTimestamp:)' \
+          | kubectl apply -n stormchaser-dogfood -f -
+      EOF
       ]
       next = ["deploy"]
     }
@@ -96,8 +124,25 @@ workflow "dogfood" {
         { name = "KUBECONFIG_DATA", value = inputs.kubeconfig }
       ]
       command = ["/bin/sh", "-c"]
-      args = [
-        "mkdir -p ~/.kube && printf '%b\\n' \"$KUBECONFIG_DATA\" > ~/.kube/config && cat ~/.kube/config && export KUBECONFIG=~/.kube/config && helm upgrade --install stormchaser-dogfood /app/deploy/charts/stormchaser-orchestration --namespace stormchaser-dogfood --create-namespace --set global.image.repository=localhost:32000/stormchaser-api --set global.image.tag=dogfood --set global.database.ssl=false --set global.database.url=postgres://stormchaser:stormchaserpassword@stormchaser-postgresql.stormchaser.svc.cluster.local:5432/stormchaser --set global.nats.url=nats://stormchaser-nats.stormchaser.svc.cluster.local:4222 --set global.loki.url=http://stormchaser-loki.stormchaser.svc.cluster.local:3100 --set global.opa.url=http://stormchaser-stormchaser-orchestration-api.stormchaser.svc.cluster.local:8181/v1/data/stormchaser/allow --set global.oidc.issuer=http://dex.stormchaser.svc.cluster.local:5556/dex"
+      args = [<<-EOF
+        set -eo pipefail
+        mkdir -p ~/.kube
+        printf '%b\n' "$KUBECONFIG_DATA" > ~/.kube/config
+        cat ~/.kube/config
+        export KUBECONFIG=~/.kube/config
+
+        helm upgrade --install stormchaser-dogfood /app/deploy/charts/stormchaser-orchestration \
+          --namespace stormchaser-dogfood \
+          --create-namespace \
+          --set global.image.repository=localhost:32000/stormchaser-api \
+          --set global.image.tag=dogfood \
+          --set global.database.ssl=false \
+          --set global.database.url=postgres://stormchaser:${inputs.db_password}@stormchaser-postgresql.stormchaser.svc.cluster.local:5432/stormchaser \
+          --set global.nats.url=nats://stormchaser-nats.stormchaser.svc.cluster.local:4222 \
+          --set global.loki.url=http://stormchaser-loki.stormchaser.svc.cluster.local:3100 \
+          --set global.opa.url=http://stormchaser-stormchaser-orchestration-api.stormchaser.svc.cluster.local:8181/v1/data/stormchaser/allow \
+          --set global.oidc.issuer=http://dex.stormchaser.svc.cluster.local:5556/dex
+      EOF
       ]
     }
   }

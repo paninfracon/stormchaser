@@ -8,6 +8,7 @@ use stormchaser_model::dsl::EmailSpec;
 #[cfg(feature = "email")]
 use stormchaser_model::workflow;
 
+/// Handle approval notification.
 pub async fn handle_approval_notification(
     run_id: Uuid,
     step_id: Uuid,
@@ -170,8 +171,8 @@ mod tests {
             backend: Some(EmailBackend::Smtp),
             smtp_server: Some("smtp.paninfracon.net".to_string()),
             smtp_port: Some(587),
-            smtp_username: Some("user".to_string()),
-            smtp_password: Some("pass".to_string()),
+            smtp_username: Some("dummy_user".to_string()),
+            smtp_password: Some("dummy_password".to_string()),
             smtp_use_tls: Some(true),
             smtp_use_mtls: None,
             ses_region: None,

@@ -1,5 +1,11 @@
 # 🌪️ Stormchaser
 
+[![CI](https://github.com/paninfracon/stormchaser/actions/workflows/ci.yml/badge.svg)](https://github.com/paninfracon/stormchaser/actions/workflows/ci.yml)
+[![Coverage](https://github.com/paninfracon/stormchaser/actions/workflows/coverage.yml/badge.svg)](https://github.com/paninfracon/stormchaser/actions/workflows/coverage.yml)
+[![Crates.io](https://img.shields.io/crates/v/stormchaser-cli.svg)](https://crates.io/crates/stormchaser-cli)
+[![Docs.rs](https://docs.rs/stormchaser-cli/badge.svg)](https://docs.rs/stormchaser-cli)
+[![License](https://img.shields.io/badge/license-MIT_OR_Apache--2.0_OR_CDLA--Permissive--2.0-blue.svg)](#-license)
+
 A robust, distributed workflow engine for event-driven and human-triggered
 workflows. Built in Rust for performance and reliability, utilizing a
 graph-based DSL, NATS JetStream for event messaging, and PostgreSQL for state
@@ -15,6 +21,50 @@ execution across container runtimes like Kubernetes and Docker.
 Instead of relying on YAML, Stormchaser uses a bespoke, graph-based Domain
 Specific Language (DSL) providing a clean, HCL-like syntax for defining robust
 workflows.
+
+## 📝 Example Workflow
+
+```hcl
+workflow "example_workflow" {
+  description = "A simple deployment workflow"
+
+  storage "workspace" {
+    size = "1Gi"
+  }
+
+  # First step: Builds the app and stores artifacts in SFS
+  step "build_app" "RunContainer" {
+    spec {
+      image   = "node:18"
+      command = ["npm", "run", "build"]
+      storage_mounts = [
+        { name = "workspace", mount_path = "/app/dist" }
+      ]
+    }
+    next = ["require_approval"]
+  }
+
+  # Second step: Waits for a human to approve the deployment
+  step "require_approval" "Approval" {
+    spec {
+      approvers = ["group:admins", "user:alice"]
+      timeout   = "24h"
+    }
+    next = ["deploy_app"]
+  }
+
+  # Third step: Mounts the SFS and deploys the built artifacts
+  step "deploy_app" "RunContainer" {
+    spec {
+      image   = "node:18"
+      command = ["npm", "run", "deploy"]
+      storage_mounts = [
+        { name = "workspace", mount_path = "/app/dist" }
+      ]
+    }
+  }
+}
+```
 
 ## ✨ Key Features
 
@@ -40,30 +90,30 @@ workflows.
 
 ### 📊 Feature Comparison Matrix
 
-| Feature | Stormchaser | StackStorm | Rundeck | Harness | Jenkins | Argo Workflows | Node-RED |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Pricing** | ✅ (FOSS) | ⚠️ (Open-Core) | ⚠️ (Open-Core) | Commercial | ✅ (FOSS) | ✅ (FOSS) | ✅ (FOSS/Hosted) |
-| **Primary Focus** | DevOps Processes | Event-Driven Ops | Job Scheduling | CI/CD Platform | CI/CD Automation | Kubernetes Native | Event Integration |
-| **Configuration** | HCL + Expressions | YAML / Python | UI / YAML / XML | YAML / UI | Groovy / UI | YAML | JSON / UI |
-| **Execution Model** | Affinity-Aware | Local/Remote Exec | SSH / Agent | SaaS / Delegate | Master / Agent | Pod-per-Step | Node.js Runtime |
-| **Git Native** | ✅ | ⚠️ (Packs) | ❌ | ✅ | ⚠️ (Plugins) | ⚠️ (ArgoCD) | ⚠️ (Projects) |
-| **K8s / Docker** | ✅ | ⚠️ (Packs) | ⚠️ (Plugins) | ✅ | ⚠️ (Plugins) | ✅ (K8s) | ✅ (Docker) |
-| **WASM Steps** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Webhooks** | ✅ (In/Out) | ✅ (In/Out) | ⚠️ (In) | ✅ (In/Out) | ⚠️ (In) | ⚠️ (Argo Events) | ✅ (In/Out) |
-| **Event Mesh** | NATS JetStream | RabbitMQ / Sensor | Polling / API | Internal Bus | Polling | Sensor | ⚠️ (MQTT Nodes) |
-| **Human-in-Loop** | Advanced (Multi) | Basic (Inquiry) | Manual Step | Built-in | `input` Step | Basic (Suspend) | ⚠️ (UI Nodes) |
-| **Variable Passing** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ (`msg.payload`) |
-| **Input Forms** | ⚠️ (Basic) | ⚠️ (Inquiry) | ✅ (Comprehensive) | ✅ | ✅ (Parameters) | ⚠️ (Basic) | ✅ (Dashboard) |
-| **Security** | OPA Fail-Closed | Action Aliases | ACLs | RBAC / Secrets | Plugin-based RBAC | K8s RBAC | ⚠️ (Basic Auth) |
-| **SSO Support** | ✅ (OIDC) | ⚠️ (Enterprise) | ⚠️ (Enterprise) | ✅ | ⚠️ (Plugins) | ✅ (SSO) | ⚠️ (Plugins) |
-| **Distributed Exec** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
-| **Artifact Mgmt** | ✅ (SFS, OCI) | ❌ | ⚠️ (Plugins) | ✅ | ✅ (Plugins) | ✅ | ❌ |
-| **JUnit Reports** | ✅ | ❌ | ❌ | ✅ | ✅ (Plugins) | ⚠️ (Artifacts) | ❌ |
-| **Observability** | ✅ (OTel, TUI) | ⚠️ (Limited) | ⚠️ (Limited) | ✅ | ⚠️ (Plugins) | ✅ (Prometheus) | ⚠️ (Basic) |
-| **Email** | ✅ | ✅ (Packs) | ✅ | ✅ | ✅ (Plugins) | ⚠️ (Hooks) | ✅ (Nodes) |
-| **Slack / Teams** | ⚠️ (Planned) | ✅ (ChatOps) | ⚠️ (Plugins) | ✅ | ✅ (Plugins) | ⚠️ (Hooks) | ✅ (Nodes) |
-| **Pipeline UI** | ⚠️ (TUI Only) | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ (FlowForge) |
-| **Visual Builder** | ❌ (Code-First) | ⚠️ (Workflow Designer) | ❌ | ✅ | ✅ (Blue Ocean) | ⚠️ (UI/3rd Party) | ✅ (Comprehensive) |
+| Feature | Stormchaser | StackStorm | Rundeck | Harness | Jenkins | Argo Workflows | Node-RED | Flow-like (n8n, Make) |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Pricing** | ✅ (FOSS) | ⚠️ (Open-Core) | ⚠️ (Open-Core) | Commercial | ✅ (FOSS) | ✅ (FOSS) | ✅ (FOSS/Hosted) | ✅ (Varies) |
+| **Primary Focus** | DevOps Processes | Event-Driven Ops | Job Scheduling | CI/CD Platform | CI/CD Automation | Kubernetes Native | Event Integration | API / RPA / ETL |
+| **Configuration** | HCL + Expressions | YAML / Python | UI / YAML / XML | YAML / UI | Groovy / UI | YAML | JSON / UI | UI / JSON |
+| **Execution Model** | Affinity-Aware | Local/Remote Exec | SSH / Agent | SaaS / Delegate | Master / Agent | Pod-per-Step | Node.js Runtime | SaaS / Worker |
+| **Git Native** | ✅ | ⚠️ (Packs) | ❌ | ✅ | ⚠️ (Plugins) | ⚠️ (ArgoCD) | ⚠️ (Projects) | ❌ |
+| **K8s / Docker** | ✅ | ⚠️ (Packs) | ⚠️ (Plugins) | ✅ | ⚠️ (Plugins) | ✅ (K8s) | ✅ (Docker) | ⚠️ (Enterprise) |
+| **WASM Steps** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Webhooks** | ✅ (In/Out) | ✅ (In/Out) | ⚠️ (In) | ✅ (In/Out) | ⚠️ (In) | ⚠️ (Argo Events) | ✅ (In/Out) | ✅ (In/Out) |
+| **Event Mesh** | NATS JetStream | RabbitMQ / Sensor | Polling / API | Internal Bus | Polling | Sensor | ⚠️ (MQTT Nodes) | ⚠️ (Polling/Hooks) |
+| **Human-in-Loop** | Advanced (Multi) | Basic (Inquiry) | Manual Step | Built-in | `input` Step | Basic (Suspend) | ⚠️ (UI Nodes) | ⚠️ (Basic Wait) |
+| **Variable Passing** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ (`msg.payload`) | ✅ |
+| **Input Forms** | ⚠️ (Basic) | ⚠️ (Inquiry) | ✅ (Comprehensive) | ✅ | ✅ (Parameters) | ⚠️ (Basic) | ✅ (Dashboard) | ⚠️ (Basic) |
+| **Security** | OPA Fail-Closed | Action Aliases | ACLs | RBAC / Secrets | Plugin-based RBAC | K8s RBAC | ⚠️ (Basic Auth) | ⚠️ (Varies) |
+| **SSO Support** | ✅ (OIDC) | ⚠️ (Enterprise) | ⚠️ (Enterprise) | ✅ | ⚠️ (Plugins) | ✅ (SSO) | ⚠️ (Plugins) | ✅ |
+| **Distributed Exec** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ⚠️ (Enterprise) |
+| **Artifact Mgmt** | ✅ (SFS, OCI) | ❌ | ⚠️ (Plugins) | ✅ | ✅ (Plugins) | ✅ | ❌ | ❌ |
+| **JUnit Reports** | ✅ | ❌ | ❌ | ✅ | ✅ (Plugins) | ⚠️ (Artifacts) | ❌ | ❌ |
+| **Observability** | ✅ (OTel, TUI) | ⚠️ (Limited) | ⚠️ (Limited) | ✅ | ⚠️ (Plugins) | ✅ (Prometheus) | ⚠️ (Basic) | ⚠️ (Basic) |
+| **Email** | ✅ | ✅ (Packs) | ✅ | ✅ | ✅ (Plugins) | ⚠️ (Hooks) | ✅ (Nodes) | ✅ |
+| **Slack / Teams** | ⚠️ (Planned) | ✅ (ChatOps) | ⚠️ (Plugins) | ✅ | ✅ (Plugins) | ⚠️ (Hooks) | ✅ (Nodes) | ✅ |
+| **Pipeline UI** | ⚠️ (TUI Only) | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ (FlowForge) | ✅ |
+| **Visual Builder** | ❌ (Code-First) | ⚠️ (Workflow Designer) | ❌ | ✅ | ✅ (Blue Ocean) | ⚠️ (UI/3rd Party) | ✅ (Comprehensive) | ✅ |
 
 *For a full list of features and planned roadmap, see
 [Features](docs/features.md).*
@@ -86,7 +136,9 @@ Stormchaser Agent).
 
 ## 🚀 Quick Start
 
-Ensure you have Rust, Docker, Docker Compose v2 (`docker compose`) or the legacy `docker-compose` wrapper, and Python 3 with `passlib[bcrypt]` installed.
+Ensure you have Rust, Docker, Docker Compose v2 (`docker compose`) or the
+legacy `docker-compose` wrapper, and Python 3 with `passlib[bcrypt]`
+installed.
 
 ```bash
 pip3 install 'passlib[bcrypt]'
@@ -95,7 +147,7 @@ pip3 install 'passlib[bcrypt]'
 1. **Clone the repository:**
 
    ```bash
-   git clone https://github.com/your-org/stormchaser.git
+   git clone https://github.com/paninfracon/stormchaser.git
    cd stormchaser
    ```
 

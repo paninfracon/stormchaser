@@ -219,17 +219,12 @@ main categories:
 
 #### 1. Core Workflow & Engine Capabilities
 
-- **Workflow Templates & CronWorkflows:** Reusability of sub-workflows and
-  periodic scheduling.
-- **Step Memoization/Caching:** The ability to skip execution if inputs/code
-  haven't changed.
-- **Advanced Retry Policies & Error Handling:** Exponential backoff/jitter for
-  retries, and dedicated Error Handling Hooks (`On-Failure`/`Finally` blocks)
-  for resource cleanup.
 - **Step Optimization:** Logic to run multiple small steps within a single
   container to reduce overhead.
-- **Input Validation:** Formal workflow input specification schemas and
-  validation/querying abilities.
+- **Input Validation:** Formal workflow input specification validation including query ability (API, SQL, AWS, etc) to retrieve valid values.
+- **Step Memoization/Caching:** The ability to skip execution if inputs/code
+  haven't changed.
+- **Concurrency Limits:** Global/per-workflow limits to prevent resource exhaustion.
 
 #### 2. Advanced Step Types & Integrations
 
@@ -238,14 +233,13 @@ or
   MS Teams.
 - **Continuous Verification:** Steps with health metric monitoring and
   automatic rollbacks.
-- **Sensors (Polling):** [Planned] Implementation of background polling
+- **Sensors (Polling):** Implementation of background polling
 mechanisms
   for external systems (Jira, GitHub, DB) to emit NATS events automatically.
+- **Environment and Service abstractions:** For cross-context workflow reuse.
 
 #### 3. Execution Runner Enhancements
 
-- **SFS Optimization:** Direct mounting of Persistent Volume Claims (PVCs) for
-  high-performance ReadWriteMany data sharing.
 - **Native WASM on Kubernetes:** Integrate `https://kwasm.sh/` for executing
 Wasm
   steps natively within the Kubernetes runner environment.

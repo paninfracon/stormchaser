@@ -4,10 +4,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 #[async_trait]
+/// Secretbackend.
 pub trait SecretBackend: Send + Sync {
+    /// Retrieves a secret value from the specified path and key.
     async fn get_secret(&self, path: &str, key: &str) -> Result<String>;
 }
 
+/// A secret backend that interacts with HashiCorp Vault.
 pub struct VaultBackend {
     #[cfg(feature = "vault")]
     client: vaultrs::client::VaultClient,
@@ -16,6 +19,7 @@ pub struct VaultBackend {
 }
 
 impl VaultBackend {
+    /// Creates a new `VaultBackend` with the specified Vault address and token.
     pub fn new(address: String, _token: String) -> Result<Self> {
         #[cfg(feature = "vault")]
         {
@@ -53,11 +57,14 @@ impl SecretBackend for VaultBackend {
     }
 }
 
+/// Mockbackend.
 pub struct MockBackend {
+    /// The secrets.
     pub secrets: HashMap<String, String>,
 }
 
 impl MockBackend {
+    /// New.
     pub fn new(secrets: HashMap<String, String>) -> Self {
         Self { secrets }
     }
@@ -74,4 +81,5 @@ impl SecretBackend for MockBackend {
     }
 }
 
+/// A thread-safe, shareable reference to a `SecretBackend` implementation.
 pub type SharedSecretBackend = Arc<dyn SecretBackend>;

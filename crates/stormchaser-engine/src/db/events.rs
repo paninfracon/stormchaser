@@ -2,6 +2,7 @@ use sqlx::{Executor, Postgres};
 use uuid::Uuid;
 
 #[allow(clippy::too_many_arguments)]
+/// Insert event correlation.
 pub async fn insert_event_correlation<'a, E>(
     executor: E,
     id: Uuid,

@@ -2,6 +2,7 @@ use sqlx::{Executor, Postgres};
 use uuid::Uuid;
 
 #[allow(clippy::too_many_arguments)]
+/// Get run quota by id.
 pub async fn get_run_quota_by_id<'a, E, O>(executor: E, run_id: Uuid) -> Result<O, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
@@ -15,6 +16,7 @@ where
     .await
 }
 
+/// Claim step quota.
 pub async fn claim_step_quota(
     executor: &mut sqlx::PgConnection,
     run_id: Uuid,
@@ -54,6 +56,7 @@ pub async fn claim_step_quota(
     }
 }
 
+/// Release step quota.
 pub async fn release_step_quota(
     executor: &mut sqlx::PgConnection,
     run_id: Uuid,

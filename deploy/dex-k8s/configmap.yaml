@@ -13,7 +13,9 @@ data:
         port: 5432
         database: stormchaser
         user: stormchaser
-        password: stormchaserpassword
+        # Supply the password via the STORMCHASER_DB_PASSWORD environment variable,
+        # which should be injected from a Kubernetes Secret (e.g. secretKeyRef).
+        password: $STORMCHASER_DB_PASSWORD
         ssl:
           mode: disable
     web:

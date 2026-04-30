@@ -94,6 +94,7 @@ The project is divided into specialized crates to ensure a clear separation of c
 - **Import Specifications**: When referring to a type or function from another module, prefer the shortest form of the path, using imports if necessary
 - **Type integrity**: When creating new function signitures use the narrowest type possible, and avoid generic constraints unless absolutely necessary or the function is specifically designed to be generic
 - **Recording changes**: Update the changelog with brief summaries of major changes. Before releasing a new version ensure that the changelog and other documentation is complete and current
+- **Workflow readability**: In the `.storm` files wrap shell commands in HCL 'here' docs and line split them appropriately to promote readability
 
 ### 5. UI/UX Guidelines
 

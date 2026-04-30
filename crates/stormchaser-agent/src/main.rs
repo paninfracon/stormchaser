@@ -1,3 +1,5 @@
+//! The Stormchaser agent. This executable runs inside task environments to facilitate integration with the engine.
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use serde_json::Value;
@@ -16,12 +18,15 @@ pub use reports::*;
 #[derive(Parser)]
 #[command(author, about, long_about = None)]
 #[command(version = concat!(env!("CARGO_PKG_VERSION"), " (rev: ", env!("VERGEN_GIT_SHA"), ", branch: ", env!("VERGEN_GIT_BRANCH"), ", built: ", env!("VERGEN_BUILD_TIMESTAMP"), ")"))]
+/// Cli.
 pub struct Cli {
     #[command(subcommand)]
+    /// The command.
     pub command: Commands,
 }
 
 #[derive(Subcommand)]
+/// Commands.
 pub enum Commands {
     /// Runs a user command and then parks (uploads) the SFS storage
     Run {
@@ -72,6 +77,7 @@ async fn main() -> Result<()> {
     run_agent(cli).await
 }
 
+/// Entry point for agent execution based on parsed CLI arguments.
 pub async fn run_agent(cli: Cli) -> Result<()> {
     match cli.command {
         Commands::Unpark {

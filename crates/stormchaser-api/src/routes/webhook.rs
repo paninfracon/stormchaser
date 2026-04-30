@@ -15,6 +15,7 @@ use stormchaser_model::event_rules::WebhookConfig;
 use stormchaser_model::workflow::RunStatus;
 use uuid::Uuid;
 
+/// Create webhook.
 pub async fn create_webhook(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -39,6 +40,7 @@ pub async fn create_webhook(
     Ok((StatusCode::CREATED, Json(serde_json::json!({ "id": id }))))
 }
 
+/// List webhooks.
 pub async fn list_webhooks(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -50,6 +52,7 @@ pub async fn list_webhooks(
     Ok(Json(webhooks))
 }
 
+/// Gets a webhook.
 pub async fn get_webhook(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -63,6 +66,7 @@ pub async fn get_webhook(
     Ok(Json(webhook))
 }
 
+/// Deletes a webhook.
 pub async fn delete_webhook(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -75,6 +79,7 @@ pub async fn delete_webhook(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Creates an event rule.
 pub async fn create_event_rule(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -104,6 +109,7 @@ pub async fn create_event_rule(
     Ok((StatusCode::CREATED, Json(serde_json::json!({ "id": id }))))
 }
 
+/// Lists event rules.
 pub async fn list_event_rules(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -115,6 +121,7 @@ pub async fn list_event_rules(
     Ok(Json(rules))
 }
 
+/// Deletes an event rule.
 pub async fn delete_event_rule(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -127,6 +134,7 @@ pub async fn delete_event_rule(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Handle webhook.
 pub async fn handle_webhook(
     Path(webhook_id): Path<Uuid>,
     headers: HeaderMap,

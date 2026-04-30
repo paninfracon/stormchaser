@@ -5,6 +5,7 @@ use stormchaser_model::runner::RunnerStatus;
 use stormchaser_model::runner;
 
 #[allow(clippy::too_many_arguments)]
+/// Mark stale runners offline.
 pub async fn mark_stale_runners_offline<'e, E>(
     executor: E,
     target_status: RunnerStatus,
@@ -22,6 +23,7 @@ where
     .await
 }
 
+/// Get runner.
 pub async fn get_runner(
     pool: &sqlx::PgPool,
     id: &str,
@@ -33,6 +35,7 @@ pub async fn get_runner(
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Register runner with steps.
 pub async fn register_runner_with_steps(
     conn: &mut sqlx::PgConnection,
     runner_id: &str,
@@ -97,6 +100,7 @@ pub async fn register_runner_with_steps(
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Upsert runner.
 pub async fn upsert_runner<'a, E>(
     executor: E,
     id: &str,
@@ -133,6 +137,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Register runner step type.
 pub async fn register_runner_step_type<'a, E>(
     executor: E,
     runner_id: &str,
@@ -155,6 +160,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Update runner heartbeat.
 pub async fn update_runner_heartbeat<'a, E>(
     executor: E,
     status: RunnerStatus,
@@ -171,6 +177,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Update runner status.
 pub async fn update_runner_status<'a, E>(
     executor: E,
     status: RunnerStatus,

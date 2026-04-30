@@ -26,6 +26,7 @@ struct ApprovalLinkPayload {
     inputs: Value,
 }
 
+/// Approves a step via an encrypted link.
 #[utoipa::path(
     get,
     path = "/api/v1/approve-link/{token}",
@@ -40,6 +41,7 @@ struct ApprovalLinkPayload {
     ),
     tag = "hitl"
 )]
+/// Approve step link.
 pub async fn approve_step_link(
     State(state): State<AppState>,
     Path(token): Path<String>,
@@ -143,6 +145,7 @@ pub async fn approve_step_link(
     }
 }
 
+/// Approves a step.
 pub async fn approve_step(
     State(state): State<AppState>,
     crate::auth::AuthClaims(claims): crate::auth::AuthClaims,
@@ -192,6 +195,7 @@ pub async fn approve_step(
     }
 }
 
+/// Rejects a step.
 pub async fn reject_step(
     State(state): State<AppState>,
     Path((run_id, step_id)): Path<(Uuid, Uuid)>,
@@ -236,6 +240,7 @@ pub async fn reject_step(
     }
 }
 
+/// Correlates an event.
 pub async fn correlate_event(
     State(state): State<AppState>,
     Json(payload): Json<Value>,

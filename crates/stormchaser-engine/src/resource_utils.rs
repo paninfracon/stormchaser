@@ -1,3 +1,4 @@
+/// Parse cpu.
 pub fn parse_cpu(cpu_str: &str) -> Option<f64> {
     if let Some(m_idx) = cpu_str.find('m') {
         if let Ok(m_cores) = cpu_str[..m_idx].parse::<f64>() {
@@ -9,6 +10,7 @@ pub fn parse_cpu(cpu_str: &str) -> Option<f64> {
     None
 }
 
+/// Parse memory.
 pub fn parse_memory(memory_str: &str) -> Option<i64> {
     let mem = memory_str.to_lowercase();
     if let Some(idx) = mem.find(|c: char| c.is_alphabetic()) {
@@ -28,6 +30,7 @@ pub fn parse_memory(memory_str: &str) -> Option<i64> {
 
 use serde_json::Value;
 
+/// Extracts CPU (in cores) and memory (in bytes) requirements from a step's specification.
 pub fn get_step_resource_requirements(step_type: &str, spec: &Value) -> (f64, i64) {
     let mut cpu_req = 0.0;
     let mut mem_req = 0;

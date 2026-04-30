@@ -13,8 +13,13 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 async fn setup_db() -> sqlx::PgPool {
-    let db_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://stormchaser:stormchaser@localhost:5432/stormchaser".into());
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        dotenvy::dotenv().ok();
+        format!(
+            "postgres://stormchaser:{}@localhost:5432/stormchaser",
+            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
+        )
+    });
     PgPoolOptions::new()
         .max_connections(5)
         .connect(&db_url)

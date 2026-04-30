@@ -1,3 +1,8 @@
+//! TLS configuration and hot-reloading utilities for Stormchaser.
+//!
+//! Provides functions to build `rustls` client and server configurations,
+//! including support for hot-reloading certificates when files change.
+
 use anyhow::{Context, Result};
 use arc_swap::ArcSwap;
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
@@ -10,14 +15,20 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::{error, info, warn};
 
+/// Configuration for TLS certificate paths.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TlsConfig {
+    /// Path to the Certificate Authority (CA) certificate.
     pub ca_cert_path: Option<PathBuf>,
+    /// Path to the client or server certificate.
     pub cert_path: PathBuf,
+    /// Path to the client or server private key.
     pub key_path: PathBuf,
+    /// Optional expected server name for SNI/validation.
     pub server_name: Option<String>,
 }
 
+/// Handles hot-reloading of TLS configurations.
 pub struct TlsReloader {
     client_config: Arc<ArcSwap<ClientConfig>>,
     server_config: Arc<ArcSwap<ServerConfig>>,
@@ -25,6 +36,7 @@ pub struct TlsReloader {
 }
 
 impl TlsReloader {
+    /// Creates a new `TlsReloader` watching the paths specified in `config`.
     pub async fn new(config: TlsConfig) -> Result<Self> {
         // Ensure a default crypto provider is installed (ignoring errors if already installed)
         rustls::crypto::ring::default_provider()
@@ -73,10 +85,12 @@ impl TlsReloader {
         })
     }
 
+    /// Returns an atomically updated `Arc<ClientConfig>`.
     pub fn client_config(&self) -> Arc<ClientConfig> {
         self.client_config.load_full()
     }
 
+    /// Returns an atomically updated `Arc<ServerConfig>`.
     pub fn server_config(&self) -> Arc<ServerConfig> {
         self.server_config.load_full()
     }
@@ -139,6 +153,7 @@ impl TlsReloader {
     }
 }
 
+/// Loads one or more certificates from a PEM-encoded string.
 pub fn load_certs_from_memory(data: &str) -> Result<Vec<CertificateDer<'static>>> {
     let mut reader = BufReader::new(data.as_bytes());
     let certs = certs(&mut reader)
@@ -147,6 +162,7 @@ pub fn load_certs_from_memory(data: &str) -> Result<Vec<CertificateDer<'static>>
     Ok(certs)
 }
 
+/// Loads a private key from a PEM-encoded string.
 pub fn load_key_from_memory(data: &str) -> Result<PrivateKeyDer<'static>> {
     let mut reader = BufReader::new(data.as_bytes());
     private_key(&mut reader)
@@ -154,6 +170,7 @@ pub fn load_key_from_memory(data: &str) -> Result<PrivateKeyDer<'static>> {
         .context("no key found in memory")
 }
 
+/// Builds a static `ClientConfig` using in-memory PEM strings.
 pub fn build_client_config(
     ca_cert: Option<&str>,
     client_cert: Option<&str>,

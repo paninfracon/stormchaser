@@ -14,6 +14,7 @@ use tokio::time::sleep;
 use tracing::{error, info, warn};
 
 impl K8sJobMachine<state::Initialized> {
+    /// Adopt.
     pub fn adopt(self, job_name: String) -> K8sJobMachine<state::Running> {
         info!(
             "Adopting orphaned K8s job {} in namespace {}",
@@ -30,6 +31,7 @@ impl K8sJobMachine<state::Initialized> {
     }
 
     #[allow(dead_code)]
+    /// Clean up.
     pub async fn clean_up(self, job_name: &str) -> Result<()> {
         info!(
             "Cleaning up K8s job {} in namespace {}",
@@ -44,6 +46,7 @@ impl K8sJobMachine<state::Initialized> {
         Ok(())
     }
 
+    /// Starts the Kubernetes job, transitioning to either Running or Failed state.
     pub async fn start(self) -> Result<StartResult> {
         let job_name = format!(
             "storm-{}-{}",
@@ -124,6 +127,7 @@ impl K8sJobMachine<state::Initialized> {
 }
 
 impl K8sJobMachine<state::Running> {
+    /// Wait.
     pub async fn wait(self) -> Result<JobState> {
         let job_name = &self.state.job_name;
         let dispatched_at = self.state.dispatched_at;
@@ -408,12 +412,14 @@ impl K8sJobMachine<state::Running> {
 }
 
 impl K8sJobMachine<state::Finished> {
+    /// Into result.
     pub fn into_result(self) -> JobState {
         self.state.result
     }
 }
 
 impl<S> K8sJobMachine<S> {
+    /// Do check version.
     pub fn do_check_version(cluster_version: &str, min_version: &str) -> Result<()> {
         let mut current = Self::do_parse_version(cluster_version)?;
         let mut required = Self::do_parse_version(min_version)?;
@@ -436,6 +442,7 @@ impl<S> K8sJobMachine<S> {
         Ok(())
     }
 
+    /// Do parse version.
     pub fn do_parse_version(v: &str) -> Result<Vec<i32>> {
         let v = v.trim_start_matches('v').split('-').next().unwrap_or(v);
         v.split('.')

@@ -6,6 +6,7 @@ use uuid::Uuid;
 use stormchaser_model::test_report;
 
 #[allow(clippy::too_many_arguments)]
+/// Upsert run storage state.
 pub async fn upsert_run_storage_state<'a, E>(
     executor: E,
     run_id: Uuid,
@@ -30,6 +31,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Get storage backend id by name.
 pub async fn get_storage_backend_id_by_name<'a, E, O>(
     executor: E,
     name: &str,
@@ -46,6 +48,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Get default sfs backend id.
 pub async fn get_default_sfs_backend_id<'a, E, O>(executor: E) -> Result<Option<O>, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
@@ -60,6 +63,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Insert artifact registry.
 pub async fn insert_artifact_registry<'a, E>(
     executor: E,
     run_id: Uuid,
@@ -89,6 +93,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Insert step test report.
 pub async fn insert_step_test_report<'a, E>(
     executor: E,
     run_id: Uuid,
@@ -124,6 +129,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Insert step test summary.
 pub async fn insert_step_test_summary<'a, E>(
     executor: E,
     run_id: Uuid,
@@ -153,6 +159,7 @@ where
     .await
 }
 
+/// Insert step test case.
 pub async fn insert_step_test_case<'a, E>(
     executor: E,
     run_id: Uuid,
@@ -182,6 +189,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Get storage backend by name.
 pub async fn get_storage_backend_by_name<'a, E, O>(
     executor: E,
     name: &str,
@@ -197,6 +205,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Get default sfs backend.
 pub async fn get_default_sfs_backend<'a, E, O>(executor: E) -> Result<Option<O>, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
@@ -208,6 +217,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Get run storage last hash.
 pub async fn get_run_storage_last_hash<'a, E, O>(
     executor: E,
     run_id: Uuid,
@@ -226,6 +236,7 @@ where
     .await
 }
 
+/// Get storage backend by id.
 pub async fn get_storage_backend_by_id<'a, E, O>(
     executor: E,
     id: Uuid,

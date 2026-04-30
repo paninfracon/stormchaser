@@ -30,6 +30,7 @@ use uuid::Uuid;
     tag = "stormchaser"
 )]
 #[tracing::instrument(skip(state, claims), fields(run_id = tracing::field::Empty, initiating_user = tracing::field::Empty))]
+/// Enqueue workflow.
 pub async fn enqueue_workflow(
     AuthClaims(claims): AuthClaims,
     State(state): State<AppState>,
@@ -136,6 +137,7 @@ pub async fn enqueue_workflow(
     ),
     tag = "stormchaser"
 )]
+/// List workflow runs.
 pub async fn list_workflow_runs(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -217,6 +219,7 @@ pub async fn list_workflow_runs(
     Ok(Json(runs))
 }
 
+/// Gets workflow run details.
 #[utoipa::path(
     get,
     path = "/api/v1/runs/{id}",
@@ -232,6 +235,7 @@ pub async fn list_workflow_runs(
     ),
     tag = "stormchaser"
 )]
+/// Get workflow run.
 pub async fn get_workflow_run(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -332,6 +336,7 @@ pub async fn get_workflow_run(
     }))
 }
 
+/// Deletes a workflow run.
 pub async fn delete_workflow_run_api(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -347,6 +352,7 @@ pub async fn delete_workflow_run_api(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Executes a direct run.
 #[tracing::instrument(skip(state, claims), fields(run_id = tracing::field::Empty, initiating_user = tracing::field::Empty))]
 pub async fn direct_run(
     AuthClaims(claims): AuthClaims,
@@ -380,6 +386,7 @@ pub async fn direct_run(
     }))
 }
 
+/// Stream workflow runs api.
 pub async fn stream_workflow_runs_api(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,

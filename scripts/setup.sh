@@ -136,6 +136,43 @@ else
     export PORT_OPA=8181
 fi
 
+# 2.25 Generate random dev passwords in .env if missing
+ENV_FILE="$REPO_ROOT/.env"
+if [ "$CLEANUP" = true ] || [ ! -f "$ENV_FILE" ]; then
+    echo -e "${BLUE}>>> Generating random dev passwords in .env...${NC}"
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo -e "${RED}Error: python3 is required to generate passwords.${NC}" >&2
+        exit 1
+    fi
+    STORMCHASER_DEV_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
+    STORMCHASER_MINIO_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
+    if [ -z "$STORMCHASER_DEV_PASSWORD" ] || [ -z "$STORMCHASER_MINIO_PASSWORD" ]; then
+        echo -e "${RED}Error: Failed to generate random passwords.${NC}" >&2
+        exit 1
+    fi
+    # Upsert keys so that unrelated entries in .env are preserved
+    touch "$ENV_FILE"
+    for key_val in "STORMCHASER_DEV_PASSWORD=$STORMCHASER_DEV_PASSWORD" "STORMCHASER_MINIO_PASSWORD=$STORMCHASER_MINIO_PASSWORD"; do
+        key="${key_val%%=*}"
+        val="${key_val#*=}"
+        if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
+            tmp=$(mktemp)
+            sed "s|^${key}=.*|${key}=${val}|" "$ENV_FILE" > "$tmp" && mv "$tmp" "$ENV_FILE"
+        else
+            echo "${key}=${val}" >> "$ENV_FILE"
+        fi
+    done
+fi
+
+# Load .env into the current shell so subsequent steps can use the passwords
+# (handles the case where .env already existed and STORMCHASER_DEV_PASSWORD was not generated above)
+if [ -f "$ENV_FILE" ]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "$ENV_FILE"
+    set +a
+fi
+
 # 2.5 Generate Dex config if missing, cleanup requested, or template changed
 DEX_TEMPLATE_PATH="$REPO_ROOT/deploy/dex/config.yaml"
 DEX_GENERATED_PATH="$REPO_ROOT/deploy/dex/config.generated.yaml"
@@ -152,6 +189,7 @@ fi
 if [ "$REGENERATE_DEX_CONFIG" = true ]; then
     echo -e "${BLUE}>>> Generating random passwords for Dex personas...${NC}"
     export REPO_ROOT
+    export STORMCHASER_DEV_PASSWORD
     if ! command -v python3 >/dev/null 2>&1; then
         echo -e "${RED}Error: python3 is required to generate the Dex config but was not found in PATH.${NC}" >&2
         echo -e "${RED}Please install Python 3 and re-run this script.${NC}" >&2
@@ -173,6 +211,11 @@ def gen_and_hash():
     return pw, bcrypt.hash(pw)
 
 repo_root = os.environ.get("REPO_ROOT", ".")
+db_password = os.environ.get("STORMCHASER_DEV_PASSWORD", "")
+if not db_password:
+    print("\033[0;31mError: STORMCHASER_DEV_PASSWORD is not set.\033[0m", file=sys.stderr)
+    sys.exit(1)
+
 template_path = os.path.join(repo_root, "deploy/dex/config.yaml")
 out_path = os.path.join(repo_root, "deploy/dex/config.generated.yaml")
 cred_path = os.path.join(repo_root, "deploy/dex/credentials.generated")
@@ -181,17 +224,22 @@ role_map = {"ADMIN": "admin", "DEV": "dev", "OPS": "ops", "SEC": "sec"}
 with open(template_path, "r") as f:
     content = f.read()
 
+client_secret = secrets.token_urlsafe(32)
+content = content.replace("DEX_DB_PASSWORD", db_password)
+content = content.replace("DEX_CLIENT_SECRET", client_secret)
+
 with open(cred_path, "w") as cred_file:
     cred_file.write("# Dex persona credentials — keep secret, do not commit\n")
+    cred_file.write(f"dex-client-secret: {client_secret}\n")
     for role, role_email in role_map.items():
         pw, phash = gen_and_hash()
         cred_file.write(f"stormchaser-{role_email}@paninfracon.net: {pw}\n")
         content = content.replace(f"PASSWORD_HASH_{role}", phash)
 
 # Verify all placeholders were replaced
-remaining = [line for line in content.splitlines() if "PASSWORD_HASH_" in line]
+remaining = [line for line in content.splitlines() if "PASSWORD_HASH_" in line or "DEX_DB_PASSWORD" in line or "DEX_CLIENT_SECRET" in line]
 if remaining:
-    print(f"\033[0;31mError: unreplaced PASSWORD_HASH_ placeholders found in generated config:\033[0m", file=sys.stderr)
+    print(f"\033[0;31mError: unreplaced placeholders found in generated config:\033[0m", file=sys.stderr)
     for line in remaining:
         print(f"  {line.strip()}", file=sys.stderr)
     sys.exit(1)

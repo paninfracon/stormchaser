@@ -5,25 +5,37 @@ use stormchaser_model::step::{StepInstance, StepStatus};
 /// State markers for the typestate pattern
 #[allow(dead_code)]
 pub mod state {
+    /// State representing a step that is waiting to be executed.
     pub struct Pending;
+    /// State representing a step that is unpacking its state from the Stormchaser File System.
     pub struct UnpackingSfs;
+    /// State representing a step that is currently executing.
     pub struct Running;
+    /// State representing a step that is packing its state into the Stormchaser File System.
     pub struct PackingSfs;
+    /// State representing a step that is waiting for an external event (e.g., Human-In-The-Loop approval).
     pub struct WaitingForEvent;
+    /// State representing a step that has successfully completed.
     pub struct Succeeded;
+    /// State representing a step that has failed.
     pub struct Failed;
+    /// State representing a step that has been skipped (e.g., due to unmet conditions).
     pub struct Skipped;
+    /// State representing a step that failed but the failure was configured to be ignored.
     pub struct FailedIgnored;
+    /// State representing a step that has been aborted.
     pub struct Aborted;
 }
 
-#[allow(dead_code)]
+/// A state machine for managing the lifecycle of a `StepInstance`.
 pub struct StepMachine<S> {
+    /// The underlying step instance data model.
     pub instance: StepInstance,
     _state: std::marker::PhantomData<S>,
 }
 
 impl<S> StepMachine<S> {
+    /// From instance.
     pub fn from_instance(instance: StepInstance) -> Self {
         Self {
             instance,
@@ -34,6 +46,7 @@ impl<S> StepMachine<S> {
 
 #[allow(dead_code)]
 impl StepMachine<state::Pending> {
+    /// New.
     pub fn new(instance: StepInstance) -> Self {
         // Ensure the initial status is correct
         let mut instance = instance;
@@ -46,6 +59,7 @@ impl StepMachine<state::Pending> {
     }
 
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
+    /// Start.
     pub async fn start(
         mut self,
         runner_id: String,
@@ -64,6 +78,7 @@ impl StepMachine<state::Pending> {
     }
 
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
+    /// Start unpacking.
     pub async fn start_unpacking(
         mut self,
         runner_id: String,
@@ -85,6 +100,7 @@ impl StepMachine<state::Pending> {
 #[allow(dead_code)]
 impl StepMachine<state::UnpackingSfs> {
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
+    /// Start running.
     pub async fn start_running(
         mut self,
         executor: &mut sqlx::PgConnection,
@@ -100,6 +116,7 @@ impl StepMachine<state::UnpackingSfs> {
     }
 
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
+    /// Fail.
     pub async fn fail(
         mut self,
         error: String,
@@ -120,6 +137,7 @@ impl StepMachine<state::UnpackingSfs> {
     }
 
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
+    /// Skip.
     pub async fn skip(
         mut self,
         executor: &mut sqlx::PgConnection,
@@ -135,6 +153,7 @@ impl StepMachine<state::UnpackingSfs> {
         })
     }
 
+    /// Into instance.
     pub fn into_instance(self) -> StepInstance {
         self.instance
     }
@@ -143,6 +162,7 @@ impl StepMachine<state::UnpackingSfs> {
 #[allow(dead_code)]
 impl StepMachine<state::Running> {
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
+    /// Start packing.
     pub async fn start_packing(
         mut self,
         executor: &mut sqlx::PgConnection,
@@ -158,6 +178,7 @@ impl StepMachine<state::Running> {
     }
 
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
+    /// Succeed.
     pub async fn succeed(
         mut self,
         executor: &mut sqlx::PgConnection,
@@ -175,6 +196,7 @@ impl StepMachine<state::Running> {
     }
 
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
+    /// Fail.
     pub async fn fail(
         mut self,
         error: String,
@@ -195,6 +217,7 @@ impl StepMachine<state::Running> {
     }
 
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
+    /// Wait for event.
     pub async fn wait_for_event(
         mut self,
         executor: &mut sqlx::PgConnection,
@@ -210,6 +233,7 @@ impl StepMachine<state::Running> {
     }
 
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
+    /// Abort.
     pub async fn abort(
         mut self,
         executor: &mut sqlx::PgConnection,
@@ -225,6 +249,7 @@ impl StepMachine<state::Running> {
         })
     }
 
+    /// Into instance.
     pub fn into_instance(self) -> StepInstance {
         self.instance
     }
@@ -233,6 +258,7 @@ impl StepMachine<state::Running> {
 #[allow(dead_code)]
 impl StepMachine<state::PackingSfs> {
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
+    /// Succeed.
     pub async fn succeed(
         mut self,
         executor: &mut sqlx::PgConnection,
@@ -250,6 +276,7 @@ impl StepMachine<state::PackingSfs> {
     }
 
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
+    /// Fail.
     pub async fn fail(
         mut self,
         error: String,
@@ -269,6 +296,7 @@ impl StepMachine<state::PackingSfs> {
         })
     }
 
+    /// Into instance.
     pub fn into_instance(self) -> StepInstance {
         self.instance
     }
@@ -277,6 +305,7 @@ impl StepMachine<state::PackingSfs> {
 #[allow(dead_code)]
 impl StepMachine<state::WaitingForEvent> {
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
+    /// Resume.
     pub async fn resume(
         mut self,
         executor: &mut sqlx::PgConnection,
@@ -292,6 +321,7 @@ impl StepMachine<state::WaitingForEvent> {
     }
 
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
+    /// Reschedule.
     pub async fn reschedule(
         mut self,
         executor: &mut sqlx::PgConnection,
@@ -306,6 +336,7 @@ impl StepMachine<state::WaitingForEvent> {
         })
     }
 
+    /// Into instance.
     pub fn into_instance(self) -> StepInstance {
         self.instance
     }
@@ -314,6 +345,7 @@ impl StepMachine<state::WaitingForEvent> {
 #[allow(dead_code)]
 impl StepMachine<state::Failed> {
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
+    /// Ignore failure.
     pub async fn ignore_failure(
         mut self,
         executor: &mut sqlx::PgConnection,
@@ -328,6 +360,7 @@ impl StepMachine<state::Failed> {
         })
     }
 
+    /// Into instance.
     pub fn into_instance(self) -> StepInstance {
         self.instance
     }
@@ -335,6 +368,7 @@ impl StepMachine<state::Failed> {
 
 #[allow(dead_code)]
 impl StepMachine<state::Succeeded> {
+    /// Into instance.
     pub fn into_instance(self) -> StepInstance {
         self.instance
     }
@@ -342,6 +376,7 @@ impl StepMachine<state::Succeeded> {
 
 #[allow(dead_code)]
 impl StepMachine<state::Skipped> {
+    /// Into instance.
     pub fn into_instance(self) -> StepInstance {
         self.instance
     }
@@ -349,6 +384,7 @@ impl StepMachine<state::Skipped> {
 
 #[allow(dead_code)]
 impl StepMachine<state::FailedIgnored> {
+    /// Into instance.
     pub fn into_instance(self) -> StepInstance {
         self.instance
     }
@@ -356,6 +392,7 @@ impl StepMachine<state::FailedIgnored> {
 
 #[allow(dead_code)]
 impl StepMachine<state::Aborted> {
+    /// Into instance.
     pub fn into_instance(self) -> StepInstance {
         self.instance
     }

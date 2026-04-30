@@ -8,6 +8,7 @@ use opentelemetry_sdk::{
 };
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+/// Initializes OpenTelemetry tracing and metrics.
 pub fn init_telemetry() -> anyhow::Result<()> {
     let service_name =
         std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| "stormchaser-api".to_string());
@@ -77,6 +78,7 @@ pub fn init_telemetry() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Shuts down the OpenTelemetry tracer provider, ensuring all telemetry is exported
 pub fn shutdown_telemetry() {
     global::shutdown_tracer_provider();
 }
