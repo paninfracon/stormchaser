@@ -17,18 +17,12 @@ pub fn json_schema_to_hcl(schema: &Value) -> Result<Body> {
                     for (def_k, def_v) in defs {
                         let mut block = Block::builder(k.as_str()).add_label(def_k.as_str());
                         if let Value::Object(def_map) = def_v {
-                            // Assume definitions are objects with properties
-                            if let Some(Value::Object(props)) = def_map.get("properties") {
-                                for (pk, pv) in props {
-                                    block =
-                                        block.add_attribute((pk.as_str(), json_to_hcl_expr(pv)?));
-                                }
-                            } else {
-                                // Just encode the whole def_map as attributes if it's not just properties
-                                for (dk, dv) in def_map {
-                                    block =
-                                        block.add_attribute((dk.as_str(), json_to_hcl_expr(dv)?));
-                                }
+                            // Encode the full definition object so schema constraints that
+                            // commonly appear alongside `properties` (for example `required`,
+                            // `additionalProperties`, `description`, `oneOf`, etc.) are preserved.
+                            for (dk, dv) in def_map {
+                                block =
+                                    block.add_attribute((dk.as_str(), json_to_hcl_expr(dv)?));
                             }
                         }
                         body = body.add_block(block.build());
