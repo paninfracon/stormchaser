@@ -75,11 +75,19 @@ jobs:
       uses: taiki-e/install-action@v2
       with:
         tool: sqlx-cli
+    - name: Generate Dev Passwords
+      run: |
+        STORMCHASER_DEV_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
+        STORMCHASER_MINIO_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
+        echo "STORMCHASER_DEV_PASSWORD=$STORMCHASER_DEV_PASSWORD" >> .env
+        echo "STORMCHASER_MINIO_PASSWORD=$STORMCHASER_MINIO_PASSWORD" >> .env
+        echo "STORMCHASER_DEV_PASSWORD=$STORMCHASER_DEV_PASSWORD" >> $GITHUB_ENV
+        echo "STORMCHASER_MINIO_PASSWORD=$STORMCHASER_MINIO_PASSWORD" >> $GITHUB_ENV
     - name: Start Infrastructure (NATS, Postgres)
       run: docker compose up -d --wait nats postgres
     - name: Generate Certificates
       run: ./scripts/generate-certs.sh
     - name: Run Database Migrations
-      run: sqlx migrate run --database-url postgres://stormchaser:stormchaser@localhost:5432/stormchaser
+      run: sqlx migrate run --database-url postgres://stormchaser:${STORMCHASER_DEV_PASSWORD}@localhost:5432/stormchaser
     - name: Run Tests
       run: cargo test --workspace --all-features
