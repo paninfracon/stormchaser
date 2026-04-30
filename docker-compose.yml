@@ -226,6 +226,3 @@ services:
 volumes:
   git-cache:
   postgres-data:
-ta:
-it-cache:
-  postgres-data:
