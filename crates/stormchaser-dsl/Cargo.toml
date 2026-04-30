@@ -11,6 +11,6 @@ license.workspace = true
 stormchaser-model = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-hcl-rs = "0.18"
+hcl-rs.workspace = true
 anyhow = { workspace = true }
 thiserror = { workspace = true }
