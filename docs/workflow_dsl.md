@@ -854,6 +854,12 @@ The base JSON Schema (Draft 7) for the Stormchaser DSL can be generated locally 
 stormchaser schema generate > schema.json
 ```
 
+You can also output the schema directly in the functional HCL data format using the `--format` flag:
+
+```bash
+stormchaser schema generate --format hcl > schema.hcl
+```
+
 Or retrieved from a running Stormchaser server API:
 
 ```bash
@@ -893,4 +899,19 @@ If you use custom, extensible step types, the linter can validate them by provid
 stormchaser lint my-workflow.storm \
   --step-schema MyCustomStep=schema.json \
   --step-schema AnotherStep=git-local:///path/to/repo?ref=main&file=schemas/step.json
+```
+
+#### Pre-commit Hook Integration
+
+Stormchaser provides native support for validating `.storm` files as part of your CI or `pre-commit` workflow. You can easily add the `stormchaser-lint` hook to your repository's `.pre-commit-config.yaml`:
+
+```yaml
+repos:
+  - repo: local
+    hooks:
+      - id: stormchaser-lint
+        name: Stormchaser Linter
+        entry: bash -c 'cargo build -p stormchaser-cli -q && for f in "$@"; do target/debug/stormchaser-cli lint "$f" || exit 1; done' --
+        language: system
+        files: \.storm$
 ```
