@@ -11,7 +11,7 @@ use reqwest_middleware::ClientBuilder;
 use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
 use std::path::PathBuf;
 
-use crate::commands::{auth, cron, rules, run, runs, storage, webhooks};
+use crate::commands::{auth, cron, lint, rules, run, runs, schema, storage, webhooks};
 
 /// Main CLI arguments and configuration.
 #[derive(Parser)]
@@ -93,6 +93,16 @@ pub enum Commands {
         command: cron::CronCommands,
     },
 
+    /// Lint a workflow file against the schema
+    Lint(lint::LintCommand),
+
+    /// Manage schemas
+    Schema {
+        /// Subcommands for schemas
+        #[command(subcommand)]
+        command: schema::SchemaCommands,
+    },
+
     /// Authentication commands
     Auth {
         /// Subcommands for authentication
@@ -157,6 +167,14 @@ pub async fn run_cli(cli: Cli) -> Result<()> {
 
         Commands::Cron { command } => {
             cron::handle(&cli.url, token_opt, &http_client, command).await?;
+        }
+
+        Commands::Lint(command) => {
+            lint::handle(&cli.url, &http_client, command).await?;
+        }
+
+        Commands::Schema { command } => {
+            schema::handle(command)?;
         }
 
         Commands::Auth { command } => {

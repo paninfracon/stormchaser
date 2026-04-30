@@ -673,28 +673,28 @@ Stormchaser provides a set of built-in functions extending HCL to handle common 
 
 **String Manipulation:**
 
-* `uuid()`: Generates a unique v4 UUID.
-* `slugify(string)`: Converts a string to a URL-safe slug (lowercase, dashes).
-* `base64_encode(bytes)` / `base64_decode(string)`: Standard base64 operations.
-* `json_encode(any)` / `json_decode(string)`: Converts objects to/from JSON strings.
+* `uuid()`: **(Planned)** Generates a unique v4 UUID.
+* `slugify(string)`: **(Planned)** Converts a string to a URL-safe slug (lowercase, dashes).
+* `base64_encode(bytes)` / `base64_decode(string)`: **(Planned)** Standard base64 operations.
+* `json_encode(any)` / `json_decode(string)`: **(Planned)** Converts objects to/from JSON strings.
 
 **Path & Filesystem:**
 
-* `path_join(list)`: Joins path components (e.g., `path_join(["/", "tmp", "source"])` -> `"/tmp/source"`).
-* `file_exists(string)`: Checks if a file exists on the shared filesystem (Runtime only).
-* `file_size(string)`: Returns the size of a file in bytes.
+* `path_join(list)`: **(Planned)** Joins path components (e.g., `path_join(["/", "tmp", "source"])` -> `"/tmp/source"`).
+* `file_exists(string)`: **(Planned)** Checks if a file exists on the shared filesystem (Runtime only).
+* `file_size(string)`: **(Planned)** Returns the size of a file in bytes.
 
 **Networking & URLs:**
 
-* `url_parse(string)`: Returns a map of URL components (scheme, host, path, query).
-* `is_valid_ipv4(string)` / `is_valid_ipv6(string)`: IP validation helpers.
+* `url_parse(string)`: **(Planned)** Returns a map of URL components (scheme, host, path, query).
+* `is_valid_ipv4(string)` / `is_valid_ipv6(string)`: **(Planned)** IP validation helpers.
 
 **Workflow Context:**
 
-* `is_retry()`: Returns `true` if the current step execution is a retry.
-* `retry_count()`: Returns the number of times the current step has been retried.
-* `env(string)`: Accesses an environment variable (Equivalent to `${env.NAME}`).
+* `env(string)`: **(Planned)** Accesses an environment variable (Equivalent to `${env.NAME}`).
 * `secret(string)`: Performs a dynamic secret lookup from the configured backend (e.g., Vault). Format is `secret("path#key")`.
+* `is_retry()`: **(Planned)** Returns `true` if the current step execution is a retry.
+* `retry_count()`: **(Planned)** Returns the number of times the current step has been retried.
 
 **Example of Secret Lookup:**
 
@@ -708,8 +708,8 @@ step "deploy" "RunContainer" {
 
 **Validation Macros:**
 
-* `regex_match(string, pattern)`: Boolean check for regex compliance.
-* `is_in_range(value, min, max)`: Numeric range validation.
+* `regex_match(string, pattern)`: **(Planned)** Boolean check for regex compliance.
+* `is_in_range(value, min, max)`: **(Planned)** Numeric range validation.
 
 ---
 
@@ -721,13 +721,13 @@ Every workflow MUST undergo a validation phase before execution. The `stormchase
 2. **DAG Cycle Detection:** The workflow graph is validated as a Directed Acyclic Graph (DAG) for all explicit `next` mappings. If a cycle is detected, the workflow is rejected.
 3. **Variable Resolution:** All `${inputs.*}`, `${steps.*}`, and `${secrets.*}` references are checked for existence and scope (including alias shadowing).
 4. **Policy Compliance:** The OPA engine is queried to ensure the workflow structure and resource requirements comply with organizational rules.
-5. **External Dependency Verification (Optional):** When the `--verify-external` flag is used, the linter performs non-destructive "pre-flight" checks to ensure the workflow is executable:
+5. **External Dependency Verification (Planned):** When the `--verify-external` flag is used, the linter performs non-destructive "pre-flight" checks to ensure the workflow is executable:
     * **Image Registry Check:** Verifies that all referenced container images exist and are accessible (e.g., via `docker manifest inspect`).
     * **Git Repository Check:** Confirms that all referenced Git repositories and branches are reachable (e.g., via `git ls-remote`).
     * **Library Integrity:** Validates that all `libraries` blocks have matching checksums and that the remote sources are available.
     * **OPA Policy Existence:** Verifies that the specific OPA policies required for the run are loaded and reachable in the OPA server.
 
-6. **Checksum Generation:** To simplify the adoption of the mandatory `checksum` field in `libraries`, the linter provides a `--generate-checksums` flag.
+6. **Checksum Generation (Planned):** To simplify the adoption of the mandatory `checksum` field in `libraries`, the linter provides a `--generate-checksums` flag.
     * **Behavior:** The linter fetches the remote source for any library missing a checksum, calculates its SHA256 fingerprint, and provides the value to update the DSL.
     * **Security Note:** Users SHOULD only use this flag when first adding a trusted library or when intentionally upgrading a version. Once generated, the checksum provides the "Lockfile" guarantee for all future executions.
 
@@ -840,4 +840,57 @@ workflow "main" {
     }
   }
 }
+```
+
+## Validation & Linting
+
+Stormchaser provides robust, offline JSON Schema validation for the DSL. Workflows can be validated for structural correctness before submission.
+
+### Generating the Schema
+
+The base JSON Schema (Draft 7) for the Stormchaser DSL can be generated locally using the CLI:
+
+```bash
+stormchaser schema generate > schema.json
+```
+
+Or retrieved from a running Stormchaser server API:
+
+```bash
+curl http://localhost:8080/api/v1/schema > schema.json
+```
+
+### Linting Workflows
+
+The `stormchaser lint` command checks `.storm` files against the generated JSON schema. 
+
+```bash
+stormchaser lint my-workflow.storm
+```
+
+#### Remote & Offline Validation
+
+By default, `lint` generates the schema locally. To validate strictly against the live server's configuration, you can use the `--remote` flag:
+
+```bash
+stormchaser lint my-workflow.storm --remote
+```
+
+For **true offline validation** against a server's exact configuration (similar to `sqlx prepare`), you can download the server schema locally:
+
+```bash
+# Downloads the live schema to .stormchaser-schema.json
+stormchaser lint --prepare
+```
+
+Subsequent `lint` runs will automatically detect `.stormchaser-schema.json` and validate against it offline.
+
+#### Validating Custom Step Plugins
+
+If you use custom, extensible step types, the linter can validate them by providing additional schemas. It supports local JSON files and reading directly from local Git repositories (without needing a checkout):
+
+```bash
+stormchaser lint my-workflow.storm \
+  --step-schema MyCustomStep=schema.json \
+  --step-schema AnotherStep=git-local:///path/to/repo?ref=main&file=schemas/step.json
 ```

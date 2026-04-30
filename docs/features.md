@@ -59,7 +59,7 @@
 38. ✅ Policy as Code (OPA integration) for workflow execution validation
 39. 🚧 Continuous Verification steps with health metric monitoring and automatic
     rollbacks
-40. 🚧 Dry-run and Linting mode for workflow validation without side effects
+40. ✅ Offline Linting mode and JSON schema validation for workflows without side effects
 41. ✅ Explicit Artifact Management (S3/GCS/Minio) with SHA-256 hash
     verification and audit trails
 42. 🚧 ChatOps integration for Slack/Teams (approvals, status updates)

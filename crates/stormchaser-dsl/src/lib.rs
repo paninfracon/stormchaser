@@ -493,6 +493,17 @@ impl StormchaserParser {
                                 }
                             }
                         }
+                        "spec" => {
+                            for attr in inner_block.body().attributes() {
+                                spec_map
+                                    .insert(attr.key().to_string(), expr_to_value(attr.expr())?);
+                            }
+                            for nested_block in inner_block.body().blocks() {
+                                let key = nested_block.identifier().to_string();
+                                let value = block_to_value(nested_block)?;
+                                spec_map.insert(key, value);
+                            }
+                        }
                         _ => {
                             // Convert block to JSON for spec
                             spec_map.insert(

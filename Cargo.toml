@@ -11,7 +11,6 @@ members = [
     "crates/stormchaser-agent",
     "crates/stormchaser-tls",
     "crates/stormchaser-opa",
-    "crates/stormchaser-tui",
 ]
 
 [workspace.package]

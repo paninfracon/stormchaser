@@ -16,6 +16,7 @@ and execution performance for modular automation.
 | **Event Mesh**      | NATS JetStream        | Webhooks / Sensor    | RabbitMQ / Sensor | Polling / API   | Webhooks        |
 | **Human-in-Loop**   | Advanced (Multi)      | Basic (Suspend)      | Basic (Inquiry)   | Manual Step     | Built-in        |
 | **Security**        | OPA Fail-Closed       | K8s RBAC             | Action Aliases    | ACLs            | RBAC / Secrets  |
+| **Linting/Validation**| JSON Schema / Offline | Argo Lint            | Pack Testing      | Basic Syntax    | Built-in        |
 | **Language**        | Rust                  | Go                   | Python            | Java            | Java/Go         |
 
 ---

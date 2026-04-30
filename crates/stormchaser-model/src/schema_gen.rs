@@ -1,0 +1,126 @@
+use crate::dsl::*;
+use schemars::schema::{ObjectValidation, RootSchema, Schema, SchemaObject, SubschemaValidation};
+use schemars::Map;
+use serde_json::Value;
+use std::collections::HashMap;
+
+pub fn apply_step_extensibility(
+    root_schema: &mut RootSchema,
+    spec_schemas: &HashMap<String, Schema>,
+) {
+    if let Some(Schema::Object(step_obj)) = root_schema.definitions.get_mut("Step") {
+        let mut all_of = Vec::new();
+
+        // Preserve any existing allOf logic
+        if let Some(subschemas) = &mut step_obj.subschemas {
+            if let Some(existing_all_of) = &subschemas.all_of {
+                all_of.extend(existing_all_of.clone());
+            }
+        }
+
+        for (type_name, spec_schema) in spec_schemas {
+            let mut if_schema = SchemaObject::default();
+            let mut properties = Map::new();
+
+            let type_schema = SchemaObject {
+                const_value: Some(Value::String(type_name.clone())),
+                ..Default::default()
+            };
+
+            properties.insert("type".to_string(), Schema::Object(type_schema));
+            if_schema.object = Some(Box::new(ObjectValidation {
+                properties,
+                ..Default::default()
+            }));
+
+            let mut then_schema = SchemaObject::default();
+            let mut then_props = Map::new();
+            then_props.insert("spec".to_string(), spec_schema.clone());
+            then_schema.object = Some(Box::new(ObjectValidation {
+                properties: then_props,
+                ..Default::default()
+            }));
+
+            let condition = SchemaObject {
+                subschemas: Some(Box::new(SubschemaValidation {
+                    if_schema: Some(Box::new(Schema::Object(if_schema))),
+                    then_schema: Some(Box::new(Schema::Object(then_schema))),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            };
+            all_of.push(Schema::Object(condition));
+        }
+
+        if let Some(subschemas) = &mut step_obj.subschemas {
+            subschemas.all_of = Some(all_of);
+        } else {
+            step_obj.subschemas = Some(Box::new(SubschemaValidation {
+                all_of: Some(all_of),
+                ..Default::default()
+            }));
+        }
+
+        if let Some(obj) = step_obj.object.as_mut() {
+            obj.additional_properties = Some(Box::new(Schema::Bool(true)));
+        }
+    }
+}
+
+pub fn generate_dsl_schema() -> RootSchema {
+    let mut generator = schemars::gen::SchemaSettings::draft07()
+        .with(|s| s.option_nullable = true)
+        .into_generator();
+
+    let mut spec_schemas = HashMap::new();
+    spec_schemas.insert(
+        "RunContainer".to_string(),
+        generator.subschema_for::<CommonContainerSpec>(),
+    );
+    spec_schemas.insert(
+        "RunK8sJob".to_string(),
+        generator.subschema_for::<K8sJobSpec>(),
+    );
+    spec_schemas.insert(
+        "Approval".to_string(),
+        generator.subschema_for::<ApprovalSpec>(),
+    );
+    spec_schemas.insert(
+        "WaitEvent".to_string(),
+        generator.subschema_for::<WaitEventSpec>(),
+    );
+    spec_schemas.insert(
+        "LambdaInvoke".to_string(),
+        generator.subschema_for::<LambdaInvokeSpec>(),
+    );
+    spec_schemas.insert(
+        "GitCheckout".to_string(),
+        generator.subschema_for::<GitCheckoutSpec>(),
+    );
+    spec_schemas.insert(
+        "Wasm".to_string(),
+        generator.subschema_for::<WasmStepSpec>(),
+    );
+    spec_schemas.insert(
+        "WebhookInvoke".to_string(),
+        generator.subschema_for::<WebhookInvokeSpec>(),
+    );
+    spec_schemas.insert("Email".to_string(), generator.subschema_for::<EmailSpec>());
+    spec_schemas.insert(
+        "JinjaRender".to_string(),
+        generator.subschema_for::<JinjaRenderSpec>(),
+    );
+    spec_schemas.insert(
+        "TestReportEmail".to_string(),
+        generator.subschema_for::<TestReportEmailSpec>(),
+    );
+    spec_schemas.insert("Jq".to_string(), generator.subschema_for::<JqSpec>());
+
+    let mut root_schema = generator.root_schema_for::<Workflow>();
+
+    apply_step_extensibility(&mut root_schema, &spec_schemas);
+
+    // Remove the OpenAPI meta-schema to avoid jsonschema validation errors on unrecognized drafts
+    root_schema.meta_schema = None;
+    root_schema
+}
