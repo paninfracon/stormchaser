@@ -4,7 +4,7 @@
 [![Coverage](https://github.com/paninfracon/stormchaser/actions/workflows/coverage.yml/badge.svg)](https://github.com/paninfracon/stormchaser/actions/workflows/coverage.yml)
 [![License](https://img.shields.io/badge/license-MIT_OR_Apache--2.0_OR_CDLA--Permissive--2.0-blue.svg)](#-license)
 [![prek](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/j178/prek/master/docs/assets/badge-v0.json)](https://github.com/j178/prek)
-[![pre-commit](https://shields.io)](https://github.com/pre-commit/pre-commit)
+[![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit)
 
 A robust, distributed workflow engine for event-driven and human-triggered
 workflows. Built in Rust for performance and reliability, utilizing a
