@@ -149,9 +149,15 @@ pub async fn approve_step_link(
 pub async fn approve_step(
     State(state): State<AppState>,
     crate::auth::AuthClaims(claims): crate::auth::AuthClaims,
+    headers: axum::http::HeaderMap,
     Path((run_id, step_id)): Path<(Uuid, Uuid)>,
     Json(inputs): Json<Value>,
 ) -> impl IntoResponse {
+    let token = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "));
+
     // 1. Verify step exists and is WaitingForEvent
     let step = crate::db::get_step_instance_for_approval(&state.pool, step_id, run_id)
         .await
@@ -164,6 +170,81 @@ pub async fn approve_step(
 
     if step.status != StepStatus::WaitingForEvent {
         return (StatusCode::BAD_REQUEST, "Step is not waiting for approval").into_response();
+    }
+
+    // 1.5 OPA ABAC Engine check
+    if state.opa.is_configured() {
+        let context_row = sqlx::query(
+            r#"
+            SELECT
+                wr.initiating_user,
+                rc.workflow_definition,
+                rc.inputs as run_inputs
+            FROM workflow_runs wr
+            JOIN run_contexts rc ON wr.id = rc.run_id
+            WHERE wr.id = $1
+            "#,
+        )
+        .bind(run_id)
+        .fetch_optional(&state.pool)
+        .await
+        .unwrap_or(None);
+
+        if let Some(row) = context_row {
+            use sqlx::Row;
+            let initiating_user: String = row.get("initiating_user");
+            let workflow_definition: Value = row.get("workflow_definition");
+            let run_inputs: Value = row.get("run_inputs");
+
+            let mut step_ast = serde_json::json!({});
+            if let Ok(workflow) =
+                serde_json::from_value::<stormchaser_model::dsl::Workflow>(workflow_definition)
+            {
+                // Recursively find the step AST
+                fn find_step(
+                    steps: &[stormchaser_model::dsl::Step],
+                    name: &str,
+                ) -> Option<stormchaser_model::dsl::Step> {
+                    for s in steps {
+                        if s.name == name {
+                            return Some(s.clone());
+                        }
+                        if let Some(inner) = &s.steps {
+                            if let Some(found) = find_step(inner, name) {
+                                return Some(found);
+                            }
+                        }
+                    }
+                    None
+                }
+
+                if let Some(s) = find_step(&workflow.steps, &step.step_name) {
+                    step_ast = serde_json::to_value(s).unwrap_or(serde_json::json!({}));
+                }
+            }
+
+            let opa_context = stormchaser_model::auth::ApprovalOpaContext {
+                run_id,
+                initiating_user,
+                step_ast,
+                inputs: run_inputs,
+                token,
+            };
+
+            match state.opa.check_approval(opa_context).await {
+                Ok(true) => {}
+                Ok(false) => {
+                    return (StatusCode::FORBIDDEN, "Approval denied by OPA policy").into_response()
+                }
+                Err(_) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "OPA policy evaluation failed",
+                    )
+                        .into_response()
+                }
+            }
+        }
     }
 
     // 2. Insert into approval_registry

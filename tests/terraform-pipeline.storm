@@ -1,0 +1,87 @@
+stormchaser_dsl_version = "0.1"
+
+workflow "terraform_deployment" {
+  description = "A standard deployment pipeline that runs Terraform plan, waits for approval, applies the plan, and uploads the final state or report."
+
+  input "aws_region" {
+    type    = "string"
+    default = "us-east-1"
+  }
+
+  input "s3_backend_bucket" {
+    type        = "string"
+    description = "The S3 bucket used for the Terraform state backend."
+  }
+
+  input "s3_backend_key" {
+    type        = "string"
+    description = "The path key for the Terraform state in the S3 bucket."
+  }
+
+  input "approvers" {
+    type        = "string"
+    description = "Comma-separated list of users or groups allowed to approve the plan."
+    default     = "admin"
+  }
+
+  steps {
+    // Phase 1: Preparation and Plan
+    step "plan_phase" "Sequential" {
+      steps {
+        step "prep_modules" "RunContainer" {
+          spec {
+            image   = "alpine:latest"
+            command = ["sh", "-c", "echo 'Fetching dynamic modules or generating pre-requisite configurations...' > prep_log.txt"]
+          }
+        }
+
+        step "terraform_plan" "TerraformPlan" {
+          spec {
+            backend_bucket = inputs.s3_backend_bucket
+            backend_key    = inputs.s3_backend_key
+            region         = inputs.aws_region
+            out_file       = "tfplan"
+          }
+          artifacts = ["tfplan"] // Or if there is a plan report, we'd add it to the intrinsic step, but let's stick to base for now.
+        }
+      }
+      next = ["manual_approval"]
+    }
+
+    // Phase 2: Wait for HITL Approval
+    step "manual_approval" "TerraformApproval" {
+      spec {
+        approvers    = ["${inputs.approvers}"]
+        plan_summary = steps.plan_phase.steps.terraform_plan.outputs.plan_summary
+        timeout      = "24h"
+      }
+      next = ["apply_phase"]
+    }
+
+    // Phase 3: Apply and Report
+    step "apply_phase" "Sequential" {
+      steps {
+        step "terraform_apply" "TerraformApply" {
+          spec {
+            backend_bucket = inputs.s3_backend_bucket
+            backend_key    = inputs.s3_backend_key
+            region         = inputs.aws_region
+            out_file       = "tfplan"
+          }
+        }
+      }
+      next = ["notify_success"]
+    }
+
+    step "notify_success" "WebhookInvoke" {
+      spec {
+        url    = "https://example.com/deploy"
+        method = "POST"
+        body = {
+          status  = "success"
+          outputs = "${steps.apply_phase.steps.terraform_apply.outputs.terraform}"
+        }
+      }
+    }
+  }
+}

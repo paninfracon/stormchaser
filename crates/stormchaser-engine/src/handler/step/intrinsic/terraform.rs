@@ -1,0 +1,157 @@
+use serde_json::Value;
+use stormchaser_model::dsl::CommonContainerSpec;
+
+pub fn mutate_if_terraform(step_type: &mut String, resolved_spec: &mut Value) {
+    if step_type == "TerraformPlan" || step_type == "TerraformApply" {
+        let is_apply = *step_type == "TerraformApply";
+
+        let actual_spec = resolved_spec.get("spec").unwrap_or(&*resolved_spec).clone();
+
+        let workspace_dir = actual_spec
+            .get("workspace_dir")
+            .and_then(|v| v.as_str())
+            .unwrap_or(".");
+        let backend_bucket = actual_spec.get("backend_bucket").and_then(|v| v.as_str());
+        let backend_key = actual_spec.get("backend_key").and_then(|v| v.as_str());
+        let region = actual_spec.get("region").and_then(|v| v.as_str());
+        let out_file = actual_spec
+            .get("out_file")
+            .and_then(|v| v.as_str())
+            .unwrap_or("tfplan");
+        let auto_approve = actual_spec
+            .get("auto_approve")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+
+        let mut init_cmd = format!("cd {} && terraform init", workspace_dir);
+        if let Some(bucket) = backend_bucket {
+            init_cmd.push_str(&format!(" -backend-config='bucket={}'", bucket));
+        }
+        if let Some(key) = backend_key {
+            init_cmd.push_str(&format!(" -backend-config='key={}'", key));
+        }
+        if let Some(r) = region {
+            init_cmd.push_str(&format!(" -backend-config='region={}'", r));
+        }
+
+        let mut run_cmd = if is_apply {
+            format!(
+                "terraform apply {} {}",
+                if auto_approve { "-auto-approve" } else { "" },
+                out_file
+            )
+        } else {
+            format!("terraform plan -out={}", out_file)
+        };
+
+        if is_apply {
+            // output raw JSON, flattening newlines with tr
+            run_cmd.push_str(" && echo '' && echo -n '--- TF OUTPUTS --- ' && terraform output -json | tr -d '\\n'");
+        } else {
+            // output a plan summary for log scraping
+            run_cmd.push_str(" && echo '' && echo -n '--- TF PLAN SUMMARY --- ' && terraform show -no-color tfplan | grep -E '^Plan:|^No changes.' | tail -n 1");
+        }
+
+        let script = format!("{} && {}", init_cmd, run_cmd);
+
+        let mut envs = Vec::new();
+        if let Some(r) = region {
+            envs.push(stormchaser_model::dsl::EnvVar {
+                name: "AWS_REGION".to_string(),
+                value: r.to_string(),
+            });
+        }
+
+        let container_spec = CommonContainerSpec {
+            image: "hashicorp/terraform:latest".to_string(),
+            command: Some(vec!["sh".to_string(), "-c".to_string(), script]),
+            args: None,
+            env: if envs.is_empty() { None } else { Some(envs) },
+            cpu: None,
+            memory: None,
+            privileged: None,
+            storage_mounts: None,
+        };
+
+        *step_type = "RunContainer".to_string();
+        if let Ok(val) = serde_json::to_value(container_spec) {
+            *resolved_spec = val;
+        }
+    }
+}
+
+pub fn mutate_if_terraform_approval(step_type: &mut String, resolved_spec: &mut Value) {
+    if step_type == "TerraformApproval" {
+        let actual_spec = resolved_spec.get("spec").unwrap_or(&*resolved_spec).clone();
+
+        let approvers = actual_spec.get("approvers").cloned();
+        let plan_summary = actual_spec
+            .get("plan_summary")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Review Terraform Plan");
+
+        let mut plan_description = format!("Terraform Plan Review: {}", plan_summary);
+        let mut has_destroys = false;
+
+        if let Some(caps) = regex::Regex::new(r"(\d+) to destroy")
+            .ok()
+            .and_then(|re| re.captures(plan_summary))
+        {
+            if let Some(count_str) = caps.get(1) {
+                if let Ok(count) = count_str.as_str().parse::<u32>() {
+                    if count > 0 {
+                        has_destroys = true;
+                        plan_description = format!(
+                            "🚨 WARNING: DESTRUCTIVE CHANGES ({} to destroy) 🚨\n\n{}",
+                            count, plan_description
+                        );
+                    }
+                }
+            }
+        }
+
+        let input = stormchaser_model::dsl::Input {
+            name: "approval_decision".to_string(),
+            r#type: "string".to_string(),
+            description: Some(plan_description),
+            default: Some(serde_json::json!("Approve")),
+            validation: None,
+            options: Some(vec!["Approve".to_string(), "Reject".to_string()]),
+            query: None,
+        };
+
+        let mut notify_spec: Option<stormchaser_model::dsl::EmailSpec> = actual_spec
+            .get("notify")
+            .cloned()
+            .and_then(|n| serde_json::from_value(n).ok());
+
+        if has_destroys {
+            if let Some(notify) = notify_spec.as_mut() {
+                let is_html = notify.html.unwrap_or(false);
+                let banner = if is_html {
+                    "<div style=\"background-color: #ffcccc; color: #cc0000; padding: 10px; border: 1px solid #cc0000; font-weight: bold; margin-bottom: 15px;\">🚨 WARNING: This Terraform plan contains destructive changes! 🚨</div>\n\n"
+                } else {
+                    "🚨 WARNING: This Terraform plan contains destructive changes! 🚨\n\n"
+                };
+                notify.body = format!("{}{}", banner, notify.body);
+                if !notify.subject.starts_with("[WARNING]") {
+                    notify.subject = format!("[WARNING] {}", notify.subject);
+                }
+            }
+        }
+
+        let approval_spec = stormchaser_model::dsl::ApprovalSpec {
+            approvers: approvers.and_then(|a| serde_json::from_value(a).ok()),
+            inputs: Some(vec![input]),
+            notify: notify_spec,
+            timeout: actual_spec
+                .get("timeout")
+                .and_then(|t| t.as_str().map(|s| s.to_string())),
+        };
+
+        *step_type = "Approval".to_string();
+        if let Ok(val) = serde_json::to_value(approval_spec) {
+            *resolved_spec = val;
+        }
+    }
+}

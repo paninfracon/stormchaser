@@ -159,6 +159,7 @@ async fn test_approve_step_success() {
             email: Some("test-user-123@paninfracon.net".to_string()),
             exp: 0,
         }),
+        axum::http::HeaderMap::new(),
         Path((run_id, step_id)),
         Json(json!({"approved": true})),
     )

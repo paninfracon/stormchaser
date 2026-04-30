@@ -10,6 +10,8 @@ pub mod jinja;
 pub mod jq;
 /// AWS Lambda function execution step.
 pub mod lambda;
+/// Terraform step orchestration.
+pub mod terraform;
 /// JUnit test report email step.
 pub mod test_report_email;
 /// WebAssembly module execution step.
