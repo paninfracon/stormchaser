@@ -1,5 +1,5 @@
 [package]
-publish = true
+publish = false
 name = "stormchaser-tui"
 version.workspace = true
 edition.workspace = true
@@ -20,7 +20,7 @@ uuid = { version = "1.7", features = ["serde", "v4"] }
 eventsource-stream = "0.2"
 futures = "0.3"
 tokio-stream = "0.1"
-stormchaser-model = { path = "../stormchaser-model" }
+stormchaser-model = { version = "0.1.0", path = "../stormchaser-model" }
 clap = { version = "4.4", features = ["derive", "env"] }
 urlencoding = "2.1"
 open = "5.3.4"

@@ -23,9 +23,9 @@ license = "MIT OR Apache-2.0"
 edition = "2021"
 
 [workspace.dependencies]
-stormchaser-model = { path = "crates/stormchaser-model" }
-stormchaser-dsl = { path = "crates/stormchaser-dsl" }
-stormchaser-tls = { path = "crates/stormchaser-tls" }
+stormchaser-model = { version = "0.1.0", path = "crates/stormchaser-model" }
+stormchaser-dsl = { version = "0.1.0", path = "crates/stormchaser-dsl" }
+stormchaser-tls = { version = "0.1.0", path = "crates/stormchaser-tls" }
 
 tokio = { version = "1", features = ["full"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json", "macros", "migrate"] }

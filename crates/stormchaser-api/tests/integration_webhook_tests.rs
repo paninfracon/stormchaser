@@ -17,6 +17,8 @@ use uuid::Uuid;
 
 #[tokio::test]
 async fn test_webhook_trigger() {
+    std::env::set_var("API_RATE_LIMIT_PER_SECOND", "1000");
+    std::env::set_var("API_RATE_LIMIT_BURST_SIZE", "1000");
     let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
@@ -137,6 +139,8 @@ async fn test_github_webhook_signature() {
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
 
+    std::env::set_var("API_RATE_LIMIT_PER_SECOND", "1000");
+    std::env::set_var("API_RATE_LIMIT_BURST_SIZE", "1000");
     let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
