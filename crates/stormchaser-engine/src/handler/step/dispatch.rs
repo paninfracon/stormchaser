@@ -47,7 +47,7 @@ pub async fn dispatch_step_instance(
 
     super::intrinsic::git_checkout::mutate(&mut step_type, &mut resolved_spec);
     super::intrinsic::jq::mutate_if_has_files(&mut step_type, &mut resolved_spec);
-    super::intrinsic::terraform::mutate_if_terraform(&mut step_type, &mut resolved_spec);
+    super::intrinsic::terraform::mutate_if_terraform(run_id, &mut step_type, &mut resolved_spec).await?;
     super::intrinsic::terraform::mutate_if_terraform_approval(&mut step_type, &mut resolved_spec);
 
     let run_context = fetch_run_context(run_id, &pool).await?;

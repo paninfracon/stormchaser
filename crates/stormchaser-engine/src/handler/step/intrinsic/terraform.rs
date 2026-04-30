@@ -1,7 +1,7 @@
 use serde_json::Value;
 use stormchaser_model::dsl::CommonContainerSpec;
 
-pub fn mutate_if_terraform(step_type: &mut String, resolved_spec: &mut Value) {
+pub async fn mutate_if_terraform(#[allow(unused_variables)] run_id: uuid::Uuid, step_type: &mut String, resolved_spec: &mut Value) -> anyhow::Result<()> {
     if step_type == "TerraformPlan" || step_type == "TerraformApply" {
         let is_apply = *step_type == "TerraformApply";
 
@@ -22,6 +22,11 @@ pub fn mutate_if_terraform(step_type: &mut String, resolved_spec: &mut Value) {
             .get("auto_approve")
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
+
+        #[cfg(feature = "aws-sdk-sts")]
+        let assume_role_arn = actual_spec.get("aws_assume_role_arn").and_then(|v| v.as_str());
+        #[cfg(feature = "aws-sdk-sts")]
+        let role_session_name = actual_spec.get("aws_role_session_name").and_then(|v| v.as_str());
 
         let mut init_cmd = format!("cd {} && terraform init", workspace_dir);
         if let Some(bucket) = backend_bucket {
@@ -54,7 +59,7 @@ pub fn mutate_if_terraform(step_type: &mut String, resolved_spec: &mut Value) {
             run_cmd.push_str(" && echo '' && echo -n '--- TF PLAN JSON --- ' && terraform show -json tfplan | tr -d '\\n'");
         }
 
-        let script = format!("{} && {}", init_cmd, run_cmd);
+        let mut script = format!("{} && {}", init_cmd, run_cmd);
 
         let mut envs = Vec::new();
         if let Some(r) = region {
@@ -68,8 +73,46 @@ pub fn mutate_if_terraform(step_type: &mut String, resolved_spec: &mut Value) {
             value: "/tmp/.terraform_plugin_cache".to_string(),
         });
 
+        #[cfg(feature = "aws-sdk-sts")]
+        if let Some(role_arn) = assume_role_arn {
+            let mut config_loader = aws_config::defaults(aws_config::BehaviorVersion::v2026_01_12());
+            if let Some(r) = region {
+                config_loader = config_loader.region(aws_config::Region::new(r.to_string()));
+            }
+            let config = config_loader.load().await;
+            let sts_client = aws_sdk_sts::Client::new(&config);
+
+            let session_name = role_session_name
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("stormchaser-tf-{}", run_id));
+
+            let assume_role_res = sts_client
+                .assume_role()
+                .role_arn(role_arn)
+                .role_session_name(session_name)
+                .send()
+                .await?;
+
+            if let Some(credentials) = assume_role_res.credentials() {
+                envs.push(stormchaser_model::dsl::EnvVar {
+                    name: "AWS_ACCESS_KEY_ID".to_string(),
+                    value: credentials.access_key_id().to_string(),
+                });
+                envs.push(stormchaser_model::dsl::EnvVar {
+                    name: "AWS_SECRET_ACCESS_KEY".to_string(),
+                    value: credentials.secret_access_key().to_string(),
+                });
+                envs.push(stormchaser_model::dsl::EnvVar {
+                    name: "AWS_SESSION_TOKEN".to_string(),
+                    value: credentials.session_token().to_string(),
+                });
+            } else {
+                return Err(anyhow::anyhow!("Missing credentials from assume_role"));
+            }
+        }
+
         // Ensure cache dir exists before running init
-        let script = format!("mkdir -p /tmp/.terraform_plugin_cache && {}", script);
+        script = format!("mkdir -p /tmp/.terraform_plugin_cache && {}", script);
 
         let container_spec = CommonContainerSpec {
             image: "hashicorp/terraform:latest".to_string(),
@@ -87,8 +130,8 @@ pub fn mutate_if_terraform(step_type: &mut String, resolved_spec: &mut Value) {
             *resolved_spec = val;
         }
     }
+    Ok(())
 }
-
 pub fn mutate_if_terraform_approval(step_type: &mut String, resolved_spec: &mut Value) {
     if step_type == "TerraformApproval" {
         let actual_spec = resolved_spec.get("spec").unwrap_or(&*resolved_spec).clone();

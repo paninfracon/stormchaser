@@ -16,6 +16,8 @@ The `spec` block for `TerraformApply` shares similar configuration with `Terrafo
 * `backend_bucket` (string, optional): S3 bucket name if using an S3 remote backend.
 * `backend_key` (string, optional): State file key path within the S3 bucket.
 * `region` (string, optional): AWS Region for backend configuration and AWS provider. Injects `AWS_REGION`.
+* `aws_assume_role_arn` (string, optional): The ARN of an IAM role to assume before running Terraform. When provided (and if the engine is built with the `aws-sdk-sts` feature), Stormchaser will natively assume this role and inject short-lived credentials (`AWS_ACCESS_KEY_ID`, etc.) into the container.
+* `aws_role_session_name` (string, optional): An optional session name to use when assuming the role. Defaults to `stormchaser-tf-<run_id>`.
 * `out_file` (string, optional): Name of the plan file to execute. Defaults to `tfplan`.
 * `auto_approve` (boolean, optional): Whether to run with `-auto-approve`. Defaults to `true`.
 
