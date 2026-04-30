@@ -16,6 +16,31 @@ Instead of relying on YAML, Stormchaser uses a bespoke, graph-based Domain
 Specific Language (DSL) providing a clean, HCL-like syntax for defining robust
 workflows.
 
+## 📝 Example Workflow
+
+```hcl
+workflow "example_workflow" {
+  description = "A simple deployment workflow"
+
+  # First step: A simple script execution
+  step "build_app" "RunContainer" {
+    spec {
+      image   = "node:18"
+      command = ["npm", "run", "build"]
+    }
+    next = ["require_approval"]
+  }
+
+  # Second step: Waits for a human to approve the deployment
+  step "require_approval" "Approval" {
+    spec {
+      approvers = ["group:admins", "user:alice"]
+      timeout   = "24h"
+    }
+  }
+}
+```
+
 ## ✨ Key Features
 
 - **Graph-Based DSL**: Define workflows using a powerful, typed, and extensible
@@ -86,7 +111,9 @@ Stormchaser Agent).
 
 ## 🚀 Quick Start
 
-Ensure you have Rust, Docker, Docker Compose v2 (`docker compose`) or the legacy `docker-compose` wrapper, and Python 3 with `passlib[bcrypt]` installed.
+Ensure you have Rust, Docker, Docker Compose v2 (`docker compose`) or the
+legacy `docker-compose` wrapper, and Python 3 with `passlib[bcrypt]`
+installed.
 
 ```bash
 pip3 install 'passlib[bcrypt]'
