@@ -37,6 +37,15 @@ workflow "example_workflow" {
       approvers = ["group:admins", "user:alice"]
       timeout   = "24h"
     }
+    next = ["deploy_app"]
+  }
+
+  # Third step: Proceeds with deployment after approval
+  step "deploy_app" "RunContainer" {
+    spec {
+      image   = "node:18"
+      command = ["npm", "run", "deploy"]
+    }
   }
 }
 ```
