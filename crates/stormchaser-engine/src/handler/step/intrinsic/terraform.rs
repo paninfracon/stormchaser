@@ -48,8 +48,10 @@ pub fn mutate_if_terraform(step_type: &mut String, resolved_spec: &mut Value) {
             // output raw JSON, flattening newlines with tr
             run_cmd.push_str(" && echo '' && echo -n '--- TF OUTPUTS --- ' && terraform output -json | tr -d '\\n'");
         } else {
-            // output a plan summary for log scraping
+            // output a plan summary for log scraping, and also save the full plan text to plan.txt
+            run_cmd.push_str(" && terraform show -no-color tfplan > plan.txt");
             run_cmd.push_str(" && echo '' && echo -n '--- TF PLAN SUMMARY --- ' && terraform show -no-color tfplan | grep -E '^Plan:|^No changes.' | tail -n 1");
+            run_cmd.push_str(" && echo '' && echo -n '--- TF PLAN JSON --- ' && terraform show -json tfplan | tr -d '\\n'");
         }
 
         let script = format!("{} && {}", init_cmd, run_cmd);
@@ -61,6 +63,13 @@ pub fn mutate_if_terraform(step_type: &mut String, resolved_spec: &mut Value) {
                 value: r.to_string(),
             });
         }
+        envs.push(stormchaser_model::dsl::EnvVar {
+            name: "TF_PLUGIN_CACHE_DIR".to_string(),
+            value: "/tmp/.terraform_plugin_cache".to_string(),
+        });
+
+        // Ensure cache dir exists before running init
+        let script = format!("mkdir -p /tmp/.terraform_plugin_cache && {}", script);
 
         let container_spec = CommonContainerSpec {
             image: "hashicorp/terraform:latest".to_string(),

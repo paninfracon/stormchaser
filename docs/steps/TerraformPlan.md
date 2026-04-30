@@ -4,6 +4,10 @@ The `TerraformPlan` step is a native intrinsic step that executes a `terraform p
 
 Because Stormchaser utilizes a shared Stormchaser File System (SFS) across steps within the same execution path, downloaded modules, state locks, and the `.tfplan` binary naturally persist.
 
+**Automatic Plan Generation:** During execution, this step automatically runs `terraform show -no-color tfplan > plan.txt`. This human-readable text file is generated in the workspace and can be exposed as a step artifact.
+
+**Plugin Caching:** This step automatically sets the `TF_PLUGIN_CACHE_DIR` environment variable to `/tmp/.terraform_plugin_cache`. Mounting a shared persistent volume to this path can significantly speed up the `terraform init` phase across multiple runs.
+
 ## DSL Specification
 
 The `spec` block for `TerraformPlan` supports the following fields:

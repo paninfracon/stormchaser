@@ -6,6 +6,8 @@ Like `TerraformPlan`, the execution runs on top of the shared file system contex
 
 **Outputs Capture:** A key feature of `TerraformApply` is that it natively extracts JSON output variables after a successful apply. The values produced by `terraform output -json` are parsed into a native `terraform` object available to subsequent workflow steps via the `steps.<step_name>.outputs.terraform` expression.
 
+**Plugin Caching:** Similar to `TerraformPlan`, this step automatically sets the `TF_PLUGIN_CACHE_DIR` environment variable to `/tmp/.terraform_plugin_cache`. Mounting a shared persistent volume to this path can significantly speed up the `terraform init` phase.
+
 ## DSL Specification
 
 The `spec` block for `TerraformApply` shares similar configuration with `TerraformPlan`:

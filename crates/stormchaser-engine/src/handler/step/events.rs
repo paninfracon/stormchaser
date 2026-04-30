@@ -285,6 +285,15 @@ pub async fn handle_step_completed(
                 group: Some(1),
                 sensitive: Some(false),
             });
+            step.outputs.push(stormchaser_model::dsl::OutputExtraction {
+                name: "plan_json".to_string(),
+                source: "stdout".to_string(),
+                marker: Some("--- TF PLAN JSON ---".to_string()),
+                format: Some("json".to_string()),
+                regex: Some(r"--- TF PLAN JSON ---\s*(.*)".to_string()),
+                group: Some(1),
+                sensitive: Some(false),
+            });
         }
     }
 

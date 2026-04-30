@@ -223,11 +223,48 @@ pub async fn approve_step(
                 }
             }
 
+            let mut run_outputs_map = serde_json::Map::new();
+            if let Ok(outputs_rows) = sqlx::query(
+                r#"
+                SELECT i.step_name, o.output_key, o.output_value
+                FROM combined_step_instances i
+                JOIN combined_step_outputs o ON i.id = o.step_instance_id
+                WHERE i.run_id = $1
+                "#,
+            )
+            .bind(run_id)
+            .fetch_all(&state.pool)
+            .await
+            {
+                use sqlx::Row;
+                for row in outputs_rows {
+                    let step_name: String = row.get("step_name");
+                    let output_key: String = row.get("output_key");
+                    let output_value: Value = row.get("output_value");
+
+                    if !run_outputs_map.contains_key(&step_name) {
+                        run_outputs_map
+                            .insert(step_name.clone(), serde_json::json!({"outputs": {}}));
+                    }
+                    if let Some(step_obj) = run_outputs_map
+                        .get_mut(&step_name)
+                        .and_then(|v| v.as_object_mut())
+                    {
+                        if let Some(outputs_obj) =
+                            step_obj.get_mut("outputs").and_then(|v| v.as_object_mut())
+                        {
+                            outputs_obj.insert(output_key, output_value);
+                        }
+                    }
+                }
+            }
+
             let opa_context = stormchaser_model::auth::ApprovalOpaContext {
                 run_id,
                 initiating_user,
                 step_ast,
                 inputs: run_inputs,
+                run_outputs: serde_json::Value::Object(run_outputs_map),
                 token,
             };
 
