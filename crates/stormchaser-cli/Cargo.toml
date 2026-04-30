@@ -33,7 +33,6 @@ hcl-rs.workspace = true
 
 [build-dependencies]
 vergen = { workspace = true }
-schemars = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3.27.0"
