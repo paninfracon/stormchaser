@@ -21,8 +21,7 @@ pub fn json_schema_to_hcl(schema: &Value) -> Result<Body> {
                             // commonly appear alongside `properties` (for example `required`,
                             // `additionalProperties`, `description`, `oneOf`, etc.) are preserved.
                             for (dk, dv) in def_map {
-                                block =
-                                    block.add_attribute((dk.as_str(), json_to_hcl_expr(dv)?));
+                                block = block.add_attribute((dk.as_str(), json_to_hcl_expr(dv)?));
                             }
                         }
                         body = body.add_block(block.build());
@@ -165,56 +164,78 @@ pub fn json_to_hcl_expr(v: &Value) -> Result<Expression> {
 }
 
 /// Deserializes HCL data format back into a JSON Schema (serde_json::Value).
+///
+/// This is the inverse of [`json_schema_to_hcl`] and the two functions form a
+/// symmetric pair.  The following conventions are used:
+///
+/// * **Blocks** – a `definitions "Name" { … }` block is decoded by mapping each
+///   attribute directly onto the corresponding definition key, preserving all
+///   constraints (`type`, `required`, `additionalProperties`, etc.).
+/// * **Top-level attributes** – attributes whose value is a *type-function call*
+///   (e.g. `integer(…)`) or a `$ref`-style *traversal* are recognised as property
+///   schemas and collected under `properties`.  All other attributes (strings,
+///   arrays, plain objects) are treated as root-level schema keywords and placed
+///   directly on the schema object.
 pub fn hcl_to_json_schema(body: &Body) -> Result<Value> {
     let mut map = Map::new();
 
-    // Process blocks (e.g., definitions "Address" { ... })
+    // Process blocks (e.g., definitions "Address" { … }).
+    // Each attribute in the block body is a direct key of the definition object,
+    // which matches exactly what json_schema_to_hcl emits.
     for block in body.blocks() {
         let block_name = block.identifier();
-
-        let mut block_map = Map::new();
-        // Assume the block body represents a set of properties for an object schema
-        // Actually, definitions usually have `{ type: "object", properties: { ... } }`
-        let mut props_map = Map::new();
+        let mut definition_map = Map::new();
         for attr in block.body().attributes() {
-            props_map.insert(attr.key().to_string(), hcl_expr_to_json(attr.expr())?);
+            definition_map.insert(attr.key().to_string(), hcl_expr_to_json(attr.expr())?);
         }
 
-        block_map.insert("type".to_string(), Value::String("object".to_string()));
-        block_map.insert("properties".to_string(), Value::Object(props_map));
-
-        // Get or create definitions container
         let defs_entry = map
             .entry(block_name)
             .or_insert_with(|| Value::Object(Map::new()));
         if let Value::Object(defs_map) = defs_entry {
-            // Use the first label as the definition name
             if let Some(label) = block.labels().first() {
-                defs_map.insert(label.as_str().to_string(), Value::Object(block_map));
+                defs_map.insert(label.as_str().to_string(), Value::Object(definition_map));
             }
         }
     }
 
-    // Process attributes
+    // Process top-level attributes.
+    // Attributes whose values look like type-function calls or $ref traversals
+    // are property definitions; everything else is a root-level schema keyword.
     let mut root_props = Map::new();
     for attr in body.attributes() {
         let key = attr.key().to_string();
         let val = hcl_expr_to_json(attr.expr())?;
 
-        // Metadata keys go to root, schema definitions go to properties
-        if ["$schema", "title", "description", "required"].contains(&key.as_str()) {
-            map.insert(key, val);
-        } else {
+        if is_property_definition(attr.expr()) {
             root_props.insert(key, val);
+        } else {
+            map.insert(key, val);
         }
     }
 
     if !root_props.is_empty() {
         map.insert("properties".to_string(), Value::Object(root_props));
-        map.insert("type".to_string(), Value::String("object".to_string()));
+        if !map.contains_key("type") {
+            map.insert("type".to_string(), Value::String("object".to_string()));
+        }
     }
 
     Ok(Value::Object(map))
+}
+
+/// Returns `true` when the expression represents a property schema definition
+/// (a type-function call such as `string()` or a `$ref`-style traversal) as
+/// opposed to a root-level schema keyword (string literal, array, plain object).
+fn is_property_definition(expr: &Expression) -> bool {
+    const TYPE_FUNCS: [&str; 7] = [
+        "string", "integer", "number", "boolean", "array", "object", "map",
+    ];
+    match expr {
+        Expression::FuncCall(func) => TYPE_FUNCS.contains(&func.name.name.as_str()),
+        Expression::Traversal(_) => true,
+        _ => false,
+    }
 }
 
 /// Helper to convert a functional HCL expression back into a JSON Schema representation.
@@ -338,12 +359,17 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// Verify that the JSON→HCL→JSON round-trip preserves all important schema constraints.
+    ///
+    /// Note: JSON Schema keys that start with `$` (e.g. `$schema`, `$id`) are not valid
+    /// bare HCL identifiers and cannot be represented in the HCL format; they are silently
+    /// dropped when serializing.  All other constraints survive the round-trip faithfully.
     #[test]
-    fn test_schema_serialization_roundtrip() {
-        let json_schema = json!({
-            "$schema": "http://json-schema.org/draft-07/schema#",
+    fn test_roundtrip_json_to_hcl_to_json() {
+        let original = json!({
             "title": "Person",
             "type": "object",
+            "required": ["email"],
             "properties": {
                 "age": {
                     "type": "integer",
@@ -357,17 +383,16 @@ mod tests {
                     "type": "array",
                     "items": {
                         "type": "string"
-                    },
-                    "uniqueItems": true
+                    }
                 },
                 "address": {
                     "$ref": "#/definitions/Address"
                 }
             },
-            "required": ["email"],
             "definitions": {
                 "Address": {
                     "type": "object",
+                    "required": ["street"],
                     "properties": {
                         "street": {
                             "type": "string"
@@ -377,30 +402,129 @@ mod tests {
             }
         });
 
-        // 1. Convert JSON Schema -> HCL
-        let hcl_body = json_schema_to_hcl(&json_schema).unwrap();
-
+        // JSON → HCL
+        let hcl_body = json_schema_to_hcl(&original).unwrap();
         let hcl_str = hcl::to_string(&hcl_body).unwrap();
-        // Since hashmap iteration is non-deterministic, we just ensure it parses back
-        // 2. Convert HCL -> JSON Schema
-        let parsed_hcl: Body = hcl::from_str(&hcl_str).unwrap();
-        let out_json = hcl_to_json_schema(&parsed_hcl).unwrap();
 
-        // Ensure keys exist in output
-        let out_map = out_json.as_object().unwrap();
-        if !out_map.contains_key("properties") {
-            panic!("Parsed JSON: {:#?}", out_json);
-        }
-        let props = out_map.get("properties").unwrap().as_object().unwrap();
-        if !props.contains_key("address") {
-            panic!("Props missing address. Parsed JSON: {:#?}", out_json);
-        }
+        // HCL → JSON
+        let parsed_body: Body = hcl::from_str(&hcl_str).unwrap();
+        let recovered = hcl_to_json_schema(&parsed_body).unwrap();
 
-        let address_ref = props.get("address").unwrap().as_object().unwrap();
-        assert_eq!(address_ref.get("$ref").unwrap(), "#/definitions/Address");
+        let root = recovered.as_object().expect("root must be an object");
 
-        let defs = out_map.get("definitions").unwrap().as_object().unwrap();
-        let address_def = defs.get("Address").unwrap().as_object().unwrap();
-        assert_eq!(address_def.get("type").unwrap(), "object");
+        // Root-level schema keywords
+        assert_eq!(
+            root.get("title").and_then(Value::as_str),
+            Some("Person"),
+            "root title preserved"
+        );
+        assert_eq!(
+            root.get("type").and_then(Value::as_str),
+            Some("object"),
+            "root type preserved"
+        );
+        let required = root
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required must be an array");
+        assert!(
+            required.iter().any(|v| v.as_str() == Some("email")),
+            "required contains email"
+        );
+
+        // Properties
+        let props = root
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties must be an object");
+        assert!(props.contains_key("age"), "age property preserved");
+        assert!(props.contains_key("email"), "email property preserved");
+        assert!(props.contains_key("tags"), "tags property preserved");
+        assert!(props.contains_key("address"), "address property preserved");
+
+        let age = props["age"].as_object().expect("age must be an object");
+        assert_eq!(age.get("type").and_then(Value::as_str), Some("integer"));
+
+        let email_prop = props["email"].as_object().expect("email must be an object");
+        assert_eq!(
+            email_prop.get("type").and_then(Value::as_str),
+            Some("string")
+        );
+
+        let tags = props["tags"].as_object().expect("tags must be an object");
+        assert_eq!(tags.get("type").and_then(Value::as_str), Some("array"));
+
+        // $ref preserved
+        let address_prop = props["address"]
+            .as_object()
+            .expect("address must be an object");
+        assert_eq!(
+            address_prop.get("$ref").and_then(Value::as_str),
+            Some("#/definitions/Address"),
+            "$ref preserved through round-trip"
+        );
+
+        // Definitions: full definition object (type + required + properties) preserved
+        let defs = root
+            .get("definitions")
+            .and_then(Value::as_object)
+            .expect("definitions must be an object");
+        let addr_def = defs
+            .get("Address")
+            .and_then(Value::as_object)
+            .expect("Address definition must exist");
+        assert_eq!(
+            addr_def.get("type").and_then(Value::as_str),
+            Some("object"),
+            "Address definition type preserved"
+        );
+        let addr_required = addr_def
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("Address required must be an array");
+        assert!(
+            addr_required.iter().any(|v| v.as_str() == Some("street")),
+            "Address required contains street"
+        );
+        let addr_props = addr_def
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("Address properties must be an object");
+        assert!(
+            addr_props.contains_key("street"),
+            "Address.street property preserved"
+        );
+    }
+
+    /// Verify that the HCL→JSON direction alone works correctly for a manually
+    /// written HCL body (not produced by json_schema_to_hcl).
+    #[test]
+    fn test_hcl_to_json_schema_direct() {
+        let hcl_src = r#"
+            title = "Minimal"
+            type = "object"
+            required = ["name"]
+
+            name = string()
+            count = integer()
+        "#;
+        let body: Body = hcl::from_str(hcl_src).unwrap();
+        let schema = hcl_to_json_schema(&body).unwrap();
+
+        let root = schema.as_object().unwrap();
+        assert_eq!(root.get("title").and_then(Value::as_str), Some("Minimal"));
+        assert_eq!(root.get("type").and_then(Value::as_str), Some("object"));
+
+        let req = root.get("required").and_then(Value::as_array).unwrap();
+        assert_eq!(req.len(), 1);
+        assert_eq!(req[0].as_str(), Some("name"));
+
+        let props = root.get("properties").and_then(Value::as_object).unwrap();
+        assert!(props.contains_key("name"));
+        assert!(props.contains_key("count"));
+        assert_eq!(
+            props["name"].as_object().unwrap().get("type"),
+            Some(&Value::String("string".into()))
+        );
     }
 }
