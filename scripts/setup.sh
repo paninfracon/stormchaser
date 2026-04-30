@@ -156,7 +156,8 @@ if [ "$CLEANUP" = true ] || [ ! -f "$ENV_FILE" ]; then
         key="${key_val%%=*}"
         val="${key_val#*=}"
         if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
-            sed -i "s|^${key}=.*|${key}=${val}|" "$ENV_FILE"
+            tmp=$(mktemp)
+            sed "s|^${key}=.*|${key}=${val}|" "$ENV_FILE" > "$tmp" && mv "$tmp" "$ENV_FILE"
         else
             echo "${key}=${val}" >> "$ENV_FILE"
         fi
