@@ -41,9 +41,9 @@ workflow "ModernDeliveryPipeline" {
 
   steps {
     step "checkout" "GitCheckout" {
-      params {
-        url    = "git@github.com:acme/web-app.git"
-        branch = "main"
+      spec {
+        repo = "git@github.com:acme/web-app.git"
+        ref  = "main"
       }
       next = ["build"]
     }

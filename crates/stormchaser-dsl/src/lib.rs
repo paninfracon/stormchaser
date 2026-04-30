@@ -117,35 +117,42 @@ impl StormchaserParser {
                                 retention,
                             });
                         } else if inner.identifier() == "provision" {
-                            let prov_name = inner
-                                .labels()
-                                .first()
-                                .map(|l| l.as_str().to_string())
-                                .context("Provision block must have a name label")?;
-                            let mut resource_type = "download".to_string();
-                            let mut source = None;
-                            let mut url = None;
-                            let mut destination = "/".to_string();
+                            for prov_block in inner.body().blocks() {
+                                let resource_type = prov_block.identifier().to_string();
+                                let prov_name = prov_block
+                                    .labels()
+                                    .first()
+                                    .map(|l| l.as_str().to_string())
+                                    .context("Provision sub-block must have a name label")?;
+                                let mut source = None;
+                                let mut url = None;
+                                let mut destination = "/".to_string();
+                                let mut mode = None;
+                                let mut checksum = None;
+                                let mut from = None;
 
-                            for attr in inner.body().attributes() {
-                                match attr.key() {
-                                    "resource_type" => resource_type = expr_to_string(attr.expr())?,
-                                    "source" => source = Some(expr_to_string(attr.expr())?),
-                                    "url" => url = Some(expr_to_string(attr.expr())?),
-                                    "destination" => destination = expr_to_string(attr.expr())?,
-                                    _ => {}
+                                for attr in prov_block.body().attributes() {
+                                    match attr.key() {
+                                        "source" => source = Some(expr_to_string(attr.expr())?),
+                                        "url" => url = Some(expr_to_string(attr.expr())?),
+                                        "destination" => destination = expr_to_string(attr.expr())?,
+                                        "mode" => mode = Some(expr_to_string(attr.expr())?),
+                                        "checksum" => checksum = Some(expr_to_string(attr.expr())?),
+                                        "from" => from = Some(expr_to_string(attr.expr())?),
+                                        _ => {}
+                                    }
                                 }
+                                provision.push(dsl::Provision {
+                                    name: prov_name,
+                                    resource_type,
+                                    source,
+                                    url,
+                                    destination,
+                                    mode,
+                                    checksum,
+                                    from,
+                                });
                             }
-                            provision.push(dsl::Provision {
-                                name: prov_name,
-                                resource_type,
-                                source,
-                                url,
-                                destination,
-                                mode: None,
-                                checksum: None,
-                                from: None,
-                            });
                         }
                     }
 
