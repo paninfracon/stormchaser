@@ -4,6 +4,12 @@ use schemars::Map;
 use serde_json::Value;
 use std::collections::HashMap;
 
+/// Injects dynamic conditional `spec` mapping into the base `Step` schema.
+///
+/// This applies an `allOf` JSON Schema constraint that forces the `spec` field of a step
+/// to structurally match the required subschema mapping (e.g. `K8sJobSpec`) depending on
+/// the literal string value of the `type` field (e.g. `"RunK8sJob"`). It also sets
+/// `additionalProperties` to `true` on steps to allow for external plugins.
 pub fn apply_step_extensibility(
     root_schema: &mut RootSchema,
     spec_schemas: &HashMap<String, Schema>,
@@ -67,6 +73,11 @@ pub fn apply_step_extensibility(
     }
 }
 
+/// Dynamically generates the complete JSON Schema Draft-07 for the Stormchaser DSL.
+///
+/// This compiles the `Workflow` AST struct into an OpenAPI/JSON Schema compatible
+/// tree, embeds all standard `spec` mappings for known intrinsic step types, and
+/// strips out incompatible OpenAPI meta-schemas to ensure local JSonschema validation runs cleanly.
 pub fn generate_dsl_schema() -> RootSchema {
     let mut generator = schemars::gen::SchemaSettings::draft07()
         .with(|s| s.option_nullable = true)

@@ -3,6 +3,7 @@ use clap::Subcommand;
 use stormchaser_dsl::hcl_schema::json_schema_to_hcl;
 use stormchaser_model::schema_gen::generate_dsl_schema;
 
+/// CLI subcommands for managing schemas.
 #[derive(Subcommand)]
 pub enum SchemaCommands {
     /// Generate schema for the DSL
@@ -13,6 +14,7 @@ pub enum SchemaCommands {
     },
 }
 
+/// Handles the `schema` command logic.
 pub fn handle(command: SchemaCommands) -> Result<()> {
     match command {
         SchemaCommands::Generate { format } => {

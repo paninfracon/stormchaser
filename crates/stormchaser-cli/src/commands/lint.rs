@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use stormchaser_dsl::StormchaserParser;
 use stormchaser_model::schema_gen::{apply_step_extensibility, generate_dsl_schema};
 
+/// CLI command to lint a workflow file against the JSON schema.
 #[derive(clap::Parser)]
 pub struct LintCommand {
     /// Path to the .storm workflow file to lint
@@ -28,6 +29,7 @@ pub struct LintCommand {
     pub prepare: bool,
 }
 
+/// Parses the `TYPE=PATH` argument into a tuple for `step_schema`.
 fn parse_step_schema(s: &str) -> Result<(String, String)> {
     let parts: Vec<&str> = s.splitn(2, '=').collect();
     if parts.len() != 2 {
@@ -36,6 +38,7 @@ fn parse_step_schema(s: &str) -> Result<(String, String)> {
     Ok((parts[0].to_string(), parts[1].to_string()))
 }
 
+/// Handles the `lint` command logic.
 pub async fn handle(
     url: &str,
     http_client: &reqwest_middleware::ClientWithMiddleware,
@@ -129,6 +132,7 @@ pub async fn handle(
     Ok(())
 }
 
+/// Loads a JSON schema from a local file or directly from a local git repository without checkout.
 fn load_schema(path: &str) -> Result<Value> {
     if path.starts_with("git-local://") {
         let url = url::Url::parse(path)?;

@@ -223,6 +223,7 @@ pub fn hcl_to_json_schema(body: &Body) -> Result<Value> {
     Ok(Value::Object(map))
 }
 
+/// Helper to convert a functional HCL expression back into a JSON Schema representation.
 pub fn hcl_expr_to_json(expr: &Expression) -> Result<Value> {
     match expr {
         Expression::Null => Ok(Value::Null),
