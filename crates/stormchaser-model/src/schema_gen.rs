@@ -36,6 +36,7 @@ pub fn apply_step_extensibility(
             properties.insert("type".to_string(), Schema::Object(type_schema));
             if_schema.object = Some(Box::new(ObjectValidation {
                 properties,
+                required: std::collections::BTreeSet::from(["type".to_string()]),
                 ..Default::default()
             }));
 
@@ -44,6 +45,7 @@ pub fn apply_step_extensibility(
             then_props.insert("spec".to_string(), spec_schema.clone());
             then_schema.object = Some(Box::new(ObjectValidation {
                 properties: then_props,
+                required: std::collections::BTreeSet::from(["spec".to_string()]),
                 ..Default::default()
             }));
 
