@@ -5,6 +5,7 @@
 
 /// Abstract Syntax Tree components for the DSL.
 pub mod ast;
+pub mod hcl_schema;
 
 use anyhow::{Context, Result};
 use ast::{Step, Workflow};

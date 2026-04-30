@@ -862,7 +862,7 @@ curl http://localhost:8080/api/v1/schema > schema.json
 
 ### Linting Workflows
 
-The `stormchaser lint` command checks `.storm` files against the generated JSON schema. 
+The `stormchaser lint` command checks `.storm` files against the generated JSON schema.
 
 ```bash
 stormchaser lint my-workflow.storm
