@@ -22,11 +22,18 @@ workflows.
 workflow "example_workflow" {
   description = "A simple deployment workflow"
 
-  # First step: A simple script execution
+  storage "workspace" {
+    size = "1Gi"
+  }
+
+  # First step: Builds the app and stores artifacts in SFS
   step "build_app" "RunContainer" {
     spec {
       image   = "node:18"
       command = ["npm", "run", "build"]
+      storage_mounts = [
+        { name = "workspace", mount_path = "/app/dist" }
+      ]
     }
     next = ["require_approval"]
   }
@@ -40,11 +47,14 @@ workflow "example_workflow" {
     next = ["deploy_app"]
   }
 
-  # Third step: Proceeds with deployment after approval
+  # Third step: Mounts the SFS and deploys the built artifacts
   step "deploy_app" "RunContainer" {
     spec {
       image   = "node:18"
       command = ["npm", "run", "deploy"]
+      storage_mounts = [
+        { name = "workspace", mount_path = "/app/dist" }
+      ]
     }
   }
 }
