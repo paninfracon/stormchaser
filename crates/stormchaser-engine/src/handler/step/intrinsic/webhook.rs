@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::handler::fetch_step_instance;
 use crate::handler::handle_webhook_invoke;
 
+/// Attempts to dispatch an HTTP Webhook step instance.
 pub async fn try_dispatch(
     run_id: Uuid,
     step_instance_id: Uuid,

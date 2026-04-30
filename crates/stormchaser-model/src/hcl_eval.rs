@@ -1,3 +1,5 @@
+//! Hcl expression evaluation models and conversion utilities.
+
 use anyhow::Result;
 use hcl::eval::{Context as HclContext, Evaluate};
 use hcl::Value as HclValue;
@@ -27,6 +29,7 @@ pub fn resolve_expressions(value: &mut Value, ctx: &HclContext) -> Result<()> {
     Ok(())
 }
 
+/// Converts a JSON value to an equivalent HCL value.
 pub fn json_to_hcl(v: Value) -> HclValue {
     match v {
         Value::Null => HclValue::Null,
@@ -57,6 +60,7 @@ pub fn json_to_hcl(v: Value) -> HclValue {
     }
 }
 
+/// Converts an HCL value back to an equivalent JSON value.
 pub fn hcl_to_json(hv: HclValue) -> Value {
     match hv {
         HclValue::Null => Value::Null,
@@ -91,6 +95,7 @@ pub fn hcl_to_json(hv: HclValue) -> Value {
     }
 }
 
+/// Evaluates a string containing HCL interpolation templates (`${...}`).
 pub fn evaluate_string(s: &str, ctx: &HclContext) -> Result<Option<Value>> {
     if !s.contains("${") && !s.contains("%{") {
         return Ok(None);
@@ -120,6 +125,7 @@ pub fn evaluate_string(s: &str, ctx: &HclContext) -> Result<Option<Value>> {
     Ok(Some(Value::String(result)))
 }
 
+/// Evaluates a raw HCL expression without the template wrapper.
 pub fn evaluate_raw_expr(expr_str: &str, ctx: &HclContext) -> Result<Value> {
     let expr: hcl::Expression = expr_str
         .parse()

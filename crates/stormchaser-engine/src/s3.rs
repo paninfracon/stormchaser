@@ -5,6 +5,7 @@ use aws_sdk_s3::Client;
 use std::time::Duration;
 use stormchaser_model::storage::StorageBackend;
 
+/// Get s3 client.
 pub async fn get_s3_client(backend: &StorageBackend) -> Result<Client> {
     let config = &backend.config;
     let endpoint = config["endpoint"].as_str();
@@ -51,6 +52,7 @@ pub async fn get_s3_client(backend: &StorageBackend) -> Result<Client> {
     Ok(Client::from_conf(s3_config_builder.build()))
 }
 
+/// Generates a presigned URL for downloading or uploading an object to/from an S3 bucket.
 pub async fn generate_presigned_url(
     client: &Client,
     bucket: &str,

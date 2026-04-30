@@ -99,49 +99,58 @@ mockall::mock! {
     }
 }
 
+/// A trait abstraction over Docker container runtime interactions.
 #[async_trait]
 pub trait ContainerRuntime: Send + Sync + Clone + 'static {
+    /// Creates a new container.
     async fn create_container(
         &self,
         options: Option<CreateContainerOptions<String>>,
         config: Config<String>,
     ) -> Result<ContainerCreateResponse, bollard::errors::Error>;
 
+    /// Starts an existing container.
     async fn start_container(
         &self,
         container_name: &str,
         options: Option<StartContainerOptions<String>>,
     ) -> Result<(), bollard::errors::Error>;
 
+    /// Stops a running container.
     async fn stop_container(
         &self,
         container_name: &str,
         options: Option<StopContainerOptions>,
     ) -> Result<(), bollard::errors::Error>;
 
+    /// Removes a container.
     async fn remove_container(
         &self,
         container_name: &str,
         options: Option<RemoveContainerOptions>,
     ) -> Result<(), bollard::errors::Error>;
 
+    /// Waits for a container to finish executing.
     fn wait_container(
         &self,
         container_name: &str,
         options: Option<WaitContainerOptions<String>>,
     ) -> BoxStream<'static, Result<ContainerWaitResponse, bollard::errors::Error>>;
 
+    /// Creates a volume.
     async fn create_volume(
         &self,
         config: CreateVolumeOptions<String>,
     ) -> Result<Volume, bollard::errors::Error>;
 
+    /// Removes a volume.
     async fn remove_volume(
         &self,
         name: &str,
         options: Option<RemoveVolumeOptions>,
     ) -> Result<(), bollard::errors::Error>;
 
+    /// Creates an image.
     fn create_image(
         &self,
         options: Option<CreateImageOptions<'static, String>>,
@@ -149,23 +158,27 @@ pub trait ContainerRuntime: Send + Sync + Clone + 'static {
         credentials: Option<bollard::auth::DockerCredentials>,
     ) -> BoxStream<'static, Result<CreateImageInfo, bollard::errors::Error>>;
 
+    /// Retrieves logs for a container.
     fn logs(
         &self,
         container_name: &str,
         options: Option<LogsOptions<String>>,
     ) -> BoxStream<'static, Result<LogOutput, bollard::errors::Error>>;
 
+    /// Inspects a container's details.
     async fn inspect_container(
         &self,
         container_name: &str,
         options: Option<InspectContainerOptions>,
     ) -> Result<ContainerInspectResponse, bollard::errors::Error>;
 
+    /// Lists containers.
     async fn list_containers(
         &self,
         options: Option<ListContainersOptions<String>>,
     ) -> Result<Vec<ContainerSummary>, bollard::errors::Error>;
 
+    /// Lists volumes.
     async fn list_volumes(
         &self,
         options: Option<ListVolumesOptions<String>>,
@@ -292,13 +305,16 @@ mockall::mock! {
     }
 }
 
+/// A trait abstraction over message bus (e.g. NATS) interactions.
 #[async_trait]
 pub trait MessageBus: Send + Sync + Clone + 'static {
+    /// Publishes a message to a given subject.
     async fn publish(
         &self,
         subject: String,
         payload: Bytes,
     ) -> Result<(), async_nats::PublishError>;
+    /// Sends a request message to a given subject and waits for a response.
     async fn request(
         &self,
         subject: String,

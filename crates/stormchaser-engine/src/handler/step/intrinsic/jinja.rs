@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::handler::fetch_step_instance;
 use crate::handler::handle_jinja_render;
 
+/// Attempts to dispatch a Jinja template evaluation step instance.
 pub async fn try_dispatch(
     run_id: Uuid,
     step_instance_id: Uuid,

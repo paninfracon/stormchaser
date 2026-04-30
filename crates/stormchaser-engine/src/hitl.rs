@@ -8,6 +8,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+/// Generates an HMAC-based token for Human-In-The-Loop (HITL) step approval or rejection.
 pub fn generate_approval_token(
     run_id: Uuid,
     step_id: Uuid,

@@ -5,6 +5,7 @@ use sqlx::PgPool;
 use stormchaser_model::runner::RunnerStatus;
 use tracing::{debug, error, info};
 
+/// Handle runner registration.
 pub async fn handle_runner_registration(payload: Value, pool: PgPool) -> Result<()> {
     let runner_id = payload["runner_id"].as_str().context("Missing runner_id")?;
     let runner_type = payload["runner_type"]
@@ -60,6 +61,7 @@ pub async fn handle_runner_registration(payload: Value, pool: PgPool) -> Result<
     Ok(())
 }
 
+/// Handle wasm registration.
 pub async fn handle_wasm_registration(payload: Value, pool: PgPool) -> Result<()> {
     let step_type = payload["step_type"].as_str().context("Missing step_type")?;
     let module = payload["wasm_module"]
@@ -87,6 +89,7 @@ pub async fn handle_wasm_registration(payload: Value, pool: PgPool) -> Result<()
     Ok(())
 }
 
+/// Handle runner heartbeat.
 pub async fn handle_runner_heartbeat(payload: Value, pool: PgPool) -> Result<()> {
     let runner_id = payload["runner_id"].as_str().context("Missing runner_id")?;
 
@@ -104,6 +107,7 @@ pub async fn handle_runner_heartbeat(payload: Value, pool: PgPool) -> Result<()>
     Ok(())
 }
 
+/// Handle runner offline.
 pub async fn handle_runner_offline(payload: Value, pool: PgPool) -> Result<()> {
     let runner_id = payload["runner_id"].as_str().context("Missing runner_id")?;
 

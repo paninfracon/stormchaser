@@ -20,6 +20,7 @@ use aws_sdk_lambda::primitives::Blob;
 use aws_sdk_lambda::types::InvocationType;
 
 #[cfg(feature = "aws-lambda")]
+/// Handle lambda invoke.
 pub async fn handle_lambda_invoke(
     run_id: Uuid,
     step_id: Uuid,
@@ -201,6 +202,7 @@ async fn handle_lambda_response(
 }
 
 #[cfg(not(feature = "aws-lambda"))]
+/// Handle lambda invoke.
 pub async fn handle_lambda_invoke(
     _run_id: Uuid,
     _step_id: Uuid,

@@ -11,10 +11,12 @@ use tokio::sync::mpsc;
 use tokio::time::sleep;
 use uuid::Uuid;
 
+/// Format log event.
 pub fn format_log_event(line: &str) -> Event {
     Event::default().event("log").data(line)
 }
 
+/// Stream step logs api.
 pub async fn stream_step_logs_api(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -60,6 +62,7 @@ pub async fn stream_step_logs_api(
     Ok(axum::response::sse::Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default()))
 }
 
+/// Streams run logs.
 pub async fn stream_run_logs_api(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -185,6 +188,7 @@ pub async fn stream_run_logs_api(
     Ok(axum::response::sse::Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default()))
 }
 
+/// Stream run status api.
 pub async fn stream_run_status_api(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,

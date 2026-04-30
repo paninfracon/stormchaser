@@ -13,8 +13,9 @@ use stormchaser_model::event;
 use stormchaser_model::step;
 use stormchaser_model::storage;
 use stormchaser_model::TestCase;
-
+/// Inserts a new workflow run into the database.
 #[allow(clippy::too_many_arguments)]
+/// Insert workflow run.
 pub async fn insert_workflow_run(
     tx: &mut Transaction<'_, Postgres>,
     run_id: Uuid,
@@ -44,7 +45,8 @@ pub async fn insert_workflow_run(
     .await?;
     Ok(())
 }
-
+/// Inserts the context details of a workflow run.
+/// Insert run context.
 pub async fn insert_run_context(
     tx: &mut Transaction<'_, Postgres>,
     run_id: Uuid,
@@ -68,7 +70,8 @@ pub async fn insert_run_context(
     .await?;
     Ok(())
 }
-
+/// Inserts the resource quotas for a workflow run.
+/// Insert run quotas.
 pub async fn insert_run_quotas(
     tx: &mut Transaction<'_, Postgres>,
     run_id: Uuid,
@@ -95,6 +98,7 @@ pub async fn insert_run_quotas(
     Ok(())
 }
 
+/// Retrieves a list of workflow runs, optionally filtered by the query parameters.
 pub async fn list_workflow_runs(
     pool: &PgPool,
     params: &ListRunsQuery,
@@ -164,7 +168,8 @@ pub async fn list_workflow_runs(
 
     query.build_query_as().fetch_all(pool).await
 }
-
+/// Retrieves full details for a workflow run.
+/// Get workflow run detail.
 pub async fn get_workflow_run_detail(
     pool: &PgPool,
     run_id: Uuid,
@@ -174,7 +179,8 @@ pub async fn get_workflow_run_detail(
         .fetch_optional(pool)
         .await
 }
-
+/// Retrieves step instances for a specific run.
+/// Get step instances.
 pub async fn get_step_instances(
     pool: &PgPool,
     run_id: Uuid,
@@ -186,7 +192,8 @@ pub async fn get_step_instances(
     .fetch_all(pool)
     .await
 }
-
+/// Retrieves the outputs for a specific step instance.
+/// Get step outputs.
 pub async fn get_step_outputs(
     pool: &PgPool,
     step_instance_id: Uuid,
@@ -196,7 +203,8 @@ pub async fn get_step_outputs(
         .fetch_all(pool)
         .await
 }
-
+/// Retrieves the status history for a specific step instance.
+/// Get step status history.
 pub async fn get_step_status_history(
     pool: &PgPool,
     step_instance_id: Uuid,
@@ -207,6 +215,7 @@ pub async fn get_step_status_history(
         .await
 }
 
+/// Creates a new webhook configuration.
 pub async fn create_webhook(
     pool: &PgPool,
     id: Uuid,
@@ -228,19 +237,22 @@ pub async fn create_webhook(
     Ok(())
 }
 
+/// Retrieves all configured webhooks
 pub async fn list_webhooks(pool: &PgPool) -> Result<Vec<WebhookConfig>, sqlx::Error> {
     sqlx::query_as("SELECT * FROM webhooks ORDER BY created_at DESC")
         .fetch_all(pool)
         .await
 }
-
+/// Retrieves a specific webhook by ID.
+/// Get webhook.
 pub async fn get_webhook(pool: &PgPool, id: Uuid) -> Result<Option<WebhookConfig>, sqlx::Error> {
     sqlx::query_as("SELECT * FROM webhooks WHERE id = $1")
         .bind(id)
         .fetch_optional(pool)
         .await
 }
-
+/// Retrieves an active webhook by ID.
+/// Get active webhook.
 pub async fn get_active_webhook(
     pool: &PgPool,
     id: Uuid,
@@ -250,7 +262,8 @@ pub async fn get_active_webhook(
         .fetch_optional(pool)
         .await
 }
-
+/// Deletes a webhook from the database.
+/// Delete webhook.
 pub async fn delete_webhook(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM webhooks WHERE id = $1")
         .bind(id)
@@ -258,8 +271,9 @@ pub async fn delete_webhook(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> 
         .await?;
     Ok(())
 }
-
+/// Creates a new event rule.
 #[allow(clippy::too_many_arguments)]
+/// Create event rule.
 pub async fn create_event_rule(
     pool: &PgPool,
     id: Uuid,
@@ -297,13 +311,15 @@ pub async fn create_event_rule(
     .await?;
     Ok(())
 }
-
+/// Retrieves all event rules.
+/// List event rules.
 pub async fn list_event_rules(pool: &PgPool) -> Result<Vec<EventRule>, sqlx::Error> {
     sqlx::query_as("SELECT * FROM event_rules ORDER BY created_at DESC")
         .fetch_all(pool)
         .await
 }
-
+/// Retrieves active event rules associated with a specific webhook.
+/// Get active event rules by webhook.
 pub async fn get_active_event_rules_by_webhook(
     pool: &PgPool,
     webhook_id: Uuid,
@@ -313,7 +329,8 @@ pub async fn get_active_event_rules_by_webhook(
         .fetch_all(pool)
         .await
 }
-
+/// Deletes an event rule from the database.
+/// Delete event rule.
 pub async fn delete_event_rule(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM event_rules WHERE id = $1")
         .bind(id)
@@ -322,6 +339,7 @@ pub async fn delete_event_rule(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Erro
     Ok(())
 }
 
+/// Creates a new cron workflow configuration.
 #[allow(clippy::too_many_arguments)]
 pub async fn create_cron_workflow(
     pool: &PgPool,
@@ -358,13 +376,15 @@ pub async fn create_cron_workflow(
     .await?;
     Ok(())
 }
-
+/// Retrieves all cron workflows.
+/// List cron workflows.
 pub async fn list_cron_workflows(pool: &PgPool) -> Result<Vec<cron::CronWorkflow>, sqlx::Error> {
     sqlx::query_as("SELECT * FROM cron_workflows ORDER BY created_at DESC")
         .fetch_all(pool)
         .await
 }
-
+/// Retrieves a cron workflow by ID.
+/// Get cron workflow.
 pub async fn get_cron_workflow(
     pool: &PgPool,
     id: Uuid,
@@ -374,7 +394,8 @@ pub async fn get_cron_workflow(
         .fetch_optional(pool)
         .await
 }
-
+/// Retrieves an active cron workflow by ID.
+/// Get active cron workflow.
 pub async fn get_active_cron_workflow(
     pool: &PgPool,
     id: Uuid,
@@ -385,6 +406,7 @@ pub async fn get_active_cron_workflow(
         .await
 }
 
+/// Deletes a scheduled workflow configuration
 pub async fn delete_cron_workflow(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM cron_workflows WHERE id = $1")
         .bind(id)
@@ -392,14 +414,16 @@ pub async fn delete_cron_workflow(pool: &PgPool, id: Uuid) -> Result<(), sqlx::E
         .await?;
     Ok(())
 }
-
+/// Unsets the default Stormchaser File System.
+/// Unset default sfs.
 pub async fn unset_default_sfs(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx::Error> {
     sqlx::query("UPDATE storage_backends SET is_default_sfs = FALSE WHERE is_default_sfs = TRUE")
         .execute(&mut **tx)
         .await?;
     Ok(())
 }
-
+/// Creates a new storage backend.
+/// Create storage backend.
 pub async fn create_storage_backend(
     tx: &mut Transaction<'_, Postgres>,
     id: Uuid,
@@ -425,7 +449,8 @@ pub async fn create_storage_backend(
     .await?;
     Ok(())
 }
-
+/// Retrieves all storage backends.
+/// List storage backends.
 pub async fn list_storage_backends(
     pool: &PgPool,
 ) -> Result<Vec<storage::StorageBackend>, sqlx::Error> {
@@ -433,7 +458,8 @@ pub async fn list_storage_backends(
         .fetch_all(pool)
         .await
 }
-
+/// Retrieves a storage backend by ID.
+/// Get storage backend.
 pub async fn get_storage_backend(
     pool: &PgPool,
     id: Uuid,
@@ -443,7 +469,8 @@ pub async fn get_storage_backend(
         .fetch_optional(pool)
         .await
 }
-
+/// Updates an existing storage backend.
+/// Update storage backend.
 pub async fn update_storage_backend(
     tx: &mut Transaction<'_, Postgres>,
     id: Uuid,
@@ -475,7 +502,8 @@ pub async fn update_storage_backend(
     query.build().execute(&mut **tx).await?;
     Ok(())
 }
-
+/// Deletes a storage backend from the database.
+/// Delete storage backend.
 pub async fn delete_storage_backend(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM storage_backends WHERE id = $1")
         .bind(id)
@@ -484,6 +512,7 @@ pub async fn delete_storage_backend(pool: &PgPool, id: Uuid) -> Result<(), sqlx:
     Ok(())
 }
 
+/// Retrieves a list of artifacts associated with a given workflow run.
 pub async fn list_run_artifacts(
     pool: &PgPool,
     run_id: Uuid,
@@ -502,7 +531,8 @@ pub async fn list_run_artifacts(
     .fetch_all(pool)
     .await
 }
-
+/// Retrieves test reports for a specific workflow run.
+/// List run test reports.
 pub async fn list_run_test_reports(
     pool: &PgPool,
     run_id: Uuid,
@@ -521,7 +551,8 @@ pub async fn list_run_test_reports(
     .fetch_all(pool)
     .await
 }
-
+/// Retrieves test summaries for a specific workflow run.
+/// List run test summaries.
 pub async fn list_run_test_summaries(
     pool: &PgPool,
     run_id: Uuid,
@@ -540,7 +571,8 @@ pub async fn list_run_test_summaries(
     .fetch_all(pool)
     .await
 }
-
+/// Retrieves individual test cases for a workflow run.
+/// List run test cases.
 pub async fn list_run_test_cases(
     pool: &PgPool,
     run_id: Uuid,
@@ -559,7 +591,8 @@ pub async fn list_run_test_cases(
     .fetch_all(pool)
     .await
 }
-
+/// Retrieves a test report by ID.
+/// Get test report.
 pub async fn get_test_report(
     pool: &PgPool,
     report_id: Uuid,
@@ -578,7 +611,8 @@ pub async fn get_test_report(
     .fetch_optional(pool)
     .await
 }
-
+/// Retrieves a step ID by its name and run ID.
+/// Get step id by name.
 pub async fn get_step_id_by_name(
     pool: &PgPool,
     run_id: Uuid,
@@ -590,7 +624,8 @@ pub async fn get_step_id_by_name(
         .fetch_optional(pool)
         .await
 }
-
+/// Retrieves the status of a workflow run.
+/// Get workflow run status.
 pub async fn get_workflow_run_status(
     pool: &PgPool,
     run_id: Uuid,
@@ -600,7 +635,8 @@ pub async fn get_workflow_run_status(
         .fetch_optional(pool)
         .await
 }
-
+/// Retrieves step names and their IDs for a workflow run.
+/// Get step names.
 pub async fn get_step_names(
     pool: &PgPool,
     run_id: Uuid,
@@ -610,7 +646,8 @@ pub async fn get_step_names(
         .fetch_all(pool)
         .await
 }
-
+/// Retrieves the combined status for a workflow run.
+/// Get combined run status.
 pub async fn get_combined_run_status(
     pool: &PgPool,
     run_id: Uuid,
@@ -620,7 +657,8 @@ pub async fn get_combined_run_status(
         .fetch_optional(pool)
         .await
 }
-
+/// Retrieves combined step statuses for a workflow run.
+/// Get combined step statuses.
 pub async fn get_combined_step_statuses(
     pool: &PgPool,
     run_id: Uuid,
@@ -632,6 +670,8 @@ pub async fn get_combined_step_statuses(
     .fetch_all(pool)
     .await
 }
+/// Retrieves a step instance for human approval.
+/// Get step instance for approval.
 pub async fn get_step_instance_for_approval(
     pool: &PgPool,
     step_id: Uuid,
@@ -645,7 +685,8 @@ pub async fn get_step_instance_for_approval(
     .fetch_optional(pool)
     .await
 }
-
+/// Inserts a record into the approval registry.
+/// Insert approval registry.
 pub async fn insert_approval_registry(
     pool: &PgPool,
     id: Uuid,
@@ -666,7 +707,8 @@ pub async fn insert_approval_registry(
     .await?;
     Ok(())
 }
-
+/// Retrieves an event correlation by key and value.
+/// Get event correlation.
 pub async fn get_event_correlation(
     pool: &PgPool,
     key: &str,
@@ -681,6 +723,7 @@ pub async fn get_event_correlation(
     .await
 }
 
+/// Deletes a workflow run completely from the system (active and archived).
 pub async fn delete_workflow_run(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
     // Delete from active table
     sqlx::query("DELETE FROM workflow_runs WHERE id = $1")
@@ -697,6 +740,7 @@ pub async fn delete_workflow_run(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Er
     Ok(())
 }
 
+/// Deletes an event correlation record
 pub async fn delete_event_correlation(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM event_correlations WHERE id = $1")
         .bind(id)

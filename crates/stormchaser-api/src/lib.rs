@@ -1,8 +1,16 @@
+//! Stormchaser API implementation.
+//! This crate contains the REST API for the Stormchaser system.
+
 use std::collections::HashMap;
+/// Authentication and authorization module
 pub mod auth;
+/// Database access module
 pub mod db;
+/// Human-in-the-loop module
 pub mod hitl;
+/// API routes module
 pub mod routes;
+/// Telemetry and metrics module
 pub mod telemetry;
 
 use auth::opa::opa_middleware;
@@ -19,6 +27,7 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use stormchaser_model::auth::OpaAuthorizer;
 use stormchaser_model::LogBackend;
+/// Rate limiting middleware and configuration
 pub mod rate_limit;
 
 use tower_http::trace::TraceLayer;
@@ -59,8 +68,10 @@ pub use routes::*;
         ("bearer_auth" = [])
     )
 )]
+/// OpenAPI documentation struct for the API
 pub struct ApiDoc;
 
+/// Counter metric for tracking the total number of enqueued workflow runs
 pub static RUNS_ENQUEUED: Lazy<Counter<u64>> = Lazy::new(|| {
     global::meter("stormchaser-api")
         .u64_counter("stormchaser.runs_enqueued")
@@ -70,25 +81,39 @@ pub static RUNS_ENQUEUED: Lazy<Counter<u64>> = Lazy::new(|| {
 
 use tokio::sync::RwLock;
 
+/// Configuration for OIDC authentication
 #[derive(Clone)]
 pub struct OidcConfig {
+    /// OIDC issuer URL
     pub issuer: String,
+    /// External issuer URL
     pub external_issuer: String,
+    /// OIDC client ID
     pub client_id: String,
+    /// OIDC client secret
     pub client_secret: String,
+    /// URL to fetch JWKS
     pub jwks_url: String,
 }
 
+/// Application state shared across routes
 #[derive(Clone)]
 pub struct AppState {
+    /// Database connection pool
     pub pool: PgPool,
+    /// NATS client connection
     pub nats: async_nats::Client,
+    /// OPA authorizer
     pub opa: Arc<dyn OpaAuthorizer>,
+    /// Optional OIDC configuration
     pub oidc_config: Option<OidcConfig>,
+    /// JWKS cache for token validation
     pub jwks: Arc<RwLock<HashMap<String, jsonwebtoken::jwk::Jwk>>>,
+    /// Optional backend for logging
     pub log_backend: Option<LogBackend>,
 }
 
+/// Fetches JSON Web Key Set (JWKS) from a specified URL
 pub async fn fetch_jwks(jwks_url: &str) -> HashMap<String, jsonwebtoken::jwk::Jwk> {
     let mut jwks = HashMap::new();
     let retry_policy =
@@ -119,6 +144,7 @@ pub async fn fetch_jwks(jwks_url: &str) -> HashMap<String, jsonwebtoken::jwk::Jw
     jwks
 }
 
+/// Constructs the Axum application router with all routes and middleware
 pub fn app(state: AppState) -> Router {
     let per_second = std::env::var("API_RATE_LIMIT_PER_SECOND")
         .ok()

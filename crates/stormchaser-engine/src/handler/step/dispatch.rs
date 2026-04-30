@@ -14,6 +14,7 @@ use stormchaser_model::dsl;
 use stormchaser_model::storage;
 use stormchaser_model::storage::BackendType;
 
+/// Recursively searches for a step by name within a list of steps.
 pub fn find_step<'a>(steps: &'a [Step], name: &str) -> Option<&'a Step> {
     for step in steps {
         if step.name == name {
@@ -28,6 +29,7 @@ pub fn find_step<'a>(steps: &'a [Step], name: &str) -> Option<&'a Step> {
     None
 }
 
+/// Dispatches a step instance, handling intrinsic types or forwarding to runners via NATS.
 #[allow(clippy::too_many_arguments)]
 pub async fn dispatch_step_instance(
     run_id: Uuid,

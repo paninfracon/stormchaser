@@ -13,6 +13,7 @@ pub use stormchaser_model::hcl_eval::{
 
 static SECRETS_BACKEND: Lazy<RwLock<Option<SharedSecretBackend>>> = Lazy::new(|| RwLock::new(None));
 
+/// Sets the global secrets backend used for resolving `secrets.*` references in HCL expressions.
 pub fn set_secrets_backend(backend: SharedSecretBackend) {
     let mut lock = SECRETS_BACKEND.write();
     *lock = Some(backend);
@@ -65,6 +66,7 @@ fn secret_lookup(args: hcl::eval::FuncArgs) -> Result<HclValue, String> {
     }
 }
 
+/// Create context.
 pub fn create_context(inputs: Value, run_id: Uuid, steps: Value) -> HclContext<'static> {
     let mut ctx = HclContext::new();
     ctx.declare_var("inputs", json_to_hcl(inputs));

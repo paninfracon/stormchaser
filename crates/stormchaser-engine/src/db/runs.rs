@@ -5,6 +5,7 @@ use stormchaser_model::workflow::{RunStatus, WorkflowRun};
 use uuid::Uuid;
 
 #[allow(clippy::too_many_arguments)]
+/// Get active workflow runs with quotas.
 pub async fn get_active_workflow_runs_with_quotas<'e, E, O>(
     executor: E,
 ) -> Result<Vec<O>, sqlx::Error>
@@ -25,6 +26,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Insert full workflow run.
 pub async fn insert_full_workflow_run(
     conn: &mut sqlx::PgConnection,
     run: &WorkflowRun,
@@ -91,6 +93,7 @@ pub async fn insert_full_workflow_run(
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Insert workflow run.
 pub async fn insert_workflow_run<'a, E>(
     executor: E,
     id: Uuid,
@@ -130,6 +133,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Insert run context.
 pub async fn insert_run_context<'a, E>(
     executor: E,
     run_id: Uuid,
@@ -157,6 +161,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Update run context.
 pub async fn update_run_context<'a, E>(
     executor: E,
     workflow_definition: Value,
@@ -179,6 +184,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Lock workflow run.
 pub async fn lock_workflow_run<'a, E>(
     executor: E,
     id: Uuid,
@@ -193,6 +199,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Update workflow run status.
 pub async fn update_workflow_run_status<'a, E>(
     executor: E,
     status: RunStatus,
@@ -215,6 +222,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Fail workflow run.
 pub async fn fail_workflow_run<'a, E>(
     executor: E,
     status: RunStatus,
@@ -239,6 +247,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Get workflow run by id.
 pub async fn get_workflow_run_by_id<'a, E, O>(executor: E, id: Uuid) -> Result<O, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
@@ -253,6 +262,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Get run context by id.
 pub async fn get_run_context_by_id<'a, E, O>(executor: E, run_id: Uuid) -> Result<O, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
@@ -267,6 +277,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Get run inputs by id.
 pub async fn get_run_inputs_by_id<'a, E, O>(executor: E, run_id: Uuid) -> Result<O, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
@@ -279,6 +290,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Update workflow run status full.
 pub async fn update_workflow_run_status_full<'a, E>(
     executor: E,
     status: &RunStatus,
@@ -313,6 +325,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Get workflow run status.
 pub async fn get_workflow_run_status<'a, E, O>(
     executor: E,
     id: Uuid,

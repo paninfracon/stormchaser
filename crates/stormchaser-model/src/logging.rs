@@ -6,10 +6,21 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+/// Represents the supported logging backends for step execution logs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum LogBackend {
-    Loki { url: String },
-    Elasticsearch { url: String, index: String },
+    /// Grafana Loki backend.
+    Loki {
+        /// The URL of the Loki server.
+        url: String,
+    },
+    /// Elasticsearch backend.
+    Elasticsearch {
+        /// The URL of the Elasticsearch server.
+        url: String,
+        /// The Elasticsearch index to query.
+        index: String,
+    },
 }
 
 impl LogBackend {
@@ -20,6 +31,7 @@ impl LogBackend {
             .build()
     }
 
+    /// Fetches historical logs for a specific step instance.
     pub async fn fetch_step_logs(
         &self,
         step_name: &str,
@@ -45,6 +57,7 @@ impl LogBackend {
         }
     }
 
+    /// Opens a real-time stream of log lines for a currently executing step instance.
     pub async fn stream_step_logs(
         &self,
         step_name: &str,

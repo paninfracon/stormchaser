@@ -8,6 +8,7 @@ use opentelemetry_sdk::{
 };
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+/// Initializes OpenTelemetry tracing, logging, and metrics based on environment variables.
 pub fn init_telemetry(rust_log: &str) -> anyhow::Result<()> {
     let service_name =
         std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| "stormchaser-engine".to_string());
@@ -74,6 +75,7 @@ pub fn init_telemetry(rust_log: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Shutdown telemetry.
 pub fn shutdown_telemetry() {
     global::shutdown_tracer_provider();
 }

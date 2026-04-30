@@ -28,6 +28,7 @@ use uuid::Uuid;
 /// Pool of Kubernetes cluster connections
 use stormchaser_model::dsl;
 
+/// Clusterpool.
 pub struct ClusterPool {
     clients: DashMap<String, (Client, String)>, // (Client, Version)
 }
@@ -39,6 +40,7 @@ impl Default for ClusterPool {
 }
 
 impl ClusterPool {
+    /// New.
     pub fn new() -> Self {
         Self {
             clients: DashMap::new(),
@@ -388,14 +390,20 @@ async fn scan_for_orphans(
 }
 
 #[derive(Debug, Clone)]
+/// Config.
 pub struct Config {
+    /// The nats url.
     pub nats_url: String,
+    /// The runner id.
     pub runner_id: String,
+    /// The encryption key.
     pub encryption_key: Option<String>,
+    /// The rust log.
     pub rust_log: String,
 }
 
 impl Config {
+    /// From env.
     pub fn from_env<I, K, V>(env: I) -> Self
     where
         I: IntoIterator<Item = (K, V)>,
@@ -432,6 +440,7 @@ async fn main() -> Result<()> {
     run_runner(config).await
 }
 
+/// Run runner.
 pub async fn run_runner(config: Config) -> Result<()> {
     rustls::crypto::ring::default_provider()
         .install_default()

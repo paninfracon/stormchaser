@@ -62,6 +62,7 @@ struct TestSuites {
     time: Option<f64>,
 }
 
+/// Parses a JUnit XML report string into a `TestSummary` and a list of `TestCase` entities.
 pub fn parse_junit(
     content: &str,
     report_name: &str,
@@ -131,6 +132,7 @@ pub fn parse_junit(
     Ok((summary, test_cases))
 }
 
+/// Aggregate summaries.
 pub fn aggregate_summaries(summaries: &[TestSummary]) -> Option<TestSummary> {
     if summaries.is_empty() {
         return None;

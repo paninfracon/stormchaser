@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde_json::Value;
 use uuid::Uuid;
 
+/// Releases the quota acquired for a specific step instance, marking it as completed or failed in the quota system.
 pub async fn release_step_quota_for_instance(
     executor: &mut sqlx::PgConnection,
     run_id: Uuid,

@@ -19,7 +19,7 @@ version = "0.1.0"
 authors = ["Stormchaser Core Team"]
 description = "A robust, distributed workflow engine for event-driven and human-triggered workflows."
 repository = "https://github.com/paninfracon/stormchaser"
-license = "MIT OR Apache-2.0"
+license = "MIT OR Apache-2.0 OR CDLA-Permissive-2.0"
 edition = "2021"
 
 [workspace.dependencies]

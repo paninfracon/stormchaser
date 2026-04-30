@@ -6,6 +6,7 @@ use sqlx::PgPool;
 use tracing::info;
 use uuid::Uuid;
 
+/// Handle jinja render.
 pub async fn handle_jinja_render(
     run_id: Uuid,
     step_id: Uuid,

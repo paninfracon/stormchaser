@@ -1,3 +1,7 @@
+//! OPA WebAssembly Integration Module.
+//!
+//! Provides execution capabilities for OPA policies compiled to WebAssembly.
+
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use opa_wasm::Runtime;
@@ -5,12 +9,14 @@ use serde_json::Value;
 use stormchaser_model::auth::OpaWasmExecutor;
 use wasmtime::*;
 
+/// Represents an instantiated OPA WASM engine ready for evaluation.
 pub struct OpaWasmInstance {
     engine: Engine,
     module: Module,
 }
 
 impl OpaWasmInstance {
+    /// Creates a new `OpaWasmInstance` from the given WASM module bytes.
     pub fn new(module_bytes: &[u8]) -> Result<Self> {
         let config = Config::new();
         // config.async_support(true); // No longer needed in wasmtime 43.0

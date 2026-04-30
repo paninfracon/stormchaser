@@ -5,6 +5,7 @@ use stormchaser_model::dsl::Artifact;
 use stormchaser_model::storage::{BackendType, StorageBackend};
 use uuid::Uuid;
 
+/// Generate parking instructions.
 pub async fn generate_parking_instructions(
     backend: &StorageBackend,
     run_id: Uuid,

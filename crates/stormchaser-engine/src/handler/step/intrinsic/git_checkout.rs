@@ -1,6 +1,7 @@
 use serde_json::Value;
 use stormchaser_model::dsl;
 
+/// Mutates the git_checkout step spec to automatically configure parameters like repository, reference, and token based on context if they are omitted.
 pub fn mutate(step_type: &mut String, resolved_spec: &mut Value) {
     if step_type == "GitCheckout" {
         let git_spec: Result<dsl::GitCheckoutSpec, _> =

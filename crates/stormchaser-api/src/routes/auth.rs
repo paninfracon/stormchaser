@@ -11,7 +11,9 @@ use serde::Deserialize;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Deserialize)]
+/// Loginquery.
 pub struct LoginQuery {
+    /// The callback url.
     pub callback_url: String,
 }
 
@@ -26,6 +28,7 @@ pub struct LoginQuery {
     ),
     tag = "stormchaser"
 )]
+/// Login.
 pub async fn login(
     State(state): State<AppState>,
     Query(query): Query<LoginQuery>,
@@ -61,6 +64,7 @@ struct TokenResponse {
     ),
     tag = "stormchaser"
 )]
+/// Exchange token.
 pub async fn exchange_token(
     State(state): State<AppState>,
     Json(payload): Json<AuthExchangeRequest>,
@@ -196,6 +200,7 @@ pub async fn exchange_token(
     }))
 }
 
+/// Refreshes the auth token.
 #[utoipa::path(
     post,
     path = "/api/v1/auth/refresh",
@@ -206,6 +211,7 @@ pub async fn exchange_token(
     ),
     tag = "stormchaser"
 )]
+/// Refresh token.
 pub async fn refresh_token(
     State(state): State<AppState>,
     Json(payload): Json<AuthRefreshRequest>,

@@ -4,6 +4,7 @@ use anyhow::Result;
 use stormchaser_dsl::StormchaserParser;
 
 impl<'a> App<'a> {
+    /// Opens the filter dialog and initializes input fields with current values.
     pub fn open_filter_dialog(&mut self) {
         self.filter_dialog_active = true;
         self.filter_focus = 0;
@@ -35,10 +36,12 @@ impl<'a> App<'a> {
             .unwrap_or(0);
     }
 
+    /// Opens the file browser for selecting a local `.storm` file.
     pub fn open_file_browser(&mut self) {
         self.file_browser_active = true;
     }
 
+    /// Opens the dialog to schedule a workflow from a Git repository.
     pub fn open_schedule_git_dialog(&mut self) {
         self.schedule_git_dialog_active = true;
         self.schedule_git_focus = 0;
@@ -49,6 +52,7 @@ impl<'a> App<'a> {
         ];
     }
 
+    /// Submits the data from the schedule git dialog to start a workflow run.
     pub async fn submit_schedule_git(&mut self) -> Result<()> {
         if self.schedule_git_inputs.len() == 3 {
             let repo_url = self.schedule_git_inputs[0].lines()[0].trim().to_string();
@@ -83,6 +87,7 @@ impl<'a> App<'a> {
         Ok(())
     }
 
+    /// Handles the submission of a selected local `.storm` file, optionally prompting for inputs.
     pub async fn submit_file(&mut self) -> Result<()> {
         let path = self
             .file_explorer
@@ -134,6 +139,7 @@ impl<'a> App<'a> {
         Ok(())
     }
 
+    /// Submits the dynamically generated form with inputs for a local workflow file.
     pub async fn submit_direct_form(&mut self) -> Result<()> {
         if let (Some(form), Some(dsl)) = (
             self.direct_submit_form.take(),
@@ -157,6 +163,7 @@ impl<'a> App<'a> {
         Ok(())
     }
 
+    /// Applies the values from the filter dialog inputs to the active filters and refreshes runs.
     pub async fn apply_filters(&mut self) -> Result<()> {
         if self.filter_inputs.len() == 6 {
             let o = self.filter_inputs[0].lines()[0].trim().to_string();

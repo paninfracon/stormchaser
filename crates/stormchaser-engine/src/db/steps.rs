@@ -6,13 +6,18 @@ use uuid::Uuid;
 
 use stormchaser_model::test_report;
 
+/// Stepdefinitioninput.
 pub struct StepDefinitionInput {
+    /// The step type.
     pub step_type: String,
+    /// The schema.
     pub schema: Value,
+    /// The documentation.
     pub documentation: Option<String>,
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Upsert step definition.
 pub async fn upsert_step_definition<'a, E>(
     executor: E,
     step_type: &str,
@@ -39,6 +44,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Upsert step definition with wasm.
 pub async fn upsert_step_definition_with_wasm<'a, E>(
     executor: E,
     step_type: &str,
@@ -74,6 +80,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Complete step instance.
 pub async fn complete_step_instance<'a, E>(
     executor: E,
     status: &StepStatus,
@@ -100,6 +107,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Get step instances by run id.
 pub async fn get_step_instances_by_run_id<'a, E, O>(
     executor: E,
     run_id: Uuid,
@@ -117,6 +125,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Upsert step output.
 pub async fn upsert_step_output<'a, E>(
     executor: E,
     step_instance_id: Uuid,
@@ -141,6 +150,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Upsert step output with sensitivity.
 pub async fn upsert_step_output_with_sensitivity<'a, E>(
     executor: E,
     step_instance_id: Uuid,
@@ -167,6 +177,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Update step instance status.
 pub async fn update_step_instance_status<'a, E>(
     executor: E,
     status: &StepStatus,
@@ -183,6 +194,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Get step spec and params.
 pub async fn get_step_spec_and_params<'a, E, O>(executor: E, id: Uuid) -> Result<O, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
@@ -195,6 +207,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Fail step instance with error.
 pub async fn fail_step_instance_with_error<'a, E>(
     executor: E,
     status: StepStatus,
@@ -221,6 +234,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Get step outputs for run.
 pub async fn get_step_outputs_for_run<'a, E, O>(
     executor: E,
     run_id: Uuid,
@@ -242,6 +256,7 @@ where
     .await
 }
 
+/// Record step status history.
 pub async fn record_step_status_history<'a, E>(
     executor: E,
     step_instance_id: Uuid,
@@ -258,6 +273,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Insert step instance.
 pub async fn insert_step_instance<'a, E>(
     executor: E,
     id: Uuid,
@@ -293,6 +309,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Count running steps for run.
 pub async fn count_running_steps_for_run<'a, E, O>(
     executor: E,
     run_id: Uuid,
@@ -311,6 +328,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Insert step instance with spec.
 pub async fn insert_step_instance_with_spec<'a, E>(
     executor: E,
     id: Uuid,
@@ -351,6 +369,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Insert step instance with spec on conflict do nothing.
 pub async fn insert_step_instance_with_spec_on_conflict_do_nothing<'a, E>(
     executor: E,
     id: Uuid,
@@ -392,6 +411,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Get wasm step definition.
 pub async fn get_wasm_step_definition<'a, E, O>(
     executor: E,
     step_type: &str,
@@ -409,6 +429,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Get pending step instances for run.
 pub async fn get_pending_step_instances_for_run<'a, E, O>(
     executor: E,
     run_id: Uuid,
@@ -434,6 +455,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Get step instance by id.
 pub async fn get_step_instance_by_id<'a, E, O>(
     executor: E,
     id: Uuid,
@@ -451,6 +473,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Fail pending steps for run on timeout.
 pub async fn fail_pending_steps_for_run_on_timeout<'a, E>(
     executor: E,
     run_id: Uuid,
@@ -471,6 +494,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Update step instance running.
 pub async fn update_step_instance_running<'a, E>(
     executor: E,
     status: &StepStatus,
@@ -491,6 +515,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Update step instance terminal.
 pub async fn update_step_instance_terminal<'a, E>(
     executor: E,
     status: &StepStatus,
@@ -506,6 +531,7 @@ where
         .await
 }
 
+/// Get test summaries for run.
 pub async fn get_test_summaries_for_run<'a, E>(
     executor: E,
     run_id: Uuid,
@@ -528,6 +554,7 @@ where
     .await
 }
 
+/// Get test cases for report.
 pub async fn get_test_cases_for_report<'a, E>(
     executor: E,
     run_id: Uuid,
@@ -553,6 +580,7 @@ where
     .await
 }
 
+/// Get step type and spec.
 pub async fn get_step_type_and_spec<'a, E, O>(executor: E, id: Uuid) -> Result<O, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,

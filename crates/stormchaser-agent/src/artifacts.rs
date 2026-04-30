@@ -114,6 +114,7 @@ async fn upload_to_oci(
     }
 }
 
+/// Uploads artifacts to configured backends and returns metadata maps.
 pub async fn park_artifacts(artifacts: Value) -> Result<HashMap<String, Value>> {
     let client = reqwest::Client::new();
     let mut metadata_map = HashMap::new();

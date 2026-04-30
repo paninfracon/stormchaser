@@ -1,3 +1,9 @@
+//! Workflow DSL parser for Stormchaser.
+//!
+//! This module provides parsing capabilities to translate HCL-based workflow
+//! definitions into the internal `Workflow` model.
+
+/// Abstract Syntax Tree components for the DSL.
 pub mod ast;
 
 use anyhow::{Context, Result};
@@ -8,6 +14,7 @@ use std::collections::HashMap;
 
 use stormchaser_model::dsl;
 
+/// A parser for translating Stormchaser HCL DSL into an executable Workflow model.
 pub struct StormchaserParser;
 
 impl Default for StormchaserParser {
@@ -17,10 +24,12 @@ impl Default for StormchaserParser {
 }
 
 impl StormchaserParser {
+    /// Creates a new instance of the `StormchaserParser`.
     pub fn new() -> Self {
         Self
     }
 
+    /// Parses the provided HCL DSL string and returns a `Workflow` instance.
     pub fn parse(&self, dsl: &str) -> Result<Workflow> {
         let body: Body = hcl::from_str(dsl)?;
 

@@ -19,10 +19,14 @@ use stormchaser_model::workflow;
 use tracing::{error, info};
 
 #[cfg(feature = "email")]
+/// Smtpparams.
 pub struct SmtpParams {
+    /// The server.
     pub server: String,
+    /// The port.
     pub port: u16,
     pub username: Option<String>,
+    /// The password.
     pub password: Option<String>,
     pub use_tls: bool,
     pub use_mtls: bool,
@@ -164,6 +168,7 @@ async fn send_email_ses(
 }
 
 #[cfg(feature = "email")]
+/// Handle email send.
 pub async fn handle_email_send(
     run_id: Uuid,
     step_id: Uuid,
@@ -435,6 +440,7 @@ async fn fail_email_step(
 }
 
 #[cfg(feature = "email")]
+/// Handle test report email.
 pub async fn handle_test_report_email(
     run_id: Uuid,
     step_id: Uuid,
@@ -710,6 +716,7 @@ async fn send_test_report_via_smtp(
 }
 
 #[cfg(not(feature = "email"))]
+/// Handle email send.
 pub async fn handle_email_send(
     _run_id: Uuid,
     _step_id: Uuid,
@@ -722,6 +729,7 @@ pub async fn handle_email_send(
 }
 
 #[cfg(not(feature = "email"))]
+/// Handle test report email.
 pub async fn handle_test_report_email(
     _run_id: Uuid,
     _step_id: Uuid,

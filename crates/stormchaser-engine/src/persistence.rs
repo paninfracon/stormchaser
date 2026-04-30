@@ -2,6 +2,7 @@ use anyhow::Result;
 use stormchaser_model::step::{StepInstance, StepStatus};
 use stormchaser_model::workflow::WorkflowRun;
 
+/// Persist run.
 pub async fn persist_run(run: &mut WorkflowRun, executor: &mut sqlx::PgConnection) -> Result<()> {
     let result = crate::db::update_workflow_run_status_full(
         executor,
@@ -40,6 +41,7 @@ pub async fn persist_run(run: &mut WorkflowRun, executor: &mut sqlx::PgConnectio
     Ok(())
 }
 
+/// Persists a `StepInstance` state change to the database, along with logs and outputs.
 pub async fn persist_step_instance(
     instance: &StepInstance,
     executor: &mut sqlx::PgConnection,

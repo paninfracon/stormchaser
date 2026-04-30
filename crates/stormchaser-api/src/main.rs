@@ -21,27 +21,46 @@ use stormchaser_tls::TlsConfig;
 use stormchaser_tls::TlsReloader;
 
 #[derive(Debug, Clone)]
+/// Config.
 pub struct Config {
+    /// The database url.
     pub database_url: String,
+    /// The tls ca cert path.
     pub tls_ca_cert_path: Option<PathBuf>,
+    /// The tls cert path.
     pub tls_cert_path: PathBuf,
+    /// The tls key path.
     pub tls_key_path: PathBuf,
+    /// The tls server name.
     pub tls_server_name: Option<String>,
+    /// The db ssl.
     pub db_ssl: bool,
+    /// The nats url.
     pub nats_url: String,
+    /// The opa url.
     pub opa_url: Option<String>,
+    /// The opa wasm path.
     pub opa_wasm_path: Option<String>,
+    /// The opa entrypoint.
     pub opa_entrypoint: Option<String>,
+    /// The loki url.
     pub loki_url: Option<String>,
+    /// The elasticsearch url.
     pub elasticsearch_url: Option<String>,
+    /// The elasticsearch index.
     pub elasticsearch_index: Option<String>,
+    /// The oidc issuer.
     pub oidc_issuer: Option<String>,
+    /// The oidc external issuer.
     pub oidc_external_issuer: Option<String>,
+    /// The oidc client id.
     pub oidc_client_id: Option<String>,
+    /// The oidc client secret.
     pub oidc_client_secret: Option<String>,
 }
 
 impl Config {
+    /// From env.
     pub fn from_env<I, K, V>(env: I) -> anyhow::Result<Self>
     where
         I: IntoIterator<Item = (K, V)>,
@@ -131,6 +150,7 @@ async fn main() -> anyhow::Result<()> {
     run_server(config).await
 }
 
+/// Run server.
 pub async fn run_server(config: Config) -> anyhow::Result<()> {
     let tls_config = TlsConfig {
         ca_cert_path: config.tls_ca_cert_path.clone(),

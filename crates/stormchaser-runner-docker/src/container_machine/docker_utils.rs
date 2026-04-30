@@ -7,6 +7,7 @@ use stormchaser_model::dsl::CommonContainerSpec;
 use tracing::info;
 
 impl<S> DockerContainerMachine<S> {
+    /// Attempts to detect the Docker network mode the runner is operating in.
     pub async fn get_network_mode(&self) -> Option<String> {
         if let Ok(hostname) = std::env::var("HOSTNAME") {
             if let Ok(inspect) = self.docker.inspect_container(&hostname, None).await {
@@ -22,6 +23,7 @@ impl<S> DockerContainerMachine<S> {
         None
     }
 
+    /// Builds the Docker container configuration based on the provided specifications.
     pub fn build_container_config(
         &self,
         spec: &CommonContainerSpec,
@@ -124,6 +126,7 @@ impl<S> DockerContainerMachine<S> {
         })
     }
 
+    /// Parses a CPU string limit to Docker CPU quota representation.
     pub fn parse_cpu_to_quota(&self, cpu: &str) -> Option<i64> {
         if let Some(m_idx) = cpu.find('m') {
             if let Ok(m_cores) = cpu[..m_idx].parse::<i64>() {
@@ -135,6 +138,7 @@ impl<S> DockerContainerMachine<S> {
         None
     }
 
+    /// Parses a memory string limit into bytes.
     pub fn parse_memory_to_bytes(&self, memory: &str) -> Option<i64> {
         let mem = memory.to_lowercase();
         if let Some(idx) = mem.find(|c: char| c.is_alphabetic()) {

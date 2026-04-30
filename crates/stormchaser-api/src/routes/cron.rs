@@ -18,6 +18,7 @@ use kube::{
 use stormchaser_model::workflow::RunStatus;
 use uuid::Uuid;
 
+/// Create cron workflow.
 pub async fn create_cron_workflow(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -62,6 +63,7 @@ pub async fn create_cron_workflow(
     }))
 }
 
+/// List cron workflows.
 pub async fn list_cron_workflows(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -73,6 +75,7 @@ pub async fn list_cron_workflows(
     Ok(Json(workflows))
 }
 
+/// Deletes a cron workflow.
 pub async fn delete_cron_workflow(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -101,6 +104,7 @@ pub async fn delete_cron_workflow(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Trigger cron workflow.
 pub async fn trigger_cron_workflow(
     headers: HeaderMap,
     State(state): State<AppState>,

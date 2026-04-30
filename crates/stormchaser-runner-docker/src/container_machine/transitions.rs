@@ -18,6 +18,7 @@ use tracing::{error, info};
 use uuid::Uuid;
 
 impl DockerContainerMachine<state::Initialized> {
+    /// Adopts an already-running container by name, transitioning the state machine to `Running`.
     pub fn adopt(self, container_name: String) -> DockerContainerMachine<state::Running> {
         info!("Adopting orphaned Docker container {}", container_name);
         DockerContainerMachine {
@@ -34,6 +35,7 @@ impl DockerContainerMachine<state::Initialized> {
         }
     }
 
+    /// Cleans up an orphaned container without running it through the state machine.
     pub async fn clean_up(self, container_name: &str) -> Result<()> {
         info!("Cleaning up orphaned Docker container {}", container_name);
         let _ = self.docker.stop_container(container_name, None).await;
@@ -41,6 +43,7 @@ impl DockerContainerMachine<state::Initialized> {
         Ok(())
     }
 
+    /// Starts a new Docker container, pulling images and unparking storage as necessary.
     pub async fn start(self) -> Result<StartResult> {
         let container_name = format!(
             "storm-{}-{}",
@@ -308,6 +311,7 @@ impl DockerContainerMachine<state::Initialized> {
 }
 
 impl DockerContainerMachine<state::Running> {
+    /// Waits for the running container to finish executing, collects metrics and artifacts, and cleans it up.
     pub async fn wait(self) -> Result<DockerContainerMachine<state::Finished>> {
         let container_name = self.state.container_name.clone();
         let dispatched_at = self.state.dispatched_at;
@@ -632,6 +636,7 @@ impl DockerContainerMachine<state::Running> {
 }
 
 impl DockerContainerMachine<state::Finished> {
+    /// Consumes the state machine, returning the final `ContainerState` result.
     pub fn into_result(self) -> ContainerState {
         self.state.result
     }

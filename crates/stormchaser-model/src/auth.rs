@@ -1,3 +1,5 @@
+//! Authentication and authorization models and OPA client.
+
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
@@ -8,18 +10,25 @@ use std::sync::Arc;
 use tracing::debug;
 use uuid::Uuid;
 
+/// Extracted claims from a JWT token.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
+    /// Subject (User ID) of the token.
     pub sub: String, // User ID
+    /// Optional email address of the user.
     pub email: Option<String>,
+    /// Expiration time as a Unix timestamp.
     pub exp: usize, // Expiration time
 }
 
+/// Trait for executing Open Policy Agent (OPA) policies compiled to WebAssembly.
 #[async_trait]
 pub trait OpaWasmExecutor: Send + Sync {
+    /// Evaluates a WASM-compiled OPA policy against the given input.
     async fn evaluate(&self, entrypoint: &str, input: &Value) -> Result<bool>;
 }
 
+/// Client for interacting with an Open Policy Agent (OPA) server or WASM module.
 #[derive(Clone)]
 pub struct OpaClient {
     url: Option<String>,
@@ -49,6 +58,7 @@ struct OpaResponse {
 }
 
 impl OpaClient {
+    /// Creates a new OpaClient with the given URL and TLS configuration.
     pub fn new(url: Option<String>, tls_config: Option<Arc<rustls::ClientConfig>>) -> Self {
         let retry_policy = ExponentialBackoff::builder().build_with_max_retries(3);
         let mut builder = reqwest::Client::builder();
@@ -70,16 +80,19 @@ impl OpaClient {
         }
     }
 
+    /// Configures the client to use a WASM executor.
     pub fn with_wasm_executor(mut self, executor: Arc<dyn OpaWasmExecutor>) -> Self {
         self.wasm_executor = Some(executor);
         self
     }
 
+    /// Sets the entrypoint for the OPA policy.
     pub fn with_entrypoint(mut self, entrypoint: String) -> Self {
         self.entrypoint = entrypoint;
         self
     }
 
+    /// Returns true if the client is configured with either a URL or a WASM executor.
     pub fn is_configured(&self) -> bool {
         self.url.is_some() || self.wasm_executor.is_some()
     }
@@ -126,9 +139,12 @@ impl OpaClient {
     }
 }
 
+/// Trait for authorizing requests using an Open Policy Agent (OPA).
 #[async_trait]
 pub trait OpaAuthorizer: Send + Sync {
+    /// Checks the given context against the OPA policy.
     async fn check(&self, context: ApiOpaContext<'_>) -> Result<bool>;
+    /// Returns true if the authorizer is properly configured.
     fn is_configured(&self) -> bool;
 }
 
@@ -145,16 +161,23 @@ impl OpaAuthorizer for OpaClient {
 /// Context for OPA checks in the API
 #[derive(Debug, Serialize)]
 pub struct ApiOpaContext<'a> {
+    /// The requested path.
     pub path: &'a str,
+    /// The HTTP method.
     pub method: &'a str,
+    /// The optional authentication token.
     pub token: Option<&'a str>,
 }
 
 /// Context for OPA checks in the Engine after DSL parsing
 #[derive(Debug, Serialize)]
 pub struct EngineOpaContext {
+    /// Associated workflow run ID.
     pub run_id: Uuid,
+    /// Identifier of the user who initiated the run.
     pub initiating_user: String,
+    /// Full parsed abstract syntax tree of the workflow.
     pub workflow_ast: Value,
+    /// JSON inputs for the workflow run.
     pub inputs: Value,
 }

@@ -2,6 +2,7 @@ use super::*;
 use crate::AppEvent;
 
 impl<'a> App<'a> {
+    /// Selects the next run in the list, wrapping to the start if at the end.
     pub fn next_run(&mut self) {
         if self.runs.is_empty() {
             return;
@@ -31,6 +32,7 @@ impl<'a> App<'a> {
         });
     }
 
+    /// Selects the previous run in the list, wrapping to the end if at the start.
     pub fn previous_run(&mut self) {
         if self.runs.is_empty() {
             return;
@@ -60,6 +62,7 @@ impl<'a> App<'a> {
         });
     }
 
+    /// Selects the next step within the currently selected workflow run.
     pub fn next_step(&mut self) {
         if let Some(run) = &self.selected_run {
             if !run.steps.is_empty() {
@@ -69,6 +72,7 @@ impl<'a> App<'a> {
         }
     }
 
+    /// Selects the previous step within the currently selected workflow run.
     pub fn previous_step(&mut self) {
         if let Some(run) = &self.selected_run {
             if !run.steps.is_empty() {
@@ -82,6 +86,7 @@ impl<'a> App<'a> {
         }
     }
 
+    /// Scrolls the log view upwards, pausing automatic scrolling.
     pub fn scroll_logs_up(&mut self) {
         self.log_auto_scroll = false;
         if self.log_scroll > 0 {
@@ -89,20 +94,24 @@ impl<'a> App<'a> {
         }
     }
 
+    /// Scrolls the log view downwards.
     pub fn scroll_logs_down(&mut self) {
         self.log_scroll += 1;
     }
 
+    /// Scrolls the overview pane upwards.
     pub fn scroll_overview_up(&mut self) {
         if self.overview_scroll > 0 {
             self.overview_scroll -= 1;
         }
     }
 
+    /// Scrolls the overview pane downwards.
     pub fn scroll_overview_down(&mut self) {
         self.overview_scroll += 1;
     }
 
+    /// Quickly scrolls the log view to the very top, pausing auto-scroll.
     pub fn scroll_logs_to_top(&mut self) {
         self.log_auto_scroll = false;
         self.log_scroll = 0;

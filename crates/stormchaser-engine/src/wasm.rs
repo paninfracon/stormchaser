@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 use wasmtime::*;
 
+/// Utility for executing WebAssembly (WASM) modules using Wasmtime.
 pub struct WasmExecutor {
     engine: Engine,
 }
@@ -13,6 +14,7 @@ impl Default for WasmExecutor {
 }
 
 impl WasmExecutor {
+    /// Creates a new `WasmExecutor` with a default Wasmtime engine configuration.
     pub fn new() -> Self {
         let config = Config::new();
         // config.async_support(true); // No longer needed in wasmtime 43.0
@@ -20,6 +22,7 @@ impl WasmExecutor {
         Self { engine }
     }
 
+    /// Execute.
     pub async fn execute(
         &self,
         module_path: &str,

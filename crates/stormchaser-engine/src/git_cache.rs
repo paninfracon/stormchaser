@@ -7,11 +7,13 @@ use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use tracing::{debug, info};
 
+/// Gitcache.
 pub struct GitCache {
     base_dir: PathBuf,
 }
 
 impl GitCache {
+    /// New.
     pub fn new<P: AsRef<Path>>(base_dir: P) -> Self {
         Self {
             base_dir: base_dir.as_ref().to_path_buf(),

@@ -13,6 +13,7 @@ use std::path::PathBuf;
 
 use stormchaser_model::dsl;
 
+/// Do extract pod metrics with reason.
 pub fn do_extract_pod_metrics_with_reason(pods: Vec<Pod>) -> (Option<i32>, i32, Option<String>) {
     let mut max_restart_count = 0;
     let mut exit_code = None;
@@ -650,6 +651,7 @@ fn build_k8s_pod_spec(
     }
 }
 
+/// Builds a complete Kubernetes `Job` specification based on metadata and environment.
 pub fn do_build_job_spec(
     job_name: &str,
     metadata: &JobMetadata,

@@ -1,3 +1,7 @@
+//! Main entry point for the Stormchaser CLI.
+//!
+//! Provides commands for interacting with the Stormchaser API and running local workflows.
+
 mod commands;
 mod utils;
 
@@ -9,14 +13,17 @@ use std::path::PathBuf;
 
 use crate::commands::{auth, cron, rules, run, runs, storage, webhooks};
 
+/// Main CLI arguments and configuration.
 #[derive(Parser)]
 #[command(name = "stormchaser")]
 #[command(about = "Stormchaser CLI", long_about = None)]
 #[command(version = concat!(env!("CARGO_PKG_VERSION"), " (rev: ", env!("VERGEN_GIT_SHA"), ", branch: ", env!("VERGEN_GIT_BRANCH"), ", built: ", env!("VERGEN_BUILD_TIMESTAMP"), ")"))]
 pub struct Cli {
+    /// The specific subcommand to execute.
     #[command(subcommand)]
     pub command: Commands,
 
+    /// The base URL of the Stormchaser API.
     #[arg(
         short,
         long,
@@ -25,10 +32,12 @@ pub struct Cli {
     )]
     pub url: String,
 
+    /// The authentication token for the API.
     #[arg(short, long, env = "STORMCHASER_TOKEN")]
     pub token: Option<String>,
 }
 
+/// Available CLI subcommands.
 #[derive(Subcommand)]
 pub enum Commands {
     /// Run a local workflow DSL file (direct execution)
@@ -51,44 +60,52 @@ pub enum Commands {
 
     /// Manage workflow runs
     Runs {
+        /// Subcommands for runs
         #[command(subcommand)]
         command: runs::RunCommands,
     },
 
     /// Manage webhooks
     Webhooks {
+        /// Subcommands for webhooks
         #[command(subcommand)]
         command: webhooks::WebhookCommands,
     },
 
     /// Manage event rules
     Rules {
+        /// Subcommands for event rules
         #[command(subcommand)]
         command: rules::RuleCommands,
     },
 
     /// Manage storage backends
     Storage {
+        /// Subcommands for storage
         #[command(subcommand)]
         command: storage::StorageCommands,
     },
 
     /// Manage scheduled workflows (Cron)
     Cron {
+        /// Subcommands for cron workflows
         #[command(subcommand)]
         command: cron::CronCommands,
     },
 
     /// Authentication commands
     Auth {
+        /// Subcommands for authentication
         #[command(subcommand)]
         command: auth::AuthCommands,
     },
 
     /// Interactive browser-based login
     Login {
+        /// The OIDC issuer URL.
         #[arg(long, default_value = "http://localhost:5556/dex")]
         issuer: String,
+        /// The OIDC client ID.
         #[arg(long, default_value = "stormchaser-cli")]
         client_id: String,
     },
@@ -100,6 +117,10 @@ async fn main() -> Result<()> {
     run_cli(cli).await
 }
 
+/// Executes the specified CLI command.
+///
+/// This function sets up the HTTP client and dispatches the command logic
+/// to the appropriate handler based on the parsed CLI options.
 pub async fn run_cli(cli: Cli) -> Result<()> {
     let retry_policy = ExponentialBackoff::builder().build_with_max_retries(3);
     let http_client = ClientBuilder::new(reqwest::Client::new())

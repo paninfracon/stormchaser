@@ -8,6 +8,7 @@ use stormchaser_tls::TlsReloader;
 use uuid::Uuid;
 
 #[allow(clippy::too_many_arguments)]
+/// Attempts to dispatch a WebAssembly (WASM) module execution step instance.
 pub async fn try_dispatch(
     run_id: Uuid,
     step_instance_id: Uuid,

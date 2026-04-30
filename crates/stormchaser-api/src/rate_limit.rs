@@ -11,14 +11,20 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::OnceCell;
 
+/// State for the NATS-backed rate limiter
 #[derive(Clone)]
 pub struct RateLimitState {
+    /// NATS client connection
     pub nats: async_nats::Client,
+    /// Lazy initialized Key-Value store for rate limiting
     pub store: Arc<OnceCell<async_nats::jetstream::kv::Store>>,
+    /// Allowed requests per second
     pub per_second: u64,
+    /// Maximum burst size for requests
     pub burst_size: u64,
 }
 
+/// Middleware that limits request rates using NATS KV
 pub async fn nats_rate_limiter(
     State(state): State<Arc<RateLimitState>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,

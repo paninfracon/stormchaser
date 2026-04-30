@@ -9,6 +9,7 @@ use axum::{
 use stormchaser_model::auth::ApiOpaContext;
 use tracing::{debug, error, info};
 
+/// Middleware to evaluate Open Policy Agent (OPA) rules for incoming requests
 pub async fn opa_middleware(
     State(state): State<AppState>,
     request: Request,

@@ -11,6 +11,7 @@ use crate::handler::{
     fetch_outputs, fetch_quotas, fetch_run_context, handle_approval_notification,
 };
 
+/// Schedules a step for execution, creating a new instance and managing its initial state transitions based on dependencies and quotas.
 pub async fn schedule_step(
     run_id: Uuid,
     step_dsl: &ast::Step,

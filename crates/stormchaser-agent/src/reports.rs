@@ -112,6 +112,7 @@ fn fallback_to_memory(
     Ok(())
 }
 
+/// Collects test reports from the filesystem and optionally uploads them.
 pub async fn collect_test_reports(
     reports: Value,
     urls: Option<Value>,

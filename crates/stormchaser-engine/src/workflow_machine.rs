@@ -6,23 +6,33 @@ use stormchaser_model::workflow::{RunStatus, WorkflowRun};
 /// State markers for the workflow typestate pattern
 #[allow(dead_code)]
 pub mod state {
+    /// State representing a workflow run that is queued and waiting for resolution.
     pub struct Queued;
+    /// State representing a workflow run that is resolving its source repository and dependencies.
     pub struct Resolving;
+    /// State representing a workflow run that has been resolved and is pending start.
     pub struct StartPending;
+    /// State representing a workflow run that is currently executing.
     pub struct Running;
+    /// State representing a workflow run that has successfully completed.
     pub struct Succeeded;
+    /// State representing a workflow run that has failed.
     pub struct Failed;
+    /// State representing a workflow run that has been aborted.
     pub struct Aborted;
 }
 
+/// A state machine for managing the lifecycle of a `WorkflowRun`.
 #[allow(dead_code)]
 pub struct WorkflowMachine<S> {
+    /// The underlying workflow run data model.
     pub run: WorkflowRun,
     _state: PhantomData<S>,
 }
 
 #[allow(dead_code)]
 impl<S> WorkflowMachine<S> {
+    /// New from run.
     pub fn new_from_run(run: WorkflowRun) -> Self {
         Self {
             run,
@@ -30,6 +40,7 @@ impl<S> WorkflowMachine<S> {
         }
     }
 
+    /// Into run.
     pub fn into_run(self) -> WorkflowRun {
         self.run
     }
@@ -37,6 +48,7 @@ impl<S> WorkflowMachine<S> {
 
 #[allow(dead_code)]
 impl WorkflowMachine<state::Queued> {
+    /// New.
     pub fn new(run: WorkflowRun) -> Self {
         let mut run = run;
         run.status = RunStatus::Queued;
@@ -48,6 +60,7 @@ impl WorkflowMachine<state::Queued> {
     }
 
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.run.id))]
+    /// Start resolving.
     pub async fn start_resolving(
         mut self,
         executor: &mut sqlx::PgConnection,
@@ -65,6 +78,7 @@ impl WorkflowMachine<state::Queued> {
     }
 
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.run.id))]
+    /// Abort.
     pub async fn abort(
         mut self,
         executor: &mut sqlx::PgConnection,
@@ -85,6 +99,7 @@ impl WorkflowMachine<state::Queued> {
 #[allow(dead_code)]
 impl WorkflowMachine<state::Resolving> {
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.run.id))]
+    /// Start pending.
     pub async fn start_pending(
         mut self,
         executor: &mut sqlx::PgConnection,
@@ -101,6 +116,7 @@ impl WorkflowMachine<state::Resolving> {
     }
 
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.run.id))]
+    /// Fail.
     pub async fn fail(
         mut self,
         error: String,
@@ -120,6 +136,7 @@ impl WorkflowMachine<state::Resolving> {
     }
 
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.run.id))]
+    /// Abort.
     pub async fn abort(
         mut self,
         executor: &mut sqlx::PgConnection,
@@ -140,6 +157,7 @@ impl WorkflowMachine<state::Resolving> {
 #[allow(dead_code)]
 impl WorkflowMachine<state::StartPending> {
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.run.id))]
+    /// Start.
     pub async fn start(
         mut self,
         executor: &mut sqlx::PgConnection,
@@ -157,6 +175,7 @@ impl WorkflowMachine<state::StartPending> {
     }
 
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.run.id))]
+    /// Fail.
     pub async fn fail(
         mut self,
         error: String,
@@ -176,6 +195,7 @@ impl WorkflowMachine<state::StartPending> {
     }
 
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.run.id))]
+    /// Abort.
     pub async fn abort(
         mut self,
         executor: &mut sqlx::PgConnection,
@@ -196,6 +216,7 @@ impl WorkflowMachine<state::StartPending> {
 #[allow(dead_code)]
 impl WorkflowMachine<state::Running> {
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.run.id))]
+    /// Succeed.
     pub async fn succeed(
         mut self,
         executor: &mut sqlx::PgConnection,
@@ -213,6 +234,7 @@ impl WorkflowMachine<state::Running> {
     }
 
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.run.id))]
+    /// Fail.
     pub async fn fail(
         mut self,
         error: String,
@@ -232,6 +254,7 @@ impl WorkflowMachine<state::Running> {
     }
 
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.run.id))]
+    /// Abort.
     pub async fn abort(
         mut self,
         executor: &mut sqlx::PgConnection,

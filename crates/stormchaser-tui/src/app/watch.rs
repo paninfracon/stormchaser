@@ -6,6 +6,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 impl<'a> App<'a> {
+    /// Re-populates the log view buffer from the currently selected step's logs.
     pub fn refresh_step_logs(&mut self, reset_scroll: bool) {
         if let Some(run) = &self.selected_run {
             if let Some(step) = run.steps.get(self.selected_step_index) {
@@ -27,6 +28,7 @@ impl<'a> App<'a> {
         }
     }
 
+    /// Spawns background tasks to listen for real-time SSE updates for a specific workflow run.
     pub async fn start_watching(&mut self, id: Uuid) {
         if let Some(handle) = self.watcher_handle.take() {
             handle.abort();

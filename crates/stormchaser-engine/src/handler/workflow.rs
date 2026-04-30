@@ -23,6 +23,7 @@ use uuid::Uuid;
 use stormchaser_dsl::ast;
 
 #[tracing::instrument(skip(pool, nats_client, _tls_reloader), fields(run_id = %run_id))]
+/// Handle workflow timeout.
 pub async fn handle_workflow_timeout(
     run_id: Uuid,
     pool: PgPool,
@@ -88,6 +89,7 @@ pub async fn handle_workflow_timeout(
 }
 
 #[tracing::instrument(skip(pool, nats_client, tls_reloader), fields(run_id = %run_id))]
+/// Handle workflow start pending.
 pub async fn handle_workflow_start_pending(
     run_id: Uuid,
     pool: PgPool,
@@ -182,6 +184,7 @@ pub async fn handle_workflow_start_pending(
 }
 
 #[tracing::instrument(skip(payload, pool, opa_client, nats_client), fields(run_id = tracing::field::Empty))]
+/// Handle workflow direct.
 pub async fn handle_workflow_direct(
     payload: Value,
     pool: PgPool,
@@ -296,6 +299,7 @@ pub async fn handle_workflow_direct(
 }
 
 #[tracing::instrument(skip(pool, git_cache, opa_client, nats_client, _tls_reloader), fields(run_id = %run_id))]
+/// Handles the event when a workflow is queued and ready for resolution.
 pub async fn handle_workflow_queued(
     run_id: Uuid,
     pool: PgPool,

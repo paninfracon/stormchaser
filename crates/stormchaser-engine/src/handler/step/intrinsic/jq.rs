@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use stormchaser_model::dsl;
 
+/// Mutate if has files.
 pub fn mutate_if_has_files(step_type: &mut String, resolved_spec: &mut Value) {
     if step_type == "JQ" {
         let jq_spec: Result<dsl::JqSpec, _> =
@@ -51,6 +52,7 @@ pub fn mutate_if_has_files(step_type: &mut String, resolved_spec: &mut Value) {
     }
 }
 
+/// Attempts to dispatch a jq step instance directly if it operates on strings (instead of files).
 pub async fn try_dispatch(
     run_id: Uuid,
     step_instance_id: Uuid,

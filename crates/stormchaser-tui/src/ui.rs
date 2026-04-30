@@ -13,6 +13,7 @@ use stormchaser_model::workflow::RunStatus;
 
 use stormchaser_model::test_report::TestCaseStatus;
 
+/// Renders the main user interface based on the current application state.
 pub fn ui(f: &mut Frame, app: &mut App) {
     if app.state == AppState::LoggedOut || app.state == AppState::LoggingIn {
         render_login_screen(f, app);

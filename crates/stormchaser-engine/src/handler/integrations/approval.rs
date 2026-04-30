@@ -8,6 +8,7 @@ use stormchaser_model::dsl::EmailSpec;
 #[cfg(feature = "email")]
 use stormchaser_model::workflow;
 
+/// Handle approval notification.
 pub async fn handle_approval_notification(
     run_id: Uuid,
     step_id: Uuid,
