@@ -7,6 +7,10 @@ description.workspace = true
 repository.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "stormchaser"
+path = "src/main.rs"
+
 [dependencies]
 schemars = { workspace = true }
 stormchaser-model = { workspace = true }

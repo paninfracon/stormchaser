@@ -44,7 +44,7 @@ jobs:
       - name: Package Linux Binaries
         run: |
           mkdir -p dist
-          for BIN in stormchaser-api stormchaser-engine stormchaser-runner-k8s stormchaser-runner-docker stormchaser-agent stormchaser-cli stormchaser-tui; do
+          for BIN in stormchaser-api stormchaser-engine stormchaser-runner-k8s stormchaser-runner-docker stormchaser-agent stormchaser stormchaser-tui; do
             if [ -f "target/release/$BIN" ]; then
               tar -czvf dist/$BIN-x86_64-unknown-linux-gnu.tar.gz -C target/release $BIN
             fi
@@ -60,7 +60,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: linux-binaries
-          path: target/release/stormchaser-*
+          path: target/release/stormchaser*
           retention-days: 1
           if-no-files-found: error
 
@@ -138,9 +138,9 @@ jobs:
       - name: Build and Upload CLI
         uses: taiki-e/upload-rust-binary-action@v1
         with:
-          bin: stormchaser-cli
+          bin: stormchaser
           target: ${{ matrix.target }}
-          archive: stormchaser-cli-${{ matrix.target }}
+          archive: stormchaser-${{ matrix.target }}
           token: ${{ secrets.GITHUB_TOKEN }}
         env:
           SQLX_OFFLINE: true

@@ -54,6 +54,6 @@ repos:
 
       - id: stormchaser-lint
         name: Stormchaser Linter
-        entry: bash -c 'cargo build -p stormchaser-cli -q && for f in "$@"; do target/debug/stormchaser-cli lint "$f" || exit 1; done' --
+        entry: bash -c 'cargo build -p stormchaser-cli -q && for f in "$@"; do target/debug/stormchaser lint "$f" || exit 1; done' --
         language: system
         files: \.storm$

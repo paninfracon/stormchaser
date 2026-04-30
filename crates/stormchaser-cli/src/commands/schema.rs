@@ -1,16 +1,25 @@
 use anyhow::{Context, Result};
-use clap::Subcommand;
+use clap::{Subcommand, ValueEnum};
 use stormchaser_dsl::hcl_schema::json_schema_to_hcl;
 use stormchaser_model::schema_gen::generate_dsl_schema;
+
+/// Output format for schema generation.
+#[derive(ValueEnum, Clone, Debug)]
+pub enum SchemaFormat {
+    /// JSON Schema (Draft 7)
+    Json,
+    /// HCL format
+    Hcl,
+}
 
 /// CLI subcommands for managing schemas.
 #[derive(Subcommand)]
 pub enum SchemaCommands {
     /// Generate schema for the DSL
     Generate {
-        /// Output format (json, hcl)
-        #[arg(short, long, default_value = "json")]
-        format: String,
+        /// Output format
+        #[arg(short, long, value_enum, default_value_t = SchemaFormat::Json)]
+        format: SchemaFormat,
     },
 }
 
@@ -20,13 +29,16 @@ pub fn handle(command: SchemaCommands) -> Result<()> {
         SchemaCommands::Generate { format } => {
             let schema = generate_dsl_schema();
 
-            if format.to_lowercase() == "hcl" {
-                let json_val = serde_json::to_value(&schema)?;
-                let hcl_body =
-                    json_schema_to_hcl(&json_val).context("Failed to serialize schema to HCL")?;
-                println!("{}", hcl::to_string(&hcl_body)?);
-            } else {
-                println!("{}", serde_json::to_string_pretty(&schema)?);
+            match format {
+                SchemaFormat::Hcl => {
+                    let json_val = serde_json::to_value(&schema)?;
+                    let hcl_body = json_schema_to_hcl(&json_val)
+                        .context("Failed to serialize schema to HCL")?;
+                    println!("{}", hcl::to_string(&hcl_body)?);
+                }
+                SchemaFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&schema)?);
+                }
             }
         }
     }
