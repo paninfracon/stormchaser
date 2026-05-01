@@ -84,9 +84,15 @@ fn build_terraform_command(
         );
     } else {
         // output a plan summary for log scraping, and also save the full plan text to plan.txt
-        run_cmd.push_str(" && terraform show -no-color tfplan > plan.txt");
-        run_cmd.push_str(" && echo '' && echo -n '--- TF PLAN SUMMARY --- ' && terraform show -no-color tfplan | grep -E '^Plan:|^No changes.' | tail -n 1");
-        run_cmd.push_str(" && echo '' && echo -n '--- TF PLAN JSON --- ' && terraform show -json tfplan | tr -d '\\n'");
+        run_cmd.push_str(&format!(" && terraform show -no-color {} > plan.txt", out_file));
+        run_cmd.push_str(&format!(
+            " && echo '' && echo -n '--- TF PLAN SUMMARY --- ' && terraform show -no-color {} | grep -E '^Plan:|^No changes.' | tail -n 1",
+            out_file
+        ));
+        run_cmd.push_str(&format!(
+            " && echo '' && echo -n '--- TF PLAN JSON --- ' && terraform show -json {} | tr -d '\\n'",
+            out_file
+        ));
     }
 
     format!(
