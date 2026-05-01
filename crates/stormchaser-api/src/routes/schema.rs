@@ -7,7 +7,7 @@ use stormchaser_model::schema_gen::generate_dsl_schema;
     path = "/api/v1/schema",
     tag = "stormchaser",
     responses(
-        (status = 200, description = "JSON schema retrieved successfully", body = Object)
+        (status = 200, description = "JSON schema retrieved successfully", body = serde_json::Value)
     )
 )]
 pub async fn get_schema() -> impl IntoResponse {
