@@ -200,7 +200,7 @@ Detailed documentation is available in the `docs/` directory:
 - [State Machines](docs/state_machines.md)
 - [Current State & Status](docs/current_state.md)
 
-Explore the `docs/steps/` directory for detailed information on available
+Explore the [`docs/steps/`](docs/steps/) directory for detailed information on available
 workflow steps (e.g., Parallel, WebhookInvoke, RunContainer).
 
 ## 🤝 Acknowledgements
