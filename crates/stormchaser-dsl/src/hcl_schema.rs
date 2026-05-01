@@ -287,39 +287,28 @@ pub fn hcl_expr_to_json(expr: &Expression) -> Result<Value> {
                 map.insert("type".to_string(), Value::String(name.to_string()));
 
                 for arg in &func.args {
-                    // Args are usually inner constraint functions like format("email")
+                    // Args are inner constraint or type functions, e.g. format("email"),
+                    // maxItems(5), or — when outer type is "array" — a nested type function
+                    // like string() or string(format("email")) that describes array items.
                     if let Expression::FuncCall(inner_func) = arg {
                         let inner_name = inner_func.name.name.as_str();
-                        if let Some(first_arg) = inner_func.args.first() {
-                            if name == "array"
-                                && inner_name != "items"
-                                && inner_name != "maxItems"
-                                && inner_name != "minItems"
-                                && inner_name != "uniqueItems"
-                                && !["string", "integer", "number", "boolean", "object", "map"]
-                                    .contains(&inner_name)
-                            {
-                                // Actually, if the type is array, the first argument might be the item type itself!
-                                // e.g. array(string(), uniqueItems(true))
-                            }
-
-                            // Let's just blindly map the inner func name to its first argument value
-                            map.insert(inner_name.to_string(), hcl_expr_to_json(first_arg)?);
-                        } else if [
+                        let is_type_func = [
                             "string", "integer", "number", "boolean", "array", "object", "map",
                         ]
-                        .contains(&inner_name)
-                        {
-                            // It's a type function passed as an argument (e.g. array(string()))
+                        .contains(&inner_name);
+
+                        if name == "array" && is_type_func {
+                            // A type function nested inside array(...) describes the item schema,
+                            // e.g. array(string()) or array(string(format("email"))).
                             map.insert("items".to_string(), hcl_expr_to_json(arg)?);
+                        } else if let Some(first_arg) = inner_func.args.first() {
+                            // Constraint function with a value argument, e.g. format("email"),
+                            // maxItems(5), minimum(0).
+                            map.insert(inner_name.to_string(), hcl_expr_to_json(first_arg)?);
                         }
-                    } else if [
-                        "string", "integer", "number", "boolean", "array", "object", "map",
-                    ]
-                    .contains(&name)
-                        && name == "array"
-                    {
-                        // First argument to array without a func wrap might just be the items definition
+                        // else: zero-arg non-type function — nothing to map.
+                    } else if name == "array" {
+                        // Non-function argument to array() — treat as the items definition.
                         map.insert("items".to_string(), hcl_expr_to_json(arg)?);
                     }
                 }
@@ -496,7 +485,77 @@ mod tests {
         );
     }
 
-    /// Verify that the HCL→JSON direction alone works correctly for a manually
+    /// Verify that an array whose items schema has constraints round-trips correctly.
+    ///
+    /// The HCL encoding is `array(string(format("email")))` and the expected JSON is
+    /// `{"type": "array", "items": {"type": "string", "format": "email"}}`.
+    #[test]
+    fn test_array_items_with_constraints_roundtrip() {
+        let original = json!({
+            "type": "object",
+            "properties": {
+                "emails": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "format": "email"
+                    }
+                },
+                "counts": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                }
+            }
+        });
+
+        // JSON → HCL
+        let hcl_body = json_schema_to_hcl(&original).unwrap();
+        let hcl_str = hcl::to_string(&hcl_body).unwrap();
+
+        // HCL → JSON
+        let parsed_body: Body = hcl::from_str(&hcl_str).unwrap();
+        let recovered = hcl_to_json_schema(&parsed_body).unwrap();
+
+        let root = recovered.as_object().expect("root must be object");
+        let props = root
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties must be an object");
+
+        // emails: array of strings with format constraint
+        let emails = props["emails"].as_object().expect("emails must be object");
+        assert_eq!(emails.get("type").and_then(Value::as_str), Some("array"));
+        let email_items = emails
+            .get("items")
+            .and_then(Value::as_object)
+            .expect("emails.items must be object");
+        assert_eq!(
+            email_items.get("type").and_then(Value::as_str),
+            Some("string"),
+            "emails.items type preserved"
+        );
+        assert_eq!(
+            email_items.get("format").and_then(Value::as_str),
+            Some("email"),
+            "emails.items format constraint preserved"
+        );
+
+        // counts: array of integers (simple case)
+        let counts = props["counts"].as_object().expect("counts must be object");
+        assert_eq!(counts.get("type").and_then(Value::as_str), Some("array"));
+        let count_items = counts
+            .get("items")
+            .and_then(Value::as_object)
+            .expect("counts.items must be object");
+        assert_eq!(
+            count_items.get("type").and_then(Value::as_str),
+            Some("integer"),
+            "counts.items type preserved"
+        );
+    }
+
     /// written HCL body (not produced by json_schema_to_hcl).
     #[test]
     fn test_hcl_to_json_schema_direct() {
