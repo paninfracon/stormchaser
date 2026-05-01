@@ -19,9 +19,9 @@ workflow "terraform_deployment" {
   }
 
   input "approvers" {
-    type        = "string"
-    description = "Comma-separated list of users or groups allowed to approve the plan."
-    default     = "admin"
+    type        = "list"
+    description = "List of users or groups allowed to approve the plan."
+    default     = ["admin"]
   }
 
   steps {
@@ -51,7 +51,7 @@ workflow "terraform_deployment" {
     // Phase 2: Wait for HITL Approval
     step "manual_approval" "TerraformApproval" {
       spec {
-        approvers    = ["${inputs.approvers}"]
+        approvers    = inputs.approvers
         plan_summary = steps.plan_phase.steps.terraform_plan.outputs.plan_summary
         timeout      = "24h"
       }
@@ -75,7 +75,7 @@ workflow "terraform_deployment" {
 
     step "notify_success" "WebhookInvoke" {
       spec {
-        url    = "https://example.com/deploy"
+        url    = "https://paninfracon.net/deploy"
         method = "POST"
         body = {
           status  = "success"

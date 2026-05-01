@@ -796,9 +796,9 @@ pub async fn insert_cron_workflow(
 pub async fn get_run_outputs_for_opa(
     pool: &PgPool,
     run_id: Uuid,
-) -> serde_json::Map<String, serde_json::Value> {
-    let mut run_outputs_map = serde_json::Map::new();
-    if let Ok(outputs_rows) = sqlx::query(
+) -> Result<serde_json::Map<String, serde_json::Value>, sqlx::Error> {
+    use sqlx::Row;
+    let outputs_rows = sqlx::query(
         r#"
         SELECT i.step_name, o.output_key, o.output_value
         FROM combined_step_instances i
@@ -808,30 +808,29 @@ pub async fn get_run_outputs_for_opa(
     )
     .bind(run_id)
     .fetch_all(pool)
-    .await
-    {
-        use sqlx::Row;
-        for row in outputs_rows {
-            let step_name: String = row.get("step_name");
-            let output_key: String = row.get("output_key");
-            let output_value: serde_json::Value = row.get("output_value");
+    .await?;
 
-            if !run_outputs_map.contains_key(&step_name) {
-                run_outputs_map.insert(step_name.clone(), serde_json::json!({"outputs": {}}));
-            }
-            if let Some(step_obj) = run_outputs_map
-                .get_mut(&step_name)
-                .and_then(|v| v.as_object_mut())
+    let mut run_outputs_map = serde_json::Map::new();
+    for row in outputs_rows {
+        let step_name: String = row.get("step_name");
+        let output_key: String = row.get("output_key");
+        let output_value: serde_json::Value = row.get("output_value");
+
+        if !run_outputs_map.contains_key(&step_name) {
+            run_outputs_map.insert(step_name.clone(), serde_json::json!({"outputs": {}}));
+        }
+        if let Some(step_obj) = run_outputs_map
+            .get_mut(&step_name)
+            .and_then(|v| v.as_object_mut())
+        {
+            if let Some(outputs_obj) =
+                step_obj.get_mut("outputs").and_then(|v| v.as_object_mut())
             {
-                if let Some(outputs_obj) =
-                    step_obj.get_mut("outputs").and_then(|v| v.as_object_mut())
-                {
-                    outputs_obj.insert(output_key, output_value);
-                }
+                outputs_obj.insert(output_key, output_value);
             }
         }
     }
-    run_outputs_map
+    Ok(run_outputs_map)
 }
 
 /// Data returned for workflow OPA context

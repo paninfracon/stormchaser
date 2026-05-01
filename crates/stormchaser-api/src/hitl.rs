@@ -179,7 +179,19 @@ async fn check_approval_opa(
             }
         }
 
-        let run_outputs_map = crate::db::get_run_outputs_for_opa(&state.pool, run_id).await;
+        let run_outputs_map = match crate::db::get_run_outputs_for_opa(&state.pool, run_id).await {
+            Ok(map) => map,
+            Err(err) => {
+                tracing::error!(
+                    "Failed to load run outputs for approval OPA evaluation for run {}: {:?}",
+                    run_id, err
+                );
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to load run outputs for approval policy evaluation".to_string(),
+                ));
+            }
+        };
 
         let opa_context = stormchaser_model::auth::ApprovalOpaContext {
             run_id,
