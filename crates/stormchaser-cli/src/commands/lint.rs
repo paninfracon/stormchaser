@@ -278,4 +278,44 @@ workflow "test_workflow" {{
         );
         Ok(())
     }
+
+    #[test]
+    fn test_load_schema_local_file() -> Result<()> {
+        let mut file = NamedTempFile::new()?;
+        writeln!(file, r#"{{"type":"object"}}"#)?;
+        let val = load_schema(file.path().to_str().unwrap())?;
+        assert_eq!(val["type"], "object");
+        Ok(())
+    }
+
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn test_lint_handle_prepare() -> Result<()> {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/schema"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"type": "object"})),
+            )
+            .mount(&server)
+            .await;
+
+        let cmd = LintCommand {
+            file: None,
+            step_schema: vec![],
+            remote: false,
+            prepare: true,
+        };
+
+        let http_client = ClientBuilder::new(reqwest::Client::new()).build();
+        handle(&server.uri(), &http_client, cmd).await?;
+
+        let saved = std::fs::read_to_string(".stormchaser-schema.json")?;
+        assert!(saved.contains("\"type\": \"object\""));
+        std::fs::remove_file(".stormchaser-schema.json")?;
+
+        Ok(())
+    }
 }
