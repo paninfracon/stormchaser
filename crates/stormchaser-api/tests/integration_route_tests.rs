@@ -686,6 +686,181 @@ async fn test_direct_run() {
 }
 
 #[tokio::test]
+async fn test_run_from_git() {
+    let app = match setup_app().await {
+        Some(a) => a,
+        None => return,
+    };
+
+    let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/runs")
+                .header("Authorization", format!("Bearer {}", get_token()))
+                .header("Content-Type", "application/json")
+                .extension(ConnectInfo(addr))
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "workflow_name": "hello-world",
+                        "repo_url": "https://github.com/paninfracon/stormchaser",
+                        "workflow_path": "tests/hello-world.storm",
+                        "git_ref": "trunk",
+                        "inputs": {}
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let enqueue_resp: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+    let run_id = enqueue_resp["run_id"].as_str().unwrap();
+
+    // Verify git file system cache only has the `.storm` file.
+    let temp_dir = tempfile::tempdir().unwrap();
+    let git_cache = stormchaser_engine::git_cache::GitCache::new(temp_dir.path());
+    let repo_url = "https://github.com/paninfracon/stormchaser";
+    let git_ref = "trunk";
+    let workflow_path = "tests/hello-world.storm";
+
+    let path = git_cache
+        .ensure_files(repo_url, git_ref, &[workflow_path.to_string()])
+        .unwrap();
+
+    let mut storm_files = Vec::new();
+    for entry in walkdir::WalkDir::new(&path) {
+        let entry = entry.unwrap();
+        if entry.file_type().is_file() {
+            if let Some(ext) = entry.path().extension() {
+                if ext == "storm" {
+                    storm_files.push(entry.path().to_path_buf());
+                }
+            }
+        }
+    }
+
+    assert_eq!(
+        storm_files.len(),
+        1,
+        "Expected exactly 1 .storm file in git cache"
+    );
+    assert_eq!(
+        storm_files[0].file_name().unwrap().to_str().unwrap(),
+        "hello-world.storm"
+    );
+
+    // Mock engine execution so the workflow completes successfully.
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        dotenvy::dotenv().ok();
+        format!(
+            "postgres://stormchaser:{}@localhost:5432/stormchaser",
+            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
+        )
+    });
+    let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
+    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let nats_client = async_nats::connect(nats_url).await.unwrap();
+
+    let opa_client = std::sync::Arc::new(stormchaser_model::auth::OpaClient::new(None, None));
+    let tls_reloader = std::sync::Arc::new(
+        stormchaser_tls::TlsReloader::new(stormchaser_tls::TlsConfig::default())
+            .await
+            .unwrap(),
+    );
+
+    // Advance Queued -> StartPending
+    stormchaser_engine::handler::workflow::handle_workflow_queued(
+        uuid::Uuid::parse_str(run_id).unwrap(),
+        pool.clone(),
+        std::sync::Arc::new(git_cache),
+        opa_client,
+        nats_client.clone(),
+        tls_reloader.clone(),
+    )
+    .await
+    .unwrap();
+
+    // Advance StartPending -> Running
+    stormchaser_engine::handler::workflow::handle_workflow_start_pending(
+        uuid::Uuid::parse_str(run_id).unwrap(),
+        pool.clone(),
+        nats_client.clone(),
+        tls_reloader.clone(),
+    )
+    .await
+    .unwrap();
+
+    let step_id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM step_instances WHERE run_id = $1")
+        .bind(uuid::Uuid::parse_str(run_id).unwrap())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    // Mock runner completing the step
+    stormchaser_engine::handler::step::events::handle_step_completed(
+        serde_json::json!({
+            "run_id": run_id,
+            "step_id": step_id.to_string(),
+            "outputs": {}
+        }),
+        pool.clone(),
+        nats_client.clone(),
+        std::sync::Arc::new(None),
+        tls_reloader.clone(),
+    )
+    .await
+    .unwrap();
+
+    // Verify the workflow completes successfully.
+    let mut success = false;
+    for _ in 0..60 {
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/api/v1/runs/{}", run_id))
+                    .header("Authorization", format!("Bearer {}", get_token()))
+                    .extension(ConnectInfo(addr))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let run_detail: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+        let status = run_detail["detail"]["status"].as_str().unwrap();
+        if status == "succeeded" {
+            success = true;
+            break;
+        } else if status == "failed" || status == "aborted" {
+            panic!("Workflow failed or aborted: {:?}", run_detail);
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+
+    assert!(
+        success,
+        "Workflow did not complete successfully within timeout"
+    );
+}
+
+#[tokio::test]
 async fn test_stream_workflow_runs() {
     let app = match setup_app().await {
         Some(a) => a,

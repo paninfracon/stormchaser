@@ -69,6 +69,9 @@ mime = "0.3"
 chrono = { workspace = true }
 serde_json = { workspace = true }
 dotenvy = "0.15.7"
+stormchaser-engine = { path = "../stormchaser-engine" }
+tempfile = "3.27.0"
+walkdir = "2.5.0"
 
 [build-dependencies]
 vergen = { workspace = true }

@@ -50,9 +50,12 @@ impl GitCache {
         let fetch_opts = git2::FetchOptions::new();
         // We could add depth(1) here but it can be problematic with specific refs/shas
 
+        let mut empty_checkout = CheckoutBuilder::new();
+        empty_checkout.dry_run();
+
         let repo = RepoBuilder::new()
             .fetch_options(fetch_opts)
-            .with_checkout(CheckoutBuilder::new()) // Empty checkout
+            .with_checkout(empty_checkout) // Empty checkout
             .clone(repo_url, &target_dir)
             .with_context(|| format!("Failed to clone metadata for {}", repo_url))?;
 
