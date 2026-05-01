@@ -155,9 +155,19 @@ async fn check_approval_opa(
         return Ok(());
     }
 
-    let context_row = crate::db::get_workflow_context_for_opa(&state.pool, run_id)
-        .await
-        .unwrap_or(None);
+    let context_row = match crate::db::get_workflow_context_for_opa(&state.pool, run_id).await {
+        Ok(context_row) => context_row,
+        Err(err) => {
+            eprintln!(
+                "Failed to load workflow context for approval OPA evaluation for run {}: {:?}",
+                run_id, err
+            );
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load workflow context for approval policy evaluation".to_string(),
+            ));
+        }
+    };
 
     if let Some(context_data) = context_row {
         let mut step_ast = serde_json::json!({});
