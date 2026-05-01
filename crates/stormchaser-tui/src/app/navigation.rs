@@ -117,3 +117,86 @@ impl<'a> App<'a> {
         self.log_scroll = 0;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::mpsc;
+
+    #[tokio::test]
+    async fn test_scroll_logic() {
+        let (tx, _rx) = mpsc::channel(1);
+        let mut app = App::new("http://localhost".to_string(), None, tx);
+
+        app.scroll_logs_down();
+        assert_eq!(app.log_scroll, 1);
+
+        app.scroll_logs_up();
+        assert_eq!(app.log_scroll, 0);
+        assert!(!app.log_auto_scroll);
+
+        app.scroll_overview_down();
+        assert_eq!(app.overview_scroll, 1);
+
+        app.scroll_overview_up();
+        assert_eq!(app.overview_scroll, 0);
+
+        app.scroll_logs_down();
+        app.scroll_logs_down();
+        app.scroll_logs_to_top();
+        assert_eq!(app.log_scroll, 0);
+        assert!(!app.log_auto_scroll);
+    }
+
+    #[tokio::test]
+    async fn test_run_navigation_empty() {
+        let (tx, _rx) = mpsc::channel(1);
+        let mut app = App::new("http://localhost".to_string(), None, tx);
+
+        app.next_run();
+        assert_eq!(app.runs_state.selected(), None);
+
+        app.previous_run();
+        assert_eq!(app.runs_state.selected(), None);
+    }
+
+    #[tokio::test]
+    async fn test_run_navigation() {
+        let (tx, _rx) = mpsc::channel(100);
+        let mut app = App::new("http://localhost".to_string(), None, tx);
+
+        app.runs = vec![
+            WorkflowRunDetail {
+                id: Uuid::new_v4(),
+                workflow_name: "1".to_string(),
+                initiating_user: "u".to_string(),
+                status: RunStatus::Succeeded,
+                created_at: chrono::Utc::now(),
+                finished_at: None,
+            },
+            WorkflowRunDetail {
+                id: Uuid::new_v4(),
+                workflow_name: "2".to_string(),
+                initiating_user: "u".to_string(),
+                status: RunStatus::Succeeded,
+                created_at: chrono::Utc::now(),
+                finished_at: None,
+            },
+        ];
+
+        app.next_run();
+        assert_eq!(app.runs_state.selected(), Some(0));
+
+        app.next_run();
+        assert_eq!(app.runs_state.selected(), Some(1));
+
+        app.next_run();
+        assert_eq!(app.runs_state.selected(), Some(0));
+
+        app.previous_run();
+        assert_eq!(app.runs_state.selected(), Some(1));
+
+        app.previous_run();
+        assert_eq!(app.runs_state.selected(), Some(0));
+    }
+}

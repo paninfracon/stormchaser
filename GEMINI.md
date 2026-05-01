@@ -16,10 +16,12 @@ The project is divided into specialized crates to ensure a clear separation of c
   - `auth.rs`: OPA contexts, identity claims, and authorization types.
   - `storage.rs` / `artifact.rs`: Models for storage backends and artifact metadata.
   - `event.rs` / `event_rules.rs`: Definitions for system events and rule-based triggers.
+  - `schema_gen.rs`: Centralized generation logic for building Extensible JSON Schemas representing the DSL.
 
-- **`stormchaser-dsl`**: Specialized HCL parser.
+- **`stormchaser-dsl`**: Specialized HCL parser and schema toolset.
   - `lib.rs`: `StormchaserParser` implementation for mapping HCL blocks to `stormchaser-model` types.
   - `ast.rs`: Abstract Syntax Tree representation of the DSL.
+  - `hcl_schema.rs`: Bidirectional serialization logic for mapping JSON Schema to and from the functional HCL data format.
 
 - **`stormchaser-engine`**: The core orchestration layer managing state transitions.
   - `workflow_machine.rs` / `step_machine.rs`: State machines governing the lifecycle of workflows and individual steps.
@@ -35,6 +37,7 @@ The project is divided into specialized crates to ensure a clear separation of c
   - `hitl.rs`: Management of Human-In-The-Loop approval flows.
   - `telemetry.rs`: Structured logging, tracing (OpenTelemetry), and metrics.
   - `db.rs`: API-specific database queries.
+  - `routes/schema.rs`: Serves the live DSL JSON schema for offline validation support.
 
 - **`stormchaser-runner-*`**: Environment-specific executors.
   - `stormchaser-runner-docker`: Uses `container_machine.rs` to manage Docker container lifecycles.
@@ -45,8 +48,9 @@ The project is divided into specialized crates to ensure a clear separation of c
   - `main.rs`: Implements storage "parking" (packaging/uploading) and "unparking" (downloading/extracting) for SFS (Stormchaser File System).
   - Collects and uploads artifacts and test reports.
 
-- **`stormchaser-cli`**: Primary user command-line interface.
-  - `main.rs`: Implements commands for running workflows, managing runs, webhooks, rules, and authentication.
+- **`stormchaser-cli`**: Primary user command-line interface. Split into a library and thin binary to support `docs.rs`.
+  - `lib.rs` / `main.rs`: Exposes the CLI parser and command router.
+  - `commands/`: Implements commands for running, linting (`lint.rs`), exporting schemas (`schema.rs`), managing runs, webhooks, rules, and authentication.
 
 - **`stormchaser-tui`**: Interactive terminal dashboard.
   - `main.rs`: Ratatui-based UI for real-time monitoring of workflow state and logs.

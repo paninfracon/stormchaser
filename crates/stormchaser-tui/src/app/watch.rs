@@ -140,3 +140,60 @@ impl<'a> App<'a> {
         self.log_handle = Some(log_handle);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::mpsc;
+
+    #[tokio::test]
+    async fn test_start_watching_handles() {
+        let (tx, _rx) = mpsc::channel(100);
+        let mut app = App::new("http://localhost".to_string(), None, tx);
+
+        let id = Uuid::new_v4();
+
+        // This will spawn two tokio tasks and set the handles.
+        // It won't actually do anything without a server since it's just a handle to a sleeping future waiting for a response or failing fast.
+        app.start_watching(id).await;
+
+        assert!(app.watcher_handle.is_some());
+        assert!(app.log_handle.is_some());
+
+        // Calling again should abort previous and make new ones
+        app.start_watching(id).await;
+
+        assert!(app.watcher_handle.is_some());
+        assert!(app.log_handle.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_start_watching_cached() {
+        let (tx, _rx) = mpsc::channel(100);
+        let mut app = App::new("http://localhost".to_string(), None, tx);
+
+        let id = Uuid::new_v4();
+        // Insert a dummy into cached runs
+        let dummy_run = WorkflowRunFullDetail {
+            detail: crate::app::WorkflowRunDetail {
+                id,
+                workflow_name: "test".to_string(),
+                initiating_user: "u".to_string(),
+                status: stormchaser_model::workflow::RunStatus::Succeeded,
+                created_at: chrono::Utc::now(),
+                finished_at: None,
+            },
+            steps: vec![],
+            artifacts: vec![],
+            test_summaries: vec![],
+            test_cases: vec![],
+        };
+        app.cached_runs.insert(id, dummy_run);
+
+        app.start_watching(id).await;
+
+        // Because it is cached, start_watching should return early and not set handles
+        assert!(app.watcher_handle.is_none());
+        assert!(app.log_handle.is_none());
+    }
+}

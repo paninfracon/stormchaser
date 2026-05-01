@@ -6,7 +6,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 /// Root structure representing a parsed workflow definition.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Workflow {
     /// Indicates if this workflow is a reusable template.
     #[serde(default)]
@@ -48,7 +48,7 @@ pub struct Workflow {
 }
 
 /// Import definition for external workflow templates.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Library {
     /// Alias to use when referencing this library.
     pub name: String,
@@ -61,7 +61,7 @@ pub struct Library {
 }
 
 /// Import definition for external step types.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct StepLibrary {
     /// Alias to use for the imported step type.
     pub name: String,
@@ -82,7 +82,7 @@ pub struct StepLibrary {
 }
 
 /// Defines an inclusion of another workflow.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Include {
     /// Name of the inclusion block.
     pub name: String,
@@ -94,7 +94,7 @@ pub struct Include {
 }
 
 /// Execution strategy settings (e.g., parallelism, affinity).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Strategy {
     /// Runner affinity rules.
     pub affinity: Option<String>,
@@ -107,7 +107,7 @@ pub struct Strategy {
 }
 
 /// Resource quotas for a run.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Quotas {
     /// Maximum concurrent steps.
     pub max_concurrency: Option<u32>,
@@ -122,7 +122,7 @@ pub struct Quotas {
 }
 
 /// Storage volume definition to be provisioned.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Storage {
     /// Logical name of the storage volume.
     pub name: String,
@@ -141,7 +141,7 @@ pub struct Storage {
 }
 
 /// Instructions for provisioning data into storage.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Provision {
     /// Type of resource to provision.
     pub resource_type: String, // "secret", "config", "download", "artifact"
@@ -162,7 +162,7 @@ pub struct Provision {
 }
 
 /// Definition of an artifact to collect and upload.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Artifact {
     /// Logical name of the artifact.
     pub name: String,
@@ -192,7 +192,7 @@ pub struct Input {
 }
 
 /// Workflow output value definition.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Output {
     /// Name of the output variable.
     pub name: String,
@@ -201,7 +201,7 @@ pub struct Output {
 }
 
 /// Event handler mapping an event to an action.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Handler {
     /// Name of the handler.
     pub name: String,
@@ -214,7 +214,7 @@ pub struct Handler {
 }
 
 /// Execution step definition within a workflow.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Step {
     /// Name of the step.
     pub name: String,
@@ -266,7 +266,7 @@ pub struct Step {
 }
 
 /// Definition for capturing a test report.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct TestReport {
     /// Name of the report.
     pub name: String,
@@ -400,7 +400,7 @@ pub struct ConfigMapMount {
 }
 
 /// Aggregation rule for map/reduce patterns.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Aggregation {
     /// Name of the aggregation.
     pub name: String,
@@ -411,7 +411,7 @@ pub struct Aggregation {
 }
 
 /// Rule for extracting outputs from logs or files.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct OutputExtraction {
     /// Output key name.
     pub name: String,
@@ -430,7 +430,7 @@ pub struct OutputExtraction {
 }
 
 /// Step retry policy definition.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct RetryPolicy {
     /// Number of retry attempts.
     pub count: u32,

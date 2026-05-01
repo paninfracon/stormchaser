@@ -147,3 +147,40 @@ pub struct AuditLog {
     /// Timestamp when the event was recorded.
     pub created_at: DateTime<Utc>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_run_status_from_string() {
+        assert_eq!(
+            RunStatus::from("resolving".to_string()),
+            RunStatus::Resolving
+        );
+        assert_eq!(
+            RunStatus::from("start_pending".to_string()),
+            RunStatus::StartPending
+        );
+        assert_eq!(RunStatus::from("running".to_string()), RunStatus::Running);
+        assert_eq!(
+            RunStatus::from("succeeded".to_string()),
+            RunStatus::Succeeded
+        );
+        assert_eq!(RunStatus::from("failed".to_string()), RunStatus::Failed);
+        assert_eq!(RunStatus::from("aborted".to_string()), RunStatus::Aborted);
+        assert_eq!(RunStatus::from("queued".to_string()), RunStatus::Queued);
+        assert_eq!(RunStatus::from("unknown".to_string()), RunStatus::Queued);
+    }
+
+    #[test]
+    fn test_run_status_to_string() {
+        assert_eq!(String::from(RunStatus::Queued), "queued");
+        assert_eq!(String::from(RunStatus::Resolving), "resolving");
+        assert_eq!(String::from(RunStatus::StartPending), "start_pending");
+        assert_eq!(String::from(RunStatus::Running), "running");
+        assert_eq!(String::from(RunStatus::Succeeded), "succeeded");
+        assert_eq!(String::from(RunStatus::Failed), "failed");
+        assert_eq!(String::from(RunStatus::Aborted), "aborted");
+    }
+}

@@ -1,7 +1,9 @@
 pub mod auth;
 pub mod cron;
+pub mod lint;
 pub mod rules;
 pub mod run;
 pub mod runs;
+pub mod schema;
 pub mod storage;
 pub mod webhooks;

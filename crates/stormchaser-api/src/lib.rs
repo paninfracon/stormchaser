@@ -50,6 +50,7 @@ pub use routes::*;
         routes::workflow::enqueue_workflow,
         routes::workflow::list_workflow_runs,
         routes::workflow::get_workflow_run,
+        routes::schema::get_schema,
         hitl::approve_step_link
     ),
     components(
@@ -215,6 +216,7 @@ pub fn app(state: AppState) -> Router {
         .route("/auth/refresh", post(refresh_token))
         .route("/approve-link/:token", get(hitl::approve_step_link))
         .route("/cron-trigger/:id", post(trigger_cron_workflow))
+        .route("/schema", get(routes::schema::get_schema))
         .layer(middleware::from_fn_with_state(
             rate_limit_state,
             rate_limit::nats_rate_limiter,

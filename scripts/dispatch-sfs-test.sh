@@ -6,7 +6,7 @@ set -e
 # 2. Dispatches the SFS parking test workflow
 
 REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." &> /dev/null && pwd)
-STORM_CLI="$REPO_ROOT/target/debug/stormchaser-cli"
+STORM_CLI="$REPO_ROOT/target/debug/stormchaser"
 
 if [ ! -f "$STORM_CLI" ]; then
     echo "Building CLI..."
