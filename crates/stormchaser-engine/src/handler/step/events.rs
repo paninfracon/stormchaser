@@ -18,7 +18,7 @@ use tar::Archive;
 use tracing::{debug, error, info};
 use uuid::Uuid;
 
-use super::dispatch::dispatch_step_instance;
+use super::dispatch::{dispatch_step_instance, find_step};
 use super::quota::release_step_quota_for_instance;
 use super::scheduling::schedule_step;
 
@@ -258,11 +258,7 @@ pub async fn handle_step_completed(
         .find(|s| s.id == step_id)
         .context("Completed step not found in DB")?;
 
-    let mut dsl_step = workflow
-        .steps
-        .iter()
-        .find(|s| s.name == current_step_instance.step_name)
-        .cloned();
+    let mut dsl_step = find_step(&workflow.steps, &current_step_instance.step_name).cloned();
 
     if let Some(step) = &mut dsl_step {
         if step.r#type == "TerraformApply" {
