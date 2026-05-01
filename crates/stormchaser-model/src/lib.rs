@@ -21,6 +21,8 @@ pub mod logging;
 pub mod outbox;
 /// Execution runner definitions and status models.
 pub mod runner;
+/// Schema generation functions.
+pub mod schema_gen;
 /// Workflow step execution models and state.
 pub mod step;
 /// Storage backend and artifact registry models.

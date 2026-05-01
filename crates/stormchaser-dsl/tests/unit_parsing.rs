@@ -1,6 +1,85 @@
 use stormchaser_dsl::StormchaserParser;
 
 #[test]
+fn test_provision_new_syntax() {
+    let dsl = r#"
+        stormchaser_dsl_version = "0.1"
+        workflow "test_provision" {
+            storage "workspace" {
+                size = "10Gi"
+                provision {
+                    download "my_script" {
+                        url = "https://example.com/setup.sh"
+                        destination = "scripts/setup.sh"
+                        mode = "0755"
+                    }
+                    secret "docker_cfg" {
+                        source = "secrets/docker"
+                        destination = ".docker/config.json"
+                    }
+                }
+            }
+            steps {}
+        }
+    "#;
+
+    let parser = StormchaserParser::new();
+    let workflow = parser.parse(dsl).expect("Failed to parse DSL");
+    let storage = &workflow.storage[0];
+
+    assert_eq!(storage.name, "workspace");
+    assert_eq!(storage.provision.len(), 2);
+
+    let download = &storage.provision[0];
+    assert_eq!(download.name, "my_script");
+    assert_eq!(download.resource_type, "download");
+    assert_eq!(
+        download.url.as_deref(),
+        Some("https://example.com/setup.sh")
+    );
+    assert_eq!(download.destination, "scripts/setup.sh");
+    assert_eq!(download.mode.as_deref(), Some("0755"));
+
+    let secret = &storage.provision[1];
+    assert_eq!(secret.name, "docker_cfg");
+    assert_eq!(secret.resource_type, "secret");
+    assert_eq!(secret.source.as_deref(), Some("secrets/docker"));
+    assert_eq!(secret.destination, ".docker/config.json");
+}
+
+#[test]
+fn test_provision_legacy_syntax() {
+    let dsl = r#"
+        stormchaser_dsl_version = "0.1"
+        workflow "test_provision_legacy" {
+            storage "workspace" {
+                size = "5Gi"
+                provision "my_artifact" {
+                    resource_type = "artifact"
+                    from = "other_workflow.workspace.output"
+                    destination = "data/input"
+                }
+            }
+            steps {}
+        }
+    "#;
+
+    let parser = StormchaserParser::new();
+    let workflow = parser.parse(dsl).expect("Failed to parse legacy DSL");
+    let storage = &workflow.storage[0];
+
+    assert_eq!(storage.provision.len(), 1);
+    let prov = &storage.provision[0];
+    assert_eq!(prov.name, "my_artifact");
+    assert_eq!(prov.resource_type, "artifact");
+    assert_eq!(
+        prov.from.as_deref(),
+        Some("other_workflow.workspace.output")
+    );
+    assert_eq!(prov.destination, "data/input");
+}
+
+#[test]
 fn test_parse_markers() {
     let dsl = r#"
         stormchaser_dsl_version = "0.1"

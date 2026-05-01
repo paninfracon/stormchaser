@@ -23,11 +23,7 @@ workflow_template "standard_deployment" {
       spec {
         url    = "https://events.example.com/deploy/start"
         method = "POST"
-        body = {
-          service = "${inputs.service_name}"
-          env     = "${inputs.environment}"
-          tag     = "${inputs.image_tag}"
-        }
+        body   = "{\"service\": \"${inputs.service_name}\", \"env\": \"${inputs.environment}\", \"tag\": \"${inputs.image_tag}\"}"
       }
       next = ["deploy_k8s"]
     }
@@ -44,11 +40,7 @@ workflow_template "standard_deployment" {
       spec {
         url    = "https://events.example.com/deploy/success"
         method = "POST"
-        body = {
-          service = "${inputs.service_name}"
-          env     = "${inputs.environment}"
-          status  = "Success"
-        }
+        body   = "{\"service\": \"${inputs.service_name}\", \"env\": \"${inputs.environment}\", \"status\": \"Success\"}"
       }
     }
   }
