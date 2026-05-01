@@ -271,3 +271,53 @@ impl WorkflowMachine<state::Running> {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    fn dummy_run() -> WorkflowRun {
+        WorkflowRun {
+            id: Uuid::new_v4(),
+            workflow_name: "test".to_string(),
+            initiating_user: "u".to_string(),
+            status: RunStatus::Succeeded, // start with something else
+            created_at: Utc::now(),
+            started_resolving_at: None,
+            started_at: None,
+            finished_at: None,
+            updated_at: Utc::now(),
+            repo_url: "https://example.com/repo".to_string(),
+            workflow_path: "workflow.yaml".to_string(),
+            version: 1,
+            fencing_token: 1,
+            git_ref: "main".to_string(),
+            error: None,
+        }
+    }
+
+    #[test]
+    fn test_workflow_machine_new() {
+        let run = dummy_run();
+        let machine: WorkflowMachine<state::Queued> = WorkflowMachine::new(run.clone());
+        assert_eq!(machine.run.status, RunStatus::Queued);
+        assert_eq!(machine.run.id, run.id);
+    }
+
+    #[test]
+    fn test_workflow_machine_new_from_run() {
+        let run = dummy_run();
+        let machine: WorkflowMachine<state::Succeeded> = WorkflowMachine::new_from_run(run.clone());
+        assert_eq!(machine.run.status, RunStatus::Succeeded);
+    }
+
+    #[test]
+    fn test_workflow_machine_into_run() {
+        let run = dummy_run();
+        let machine: WorkflowMachine<state::Succeeded> = WorkflowMachine::new_from_run(run.clone());
+        let extracted = machine.into_run();
+        assert_eq!(extracted.id, run.id);
+        assert_eq!(extracted.status, RunStatus::Succeeded);
+    }
+}

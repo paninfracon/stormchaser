@@ -397,3 +397,53 @@ impl StepMachine<state::Aborted> {
         self.instance
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    fn dummy_instance() -> StepInstance {
+        StepInstance {
+            id: Uuid::new_v4(),
+            run_id: Uuid::new_v4(),
+            step_name: "test".to_string(),
+            step_type: "docker".to_string(),
+            status: StepStatus::Running, // Start with something else
+            iteration_index: None,
+            runner_id: None,
+            affinity_context: None,
+            started_at: None,
+            finished_at: None,
+            exit_code: None,
+            error: None,
+            spec: serde_json::json!({}),
+            params: serde_json::json!({}),
+            created_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn test_step_machine_new() {
+        let instance = dummy_instance();
+        let machine: StepMachine<state::Pending> = StepMachine::new(instance.clone());
+        assert_eq!(machine.instance.status, StepStatus::Pending);
+        assert_eq!(machine.instance.id, instance.id);
+    }
+
+    #[test]
+    fn test_step_machine_from_instance() {
+        let instance = dummy_instance();
+        let machine: StepMachine<state::Running> = StepMachine::from_instance(instance.clone());
+        assert_eq!(machine.instance.status, StepStatus::Running);
+    }
+
+    #[test]
+    fn test_step_machine_into_instance() {
+        let instance = dummy_instance();
+        let machine: StepMachine<state::Running> = StepMachine::from_instance(instance.clone());
+        let extracted = machine.into_instance();
+        assert_eq!(extracted.id, instance.id);
+        assert_eq!(extracted.status, StepStatus::Running);
+    }
+}
