@@ -179,18 +179,17 @@ pub async fn get_workflow_run(
     Path(run_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, StatusCode> {
     // 1. Fetch the workflow run detail
-    let detail: WorkflowRunDetail =
-        crate::db::get_workflow_run_detail(&state.pool, run_id)
-            .await
-            .map_err(|e| {
-                tracing::error!(
-                    "Failed to fetch workflow run detail for {}: {:?}",
-                    run_id,
-                    e
-                );
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?
-            .ok_or(StatusCode::NOT_FOUND)?;
+    let detail: WorkflowRunDetail = crate::db::get_workflow_run_detail(&state.pool, run_id)
+        .await
+        .map_err(|e| {
+            tracing::error!(
+                "Failed to fetch workflow run detail for {}: {:?}",
+                run_id,
+                e
+            );
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     // 2. Fetch all step instances for this run (active or archived)
     let instances = crate::db::get_step_instances(&state.pool, run_id)

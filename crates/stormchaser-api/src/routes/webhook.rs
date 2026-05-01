@@ -141,14 +141,13 @@ pub async fn handle_webhook(
     body: Bytes,
 ) -> Result<impl IntoResponse, StatusCode> {
     // 1. Fetch WebhookConfig
-    let webhook: WebhookConfig =
-        crate::db::get_active_webhook(&state.pool, webhook_id)
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to fetch webhook: {:?}", e);
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?
-            .ok_or(StatusCode::NOT_FOUND)?;
+    let webhook: WebhookConfig = crate::db::get_active_webhook(&state.pool, webhook_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to fetch webhook: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     // 2. Validate Source/Signature
     let payload: Value = serde_json::from_slice(&body).map_err(|_| StatusCode::BAD_REQUEST)?;

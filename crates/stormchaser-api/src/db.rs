@@ -877,7 +877,10 @@ pub async fn get_workflow_context_for_opa(
 }
 
 /// Deletes an event correlation record
-pub async fn delete_event_correlation(pool: &sqlx::PgPool, id: uuid::Uuid) -> Result<(), sqlx::Error> {
+pub async fn delete_event_correlation(
+    pool: &sqlx::PgPool,
+    id: uuid::Uuid,
+) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM event_correlations WHERE id = $1")
         .bind(id)
         .execute(pool)

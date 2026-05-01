@@ -161,9 +161,9 @@ async fn check_approval_opa(
 
     if let Some(context_data) = context_row {
         let mut step_ast = serde_json::json!({});
-        if let Ok(workflow) =
-            serde_json::from_value::<stormchaser_model::dsl::Workflow>(context_data.workflow_definition)
-        {
+        if let Ok(workflow) = serde_json::from_value::<stormchaser_model::dsl::Workflow>(
+            context_data.workflow_definition,
+        ) {
             if let Some(s) = find_step(&workflow.steps, step_name) {
                 step_ast = serde_json::to_value(s).unwrap_or(serde_json::json!({}));
             }
