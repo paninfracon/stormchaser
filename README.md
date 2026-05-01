@@ -1,7 +1,7 @@
 # 🌪️ Stormchaser
 
 [![CI](https://github.com/paninfracon/stormchaser/actions/workflows/ci.yml/badge.svg)](https://github.com/paninfracon/stormchaser/actions/workflows/ci.yml)
-[![Coverage](https://github.com/paninfracon/stormchaser/actions/workflows/coverage.yml/badge.svg)](https://github.com/paninfracon/stormchaser/actions/workflows/coverage.yml)
+[![Coverage](https://codecov.io/gh/paninfracon/stormchaser/branch/trunk/graph/badge.svg)](https://codecov.io/gh/paninfracon/stormchaser)
 [![License](https://img.shields.io/badge/license-MIT_OR_Apache--2.0_OR_CDLA--Permissive--2.0-blue.svg)](#-license)
 [![prek](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/j178/prek/master/docs/assets/badge-v0.json)](https://github.com/j178/prek)
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit)
@@ -33,7 +33,6 @@ workflows.
 | `stormchaser-dsl` | [![Crates.io](https://img.shields.io/crates/v/stormchaser-dsl.svg)](https://crates.io/crates/stormchaser-dsl) | [![Docs.rs](https://docs.rs/stormchaser-dsl/badge.svg)](https://docs.rs/stormchaser-dsl) |
 | `stormchaser-opa` | [![Crates.io](https://img.shields.io/crates/v/stormchaser-opa.svg)](https://crates.io/crates/stormchaser-opa) | [![Docs.rs](https://docs.rs/stormchaser-opa/badge.svg)](https://docs.rs/stormchaser-opa) |
 | `stormchaser-tls` | [![Crates.io](https://img.shields.io/crates/v/stormchaser-tls.svg)](https://crates.io/crates/stormchaser-tls) | [![Docs.rs](https://docs.rs/stormchaser-tls/badge.svg)](https://docs.rs/stormchaser-tls) |
-
 
 ## 📝 Example Workflow
 

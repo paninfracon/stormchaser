@@ -182,3 +182,24 @@ pub async fn run_cli(cli: Cli) -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn verify_cli() {
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn parse_cli_basic() {
+        use clap::Parser;
+
+        let cli = Cli::try_parse_from(["stormchaser", "--url", "http://test", "webhooks", "list"])
+            .unwrap();
+        assert_eq!(cli.url, "http://test");
+        assert!(matches!(cli.command, Commands::Webhooks { .. }));
+    }
+}

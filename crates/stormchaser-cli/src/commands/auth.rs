@@ -156,3 +156,29 @@ pub async fn handle_login(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reqwest_middleware::ClientBuilder;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn test_auth_exchange() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/auth/exchange"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"access_token": "test"})))
+            .mount(&server)
+            .await;
+
+        let client = ClientBuilder::new(reqwest::Client::new()).build();
+        let cmd = AuthCommands::Exchange {
+            sso_token: "test_sso".to_string(),
+        };
+
+        let result = handle(&server.uri(), &client, cmd).await;
+        assert!(result.is_ok());
+    }
+}

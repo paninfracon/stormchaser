@@ -252,3 +252,22 @@ impl<'a> App<'a> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::mpsc;
+
+    #[test]
+    fn test_app_new() {
+        let (tx, _rx) = mpsc::channel(1);
+        let app = App::new("http://test".to_string(), Some("token".to_string()), tx);
+
+        assert_eq!(app.url, "http://test");
+        assert_eq!(app.token, Some("token".to_string()));
+        assert_eq!(app.state, AppState::LoggedOut);
+        assert_eq!(app.active_pane, Pane::RunsList);
+        assert!(app.run_logs.is_empty());
+        assert_eq!(app.runs.len(), 0);
+    }
+}

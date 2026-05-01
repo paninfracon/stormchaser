@@ -44,3 +44,26 @@ pub fn handle(command: SchemaCommands) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_handle_schema_generate_json() {
+        let cmd = SchemaCommands::Generate {
+            format: SchemaFormat::Json,
+        };
+        let result = handle(cmd);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_schema_generate_hcl() {
+        let cmd = SchemaCommands::Generate {
+            format: SchemaFormat::Hcl,
+        };
+        let result = handle(cmd);
+        assert!(result.is_ok());
+    }
+}

@@ -88,3 +88,72 @@ pub async fn handle(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reqwest_middleware::ClientBuilder;
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn test_cron_list() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/cron-workflows"))
+            .and(header("Authorization", "Bearer test-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+            .mount(&server)
+            .await;
+
+        let client = ClientBuilder::new(reqwest::Client::new()).build();
+        let cmd = CronCommands::List;
+
+        let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_cron_create() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/cron-workflows"))
+            .and(header("Authorization", "Bearer test-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "created"})))
+            .mount(&server)
+            .await;
+
+        let client = ClientBuilder::new(reqwest::Client::new()).build();
+        let cmd = CronCommands::Create {
+            name: "test-cron".to_string(),
+            cron: "* * * * *".to_string(),
+            workflow: "my-wf".to_string(),
+            repo: "https://github.com/a/b".to_string(),
+            path: "wf.storm".to_string(),
+            git_ref: "main".to_string(),
+            description: Some("desc".to_string()),
+            input: vec!["key=value".to_string()],
+        };
+
+        let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_cron_delete() {
+        let server = MockServer::start().await;
+        let id = Uuid::new_v4();
+        Mock::given(method("DELETE"))
+            .and(path(format!("/api/v1/cron-workflows/{}", id)))
+            .and(header("Authorization", "Bearer test-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "deleted"})))
+            .mount(&server)
+            .await;
+
+        let client = ClientBuilder::new(reqwest::Client::new()).build();
+        let cmd = CronCommands::Delete { id };
+
+        let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
+        assert!(result.is_ok());
+    }
+}
