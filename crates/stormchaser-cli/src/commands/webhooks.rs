@@ -81,3 +81,86 @@ pub async fn handle(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reqwest_middleware::ClientBuilder;
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn test_webhook_list() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/webhooks"))
+            .and(header("Authorization", "Bearer test-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+            .mount(&server)
+            .await;
+
+        let client = ClientBuilder::new(reqwest::Client::new()).build();
+        let cmd = WebhookCommands::List;
+
+        let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_webhook_create() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/webhooks"))
+            .and(header("Authorization", "Bearer test-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "created"})))
+            .mount(&server)
+            .await;
+
+        let client = ClientBuilder::new(reqwest::Client::new()).build();
+        let cmd = WebhookCommands::Create {
+            name: "test-webhook".to_string(),
+            source_type: "github".to_string(),
+            secret: Some("secret".to_string()),
+            description: None,
+        };
+
+        let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_webhook_get() {
+        let server = MockServer::start().await;
+        let id = Uuid::new_v4();
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v1/webhooks/{}", id)))
+            .and(header("Authorization", "Bearer test-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": id})))
+            .mount(&server)
+            .await;
+
+        let client = ClientBuilder::new(reqwest::Client::new()).build();
+        let cmd = WebhookCommands::Get { id };
+
+        let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_webhook_delete() {
+        let server = MockServer::start().await;
+        let id = Uuid::new_v4();
+        Mock::given(method("DELETE"))
+            .and(path(format!("/api/v1/webhooks/{}", id)))
+            .and(header("Authorization", "Bearer test-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "deleted"})))
+            .mount(&server)
+            .await;
+
+        let client = ClientBuilder::new(reqwest::Client::new()).build();
+        let cmd = WebhookCommands::Delete { id };
+
+        let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
+        assert!(result.is_ok());
+    }
+}

@@ -14,3 +14,16 @@ pub async fn get_schema() -> impl IntoResponse {
     let schema = generate_dsl_schema();
     Json(schema)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+
+    #[tokio::test]
+    async fn test_get_schema() {
+        let response = get_schema().await.into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+}
