@@ -102,31 +102,31 @@ workflow "example_workflow" {
 
 ### 📊 Feature Comparison Matrix
 
-| Feature | Stormchaser | StackStorm | Rundeck | Harness | Jenkins | Argo Workflows | Node-RED | Flow-like (n8n, Make) |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Pricing** | ✅ (FOSS) | ⚠️ (Open-Core) | ⚠️ (Open-Core) | Commercial | ✅ (FOSS) | ✅ (FOSS) | ✅ (FOSS/Hosted) | ✅ (Varies) |
-| **Primary Focus** | DevOps Processes | Event-Driven Ops | Job Scheduling | CI/CD Platform | CI/CD Automation | Kubernetes Native | Event Integration | API / RPA / ETL |
-| **Configuration** | HCL + Expressions | YAML / Python | UI / YAML / XML | YAML / UI | Groovy / UI | YAML | JSON / UI | UI / JSON |
-| **Execution Model** | Affinity-Aware | Local/Remote Exec | SSH / Agent | SaaS / Delegate | Master / Agent | Pod-per-Step | Node.js Runtime | SaaS / Worker |
-| **Git Native** | ✅ | ⚠️ (Packs) | ❌ | ✅ | ⚠️ (Plugins) | ⚠️ (ArgoCD) | ⚠️ (Projects) | ❌ |
-| **K8s / Docker** | ✅ | ⚠️ (Packs) | ⚠️ (Plugins) | ✅ | ⚠️ (Plugins) | ✅ (K8s) | ✅ (Docker) | ⚠️ (Enterprise) |
-| **WASM Steps** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Webhooks** | ✅ (In/Out) | ✅ (In/Out) | ⚠️ (In) | ✅ (In/Out) | ⚠️ (In) | ⚠️ (Argo Events) | ✅ (In/Out) | ✅ (In/Out) |
-| **Event Mesh** | NATS JetStream | RabbitMQ / Sensor | Polling / API | Internal Bus | Polling | Sensor | ⚠️ (MQTT Nodes) | ⚠️ (Polling/Hooks) |
-| **Human-in-Loop** | Advanced (Multi) | Basic (Inquiry) | Manual Step | Built-in | `input` Step | Basic (Suspend) | ⚠️ (UI Nodes) | ⚠️ (Basic Wait) |
-| **Variable Passing** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ (`msg.payload`) | ✅ |
-| **Input Forms** | ⚠️ (Basic) | ⚠️ (Inquiry) | ✅ (Comprehensive) | ✅ | ✅ (Parameters) | ⚠️ (Basic) | ✅ (Dashboard) | ⚠️ (Basic) |
-| **Linting/Validation**| ✅ (JSON Schema/Offline) | ⚠️ (Packs) | ⚠️ (Basic) | ✅ (Built-in) | ⚠️ (Basic) | ✅ (Argo Lint) | ⚠️ (Basic) | ⚠️ (Basic) |
-| **Security** | OPA Fail-Closed | Action Aliases | ACLs | RBAC / Secrets | Plugin-based RBAC | K8s RBAC | ⚠️ (Basic Auth) | ⚠️ (Varies) |
-| **SSO Support** | ✅ (OIDC) | ⚠️ (Enterprise) | ⚠️ (Enterprise) | ✅ | ⚠️ (Plugins) | ✅ (SSO) | ⚠️ (Plugins) | ✅ |
-| **Distributed Exec** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ⚠️ (Enterprise) |
-| **Artifact Mgmt** | ✅ (SFS, OCI) | ❌ | ⚠️ (Plugins) | ✅ | ✅ (Plugins) | ✅ | ❌ | ❌ |
-| **JUnit Reports** | ✅ | ❌ | ❌ | ✅ | ✅ (Plugins) | ⚠️ (Artifacts) | ❌ | ❌ |
-| **Observability** | ✅ (OTel, TUI) | ⚠️ (Limited) | ⚠️ (Limited) | ✅ | ⚠️ (Plugins) | ✅ (Prometheus) | ⚠️ (Basic) | ⚠️ (Basic) |
-| **Email** | ✅ | ✅ (Packs) | ✅ | ✅ | ✅ (Plugins) | ⚠️ (Hooks) | ✅ (Nodes) | ✅ |
-| **Slack / Teams** | ⚠️ (Planned) | ✅ (ChatOps) | ⚠️ (Plugins) | ✅ | ✅ (Plugins) | ⚠️ (Hooks) | ✅ (Nodes) | ✅ |
-| **Pipeline UI** | ⚠️ (TUI Only) | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ (FlowForge) | ✅ |
-| **Visual Builder** | ❌ (Code-First) | ⚠️ (Workflow Designer) | ❌ | ✅ | ✅ (Blue Ocean) | ⚠️ (UI/3rd Party) | ✅ (Comprehensive) | ✅ |
+| Feature | Stormchaser | StackStorm | Rundeck | Harness | Jenkins | Argo Workflows | Node-RED | Flow-like (n8n, Make) | Celery |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Pricing** | ✅ (FOSS) | ⚠️ (Open-Core) | ⚠️ (Open-Core) | Commercial | ✅ (FOSS) | ✅ (FOSS) | ✅ (FOSS/Hosted) | ✅ (Varies) | ✅ (FOSS) |
+| **Primary Focus** | DevOps Processes | Event-Driven Ops | Job Scheduling | CI/CD Platform | CI/CD Automation | Kubernetes Native | Event Integration | API / RPA / ETL | Task Queue |
+| **Configuration** | HCL + Expressions | YAML / Python | UI / YAML / XML | YAML / UI | Groovy / UI | YAML | JSON / UI | UI / JSON | Python |
+| **Execution Model** | Affinity-Aware | Local/Remote Exec | SSH / Agent | SaaS / Delegate | Master / Agent | Pod-per-Step | Node.js Runtime | SaaS / Worker | Worker Nodes |
+| **Git Native** | ✅ | ⚠️ (Packs) | ❌ | ✅ | ⚠️ (Plugins) | ⚠️ (ArgoCD) | ⚠️ (Projects) | ❌ | ❌ |
+| **K8s / Docker** | ✅ | ⚠️ (Packs) | ⚠️ (Plugins) | ✅ | ⚠️ (Plugins) | ✅ (K8s) | ✅ (Docker) | ⚠️ (Enterprise) | ✅ |
+| **WASM Steps** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Webhooks** | ✅ (In/Out) | ✅ (In/Out) | ⚠️ (In) | ✅ (In/Out) | ⚠️ (In) | ⚠️ (Argo Events) | ✅ (In/Out) | ✅ (In/Out) | ❌ |
+| **Event Mesh** | NATS JetStream | RabbitMQ / Sensor | Polling / API | Internal Bus | Polling | Sensor | ⚠️ (MQTT Nodes) | ⚠️ (Polling/Hooks) | Redis / RabbitMQ |
+| **Human-in-Loop** | Advanced (Multi) | Basic (Inquiry) | Manual Step | Built-in | `input` Step | Basic (Suspend) | ⚠️ (UI Nodes) | ⚠️ (Basic Wait) | ❌ |
+| **Variable Passing** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ (`msg.payload`) | ✅ | ✅ |
+| **Input Forms** | ⚠️ (Basic) | ⚠️ (Inquiry) | ✅ (Comprehensive) | ✅ | ✅ (Parameters) | ⚠️ (Basic) | ✅ (Dashboard) | ⚠️ (Basic) | ❌ |
+| **Linting/Validation**| ✅ (JSON Schema/Offline) | ⚠️ (Packs) | ⚠️ (Basic) | ✅ (Built-in) | ⚠️ (Basic) | ✅ (Argo Lint) | ⚠️ (Basic) | ⚠️ (Basic) | ⚠️ (Basic) |
+| **Security** | OPA Fail-Closed | Action Aliases | ACLs | RBAC / Secrets | Plugin-based RBAC | K8s RBAC | ⚠️ (Basic Auth) | ⚠️ (Varies) | ⚠️ (Basic) |
+| **SSO Support** | ✅ (OIDC) | ⚠️ (Enterprise) | ⚠️ (Enterprise) | ✅ | ⚠️ (Plugins) | ✅ (SSO) | ⚠️ (Plugins) | ✅ | ❌ |
+| **Distributed Exec** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ⚠️ (Enterprise) | ✅ |
+| **Artifact Mgmt** | ✅ (SFS, OCI) | ❌ | ⚠️ (Plugins) | ✅ | ✅ (Plugins) | ✅ | ❌ | ❌ | ❌ |
+| **JUnit Reports** | ✅ | ❌ | ❌ | ✅ | ✅ (Plugins) | ⚠️ (Artifacts) | ❌ | ❌ | ❌ |
+| **Observability** | ✅ (OTel, TUI) | ⚠️ (Limited) | ⚠️ (Limited) | ✅ | ⚠️ (Plugins) | ✅ (Prometheus) | ⚠️ (Basic) | ⚠️ (Basic) | ⚠️ (Limited) |
+| **Email** | ✅ | ✅ (Packs) | ✅ | ✅ | ✅ (Plugins) | ⚠️ (Hooks) | ✅ (Nodes) | ✅ | ❌ |
+| **Slack / Teams** | ⚠️ (Planned) | ✅ (ChatOps) | ⚠️ (Plugins) | ✅ | ✅ (Plugins) | ⚠️ (Hooks) | ✅ (Nodes) | ✅ | ❌ |
+| **Pipeline UI** | ⚠️ (TUI Only) | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ (FlowForge) | ✅ | ⚠️ (Flower) |
+| **Visual Builder** | ❌ (Code-First) | ⚠️ (Workflow Designer) | ❌ | ✅ | ✅ (Blue Ocean) | ⚠️ (UI/3rd Party) | ✅ (Comprehensive) | ✅ | ❌ |
 
 *For a full list of features and planned roadmap, see
 [Features](docs/features.md).*
