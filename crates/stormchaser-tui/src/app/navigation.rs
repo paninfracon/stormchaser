@@ -100,6 +100,44 @@ impl<'a> App<'a> {
         self.selected_storage_backend = Some(self.storage_backends[i].clone());
     }
 
+    /// Selects the next webhook in the list.
+    pub fn next_webhook(&mut self) {
+        if self.webhooks.is_empty() {
+            return;
+        }
+        let i = match self.webhooks_state.selected() {
+            Some(i) => {
+                if i >= self.webhooks.len() - 1 {
+                    0
+                } else {
+                    i + 1
+                }
+            }
+            None => 0,
+        };
+        self.webhooks_state.select(Some(i));
+        self.selected_webhook = Some(self.webhooks[i].clone());
+    }
+
+    /// Selects the previous webhook in the list.
+    pub fn previous_webhook(&mut self) {
+        if self.webhooks.is_empty() {
+            return;
+        }
+        let i = match self.webhooks_state.selected() {
+            Some(i) => {
+                if i == 0 {
+                    self.webhooks.len() - 1
+                } else {
+                    i - 1
+                }
+            }
+            None => 0,
+        };
+        self.webhooks_state.select(Some(i));
+        self.selected_webhook = Some(self.webhooks[i].clone());
+    }
+
     /// Selects the next step within the currently selected workflow run.
     pub fn next_step(&mut self) {
         if let Some(run) = &self.selected_run {
@@ -137,6 +175,18 @@ impl<'a> App<'a> {
         self.log_scroll += 1;
     }
 
+    /// Scrolls the log view to the left.
+    pub fn scroll_logs_left(&mut self) {
+        if self.log_scroll_x > 0 {
+            self.log_scroll_x -= 1;
+        }
+    }
+
+    /// Scrolls the log view to the right.
+    pub fn scroll_logs_right(&mut self) {
+        self.log_scroll_x += 1;
+    }
+
     /// Scrolls the overview pane upwards.
     pub fn scroll_overview_up(&mut self) {
         if self.overview_scroll > 0 {
@@ -172,6 +222,16 @@ mod tests {
         app.scroll_logs_up();
         assert_eq!(app.log_scroll, 0);
         assert!(!app.log_auto_scroll);
+
+        app.scroll_logs_right();
+        assert_eq!(app.log_scroll_x, 1);
+
+        app.scroll_logs_left();
+        assert_eq!(app.log_scroll_x, 0);
+
+        // Ensure we don't underflow
+        app.scroll_logs_left();
+        assert_eq!(app.log_scroll_x, 0);
 
         app.scroll_overview_down();
         assert_eq!(app.overview_scroll, 1);

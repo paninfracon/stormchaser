@@ -14,6 +14,16 @@ opener = urllib.request.build_opener(ConditionalRedirectHandler())
 urllib.request.install_opener(opener)
 
 def get_token():
+    def get_password(username):
+        try:
+            with open("deploy/dex/credentials.generated", "r") as f:
+                for line in f:
+                    if line.startswith(username + ":"):
+                        return line.split(":", 1)[1].strip()
+        except Exception:
+            pass
+        return "password"
+
     auth_url = "http://127.0.0.1:5556/dex/auth?client_id=stormchaser-cli&redirect_uri=http://localhost:8080/callback&response_type=code&scope=openid+profile+email"
     req1 = urllib.request.Request(auth_url)
     try:
@@ -24,7 +34,8 @@ def get_token():
         action = html[action_start:action_end]
         login_url = "http://127.0.0.1:5556" + action.replace('&amp;', '&')
 
-        data = urllib.parse.urlencode({'login': 'stormchaser-admin@paninfracon.net', 'password': 'password'}).encode('ascii')
+        password = get_password('stormchaser-admin@paninfracon.net')
+        data = urllib.parse.urlencode({'login': 'stormchaser-admin@paninfracon.net', 'password': password}).encode('ascii')
         req2 = urllib.request.Request(login_url, data=data, method='POST')
 
         try:

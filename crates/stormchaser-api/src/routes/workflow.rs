@@ -271,6 +271,18 @@ pub async fn get_workflow_run(
 }
 
 /// Deletes a workflow run.
+#[utoipa::path(
+    delete,
+    path = "/api/v1/runs/{run_id}",
+    params(("run_id" = Uuid, Path, description="Run ID")),
+    responses(
+        (status = 200, description = "Success"),
+        (status = 400, description = "Bad Request"),
+        (status = 404, description = "Not Found"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    tag = "workflow"
+)]
 pub async fn delete_workflow_run_api(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -286,6 +298,19 @@ pub async fn delete_workflow_run_api(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/runs/direct",
+    request_body = DirectRunRequest,
+    responses(
+        (status = 200, description = "Workflow started", body = EnqueueResponse),
+        (status = 500, description = "Internal Server Error")
+    ),
+    security(
+        ("bearer_auth" = [])
+    ),
+    tag = "workflow"
+)]
 /// Executes a direct run.
 #[tracing::instrument(skip(state, claims), fields(run_id = tracing::field::Empty, initiating_user = tracing::field::Empty))]
 pub async fn direct_run(
@@ -320,6 +345,17 @@ pub async fn direct_run(
     }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/runs/stream",
+    responses(
+        (status = 200, description = "Workflow runs stream (SSE)")
+    ),
+    security(
+        ("bearer_auth" = [])
+    ),
+    tag = "workflow"
+)]
 /// Stream workflow runs api.
 pub async fn stream_workflow_runs_api(
     AuthClaims(_claims): AuthClaims,

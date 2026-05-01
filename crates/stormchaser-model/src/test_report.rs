@@ -1,10 +1,11 @@
 //! Test reporting and summary models for workflow execution.
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 /// Details of a single test report associated with a step instance.
-#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
+#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow, ToSchema)]
 pub struct TestReport {
     /// Unique identifier for the test report.
     pub id: Uuid,
@@ -31,7 +32,7 @@ pub struct TestReport {
 }
 
 /// Aggregated summary of test results for a specific report.
-#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow, Default, ToSchema)]
 pub struct TestSummary {
     /// Unique identifier for the summary.
     pub id: Uuid,
@@ -58,7 +59,7 @@ pub struct TestSummary {
 }
 
 /// Status of an individual test case.
-#[derive(Debug, Serialize, Deserialize, Clone, sqlx::Type, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone, sqlx::Type, PartialEq, Eq, ToSchema)]
 #[sqlx(type_name = "test_case_status", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum TestCaseStatus {
@@ -73,7 +74,7 @@ pub enum TestCaseStatus {
 }
 
 /// Details of an individual test case execution.
-#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
+#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow, ToSchema)]
 pub struct TestCase {
     /// Unique identifier for the test case record.
     pub id: Uuid,

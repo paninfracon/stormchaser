@@ -224,7 +224,7 @@ role_map = {"ADMIN": "admin", "DEV": "dev", "OPS": "ops", "SEC": "sec"}
 with open(template_path, "r") as f:
     content = f.read()
 
-client_secret = secrets.token_urlsafe(32)
+client_secret = "stormchaser-cli-secret"
 content = content.replace("DEX_DB_PASSWORD", db_password)
 content = content.replace("DEX_CLIENT_SECRET", client_secret)
 
@@ -248,7 +248,8 @@ os.chmod(cred_path, stat.S_IRUSR | stat.S_IWUSR)
 
 with open(out_path, "w") as f:
     f.write(content)
-os.chmod(out_path, stat.S_IRUSR | stat.S_IWUSR)
+
+os.chmod(out_path, 0o644)
 
 print(f"Dex credentials written to {cred_path} (mode 0600).")
 EOF

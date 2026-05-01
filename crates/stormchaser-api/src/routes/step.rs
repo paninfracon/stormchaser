@@ -17,6 +17,18 @@ pub fn format_log_event(line: &str) -> Event {
 }
 
 /// Stream step logs api.
+#[utoipa::path(
+    get,
+    path = "/api/v1/runs/{run_id}/steps/{step_id}/logs/stream",
+    params(("run_id" = Uuid, Path, description="Run ID"), ("step_id" = String, Path, description="Step ID")),
+    responses(
+        (status = 200, description = "Success"),
+        (status = 400, description = "Bad Request"),
+        (status = 404, description = "Not Found"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    tag = "step"
+)]
 pub async fn stream_step_logs_api(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -63,6 +75,18 @@ pub async fn stream_step_logs_api(
 }
 
 /// Streams run logs.
+#[utoipa::path(
+    get,
+    path = "/api/v1/runs/{run_id}/logs/stream",
+    params(("run_id" = Uuid, Path, description="Run ID")),
+    responses(
+        (status = 200, description = "Success"),
+        (status = 400, description = "Bad Request"),
+        (status = 404, description = "Not Found"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    tag = "step"
+)]
 pub async fn stream_run_logs_api(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -188,6 +212,20 @@ pub async fn stream_run_logs_api(
     Ok(axum::response::sse::Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default()))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/runs/{run_id}/status/stream",
+    params(
+        ("run_id" = Uuid, Path, description = "Run ID")
+    ),
+    responses(
+        (status = 200, description = "Status stream (SSE)")
+    ),
+    security(
+        ("bearer_auth" = [])
+    ),
+    tag = "step"
+)]
 /// Stream run status api.
 pub async fn stream_run_status_api(
     AuthClaims(_claims): AuthClaims,

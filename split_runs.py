@@ -1,8 +1,29 @@
-use crate::utils::{handle_response, handle_run_response, parse_key_val_list, require_token};
+import os
+import re
+
+runs_rs_path = "crates/stormchaser-cli/src/commands/runs.rs"
+out_dir = "crates/stormchaser-cli/src/commands/runs"
+os.makedirs(out_dir, exist_ok=True)
+
+with open(runs_rs_path, "r") as f:
+    content = f.read()
+
+# I will write the files directly to avoid parsing complex rust AST in python.
+# Actually, I can just use python strings and write the whole files directly.
+
+mod_rs = """use crate::utils::{handle_response, handle_run_response, parse_key_val_list, require_token};
 use anyhow::Result;
 use clap::Subcommand;
-use serde_json::json;
 use uuid::Uuid;
+
+pub mod approve;
+pub mod artifacts;
+pub mod enqueue;
+pub mod get;
+pub mod list;
+pub mod logs;
+pub mod reports;
+pub mod watch;
 
 #[derive(Subcommand)]
 pub enum RunCommands {
@@ -78,26 +99,6 @@ pub enum RunCommands {
     ApproveLink { token: String },
 }
 
-pub struct ListRunsFilters {
-    pub owner: Option<String>,
-    pub name: Option<String>,
-    pub repo_url: Option<String>,
-    pub workflow_path: Option<String>,
-    pub created_after: Option<String>,
-    pub created_before: Option<String>,
-    pub status: Option<String>,
-}
-
-pub struct EnqueueRunParams {
-    pub workflow_name: String,
-    pub repo: String,
-    pub path: String,
-    pub git_ref: String,
-    pub input: Vec<String>,
-    pub tail: bool,
-    pub watch: bool,
-}
-
 pub async fn handle(
     url: &str,
     token: Option<&str>,
@@ -114,11 +115,11 @@ pub async fn handle(
             created_before,
             status,
         } => {
-            list_runs(
+            list::list_runs(
                 url,
                 token,
                 http_client,
-                ListRunsFilters {
+                list::ListRunsFilters {
                     owner,
                     name,
                     repo_url,
@@ -130,16 +131,16 @@ pub async fn handle(
             )
             .await
         }
-        RunCommands::Get { id } => get_run(url, token, http_client, id).await,
-        RunCommands::Artifacts { id } => list_artifacts(url, token, http_client, id).await,
-        RunCommands::Reports { id } => list_reports(url, token, http_client, id).await,
+        RunCommands::Get { id } => get::get_run(url, token, http_client, id).await,
+        RunCommands::Artifacts { id } => artifacts::list_artifacts(url, token, http_client, id).await,
+        RunCommands::Reports { id } => reports::list_reports(url, token, http_client, id).await,
         RunCommands::Report { id, report_id } => {
-            get_report(url, token, http_client, id, report_id).await
+            reports::get_report(url, token, http_client, id, report_id).await
         }
         RunCommands::Logs { id, step_name } => {
-            stream_logs(url, token, http_client, id, step_name).await
+            logs::stream_logs(url, token, http_client, id, step_name).await
         }
-        RunCommands::Watch { id } => watch_run(url, token, http_client, id).await,
+        RunCommands::Watch { id } => watch::watch_run(url, token, http_client, id).await,
         RunCommands::Enqueue {
             workflow_name,
             repo,
@@ -149,11 +150,11 @@ pub async fn handle(
             tail,
             watch,
         } => {
-            enqueue_run(
+            enqueue::enqueue_run(
                 url,
                 token,
                 http_client,
-                EnqueueRunParams {
+                enqueue::EnqueueRunParams {
                     workflow_name,
                     repo,
                     path,
@@ -169,18 +170,32 @@ pub async fn handle(
             run_id,
             step_id,
             input,
-        } => approve_step(url, token, http_client, run_id, step_id, input).await,
+        } => approve::approve_step(url, token, http_client, run_id, step_id, input).await,
         RunCommands::Reject { run_id, step_id } => {
-            reject_step(url, token, http_client, run_id, step_id).await
+            approve::reject_step(url, token, http_client, run_id, step_id).await
         }
         RunCommands::ApproveLink { token: link_token } => {
-            approve_link(url, http_client, link_token).await
+            approve::approve_link(url, http_client, link_token).await
         }
-        RunCommands::Pending => list_pending(url, token, http_client).await,
+        RunCommands::Pending => approve::list_pending(url, token, http_client).await,
     }
 }
+"""
 
-async fn list_runs(
+list_rs = """use crate::utils::{handle_response, require_token};
+use anyhow::Result;
+
+pub struct ListRunsFilters {
+    pub owner: Option<String>,
+    pub name: Option<String>,
+    pub repo_url: Option<String>,
+    pub workflow_path: Option<String>,
+    pub created_after: Option<String>,
+    pub created_before: Option<String>,
+    pub status: Option<String>,
+}
+
+pub async fn list_runs(
     url: &str,
     token: Option<&str>,
     http_client: &reqwest_middleware::ClientWithMiddleware,
@@ -223,7 +238,87 @@ fn build_list_runs_url(base_url: &str, filters: ListRunsFilters) -> Result<reqwe
     Ok(url)
 }
 
-async fn get_run(
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use reqwest_middleware::ClientBuilder;
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    use serde_json::json;
+
+    #[test]
+    fn test_build_list_runs_url_basic() {
+        let url = build_list_runs_url(
+            "http://localhost:8080",
+            ListRunsFilters {
+                owner: None,
+                name: None,
+                repo_url: None,
+                workflow_path: None,
+                created_after: None,
+                created_before: None,
+                status: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(url.as_str(), "http://localhost:8080/api/v1/runs");
+    }
+
+    #[test]
+    fn test_build_list_runs_url_with_params() {
+        let url = build_list_runs_url(
+            "http://localhost:8080",
+            ListRunsFilters {
+                owner: Some("alice".to_string()),
+                name: Some("my-workflow".to_string()),
+                repo_url: None,
+                workflow_path: None,
+                created_after: None,
+                created_before: None,
+                status: Some("Succeeded".to_string()),
+            },
+        )
+        .unwrap();
+        let query: HashMap<_, _> = url.query_pairs().into_owned().collect();
+        assert_eq!(query.get("initiating_user").unwrap(), "alice");
+        assert_eq!(query.get("workflow_name").unwrap(), "my-workflow");
+        assert_eq!(query.get("status").unwrap(), "Succeeded");
+        assert!(!query.contains_key("repo_url"));
+    }
+
+    #[tokio::test]
+    async fn test_runs_list() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/runs"))
+            .and(header("Authorization", "Bearer test-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+            .mount(&server)
+            .await;
+
+        let client = ClientBuilder::new(reqwest::Client::new()).build();
+        let filters = ListRunsFilters {
+            owner: None,
+            name: None,
+            repo_url: None,
+            workflow_path: None,
+            created_after: None,
+            created_before: None,
+            status: None,
+        };
+
+        let result = list_runs(&server.uri(), Some("test-token"), &client, filters).await;
+        assert!(result.is_ok());
+    }
+}
+"""
+
+get_rs = """use crate::utils::{handle_response, require_token};
+use anyhow::Result;
+use uuid::Uuid;
+
+pub async fn get_run(
     url: &str,
     token: Option<&str>,
     http_client: &reqwest_middleware::ClientWithMiddleware,
@@ -238,7 +333,38 @@ async fn get_run(
     handle_response(res).await
 }
 
-async fn list_artifacts(
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reqwest_middleware::ClientBuilder;
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn test_runs_get() {
+        let server = MockServer::start().await;
+        let id = Uuid::new_v4();
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v1/runs/{}", id)))
+            .and(header("Authorization", "Bearer test-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": id})))
+            .mount(&server)
+            .await;
+
+        let client = ClientBuilder::new(reqwest::Client::new()).build();
+
+        let result = get_run(&server.uri(), Some("test-token"), &client, id).await;
+        assert!(result.is_ok());
+    }
+}
+"""
+
+artifacts_rs = """use crate::utils::{handle_response, require_token};
+use anyhow::Result;
+use uuid::Uuid;
+
+pub async fn list_artifacts(
     url: &str,
     token: Option<&str>,
     http_client: &reqwest_middleware::ClientWithMiddleware,
@@ -253,7 +379,38 @@ async fn list_artifacts(
     handle_response(res).await
 }
 
-async fn list_reports(
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reqwest_middleware::ClientBuilder;
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn test_runs_artifacts() {
+        let server = MockServer::start().await;
+        let id = Uuid::new_v4();
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v1/runs/{}/artifacts", id)))
+            .and(header("Authorization", "Bearer test-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+            .mount(&server)
+            .await;
+
+        let client = ClientBuilder::new(reqwest::Client::new()).build();
+
+        let result = list_artifacts(&server.uri(), Some("test-token"), &client, id).await;
+        assert!(result.is_ok());
+    }
+}
+"""
+
+reports_rs = """use crate::utils::{handle_response, require_token};
+use anyhow::Result;
+use uuid::Uuid;
+
+pub async fn list_reports(
     url: &str,
     token: Option<&str>,
     http_client: &reqwest_middleware::ClientWithMiddleware,
@@ -268,7 +425,7 @@ async fn list_reports(
     handle_response(res).await
 }
 
-async fn get_report(
+pub async fn get_report(
     url: &str,
     token: Option<&str>,
     http_client: &reqwest_middleware::ClientWithMiddleware,
@@ -283,8 +440,13 @@ async fn get_report(
         .await?;
     handle_response(res).await
 }
+"""
 
-async fn stream_logs(
+logs_rs = """use crate::utils::{handle_response, require_token};
+use anyhow::Result;
+use uuid::Uuid;
+
+pub async fn stream_logs(
     url: &str,
     token: Option<&str>,
     http_client: &reqwest_middleware::ClientWithMiddleware,
@@ -327,8 +489,13 @@ async fn stream_logs(
     }
     Ok(())
 }
+"""
 
-async fn watch_run(
+watch_rs = """use crate::utils::{handle_response, require_token};
+use anyhow::Result;
+use uuid::Uuid;
+
+pub async fn watch_run(
     url: &str,
     token: Option<&str>,
     http_client: &reqwest_middleware::ClientWithMiddleware,
@@ -365,8 +532,23 @@ async fn watch_run(
     }
     Ok(())
 }
+"""
 
-async fn enqueue_run(
+enqueue_rs = """use crate::utils::{handle_run_response, parse_key_val_list, require_token};
+use anyhow::Result;
+use serde_json::json;
+
+pub struct EnqueueRunParams {
+    pub workflow_name: String,
+    pub repo: String,
+    pub path: String,
+    pub git_ref: String,
+    pub input: Vec<String>,
+    pub tail: bool,
+    pub watch: bool,
+}
+
+pub async fn enqueue_run(
     url: &str,
     token: Option<&str>,
     http_client: &reqwest_middleware::ClientWithMiddleware,
@@ -390,7 +572,48 @@ async fn enqueue_run(
     handle_run_response(http_client, url, token_str, res, params.tail, params.watch).await
 }
 
-async fn approve_step(
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reqwest_middleware::ClientBuilder;
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn test_runs_enqueue() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/runs"))
+            .and(header("Authorization", "Bearer test-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "12345678-1234-1234-1234-123456789012",
+                "status": "queued"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = ClientBuilder::new(reqwest::Client::new()).build();
+        let params = EnqueueRunParams {
+            workflow_name: "test".to_string(),
+            repo: "http://git".to_string(),
+            path: "workflow.yaml".to_string(),
+            git_ref: "main".to_string(),
+            input: vec![],
+            tail: false,
+            watch: false,
+        };
+
+        let result = enqueue_run(&server.uri(), Some("test-token"), &client, params).await;
+        assert!(result.is_ok());
+    }
+}
+"""
+
+approve_rs = """use crate::utils::{handle_response, parse_key_val_list, require_token};
+use anyhow::Result;
+use uuid::Uuid;
+
+pub async fn approve_step(
     url: &str,
     token: Option<&str>,
     http_client: &reqwest_middleware::ClientWithMiddleware,
@@ -412,7 +635,7 @@ async fn approve_step(
     handle_response(res).await
 }
 
-async fn reject_step(
+pub async fn reject_step(
     url: &str,
     token: Option<&str>,
     http_client: &reqwest_middleware::ClientWithMiddleware,
@@ -431,7 +654,7 @@ async fn reject_step(
     handle_response(res).await
 }
 
-async fn approve_link(
+pub async fn approve_link(
     url: &str,
     http_client: &reqwest_middleware::ClientWithMiddleware,
     link_token: String,
@@ -443,7 +666,7 @@ async fn approve_link(
     handle_response(res).await
 }
 
-async fn list_pending(
+pub async fn list_pending(
     url: &str,
     token: Option<&str>,
     http_client: &reqwest_middleware::ClientWithMiddleware,
@@ -460,112 +683,10 @@ async fn list_pending(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
-
-    #[test]
-    fn test_build_list_runs_url_basic() {
-        let url = build_list_runs_url(
-            "http://localhost:8080",
-            ListRunsFilters {
-                owner: None,
-                name: None,
-                repo_url: None,
-                workflow_path: None,
-                created_after: None,
-                created_before: None,
-                status: None,
-            },
-        )
-        .unwrap();
-        assert_eq!(url.as_str(), "http://localhost:8080/api/v1/runs");
-    }
-
-    #[test]
-    fn test_build_list_runs_url_with_params() {
-        let url = build_list_runs_url(
-            "http://localhost:8080",
-            ListRunsFilters {
-                owner: Some("alice".to_string()),
-                name: Some("my-workflow".to_string()),
-                repo_url: None,
-                workflow_path: None,
-                created_after: None,
-                created_before: None,
-                status: Some("Succeeded".to_string()),
-            },
-        )
-        .unwrap();
-        let query: HashMap<_, _> = url.query_pairs().into_owned().collect();
-        assert_eq!(query.get("initiating_user").unwrap(), "alice");
-        assert_eq!(query.get("workflow_name").unwrap(), "my-workflow");
-        assert_eq!(query.get("status").unwrap(), "Succeeded");
-        assert!(!query.contains_key("repo_url"));
-    }
-
     use reqwest_middleware::ClientBuilder;
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
-
-    #[tokio::test]
-    async fn test_runs_list() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/api/v1/runs"))
-            .and(header("Authorization", "Bearer test-token"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
-            .mount(&server)
-            .await;
-
-        let client = ClientBuilder::new(reqwest::Client::new()).build();
-        let cmd = RunCommands::List {
-            owner: None,
-            name: None,
-            repo_url: None,
-            workflow_path: None,
-            created_after: None,
-            created_before: None,
-            status: None,
-        };
-
-        let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_runs_get() {
-        let server = MockServer::start().await;
-        let id = Uuid::new_v4();
-        Mock::given(method("GET"))
-            .and(path(format!("/api/v1/runs/{}", id)))
-            .and(header("Authorization", "Bearer test-token"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": id})))
-            .mount(&server)
-            .await;
-
-        let client = ClientBuilder::new(reqwest::Client::new()).build();
-        let cmd = RunCommands::Get { id };
-
-        let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_runs_artifacts() {
-        let server = MockServer::start().await;
-        let id = Uuid::new_v4();
-        Mock::given(method("GET"))
-            .and(path(format!("/api/v1/runs/{}/artifacts", id)))
-            .and(header("Authorization", "Bearer test-token"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
-            .mount(&server)
-            .await;
-
-        let client = ClientBuilder::new(reqwest::Client::new()).build();
-        let cmd = RunCommands::Artifacts { id };
-
-        let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
-        assert!(result.is_ok());
-    }
+    use serde_json::json;
 
     #[tokio::test]
     async fn test_runs_approve() {
@@ -583,13 +704,8 @@ mod tests {
             .await;
 
         let client = ClientBuilder::new(reqwest::Client::new()).build();
-        let cmd = RunCommands::Approve {
-            run_id,
-            step_id,
-            input: vec![],
-        };
 
-        let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
+        let result = approve_step(&server.uri(), Some("test-token"), &client, run_id, step_id, vec![]).await;
         assert!(result.is_ok());
     }
 
@@ -609,9 +725,8 @@ mod tests {
             .await;
 
         let client = ClientBuilder::new(reqwest::Client::new()).build();
-        let cmd = RunCommands::Reject { run_id, step_id };
 
-        let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
+        let result = reject_step(&server.uri(), Some("test-token"), &client, run_id, step_id).await;
         assert!(result.is_ok());
     }
 
@@ -620,45 +735,14 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/api/v1/runs"))
-            // It expects a query string `?status=Running` but wiremock path matcher ignores query
-            // so we can just match path or use path_and_query
             .and(header("Authorization", "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
             .mount(&server)
             .await;
 
         let client = ClientBuilder::new(reqwest::Client::new()).build();
-        let cmd = RunCommands::Pending;
 
-        let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_runs_enqueue() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/api/v1/runs/enqueue"))
-            .and(header("Authorization", "Bearer test-token"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "id": "12345678-1234-1234-1234-123456789012",
-                "status": "queued"
-            })))
-            .mount(&server)
-            .await;
-
-        let client = ClientBuilder::new(reqwest::Client::new()).build();
-        let cmd = RunCommands::Enqueue {
-            workflow_name: "test".to_string(),
-            repo: "http://git".to_string(),
-            path: "workflow.yaml".to_string(),
-            git_ref: "main".to_string(),
-            input: vec![],
-            tail: false,
-            watch: false,
-        };
-
-        let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
+        let result = list_pending(&server.uri(), Some("test-token"), &client).await;
         assert!(result.is_ok());
     }
 
@@ -672,11 +756,23 @@ mod tests {
             .await;
 
         let client = ClientBuilder::new(reqwest::Client::new()).build();
-        let cmd = RunCommands::ApproveLink {
-            token: "my-secret-token".to_string(),
-        };
 
-        let result = handle(&server.uri(), None, &client, cmd).await;
+        let result = approve_link(&server.uri(), &client, "my-secret-token".to_string()).await;
         assert!(result.is_ok());
     }
 }
+"""
+
+with open(f"{out_dir}/mod.rs", "w") as f: f.write(mod_rs)
+with open(f"{out_dir}/list.rs", "w") as f: f.write(list_rs)
+with open(f"{out_dir}/get.rs", "w") as f: f.write(get_rs)
+with open(f"{out_dir}/artifacts.rs", "w") as f: f.write(artifacts_rs)
+with open(f"{out_dir}/reports.rs", "w") as f: f.write(reports_rs)
+with open(f"{out_dir}/logs.rs", "w") as f: f.write(logs_rs)
+with open(f"{out_dir}/watch.rs", "w") as f: f.write(watch_rs)
+with open(f"{out_dir}/enqueue.rs", "w") as f: f.write(enqueue_rs)
+with open(f"{out_dir}/approve.rs", "w") as f: f.write(approve_rs)
+
+import shutil
+os.remove(runs_rs_path)
+print("done")

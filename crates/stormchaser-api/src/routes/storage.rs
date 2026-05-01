@@ -9,6 +9,17 @@ use axum::{
 use uuid::Uuid;
 
 /// Creates a storage backend.
+#[utoipa::path(
+    post,
+    path = "/api/v1/storage/backends",
+    responses(
+        (status = 200, description = "Success"),
+        (status = 400, description = "Bad Request"),
+        (status = 404, description = "Not Found"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    tag = "storage"
+)]
 pub async fn create_storage_backend(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -53,6 +64,17 @@ pub async fn create_storage_backend(
 }
 
 /// List storage backends.
+#[utoipa::path(
+    get,
+    path = "/api/v1/storage/backends",
+    responses(
+        (status = 200, description = "Success"),
+        (status = 400, description = "Bad Request"),
+        (status = 404, description = "Not Found"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    tag = "storage"
+)]
 pub async fn list_storage_backends(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -65,6 +87,18 @@ pub async fn list_storage_backends(
 }
 
 /// Get storage backend.
+#[utoipa::path(
+    get,
+    path = "/api/v1/storage/backends/{id}",
+    params(("id" = Uuid, Path, description="Backend ID")),
+    responses(
+        (status = 200, description = "Success"),
+        (status = 400, description = "Bad Request"),
+        (status = 404, description = "Not Found"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    tag = "storage"
+)]
 pub async fn get_storage_backend(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -79,6 +113,18 @@ pub async fn get_storage_backend(
 }
 
 /// Update storage backend.
+#[utoipa::path(
+    put,
+    path = "/api/v1/storage/backends/{id}",
+    params(("id" = Uuid, Path, description="Backend ID")),
+    responses(
+        (status = 200, description = "Success"),
+        (status = 400, description = "Bad Request"),
+        (status = 404, description = "Not Found"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    tag = "storage"
+)]
 pub async fn update_storage_backend(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -112,6 +158,18 @@ pub async fn update_storage_backend(
 }
 
 /// Deletes a storage backend.
+#[utoipa::path(
+    delete,
+    path = "/api/v1/storage/backends/{id}",
+    params(("id" = Uuid, Path, description="Backend ID")),
+    responses(
+        (status = 200, description = "Success"),
+        (status = 400, description = "Bad Request"),
+        (status = 404, description = "Not Found"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    tag = "storage"
+)]
 pub async fn delete_storage_backend(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -124,6 +182,21 @@ pub async fn delete_storage_backend(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/runs/{id}/artifacts",
+    params(
+        ("id" = Uuid, Path, description = "Run ID")
+    ),
+    responses(
+        (status = 200, description = "List of artifacts", body = [stormchaser_model::storage::ArtifactRegistry]),
+        (status = 500, description = "Internal Server Error")
+    ),
+    security(
+        ("bearer_auth" = [])
+    ),
+    tag = "storage"
+)]
 /// Lists run artifacts.
 pub async fn list_run_artifacts(
     AuthClaims(_claims): AuthClaims,
@@ -138,6 +211,18 @@ pub async fn list_run_artifacts(
 }
 
 /// Lists run test reports.
+#[utoipa::path(
+    get,
+    path = "/api/v1/runs/{run_id}/reports",
+    params(("run_id" = Uuid, Path, description="Run ID")),
+    responses(
+        (status = 200, description = "Success"),
+        (status = 400, description = "Bad Request"),
+        (status = 404, description = "Not Found"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    tag = "storage"
+)]
 pub async fn list_run_test_reports(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -151,6 +236,18 @@ pub async fn list_run_test_reports(
 }
 
 /// Lists run test summaries.
+#[utoipa::path(
+    get,
+    path = "/api/v1/runs/{run_id}/test-summaries",
+    params(("run_id" = Uuid, Path, description="Run ID")),
+    responses(
+        (status = 200, description = "Success"),
+        (status = 400, description = "Bad Request"),
+        (status = 404, description = "Not Found"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    tag = "storage"
+)]
 pub async fn list_run_test_summaries(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -163,6 +260,23 @@ pub async fn list_run_test_summaries(
     Ok(Json(summaries))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/runs/{run_id}/reports/{report_id}",
+    params(
+        ("run_id" = Uuid, Path, description = "Run ID"),
+        ("report_id" = Uuid, Path, description = "Report ID")
+    ),
+    responses(
+        (status = 200, description = "Test report content"),
+        (status = 404, description = "Report not found"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    security(
+        ("bearer_auth" = [])
+    ),
+    tag = "storage"
+)]
 /// Gets a test report.
 pub async fn get_test_report(
     AuthClaims(_claims): AuthClaims,

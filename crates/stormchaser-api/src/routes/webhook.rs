@@ -1,4 +1,4 @@
-use super::{CreateEventRuleRequest, CreateWebhookRequest};
+use super::{CreateEventRuleRequest, CreateWebhookRequest, UpdateWebhookRequest};
 use crate::{AppState, AuthClaims};
 use axum::{
     body::Bytes,
@@ -16,6 +16,17 @@ use stormchaser_model::workflow::RunStatus;
 use uuid::Uuid;
 
 /// Create webhook.
+#[utoipa::path(
+    post,
+    path = "/api/v1/webhooks",
+    responses(
+        (status = 200, description = "Success"),
+        (status = 400, description = "Bad Request"),
+        (status = 404, description = "Not Found"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    tag = "webhook"
+)]
 pub async fn create_webhook(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -40,6 +51,17 @@ pub async fn create_webhook(
 }
 
 /// List webhooks.
+#[utoipa::path(
+    get,
+    path = "/api/v1/webhooks",
+    responses(
+        (status = 200, description = "Success"),
+        (status = 400, description = "Bad Request"),
+        (status = 404, description = "Not Found"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    tag = "webhook"
+)]
 pub async fn list_webhooks(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -52,6 +74,18 @@ pub async fn list_webhooks(
 }
 
 /// Gets a webhook.
+#[utoipa::path(
+    get,
+    path = "/api/v1/webhooks/{id}",
+    params(("id" = Uuid, Path, description="Webhook ID")),
+    responses(
+        (status = 200, description = "Success"),
+        (status = 400, description = "Bad Request"),
+        (status = 404, description = "Not Found"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    tag = "webhook"
+)]
 pub async fn get_webhook(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -65,7 +99,65 @@ pub async fn get_webhook(
     Ok(Json(webhook))
 }
 
+/// Updates a webhook.
+#[utoipa::path(
+    patch,
+    path = "/api/v1/webhooks/{id}",
+    request_body = UpdateWebhookRequest,
+    params(("id" = Uuid, Path, description="Webhook ID")),
+    responses(
+        (status = 200, description = "Success"),
+        (status = 400, description = "Bad Request"),
+        (status = 404, description = "Not Found"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    tag = "webhook"
+)]
+pub async fn update_webhook(
+    AuthClaims(_claims): AuthClaims,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(payload): Json<UpdateWebhookRequest>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let description = match payload.description {
+        Some(s) if s.is_empty() => Some(None),
+        Some(s) => Some(Some(s)),
+        None => None,
+    };
+    let secret_token = match payload.secret_token {
+        Some(s) if s.is_empty() => Some(None),
+        Some(s) => Some(Some(s)),
+        None => None,
+    };
+
+    crate::db::update_webhook(
+        &state.pool,
+        id,
+        payload.name,
+        description,
+        payload.source_type,
+        secret_token,
+        payload.is_active,
+    )
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(StatusCode::OK)
+}
+
 /// Deletes a webhook.
+#[utoipa::path(
+    delete,
+    path = "/api/v1/webhooks/{id}",
+    params(("id" = Uuid, Path, description="Webhook ID")),
+    responses(
+        (status = 200, description = "Success"),
+        (status = 400, description = "Bad Request"),
+        (status = 404, description = "Not Found"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    tag = "webhook"
+)]
 pub async fn delete_webhook(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -79,6 +171,17 @@ pub async fn delete_webhook(
 }
 
 /// Creates an event rule.
+#[utoipa::path(
+    post,
+    path = "/api/v1/rules",
+    responses(
+        (status = 200, description = "Success"),
+        (status = 400, description = "Bad Request"),
+        (status = 404, description = "Not Found"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    tag = "webhook"
+)]
 pub async fn create_event_rule(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -109,6 +212,17 @@ pub async fn create_event_rule(
 }
 
 /// Lists event rules.
+#[utoipa::path(
+    get,
+    path = "/api/v1/rules",
+    responses(
+        (status = 200, description = "Success"),
+        (status = 400, description = "Bad Request"),
+        (status = 404, description = "Not Found"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    tag = "webhook"
+)]
 pub async fn list_event_rules(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -120,6 +234,21 @@ pub async fn list_event_rules(
     Ok(Json(rules))
 }
 
+#[utoipa::path(
+    delete,
+    path = "/api/v1/rules/{id}",
+    params(
+        ("id" = Uuid, Path, description = "Event rule ID")
+    ),
+    responses(
+        (status = 204, description = "Event rule deleted"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    security(
+        ("bearer_auth" = [])
+    ),
+    tag = "webhook"
+)]
 /// Deletes an event rule.
 pub async fn delete_event_rule(
     AuthClaims(_claims): AuthClaims,
@@ -133,6 +262,21 @@ pub async fn delete_event_rule(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/webhooks/{id}",
+    params(
+        ("id" = Uuid, Path, description = "Webhook ID")
+    ),
+    request_body = String,
+    responses(
+        (status = 200, description = "Webhook handled"),
+        (status = 400, description = "Bad Request"),
+        (status = 404, description = "Webhook not found"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    tag = "webhook"
+)]
 /// Handle webhook.
 pub async fn handle_webhook(
     Path(webhook_id): Path<Uuid>,

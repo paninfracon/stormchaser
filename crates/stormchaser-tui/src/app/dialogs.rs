@@ -110,6 +110,55 @@ impl<'a> App<'a> {
         self.storage_backend_is_default = false;
     }
 
+    /// Opens the webhook create/edit dialog.
+    pub fn open_webhook_dialog(&mut self, edit: bool) {
+        self.webhook_dialog_active = true;
+        self.webhook_focus = 0;
+
+        if edit {
+            if let Some(webhook) = &self.selected_webhook {
+                self.webhook_edit_id = Some(webhook.id);
+                self.webhook_inputs = vec![
+                    ratatui_textarea::TextArea::from(vec![webhook.name.clone()]),
+                    ratatui_textarea::TextArea::from(
+                        webhook
+                            .description
+                            .clone()
+                            .unwrap_or_default()
+                            .lines()
+                            .map(String::from)
+                            .collect::<Vec<_>>(),
+                    ),
+                    ratatui_textarea::TextArea::from(
+                        webhook
+                            .secret_token
+                            .clone()
+                            .unwrap_or_default()
+                            .lines()
+                            .map(String::from)
+                            .collect::<Vec<_>>(),
+                    ),
+                ];
+                let type_str = webhook.source_type.as_str();
+                self.webhook_source_type_index = crate::app::WEBHOOK_SOURCE_TYPE_OPTIONS
+                    .iter()
+                    .position(|&s| s == type_str)
+                    .unwrap_or(0);
+                self.webhook_is_active = webhook.is_active;
+                return;
+            }
+        }
+
+        self.webhook_edit_id = None;
+        self.webhook_inputs = vec![
+            ratatui_textarea::TextArea::default(), // name
+            ratatui_textarea::TextArea::default(), // description
+            ratatui_textarea::TextArea::default(), // secret token
+        ];
+        self.webhook_source_type_index = 0;
+        self.webhook_is_active = true;
+    }
+
     /// Submits the data from the schedule git dialog to start a workflow run.
     pub async fn submit_schedule_git(&mut self) -> Result<()> {
         if self.schedule_git_inputs.len() == 3 {
