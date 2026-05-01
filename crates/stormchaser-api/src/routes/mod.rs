@@ -275,6 +275,8 @@ pub struct CreateStorageBackendRequest {
     pub backend_type: BackendType,
     /// The config.
     pub config: Value,
+    /// Optional AWS role ARN.
+    pub aws_assume_role_arn: Option<String>,
     /// The is default sfs.
     pub is_default_sfs: bool,
 }
@@ -290,6 +292,8 @@ pub struct UpdateStorageBackendRequest {
     pub backend_type: Option<BackendType>,
     /// The config.
     pub config: Option<Value>,
+    /// Optional AWS role ARN.
+    pub aws_assume_role_arn: Option<String>,
     /// The is default sfs.
     pub is_default_sfs: Option<bool>,
 }

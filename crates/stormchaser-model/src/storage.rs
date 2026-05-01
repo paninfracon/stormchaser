@@ -34,6 +34,8 @@ pub struct StorageBackend {
     pub backend_type: BackendType,
     /// JSON configuration specific to the backend type.
     pub config: Value,
+    /// Optional AWS role ARN to assume via STS (primarily for S3).
+    pub aws_assume_role_arn: Option<String>,
     /// Whether this backend is the default Stormchaser File System (SFS).
     pub is_default_sfs: bool,
     /// Optional custom CA certificate for mTLS.

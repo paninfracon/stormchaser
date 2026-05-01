@@ -94,6 +94,10 @@ pub enum Pane {
     RunDetail,
     /// The pane displaying test results for a selected run.
     TestResults,
+    /// The pane displaying the list of storage backends.
+    StorageBackendsList,
+    /// The pane displaying detailed information for a selected storage backend.
+    StorageBackendDetail,
 }
 
 /// The main application state holding all data and UI status for the TUI.
@@ -126,6 +130,12 @@ pub struct App<'a> {
     pub runs_state: ListState,
     /// The full details of the currently selected run, if any.
     pub selected_run: Option<WorkflowRunFullDetail>,
+    /// The current list of storage backends.
+    pub storage_backends: Vec<storage::StorageBackend>,
+    /// The state of the storage backends list widget.
+    pub storage_backends_state: ListState,
+    /// The currently selected storage backend.
+    pub selected_storage_backend: Option<storage::StorageBackend>,
     /// The index of the currently selected step within the detailed run view.
     pub selected_step_index: usize,
     /// The aggregated logs for the current view.
@@ -166,6 +176,18 @@ pub struct App<'a> {
     pub schedule_git_focus: usize,
     /// The text area inputs for the schedule git dialog.
     pub schedule_git_inputs: Vec<ratatui_textarea::TextArea<'a>>,
+    /// Whether the storage backend dialog is active.
+    pub storage_backend_dialog_active: bool,
+    /// The index of the focused input in the storage backend dialog.
+    pub storage_backend_focus: usize,
+    /// The text area inputs for the storage backend dialog.
+    pub storage_backend_inputs: Vec<ratatui_textarea::TextArea<'a>>,
+    /// The index of the selected backend type.
+    pub storage_backend_type_index: usize,
+    /// Whether the backend is the default SFS.
+    pub storage_backend_is_default: bool,
+    /// The ID of the storage backend being edited, or None for creating a new one.
+    pub storage_backend_edit_id: Option<Uuid>,
     /// Whether the file browser dialog is active.
     pub file_browser_active: bool,
     /// The state of the file explorer widget.
@@ -190,6 +212,9 @@ pub const FILTER_STATUS_OPTIONS: &[&str] = &[
     "Failed",
     "Aborted",
 ];
+
+/// The available storage backend types.
+pub const BACKEND_TYPE_OPTIONS: &[&str] = &["S3", "Oci", "Jfrog", "Gcs", "Azure"];
 
 /// API interaction methods.
 pub mod api;
@@ -220,6 +245,9 @@ impl<'a> App<'a> {
             runs: Vec::new(),
             runs_state: ListState::default(),
             selected_run: None,
+            storage_backends: Vec::new(),
+            storage_backends_state: ListState::default(),
+            selected_storage_backend: None,
             selected_step_index: 0,
             run_logs: Vec::new(),
             log_scroll: 0,
@@ -240,6 +268,12 @@ impl<'a> App<'a> {
             schedule_git_dialog_active: false,
             schedule_git_focus: 0,
             schedule_git_inputs: Vec::new(),
+            storage_backend_dialog_active: false,
+            storage_backend_focus: 0,
+            storage_backend_inputs: Vec::new(),
+            storage_backend_type_index: 0,
+            storage_backend_is_default: false,
+            storage_backend_edit_id: None,
             file_browser_active: false,
             direct_submit_form: None,
             direct_submit_dsl: None,

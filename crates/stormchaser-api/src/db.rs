@@ -424,6 +424,7 @@ pub async fn unset_default_sfs(tx: &mut Transaction<'_, Postgres>) -> Result<(),
 }
 /// Creates a new storage backend.
 /// Create storage backend.
+#[allow(clippy::too_many_arguments)]
 pub async fn create_storage_backend(
     tx: &mut Transaction<'_, Postgres>,
     id: Uuid,
@@ -431,12 +432,13 @@ pub async fn create_storage_backend(
     description: &Option<String>,
     backend_type: &storage::BackendType,
     config: &Value,
+    aws_assume_role_arn: &Option<String>,
     is_default_sfs: bool,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"
-        INSERT INTO storage_backends (id, name, description, backend_type, config, is_default_sfs)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO storage_backends (id, name, description, backend_type, config, aws_assume_role_arn, is_default_sfs)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         "#,
     )
     .bind(id)
@@ -444,6 +446,7 @@ pub async fn create_storage_backend(
     .bind(description)
     .bind(backend_type)
     .bind(config)
+    .bind(aws_assume_role_arn)
     .bind(is_default_sfs)
     .execute(&mut **tx)
     .await?;
@@ -488,10 +491,15 @@ pub async fn update_storage_backend(
     if let Some(bt) = &payload.backend_type {
         separated.push("backend_type = ").push_bind_unseparated(bt);
     }
-    if let Some(config) = &payload.config {
-        separated.push("config = ").push_bind_unseparated(config);
+    if let Some(cfg) = &payload.config {
+        separated.push("config = ").push_bind_unseparated(cfg);
     }
-    if let Some(is_default) = &payload.is_default_sfs {
+    if let Some(role) = &payload.aws_assume_role_arn {
+        separated
+            .push("aws_assume_role_arn = ")
+            .push_bind_unseparated(role);
+    }
+    if let Some(is_default) = payload.is_default_sfs {
         separated
             .push("is_default_sfs = ")
             .push_bind_unseparated(is_default);

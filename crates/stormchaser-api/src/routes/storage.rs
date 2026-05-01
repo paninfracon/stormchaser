@@ -36,6 +36,7 @@ pub async fn create_storage_backend(
         &payload.description,
         &payload.backend_type,
         &payload.config,
+        &payload.aws_assume_role_arn,
         payload.is_default_sfs,
     )
     .await

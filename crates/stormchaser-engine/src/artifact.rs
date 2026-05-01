@@ -84,6 +84,7 @@ mod tests {
                 "username": "user",
                 "password": "pass"
             }),
+            aws_assume_role_arn: None,
             is_default_sfs: false,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
@@ -121,6 +122,7 @@ mod tests {
             description: None,
             backend_type: BackendType::Jfrog,
             config: json!({}),
+            aws_assume_role_arn: None,
             is_default_sfs: false,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),

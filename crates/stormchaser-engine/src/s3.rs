@@ -42,6 +42,37 @@ pub async fn get_s3_client(backend: &StorageBackend) -> Result<Client> {
     }
 
     let sdk_config = sdk_config_builder.build();
+
+    #[cfg(feature = "aws-s3-sts")]
+    let sdk_config = if let Some(role_arn) = &backend.aws_assume_role_arn {
+        let sts_client = aws_sdk_sts::Client::new(&sdk_config);
+        let assume_role_res = sts_client
+            .assume_role()
+            .role_arn(role_arn)
+            .role_session_name("StormchaserS3Backend")
+            .send()
+            .await?;
+
+        if let Some(credentials) = assume_role_res.credentials() {
+            let provider = aws_sdk_s3::config::Credentials::new(
+                credentials.access_key_id(),
+                credentials.secret_access_key(),
+                Some(credentials.session_token().to_string()),
+                None,
+                "StsAssumedRole",
+            );
+            let shared_provider = aws_sdk_s3::config::SharedCredentialsProvider::new(provider);
+            sdk_config
+                .into_builder()
+                .credentials_provider(shared_provider)
+                .build()
+        } else {
+            return Err(anyhow::anyhow!("Missing credentials from assume_role"));
+        }
+    } else {
+        sdk_config
+    };
+
     let mut s3_config_builder = aws_sdk_s3::config::Builder::from(&sdk_config);
 
     // For Minio/S3 compatible backends, we often need path style access
@@ -105,6 +136,7 @@ mod tests {
                 "secret_key": "test",
                 "force_path_style": true
             }),
+            aws_assume_role_arn: None,
             is_default_sfs: true,
             ca_cert: None,
             client_cert: None,

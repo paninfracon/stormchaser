@@ -62,6 +62,44 @@ impl<'a> App<'a> {
         });
     }
 
+    /// Selects the next storage backend in the list.
+    pub fn next_storage_backend(&mut self) {
+        if self.storage_backends.is_empty() {
+            return;
+        }
+        let i = match self.storage_backends_state.selected() {
+            Some(i) => {
+                if i >= self.storage_backends.len() - 1 {
+                    0
+                } else {
+                    i + 1
+                }
+            }
+            None => 0,
+        };
+        self.storage_backends_state.select(Some(i));
+        self.selected_storage_backend = Some(self.storage_backends[i].clone());
+    }
+
+    /// Selects the previous storage backend in the list.
+    pub fn previous_storage_backend(&mut self) {
+        if self.storage_backends.is_empty() {
+            return;
+        }
+        let i = match self.storage_backends_state.selected() {
+            Some(i) => {
+                if i == 0 {
+                    self.storage_backends.len() - 1
+                } else {
+                    i - 1
+                }
+            }
+            None => 0,
+        };
+        self.storage_backends_state.select(Some(i));
+        self.selected_storage_backend = Some(self.storage_backends[i].clone());
+    }
+
     /// Selects the next step within the currently selected workflow run.
     pub fn next_step(&mut self) {
         if let Some(run) = &self.selected_run {

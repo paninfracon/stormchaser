@@ -52,6 +52,64 @@ impl<'a> App<'a> {
         ];
     }
 
+    /// Opens the storage backend create/edit dialog.
+    pub fn open_storage_backend_dialog(&mut self, edit: bool) {
+        self.storage_backend_dialog_active = true;
+        self.storage_backend_focus = 0;
+
+        if edit {
+            if let Some(backend) = &self.selected_storage_backend {
+                self.storage_backend_edit_id = Some(backend.id);
+                self.storage_backend_inputs = vec![
+                    ratatui_textarea::TextArea::from(vec![backend.name.clone()]),
+                    ratatui_textarea::TextArea::from(
+                        backend
+                            .description
+                            .clone()
+                            .unwrap_or_default()
+                            .lines()
+                            .map(String::from)
+                            .collect::<Vec<_>>(),
+                    ),
+                    ratatui_textarea::TextArea::from(
+                        serde_json::to_string_pretty(&backend.config)
+                            .unwrap_or_default()
+                            .lines()
+                            .map(String::from)
+                            .collect::<Vec<_>>(),
+                    ),
+                    ratatui_textarea::TextArea::from(vec![backend
+                        .aws_assume_role_arn
+                        .clone()
+                        .unwrap_or_default()]),
+                ];
+                let type_str = match backend.backend_type {
+                    stormchaser_model::storage::BackendType::S3 => "S3",
+                    stormchaser_model::storage::BackendType::Oci => "Oci",
+                    stormchaser_model::storage::BackendType::Jfrog => "Jfrog",
+                    stormchaser_model::storage::BackendType::Gcs => "Gcs",
+                    stormchaser_model::storage::BackendType::Azure => "Azure",
+                };
+                self.storage_backend_type_index = crate::app::BACKEND_TYPE_OPTIONS
+                    .iter()
+                    .position(|&s| s == type_str)
+                    .unwrap_or(0);
+                self.storage_backend_is_default = backend.is_default_sfs;
+                return;
+            }
+        }
+
+        self.storage_backend_edit_id = None;
+        self.storage_backend_inputs = vec![
+            ratatui_textarea::TextArea::default(), // name
+            ratatui_textarea::TextArea::default(), // description
+            ratatui_textarea::TextArea::from(vec!["{}".to_string()]), // config
+            ratatui_textarea::TextArea::default(), // assume role arn
+        ];
+        self.storage_backend_type_index = 0;
+        self.storage_backend_is_default = false;
+    }
+
     /// Submits the data from the schedule git dialog to start a workflow run.
     pub async fn submit_schedule_git(&mut self) -> Result<()> {
         if self.schedule_git_inputs.len() == 3 {

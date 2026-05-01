@@ -123,6 +123,45 @@ async fn handle_app_event<'a>(app: &mut App<'a>, event: AppEvent) -> bool {
                         app.schedule_git_inputs[app.schedule_git_focus].input(key);
                     }
                 }
+            } else if app.storage_backend_dialog_active {
+                let focus_count = app.storage_backend_inputs.len() + 2; // name, desc, config, arn, type, is_default
+                match key.code {
+                    KeyCode::Esc => {
+                        app.storage_backend_dialog_active = false;
+                    }
+                    KeyCode::Enter
+                        if key
+                            .modifiers
+                            .contains(ratatui::crossterm::event::KeyModifiers::CONTROL) =>
+                    {
+                        let _ = app.submit_storage_backend_form().await;
+                    }
+                    KeyCode::BackTab => {
+                        app.storage_backend_focus =
+                            (app.storage_backend_focus + focus_count - 1) % focus_count;
+                    }
+                    KeyCode::Tab => {
+                        app.storage_backend_focus = (app.storage_backend_focus + 1) % focus_count;
+                    }
+                    KeyCode::Left if app.storage_backend_focus == 4 => {
+                        let opts_len = stormchaser_tui::app::BACKEND_TYPE_OPTIONS.len();
+                        app.storage_backend_type_index =
+                            (app.storage_backend_type_index + opts_len - 1) % opts_len;
+                    }
+                    KeyCode::Right if app.storage_backend_focus == 4 => {
+                        let opts_len = stormchaser_tui::app::BACKEND_TYPE_OPTIONS.len();
+                        app.storage_backend_type_index =
+                            (app.storage_backend_type_index + 1) % opts_len;
+                    }
+                    KeyCode::Char(' ') | KeyCode::Enter if app.storage_backend_focus == 5 => {
+                        app.storage_backend_is_default = !app.storage_backend_is_default;
+                    }
+                    _ => {
+                        if app.storage_backend_focus < 4 {
+                            app.storage_backend_inputs[app.storage_backend_focus].input(key);
+                        }
+                    }
+                }
             } else if let Some(ref mut form) = app.direct_submit_form {
                 form.handle_input(key);
                 match form.result() {
@@ -153,46 +192,57 @@ async fn handle_app_event<'a>(app: &mut App<'a>, event: AppEvent) -> bool {
                 }
             } else {
                 match key.code {
-                    KeyCode::Char('e') | KeyCode::Char('r') => {
-                        app.open_file_browser();
-                    }
                     KeyCode::Char('f') | KeyCode::Char('/') => {
                         app.open_filter_dialog();
                     }
                     KeyCode::Char('q') => return true,
-                    KeyCode::Char('j') | KeyCode::Down => {
-                        if app.active_pane == Pane::RunsList {
-                            app.next_run();
-                        } else {
-                            app.next_step();
-                        }
+                    KeyCode::Char('j') | KeyCode::Down => match app.active_pane {
+                        Pane::RunsList => app.next_run(),
+                        Pane::StorageBackendsList => app.next_storage_backend(),
+                        _ => app.next_step(),
+                    },
+                    KeyCode::Char('k') | KeyCode::Up => match app.active_pane {
+                        Pane::RunsList => app.previous_run(),
+                        Pane::StorageBackendsList => app.previous_storage_backend(),
+                        _ => app.previous_step(),
+                    },
+                    KeyCode::Char('1') => {
+                        app.active_pane = Pane::RunsList;
                     }
-                    KeyCode::Char('k') | KeyCode::Up => {
-                        if app.active_pane == Pane::RunsList {
-                            app.previous_run();
-                        } else {
-                            app.previous_step();
-                        }
+                    KeyCode::Char('2') => {
+                        app.active_pane = Pane::StorageBackendsList;
                     }
                     KeyCode::Tab => {
                         app.active_pane = match app.active_pane {
                             Pane::RunsList => Pane::RunDetail,
                             Pane::RunDetail => Pane::TestResults,
-                            Pane::TestResults => Pane::RunsList,
+                            Pane::TestResults => Pane::StorageBackendsList,
+                            Pane::StorageBackendsList => Pane::StorageBackendDetail,
+                            Pane::StorageBackendDetail => Pane::RunsList,
                         };
                     }
                     KeyCode::Char('t') => {
                         if app.active_pane == Pane::TestResults {
                             app.active_pane = Pane::RunDetail;
-                        } else {
+                        } else if app.active_pane == Pane::RunDetail
+                            || app.active_pane == Pane::RunsList
+                        {
                             app.active_pane = Pane::TestResults;
                         }
                     }
                     KeyCode::Char('h') | KeyCode::Left => {
-                        app.active_pane = Pane::RunsList;
+                        app.active_pane = match app.active_pane {
+                            Pane::RunDetail | Pane::TestResults => Pane::RunsList,
+                            Pane::StorageBackendDetail => Pane::StorageBackendsList,
+                            other => other,
+                        };
                     }
                     KeyCode::Char('l') | KeyCode::Right => {
-                        app.active_pane = Pane::RunDetail;
+                        app.active_pane = match app.active_pane {
+                            Pane::RunsList => Pane::RunDetail,
+                            Pane::StorageBackendsList => Pane::StorageBackendDetail,
+                            other => other,
+                        };
                     }
                     KeyCode::Char('[') => {
                         app.scroll_logs_up();
@@ -218,6 +268,32 @@ async fn handle_app_event<'a>(app: &mut App<'a>, event: AppEvent) -> bool {
                     }
                     KeyCode::Char('a') => {
                         app.log_auto_scroll = !app.log_auto_scroll;
+                    }
+                    KeyCode::Char('c')
+                        if app.active_pane == Pane::StorageBackendsList
+                            || app.active_pane == Pane::StorageBackendDetail =>
+                    {
+                        app.open_storage_backend_dialog(false);
+                    }
+                    KeyCode::Char('c') => {} // No-op if not in backends tab
+                    KeyCode::Char('e') => {
+                        if app.active_pane == Pane::StorageBackendsList
+                            || app.active_pane == Pane::StorageBackendDetail
+                        {
+                            app.open_storage_backend_dialog(true);
+                        } else {
+                            app.open_file_browser();
+                        }
+                    }
+                    KeyCode::Char('d')
+                        if app.active_pane == Pane::StorageBackendsList
+                            || app.active_pane == Pane::StorageBackendDetail =>
+                    {
+                        let _ = app.delete_selected_storage_backend().await;
+                    }
+                    KeyCode::Char('d') => {} // No-op if not in backends tab
+                    KeyCode::Char('r') => {
+                        app.open_file_browser();
                     }
                     _ => {}
                 }
@@ -283,6 +359,7 @@ async fn main() -> Result<()> {
     if app.token.is_some() {
         app.start_listening_for_workflows().await;
         let _ = app.refresh_runs().await;
+        let _ = app.refresh_storage_backends().await;
     }
 
     // Input loop
