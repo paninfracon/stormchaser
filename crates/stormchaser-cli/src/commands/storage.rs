@@ -134,3 +134,74 @@ pub async fn handle(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reqwest_middleware::ClientBuilder;
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn test_storage_list() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/storage-backends"))
+            .and(header("Authorization", "Bearer test-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+            .mount(&server)
+            .await;
+
+        let client = ClientBuilder::new(reqwest::Client::new()).build();
+        let cmd = StorageCommands::List;
+
+        let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_storage_create() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/storage-backends"))
+            .and(header("Authorization", "Bearer test-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "created"})))
+            .mount(&server)
+            .await;
+
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "{{\"bucket\":\"my-bucket\"}}").unwrap();
+
+        let client = ClientBuilder::new(reqwest::Client::new()).build();
+        let cmd = StorageCommands::Create {
+            name: "test-storage".to_string(),
+            backend_type: "s3".to_string(),
+            config: temp_file.path().to_path_buf(),
+            default_sfs: true,
+            description: None,
+        };
+
+        let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_storage_delete() {
+        let server = MockServer::start().await;
+        let id = Uuid::new_v4();
+        Mock::given(method("DELETE"))
+            .and(path(format!("/api/v1/storage-backends/{}", id)))
+            .and(header("Authorization", "Bearer test-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "deleted"})))
+            .mount(&server)
+            .await;
+
+        let client = ClientBuilder::new(reqwest::Client::new()).build();
+        let cmd = StorageCommands::Delete { id };
+
+        let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
+        assert!(result.is_ok());
+    }
+}

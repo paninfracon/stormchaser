@@ -203,3 +203,31 @@ pub struct ApprovalOpaContext<'a> {
     /// The optional authentication token of the approver.
     pub token: Option<&'a str>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_opa_client_config() {
+        let client = OpaClient::new(None, None);
+        assert!(!client.is_configured());
+        assert!(!OpaAuthorizer::is_configured(&client));
+
+        let client = OpaClient::new(Some("http://localhost:8181".to_string()), None);
+        assert!(client.is_configured());
+        assert_eq!(client.entrypoint, "stormchaser/allow");
+
+        let client = client.with_entrypoint("custom/allow".to_string());
+        assert_eq!(client.entrypoint, "custom/allow");
+    }
+
+    #[test]
+    fn test_opa_client_debug() {
+        let client = OpaClient::new(Some("http://localhost:8181".to_string()), None);
+        let debug_str = format!("{:?}", client);
+        assert!(debug_str.contains("OpaClient"));
+        assert!(debug_str.contains("url: Some(\"http://localhost:8181\")"));
+        assert!(debug_str.contains("wasm_configured: false"));
+    }
+}
