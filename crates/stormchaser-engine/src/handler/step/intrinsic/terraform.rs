@@ -79,7 +79,9 @@ fn build_terraform_command(
 
     if is_apply {
         // output raw JSON, flattening newlines with tr
-        run_cmd.push_str(" && echo '' && echo -n '--- TF OUTPUTS --- ' && terraform output -json | tr -d '\\n'");
+        run_cmd.push_str(
+            " && echo '' && echo -n '--- TF OUTPUTS --- ' && terraform output -json | tr -d '\\n'",
+        );
     } else {
         // output a plan summary for log scraping, and also save the full plan text to plan.txt
         run_cmd.push_str(" && terraform show -no-color tfplan > plan.txt");
@@ -87,7 +89,10 @@ fn build_terraform_command(
         run_cmd.push_str(" && echo '' && echo -n '--- TF PLAN JSON --- ' && terraform show -json tfplan | tr -d '\\n'");
     }
 
-    format!("mkdir -p /tmp/.terraform_plugin_cache && {} && {}", init_cmd, run_cmd)
+    format!(
+        "mkdir -p /tmp/.terraform_plugin_cache && {} && {}",
+        init_cmd, run_cmd
+    )
 }
 
 fn extract_destructive_change_count(plan_summary: &str) -> Option<u32> {

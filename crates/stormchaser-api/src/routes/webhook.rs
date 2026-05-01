@@ -22,15 +22,14 @@ pub async fn create_webhook(
     Json(payload): Json<CreateWebhookRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let id = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO webhooks (id, name, description, source_type, secret_token) VALUES ($1, $2, $3, $4, $5)"
+    crate::db::insert_webhook(
+        &state.pool,
+        id,
+        &payload.name,
+        &payload.description,
+        &payload.source_type,
+        &payload.secret_token,
     )
-    .bind(id)
-    .bind(&payload.name)
-    .bind(&payload.description)
-    .bind(&payload.source_type)
-    .bind(&payload.secret_token)
-    .execute(&state.pool)
     .await
     .map_err(|e| {
         tracing::error!("Failed to create webhook: {:?}", e);
@@ -143,9 +142,7 @@ pub async fn handle_webhook(
 ) -> Result<impl IntoResponse, StatusCode> {
     // 1. Fetch WebhookConfig
     let webhook: WebhookConfig =
-        sqlx::query_as("SELECT * FROM webhooks WHERE id = $1 AND is_active = TRUE")
-            .bind(webhook_id)
-            .fetch_optional(&state.pool)
+        crate::db::get_active_webhook(&state.pool, webhook_id)
             .await
             .map_err(|e| {
                 tracing::error!("Failed to fetch webhook: {:?}", e);

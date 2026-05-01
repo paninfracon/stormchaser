@@ -29,19 +29,15 @@ pub async fn create_storage_backend(
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }
 
-    sqlx::query(
-        r#"
-        INSERT INTO storage_backends (id, name, description, backend_type, config, is_default_sfs)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        "#,
+    crate::db::create_storage_backend(
+        &mut tx,
+        id,
+        &payload.name,
+        &payload.description,
+        &payload.backend_type,
+        &payload.config,
+        payload.is_default_sfs,
     )
-    .bind(id)
-    .bind(&payload.name)
-    .bind(&payload.description)
-    .bind(&payload.backend_type)
-    .bind(&payload.config)
-    .bind(payload.is_default_sfs)
-    .execute(&mut *tx)
     .await
     .map_err(|e| {
         tracing::error!("Failed to create storage backend: {:?}", e);

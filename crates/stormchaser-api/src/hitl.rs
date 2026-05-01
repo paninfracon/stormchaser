@@ -145,47 +145,6 @@ pub async fn approve_step_link(
     }
 }
 
-async fn fetch_run_outputs_for_opa(
-    pool: &sqlx::PgPool,
-    run_id: Uuid,
-) -> serde_json::Map<String, Value> {
-    let mut run_outputs_map = serde_json::Map::new();
-    if let Ok(outputs_rows) = sqlx::query(
-        r#"
-        SELECT i.step_name, o.output_key, o.output_value
-        FROM combined_step_instances i
-        JOIN combined_step_outputs o ON i.id = o.step_instance_id
-        WHERE i.run_id = $1
-        "#,
-    )
-    .bind(run_id)
-    .fetch_all(pool)
-    .await
-    {
-        use sqlx::Row;
-        for row in outputs_rows {
-            let step_name: String = row.get("step_name");
-            let output_key: String = row.get("output_key");
-            let output_value: Value = row.get("output_value");
-
-            if !run_outputs_map.contains_key(&step_name) {
-                run_outputs_map.insert(step_name.clone(), serde_json::json!({"outputs": {}}));
-            }
-            if let Some(step_obj) = run_outputs_map
-                .get_mut(&step_name)
-                .and_then(|v| v.as_object_mut())
-            {
-                if let Some(outputs_obj) =
-                    step_obj.get_mut("outputs").and_then(|v| v.as_object_mut())
-                {
-                    outputs_obj.insert(output_key, output_value);
-                }
-            }
-        }
-    }
-    run_outputs_map
-}
-
 async fn check_approval_opa(
     state: &AppState,
     run_id: Uuid,
@@ -196,51 +155,37 @@ async fn check_approval_opa(
         return Ok(());
     }
 
-    let context_row = sqlx::query(
-        r#"
-        SELECT
-            wr.initiating_user,
-            rc.workflow_definition,
-            rc.inputs as run_inputs
-        FROM workflow_runs wr
-        JOIN run_contexts rc ON wr.id = rc.run_id
-        WHERE wr.id = $1
-        "#,
-    )
-    .bind(run_id)
-    .fetch_optional(&state.pool)
-    .await
-    .unwrap_or(None);
+    let context_row = crate::db::get_workflow_context_for_opa(&state.pool, run_id)
+        .await
+        .unwrap_or(None);
 
-    if let Some(row) = context_row {
-        use sqlx::Row;
-        let initiating_user: String = row.get("initiating_user");
-        let workflow_definition: Value = row.get("workflow_definition");
-        let run_inputs: Value = row.get("run_inputs");
-
+    if let Some(context_data) = context_row {
         let mut step_ast = serde_json::json!({});
         if let Ok(workflow) =
-            serde_json::from_value::<stormchaser_model::dsl::Workflow>(workflow_definition)
+            serde_json::from_value::<stormchaser_model::dsl::Workflow>(context_data.workflow_definition)
         {
             if let Some(s) = find_step(&workflow.steps, step_name) {
                 step_ast = serde_json::to_value(s).unwrap_or(serde_json::json!({}));
             }
         }
 
-        let run_outputs_map = fetch_run_outputs_for_opa(&state.pool, run_id).await;
+        let run_outputs_map = crate::db::get_run_outputs_for_opa(&state.pool, run_id).await;
 
         let opa_context = stormchaser_model::auth::ApprovalOpaContext {
             run_id,
-            initiating_user,
+            initiating_user: context_data.initiating_user,
             step_ast,
-            inputs: run_inputs,
+            inputs: context_data.run_inputs,
             run_outputs: serde_json::Value::Object(run_outputs_map),
             token,
         };
 
         match state.opa.check_approval(opa_context).await {
             Ok(true) => Ok(()),
-            Ok(false) => Err((StatusCode::FORBIDDEN, "Approval denied by OPA policy".to_string())),
+            Ok(false) => Err((
+                StatusCode::FORBIDDEN,
+                "Approval denied by OPA policy".to_string(),
+            )),
             Err(_) => Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "OPA policy evaluation failed".to_string(),
