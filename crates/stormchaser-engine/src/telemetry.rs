@@ -79,3 +79,27 @@ pub fn init_telemetry(rust_log: &str) -> anyhow::Result<()> {
 pub fn shutdown_telemetry() {
     global::shutdown_tracer_provider();
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Once;
+
+    static INIT: Once = Once::new();
+
+    #[test]
+    fn test_init_telemetry_no_otel_endpoint() {
+        // Ensure OTEL endpoint is NOT set for this test
+        std::env::remove_var("OTEL_EXPORTER_OTLP_ENDPOINT");
+
+        // We can only init once per process safely
+        INIT.call_once(|| {
+            init_telemetry("debug").unwrap();
+        });
+    }
+
+    #[test]
+    fn test_shutdown_telemetry() {
+        shutdown_telemetry();
+    }
+}
