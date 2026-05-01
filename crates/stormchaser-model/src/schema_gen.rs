@@ -79,7 +79,7 @@ pub fn apply_step_extensibility(
 ///
 /// This compiles the `Workflow` AST struct into an OpenAPI/JSON Schema compatible
 /// tree, embeds all standard `spec` mappings for known intrinsic step types, and
-/// strips out incompatible OpenAPI meta-schemas to ensure local JSonschema validation runs cleanly.
+/// strips out incompatible OpenAPI meta-schemas to ensure local JSON Schema validation runs cleanly.
 pub fn generate_dsl_schema() -> RootSchema {
     let mut generator = schemars::gen::SchemaSettings::draft07()
         .with(|s| s.option_nullable = true)
