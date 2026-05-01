@@ -176,7 +176,17 @@ async fn test_reject_step_success() {
     sqlx::query("INSERT INTO workflow_runs (id, workflow_name, initiating_user, repo_url, workflow_path, git_ref, status, fencing_token) VALUES ($1, 'wf', 'user', 'url', 'path', 'ref', 'running'::run_status, 1)").bind(run_id).execute(&state.pool).await.unwrap();
     sqlx::query("INSERT INTO step_instances (id, run_id, step_name, step_type, status, created_at) VALUES ($1, $2, 'step', 'approval', 'waiting_for_event'::step_status, now())").bind(step_id).bind(run_id).execute(&state.pool).await.unwrap();
 
-    let response = reject_step(State(state), Path((run_id, step_id))).await;
+    let response = reject_step(
+        State(state),
+        AuthClaims(Claims {
+            sub: "test-user-123".to_string(),
+            email: Some("test-user-123@paninfracon.net".to_string()),
+            exp: 0,
+        }),
+        axum::http::HeaderMap::new(),
+        Path((run_id, step_id)),
+    )
+    .await;
     assert_eq!(response.into_response().status(), StatusCode::OK);
 }
 

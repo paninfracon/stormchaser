@@ -9,6 +9,7 @@ This document outlines proposed enhancements to the native `TerraformPlan`, `Ter
 **Implementation:** `TerraformPlan` executes `terraform show -json tfplan` and extracts it natively into a `plan_json` output variable. During the HITL approval phase, the API resolves all run outputs and provides them inside the `ApprovalOpaContext` as `run_outputs`, allowing Rego policies to deeply inspect `input.run_outputs.terraform_plan.outputs.plan_json.resource_changes`.
 
 ## 2. Native OIDC Cloud Authentication (Implemented)
+
 **Goal:** Eliminate long-lived static credentials for cloud providers.
 **Rationale:** The current approach requires passing `AWS_ACCESS_KEY_ID` or `GOOGLE_CREDENTIALS` via environment variables. Since Stormchaser runs on modern orchestrators, it should natively generate short-lived OIDC tokens.
 **Implementation:** You can now provide `aws_assume_role_arn` and `aws_role_session_name` in the spec of `TerraformPlan` and `TerraformApply`. If the Stormchaser Engine is compiled with the `aws-sdk-sts` feature, it will natively invoke `sts:AssumeRole` before dispatching the container and inject short-lived AWS credentials securely into the container environment.
