@@ -24,6 +24,9 @@ pub enum StorageCommands {
         default_sfs: bool,
         #[arg(long)]
         description: Option<String>,
+        /// Optional AWS role ARN to assume
+        #[arg(long)]
+        aws_assume_role_arn: Option<String>,
     },
     /// Get storage backend details
     Get { id: Uuid },
@@ -39,6 +42,9 @@ pub enum StorageCommands {
         default_sfs: Option<bool>,
         #[arg(long)]
         description: Option<String>,
+        /// Optional AWS role ARN to assume
+        #[arg(long)]
+        aws_assume_role_arn: Option<String>,
     },
     /// Delete a storage backend
     Delete { id: Uuid },
@@ -66,6 +72,7 @@ pub async fn handle(
             config,
             default_sfs,
             description,
+            aws_assume_role_arn,
         } => {
             let config_json: Value = serde_json::from_str(&fs::read_to_string(config)?)?;
             let token = require_token(token)?;
@@ -78,6 +85,7 @@ pub async fn handle(
                     "config": config_json,
                     "is_default_sfs": default_sfs,
                     "description": description,
+                    "aws_assume_role_arn": aws_assume_role_arn,
                 }))
                 .send()
                 .await?;
@@ -98,6 +106,7 @@ pub async fn handle(
             config,
             default_sfs,
             description,
+            aws_assume_role_arn,
         } => {
             let mut body = json!({});
             if let Some(n) = name {
@@ -111,6 +120,9 @@ pub async fn handle(
             }
             if let Some(desc) = description {
                 body["description"] = json!(desc);
+            }
+            if let Some(arn) = aws_assume_role_arn {
+                body["aws_assume_role_arn"] = json!(arn);
             }
 
             let token = require_token(token)?;
@@ -181,6 +193,7 @@ mod tests {
             config: temp_file.path().to_path_buf(),
             default_sfs: true,
             description: None,
+            aws_assume_role_arn: None,
         };
 
         let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
