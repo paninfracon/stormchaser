@@ -33,7 +33,10 @@ fn test_provision_new_syntax() {
     let download = &storage.provision[0];
     assert_eq!(download.name, "my_script");
     assert_eq!(download.resource_type, "download");
-    assert_eq!(download.url.as_deref(), Some("https://example.com/setup.sh"));
+    assert_eq!(
+        download.url.as_deref(),
+        Some("https://example.com/setup.sh")
+    );
     assert_eq!(download.destination, "scripts/setup.sh");
     assert_eq!(download.mode.as_deref(), Some("0755"));
 
@@ -69,10 +72,12 @@ fn test_provision_legacy_syntax() {
     let prov = &storage.provision[0];
     assert_eq!(prov.name, "my_artifact");
     assert_eq!(prov.resource_type, "artifact");
-    assert_eq!(prov.from.as_deref(), Some("other_workflow.workspace.output"));
+    assert_eq!(
+        prov.from.as_deref(),
+        Some("other_workflow.workspace.output")
+    );
     assert_eq!(prov.destination, "data/input");
 }
-
 
 #[test]
 fn test_parse_markers() {
