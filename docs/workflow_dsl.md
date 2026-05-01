@@ -860,10 +860,10 @@ You can also output the schema directly in the functional HCL data format using 
 stormchaser schema generate --format hcl > schema.hcl
 ```
 
-Or retrieved from a running Stormchaser server API:
+Or retrieved from a running Stormchaser server API (replace `<host>` and `<port>` with the address of your deployment — the default for a local development server is port `3000`, while Kubernetes deployments may expose a different port or an ingress URL):
 
 ```bash
-curl http://localhost:8080/api/v1/schema > schema.json
+curl http://<host>:<port>/api/v1/schema > schema.json
 ```
 
 ### Linting Workflows
