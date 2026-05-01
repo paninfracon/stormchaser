@@ -84,7 +84,10 @@ fn build_terraform_command(
         );
     } else {
         // output a plan summary for log scraping, and also save the full plan text to plan.txt
-        run_cmd.push_str(&format!(" && terraform show -no-color {} > plan.txt", out_file));
+        run_cmd.push_str(&format!(
+            " && terraform show -no-color {} > plan.txt",
+            out_file
+        ));
         run_cmd.push_str(&format!(
             " && echo '' && echo -n '--- TF PLAN SUMMARY --- ' && terraform show -no-color {} | grep -E '^Plan:|^No changes.' | tail -n 1",
             out_file
@@ -313,19 +316,36 @@ mod tests {
         let image = spec.get("image").and_then(|v| v.as_str()).unwrap();
         assert_eq!(image, "hashicorp/terraform:latest");
 
-        let command = spec
-            .get("command")
-            .and_then(|v| v.as_array())
-            .unwrap();
+        let command = spec.get("command").and_then(|v| v.as_array()).unwrap();
         assert_eq!(command[0], "sh");
         assert_eq!(command[1], "-c");
         let script = command[2].as_str().unwrap();
-        assert!(script.contains("terraform plan -out=tfplan"), "missing plan command: {}", script);
-        assert!(script.contains("terraform show -no-color tfplan"), "missing show command: {}", script);
-        assert!(script.contains("--- TF PLAN SUMMARY ---"), "missing plan summary marker: {}", script);
-        assert!(script.contains("--- TF PLAN JSON ---"), "missing plan json marker: {}", script);
+        assert!(
+            script.contains("terraform plan -out=tfplan"),
+            "missing plan command: {}",
+            script
+        );
+        assert!(
+            script.contains("terraform show -no-color tfplan"),
+            "missing show command: {}",
+            script
+        );
+        assert!(
+            script.contains("--- TF PLAN SUMMARY ---"),
+            "missing plan summary marker: {}",
+            script
+        );
+        assert!(
+            script.contains("--- TF PLAN JSON ---"),
+            "missing plan json marker: {}",
+            script
+        );
         // Should not contain apply commands
-        assert!(!script.contains("terraform apply"), "unexpected apply command: {}", script);
+        assert!(
+            !script.contains("terraform apply"),
+            "unexpected apply command: {}",
+            script
+        );
     }
 
     #[tokio::test]
@@ -341,16 +361,29 @@ mod tests {
             .unwrap();
 
         assert_eq!(step_type, "RunContainer");
-        let command = spec
-            .get("command")
-            .and_then(|v| v.as_array())
-            .unwrap();
+        let command = spec.get("command").and_then(|v| v.as_array()).unwrap();
         let script = command[2].as_str().unwrap();
-        assert!(script.contains("terraform apply"), "missing apply command: {}", script);
-        assert!(script.contains("myplan"), "out_file not used in apply: {}", script);
-        assert!(script.contains("--- TF OUTPUTS ---"), "missing tf outputs marker: {}", script);
+        assert!(
+            script.contains("terraform apply"),
+            "missing apply command: {}",
+            script
+        );
+        assert!(
+            script.contains("myplan"),
+            "out_file not used in apply: {}",
+            script
+        );
+        assert!(
+            script.contains("--- TF OUTPUTS ---"),
+            "missing tf outputs marker: {}",
+            script
+        );
         // Should not contain plan commands
-        assert!(!script.contains("terraform plan"), "unexpected plan command: {}", script);
+        assert!(
+            !script.contains("terraform plan"),
+            "unexpected plan command: {}",
+            script
+        );
     }
 
     #[tokio::test]
@@ -364,17 +397,34 @@ mod tests {
             .await
             .unwrap();
 
-        let command = spec
-            .get("command")
-            .and_then(|v| v.as_array())
-            .unwrap();
+        let command = spec.get("command").and_then(|v| v.as_array()).unwrap();
         let script = command[2].as_str().unwrap();
         // All terraform show invocations must use the custom out_file, not a hardcoded 'tfplan'
-        assert!(script.contains("terraform plan -out=custom_plan_file"), "plan out_file: {}", script);
-        assert!(script.contains("terraform show -no-color custom_plan_file"), "show uses out_file: {}", script);
-        assert!(script.contains("terraform show -json custom_plan_file"), "show json uses out_file: {}", script);
-        assert!(!script.contains("terraform show -no-color tfplan"), "hardcoded tfplan found: {}", script);
-        assert!(!script.contains("terraform show -json tfplan"), "hardcoded tfplan in json: {}", script);
+        assert!(
+            script.contains("terraform plan -out=custom_plan_file"),
+            "plan out_file: {}",
+            script
+        );
+        assert!(
+            script.contains("terraform show -no-color custom_plan_file"),
+            "show uses out_file: {}",
+            script
+        );
+        assert!(
+            script.contains("terraform show -json custom_plan_file"),
+            "show json uses out_file: {}",
+            script
+        );
+        assert!(
+            !script.contains("terraform show -no-color tfplan"),
+            "hardcoded tfplan found: {}",
+            script
+        );
+        assert!(
+            !script.contains("terraform show -json tfplan"),
+            "hardcoded tfplan in json: {}",
+            script
+        );
     }
 
     #[tokio::test]
@@ -394,9 +444,15 @@ mod tests {
 
         assert_eq!(spec.get("cpu").and_then(|v| v.as_str()), Some("500m"));
         assert_eq!(spec.get("memory").and_then(|v| v.as_str()), Some("1Gi"));
-        let mounts = spec.get("storage_mounts").and_then(|v| v.as_array()).unwrap();
+        let mounts = spec
+            .get("storage_mounts")
+            .and_then(|v| v.as_array())
+            .unwrap();
         assert_eq!(mounts.len(), 1);
-        assert_eq!(mounts[0].get("name").and_then(|v| v.as_str()), Some("tf-cache"));
+        assert_eq!(
+            mounts[0].get("name").and_then(|v| v.as_str()),
+            Some("tf-cache")
+        );
     }
 
     #[test]
@@ -435,8 +491,16 @@ mod tests {
             .get("description")
             .and_then(|v| v.as_str())
             .unwrap();
-        assert!(description.contains("DESTRUCTIVE CHANGES"), "no warning in description: {}", description);
-        assert!(description.contains("3 to destroy"), "destroy count missing: {}", description);
+        assert!(
+            description.contains("DESTRUCTIVE CHANGES"),
+            "no warning in description: {}",
+            description
+        );
+        assert!(
+            description.contains("3 to destroy"),
+            "destroy count missing: {}",
+            description
+        );
     }
 
     #[test]
@@ -447,6 +511,9 @@ mod tests {
         mutate_if_terraform_approval(&mut step_type, &mut spec);
 
         assert_eq!(step_type, "RunContainer");
-        assert_eq!(spec.get("image").and_then(|v| v.as_str()), Some("ubuntu:latest"));
+        assert_eq!(
+            spec.get("image").and_then(|v| v.as_str()),
+            Some("ubuntu:latest")
+        );
     }
 }

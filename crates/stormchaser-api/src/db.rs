@@ -823,9 +823,7 @@ pub async fn get_run_outputs_for_opa(
             .get_mut(&step_name)
             .and_then(|v| v.as_object_mut())
         {
-            if let Some(outputs_obj) =
-                step_obj.get_mut("outputs").and_then(|v| v.as_object_mut())
-            {
+            if let Some(outputs_obj) = step_obj.get_mut("outputs").and_then(|v| v.as_object_mut()) {
                 outputs_obj.insert(output_key, output_value);
             }
         }

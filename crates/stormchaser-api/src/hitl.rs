@@ -184,7 +184,8 @@ async fn check_approval_opa(
             Err(err) => {
                 tracing::error!(
                     "Failed to load run outputs for approval OPA evaluation for run {}: {:?}",
-                    run_id, err
+                    run_id,
+                    err
                 );
                 return Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
