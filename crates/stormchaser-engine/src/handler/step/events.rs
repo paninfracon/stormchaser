@@ -18,7 +18,7 @@ use tar::Archive;
 use tracing::{debug, error, info};
 use uuid::Uuid;
 
-use super::dispatch::dispatch_step_instance;
+use super::dispatch::{dispatch_step_instance, find_step};
 use super::quota::release_step_quota_for_instance;
 use super::scheduling::schedule_step;
 
@@ -258,12 +258,42 @@ pub async fn handle_step_completed(
         .find(|s| s.id == step_id)
         .context("Completed step not found in DB")?;
 
-    let dsl_step = workflow
-        .steps
-        .iter()
-        .find(|s| s.name == current_step_instance.step_name);
+    let mut dsl_step = find_step(&workflow.steps, &current_step_instance.step_name).cloned();
 
-    if let (Some(dsl_step), Some(backend)) = (dsl_step, &*log_backend) {
+    if let Some(step) = &mut dsl_step {
+        if step.r#type == "TerraformApply" {
+            step.outputs.push(stormchaser_model::dsl::OutputExtraction {
+                name: "terraform".to_string(),
+                source: "stdout".to_string(),
+                marker: Some("--- TF OUTPUTS ---".to_string()),
+                format: Some("json".to_string()),
+                regex: Some(r"--- TF OUTPUTS ---\s*(.*)".to_string()),
+                group: Some(1),
+                sensitive: Some(false),
+            });
+        } else if step.r#type == "TerraformPlan" {
+            step.outputs.push(stormchaser_model::dsl::OutputExtraction {
+                name: "plan_summary".to_string(),
+                source: "stdout".to_string(),
+                marker: Some("--- TF PLAN SUMMARY ---".to_string()),
+                format: Some("string".to_string()),
+                regex: Some(r"--- TF PLAN SUMMARY ---\s*(.*)".to_string()),
+                group: Some(1),
+                sensitive: Some(false),
+            });
+            step.outputs.push(stormchaser_model::dsl::OutputExtraction {
+                name: "plan_json".to_string(),
+                source: "stdout".to_string(),
+                marker: Some("--- TF PLAN JSON ---".to_string()),
+                format: Some("json".to_string()),
+                regex: Some(r"--- TF PLAN JSON ---\s*(.*)".to_string()),
+                group: Some(1),
+                sensitive: Some(false),
+            });
+        }
+    }
+
+    if let (Some(dsl_step), Some(backend)) = (&dsl_step, &*log_backend) {
         if !dsl_step.outputs.is_empty() {
             tracing::info!("Scraping outputs from logs for step {}", dsl_step.name);
             let logs = backend
@@ -316,11 +346,19 @@ pub async fn handle_step_completed(
                                     };
 
                                     if let Some(val) = value {
+                                        let final_val =
+                                            if extraction.format.as_deref() == Some("json") {
+                                                serde_json::from_str(&val)
+                                                    .unwrap_or(serde_json::json!(val))
+                                            } else {
+                                                serde_json::json!(val)
+                                            };
+
                                         crate::db::upsert_step_output_with_sensitivity(
                                             &mut *tx,
                                             step_id,
                                             &extraction.name,
-                                            &serde_json::json!(val),
+                                            &final_val,
                                             extraction.sensitive.unwrap_or(false),
                                         )
                                         .await?;

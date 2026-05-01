@@ -44,6 +44,12 @@ repos:
       - id: markdownlint
         args: ["--fix"]
 
+  - repo: https://github.com/anderseknert/pre-commit-opa
+    rev: v1.5.1
+    hooks:
+      - id: opa-fmt
+      - id: opa-check
+
   - repo: local
     hooks:
       - id: hcl-fmt

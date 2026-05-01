@@ -86,3 +86,13 @@ fn test_parse_workflow_template_and_include() {
     assert_eq!(inc.workflow, "my_template.storm");
     assert_eq!(inc.inputs.get("repo").unwrap(), "my_repo");
 }
+
+#[test]
+fn test_parse_terraform_pipeline() {
+    let dsl = std::fs::read_to_string("../../tests/terraform-pipeline.storm").unwrap();
+    let parser = stormchaser_dsl::StormchaserParser::new();
+    let workflow = parser
+        .parse(&dsl)
+        .expect("Failed to parse terraform-pipeline.storm");
+    assert!(!workflow.steps.is_empty());
+}

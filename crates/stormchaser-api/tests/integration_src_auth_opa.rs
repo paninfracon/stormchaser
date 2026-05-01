@@ -21,6 +21,15 @@ impl OpaAuthorizer for MockAuthorizer {
             Err(_) => anyhow::bail!("error"),
         }
     }
+    async fn check_approval(
+        &self,
+        _context: stormchaser_model::auth::ApprovalOpaContext<'_>,
+    ) -> anyhow::Result<bool> {
+        match &self.result {
+            Ok(b) => Ok(*b),
+            Err(_) => anyhow::bail!("error"),
+        }
+    }
     fn is_configured(&self) -> bool {
         self.configured
     }

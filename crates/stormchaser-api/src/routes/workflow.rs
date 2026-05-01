@@ -146,70 +146,7 @@ pub async fn list_workflow_runs(
     let limit = params.limit.unwrap_or(20).min(100);
     let offset = params.offset.unwrap_or(0);
 
-    let mut query = sqlx::QueryBuilder::new(
-        r#"
-        WITH combined_runs AS (
-            SELECT
-                wr.id, wr.workflow_name, wr.initiating_user, wr.repo_url, wr.workflow_path, wr.git_ref,
-                wr.status::run_status as "status", wr.version, wr.created_at, wr.updated_at, wr.started_resolving_at, wr.started_at, wr.finished_at, wr.error,
-                rc.inputs, rc.secrets, rc.source_code, rc.dsl_version
-            FROM workflow_runs wr
-            JOIN run_contexts rc ON wr.id = rc.run_id
-            UNION ALL
-            SELECT
-                wr.id, wr.workflow_name, wr.initiating_user, wr.repo_url, wr.workflow_path, wr.git_ref,
-                wr.status::run_status as "status", wr.version, wr.created_at, wr.updated_at, wr.started_resolving_at, wr.started_at, wr.finished_at, wr.error,
-                rc.inputs, rc.secrets, rc.source_code, rc.dsl_version
-            FROM archived_workflow_runs wr
-            JOIN archived_run_contexts rc ON wr.id = rc.run_id
-        )
-        SELECT * FROM combined_runs wr WHERE 1=1
-        "#,
-    );
-
-    if let Some(name) = params.workflow_name {
-        query.push(" AND wr.workflow_name LIKE ");
-        query.push_bind(format!("%{}%", name));
-    }
-
-    if let Some(status) = params.status {
-        query.push(" AND wr.status = ");
-        query.push_bind(status);
-    }
-
-    if let Some(user) = params.initiating_user {
-        query.push(" AND wr.initiating_user = ");
-        query.push_bind(user);
-    }
-
-    if let Some(repo) = params.repo_url {
-        query.push(" AND wr.repo_url = ");
-        query.push_bind(repo);
-    }
-
-    if let Some(path) = params.workflow_path {
-        query.push(" AND wr.workflow_path = ");
-        query.push_bind(path);
-    }
-
-    if let Some(after) = params.created_after {
-        query.push(" AND wr.created_at >= ");
-        query.push_bind(after);
-    }
-
-    if let Some(before) = params.created_before {
-        query.push(" AND wr.created_at <= ");
-        query.push_bind(before);
-    }
-
-    query.push(" ORDER BY wr.created_at DESC LIMIT ");
-    query.push_bind(limit as i64);
-    query.push(" OFFSET ");
-    query.push_bind(offset as i64);
-
-    let runs: Vec<WorkflowRunDetail> = query
-        .build_query_as()
-        .fetch_all(&state.pool)
+    let runs = crate::db::list_workflow_runs(&state.pool, &params, limit as i64, offset as i64)
         .await
         .map_err(|e| {
             tracing::error!("Failed to fetch workflow runs: {:?}", e);
@@ -242,20 +179,17 @@ pub async fn get_workflow_run(
     Path(run_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, StatusCode> {
     // 1. Fetch the workflow run detail
-    let detail: WorkflowRunDetail =
-        sqlx::query_as("SELECT * FROM combined_run_details WHERE id = $1")
-            .bind(run_id)
-            .fetch_optional(&state.pool)
-            .await
-            .map_err(|e| {
-                tracing::error!(
-                    "Failed to fetch workflow run detail for {}: {:?}",
-                    run_id,
-                    e
-                );
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?
-            .ok_or(StatusCode::NOT_FOUND)?;
+    let detail: WorkflowRunDetail = crate::db::get_workflow_run_detail(&state.pool, run_id)
+        .await
+        .map_err(|e| {
+            tracing::error!(
+                "Failed to fetch workflow run detail for {}: {:?}",
+                run_id,
+                e
+            );
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     // 2. Fetch all step instances for this run (active or archived)
     let instances = crate::db::get_step_instances(&state.pool, run_id)

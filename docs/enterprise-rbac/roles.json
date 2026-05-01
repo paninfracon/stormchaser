@@ -15,6 +15,10 @@
     "security": [
       "Okta-Security-Auditors",
       "EntraID-SecOps"
+    ],
+    "production_approvers": [
+      "Okta-SRE-Leads",
+      "EntraID-Platform-Owners"
     ]
   },
   "allowed_email_domains": [

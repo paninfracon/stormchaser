@@ -32,24 +32,13 @@ pub async fn create_cron_workflow(
         register_external_cron(id, &payload.name, &payload.cronspec, &secret_token).await?;
 
     // 2. Save to database
-    sqlx::query(
-        r#"
-        INSERT INTO cron_workflows (id, name, description, cronspec, workflow_name, repo_url, workflow_path, git_ref, inputs, secret_token, external_job_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-        "#,
+    crate::db::insert_cron_workflow(
+        &state.pool,
+        id,
+        &payload,
+        &secret_token,
+        external_job_id.clone(),
     )
-    .bind(id)
-    .bind(&payload.name)
-    .bind(&payload.description)
-    .bind(&payload.cronspec)
-    .bind(&payload.workflow_name)
-    .bind(&payload.repo_url)
-    .bind(&payload.workflow_path)
-    .bind(&payload.git_ref)
-    .bind(&payload.inputs)
-    .bind(&secret_token)
-    .bind(&external_job_id)
-    .execute(&state.pool)
     .await
     .map_err(|e| {
         tracing::error!("Failed to create cron workflow: {:?}", e);

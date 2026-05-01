@@ -740,8 +740,144 @@ pub async fn delete_workflow_run(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Er
     Ok(())
 }
 
+/// Inserts a new webhook.
+pub async fn insert_webhook(
+    pool: &PgPool,
+    id: Uuid,
+    name: &str,
+    description: &Option<String>,
+    source_type: &str,
+    secret_token: &Option<String>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO webhooks (id, name, description, source_type, secret_token) VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(id)
+    .bind(name)
+    .bind(description)
+    .bind(source_type)
+    .bind(secret_token)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Inserts a new cron workflow.
+pub async fn insert_cron_workflow(
+    pool: &PgPool,
+    id: Uuid,
+    payload: &crate::routes::CreateCronWorkflowRequest,
+    secret_token: &str,
+    external_job_id: Option<String>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        INSERT INTO cron_workflows (id, name, description, cronspec, workflow_name, repo_url, workflow_path, git_ref, inputs, secret_token, external_job_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        "#,
+    )
+    .bind(id)
+    .bind(&payload.name)
+    .bind(&payload.description)
+    .bind(&payload.cronspec)
+    .bind(&payload.workflow_name)
+    .bind(&payload.repo_url)
+    .bind(&payload.workflow_path)
+    .bind(&payload.git_ref)
+    .bind(&payload.inputs)
+    .bind(secret_token)
+    .bind(external_job_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Retrieves run outputs for OPA evaluation.
+pub async fn get_run_outputs_for_opa(
+    pool: &PgPool,
+    run_id: Uuid,
+) -> Result<serde_json::Map<String, serde_json::Value>, sqlx::Error> {
+    use sqlx::Row;
+    let outputs_rows = sqlx::query(
+        r#"
+        SELECT i.step_name, o.output_key, o.output_value
+        FROM combined_step_instances i
+        JOIN combined_step_outputs o ON i.id = o.step_instance_id
+        WHERE i.run_id = $1
+        "#,
+    )
+    .bind(run_id)
+    .fetch_all(pool)
+    .await?;
+
+    let mut run_outputs_map = serde_json::Map::new();
+    for row in outputs_rows {
+        let step_name: String = row.get("step_name");
+        let output_key: String = row.get("output_key");
+        let output_value: serde_json::Value = row.get("output_value");
+
+        if !run_outputs_map.contains_key(&step_name) {
+            run_outputs_map.insert(step_name.clone(), serde_json::json!({"outputs": {}}));
+        }
+        if let Some(step_obj) = run_outputs_map
+            .get_mut(&step_name)
+            .and_then(|v| v.as_object_mut())
+        {
+            if let Some(outputs_obj) = step_obj.get_mut("outputs").and_then(|v| v.as_object_mut()) {
+                outputs_obj.insert(output_key, output_value);
+            }
+        }
+    }
+    Ok(run_outputs_map)
+}
+
+/// Data returned for workflow OPA context
+pub struct WorkflowOpaContextData {
+    pub initiating_user: String,
+    pub workflow_definition: serde_json::Value,
+    pub run_inputs: serde_json::Value,
+}
+
+/// Retrieves workflow context for OPA evaluation.
+pub async fn get_workflow_context_for_opa(
+    pool: &PgPool,
+    run_id: Uuid,
+) -> Result<Option<WorkflowOpaContextData>, sqlx::Error> {
+    let context_row = sqlx::query(
+        r#"
+        SELECT
+            wr.initiating_user,
+            rc.workflow_definition,
+            rc.inputs as run_inputs
+        FROM workflow_runs wr
+        JOIN run_contexts rc ON wr.id = rc.run_id
+        WHERE wr.id = $1
+        "#,
+    )
+    .bind(run_id)
+    .fetch_optional(pool)
+    .await?;
+
+    if let Some(row) = context_row {
+        use sqlx::Row;
+        let initiating_user: String = row.get("initiating_user");
+        let workflow_definition: serde_json::Value = row.get("workflow_definition");
+        let run_inputs: serde_json::Value = row.get("run_inputs");
+        Ok(Some(WorkflowOpaContextData {
+            initiating_user,
+            workflow_definition,
+            run_inputs,
+        }))
+    } else {
+        Ok(None)
+    }
+}
+
 /// Deletes an event correlation record
-pub async fn delete_event_correlation(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
+pub async fn delete_event_correlation(
+    pool: &sqlx::PgPool,
+    id: uuid::Uuid,
+) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM event_correlations WHERE id = $1")
         .bind(id)
         .execute(pool)

@@ -145,13 +145,111 @@ pub async fn approve_step_link(
     }
 }
 
+async fn check_approval_opa(
+    state: &AppState,
+    run_id: Uuid,
+    step_name: &str,
+    token: Option<&str>,
+) -> Result<(), (StatusCode, String)> {
+    if !state.opa.is_configured() {
+        return Ok(());
+    }
+
+    let context_row = match crate::db::get_workflow_context_for_opa(&state.pool, run_id).await {
+        Ok(context_row) => context_row,
+        Err(err) => {
+            eprintln!(
+                "Failed to load workflow context for approval OPA evaluation for run {}: {:?}",
+                run_id, err
+            );
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load workflow context for approval policy evaluation".to_string(),
+            ));
+        }
+    };
+
+    if let Some(context_data) = context_row {
+        let mut step_ast = serde_json::json!({});
+        if let Ok(workflow) = serde_json::from_value::<stormchaser_model::dsl::Workflow>(
+            context_data.workflow_definition,
+        ) {
+            if let Some(s) = find_step(&workflow.steps, step_name) {
+                step_ast = serde_json::to_value(s).unwrap_or(serde_json::json!({}));
+            }
+        }
+
+        let run_outputs_map = match crate::db::get_run_outputs_for_opa(&state.pool, run_id).await {
+            Ok(map) => map,
+            Err(err) => {
+                tracing::error!(
+                    "Failed to load run outputs for approval OPA evaluation for run {}: {:?}",
+                    run_id,
+                    err
+                );
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to load run outputs for approval policy evaluation".to_string(),
+                ));
+            }
+        };
+
+        let opa_context = stormchaser_model::auth::ApprovalOpaContext {
+            run_id,
+            initiating_user: context_data.initiating_user,
+            step_ast,
+            inputs: context_data.run_inputs,
+            run_outputs: serde_json::Value::Object(run_outputs_map),
+            token,
+        };
+
+        match state.opa.check_approval(opa_context).await {
+            Ok(true) => Ok(()),
+            Ok(false) => Err((
+                StatusCode::FORBIDDEN,
+                "Approval denied by OPA policy".to_string(),
+            )),
+            Err(_) => Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "OPA policy evaluation failed".to_string(),
+            )),
+        }
+    } else {
+        Ok(())
+    }
+}
+
+// Recursively find the step AST
+fn find_step(
+    steps: &[stormchaser_model::dsl::Step],
+    name: &str,
+) -> Option<stormchaser_model::dsl::Step> {
+    for s in steps {
+        if s.name == name {
+            return Some(s.clone());
+        }
+        if let Some(inner) = &s.steps {
+            if let Some(found) = find_step(inner, name) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
 /// Approves a step.
 pub async fn approve_step(
     State(state): State<AppState>,
     crate::auth::AuthClaims(claims): crate::auth::AuthClaims,
+    headers: axum::http::HeaderMap,
     Path((run_id, step_id)): Path<(Uuid, Uuid)>,
     Json(inputs): Json<Value>,
 ) -> impl IntoResponse {
+    let token = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "));
+
     // 1. Verify step exists and is WaitingForEvent
     let step = crate::db::get_step_instance_for_approval(&state.pool, step_id, run_id)
         .await
@@ -164,6 +262,11 @@ pub async fn approve_step(
 
     if step.status != StepStatus::WaitingForEvent {
         return (StatusCode::BAD_REQUEST, "Step is not waiting for approval").into_response();
+    }
+
+    // 1.5 OPA ABAC Engine check
+    if let Err((status, msg)) = check_approval_opa(&state, run_id, &step.step_name, token).await {
+        return (status, msg).into_response();
     }
 
     // 2. Insert into approval_registry
@@ -198,8 +301,15 @@ pub async fn approve_step(
 /// Rejects a step.
 pub async fn reject_step(
     State(state): State<AppState>,
+    crate::auth::AuthClaims(claims): crate::auth::AuthClaims,
+    headers: axum::http::HeaderMap,
     Path((run_id, step_id)): Path<(Uuid, Uuid)>,
 ) -> impl IntoResponse {
+    let token = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "));
+
     let step = crate::db::get_step_instance_for_approval(&state.pool, step_id, run_id)
         .await
         .unwrap_or(None);
@@ -213,13 +323,18 @@ pub async fn reject_step(
         return (StatusCode::BAD_REQUEST, "Step is not waiting for approval").into_response();
     }
 
+    // 1.5 OPA ABAC Engine check
+    if let Err((status, msg)) = check_approval_opa(&state, run_id, &step.step_name, token).await {
+        return (status, msg).into_response();
+    }
+
     let _ = crate::db::insert_approval_registry(
         &state.pool,
         Uuid::new_v4(),
         step_id,
-        "system",
+        &claims.sub,
         "rejected",
-        &json!({}),
+        &serde_json::json!({}),
     )
     .await;
 
