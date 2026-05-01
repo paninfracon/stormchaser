@@ -180,9 +180,21 @@ pub async fn mutate_if_terraform(
             envs.append(&mut sts_envs);
         }
 
-        let storage_mounts: Option<Vec<stormchaser_model::dsl::StorageMount>> = actual_spec
-            .get("storage_mounts")
-            .and_then(|v| serde_json::from_value(v.clone()).ok());
+        let storage_mounts: Option<Vec<stormchaser_model::dsl::StorageMount>> =
+            match actual_spec.get("storage_mounts") {
+                Some(v) => match serde_json::from_value(v.clone()) {
+                    Ok(mounts) => Some(mounts),
+                    Err(err) => {
+                        tracing::warn!(
+                            "Failed to deserialize storage_mounts for Terraform step, \
+                             mounts will not be applied: {}",
+                            err
+                        );
+                        None
+                    }
+                },
+                None => None,
+            };
         let cpu = actual_spec
             .get("cpu")
             .and_then(|v| v.as_str())
