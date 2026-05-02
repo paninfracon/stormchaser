@@ -65,7 +65,6 @@ pub struct EnqueueRequest {
     pub workflow_path: String,
     /// The git ref.
     pub git_ref: String,
-    #[schema(value_type = Object)]
     /// The inputs.
     #[schema(value_type = Object)]
     pub inputs: Value,
