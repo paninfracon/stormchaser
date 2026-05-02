@@ -837,6 +837,16 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_handle_approval_dialog_key() {
+        let mut app = setup_app();
+        app.approval_dialog_active = true;
+
+        app.handle_approval_dialog_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .await;
+        assert!(!app.approval_dialog_active);
+    }
+
+    #[tokio::test]
     async fn test_handle_default_key_scroll_logs() {
         let mut app = setup_app();
 

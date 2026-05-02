@@ -123,6 +123,21 @@ fn render_webhook_dialog() {
 }
 
 #[test]
+fn render_approval_dialog() {
+    let mut app = create_test_app();
+    app.active_pane = Pane::RunDetail;
+    app.approval_dialog_active = true;
+    app.approval_inputs = ratatui_textarea::TextArea::default();
+    app.approval_inputs.insert_str("{\"approve\": true}");
+
+    let backend = TestBackend::new(100, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    terminal.draw(|f| ui(f, &mut app)).unwrap();
+    assert_debug_snapshot!(terminal.backend());
+}
+
+#[test]
 fn render_runs_tab_empty() {
     let mut app = create_test_app();
     app.active_pane = Pane::RunsList;
