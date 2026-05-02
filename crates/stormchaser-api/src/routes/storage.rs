@@ -11,7 +11,7 @@ use uuid::Uuid;
 /// Creates a storage backend.
 #[utoipa::path(
     post,
-    path = "/api/v1/storage/backends",
+    path = "/api/v1/storage-backends",
     responses(
         (status = 200, description = "Success"),
         (status = 400, description = "Bad Request"),
@@ -66,7 +66,7 @@ pub async fn create_storage_backend(
 /// List storage backends.
 #[utoipa::path(
     get,
-    path = "/api/v1/storage/backends",
+    path = "/api/v1/storage-backends",
     responses(
         (status = 200, description = "Success"),
         (status = 400, description = "Bad Request"),
@@ -89,7 +89,7 @@ pub async fn list_storage_backends(
 /// Get storage backend.
 #[utoipa::path(
     get,
-    path = "/api/v1/storage/backends/{id}",
+    path = "/api/v1/storage-backends/{id}",
     params(("id" = Uuid, Path, description="Backend ID")),
     responses(
         (status = 200, description = "Success"),
@@ -115,7 +115,7 @@ pub async fn get_storage_backend(
 /// Update storage backend.
 #[utoipa::path(
     put,
-    path = "/api/v1/storage/backends/{id}",
+    path = "/api/v1/storage-backends/{id}",
     params(("id" = Uuid, Path, description="Backend ID")),
     responses(
         (status = 200, description = "Success"),
@@ -160,7 +160,7 @@ pub async fn update_storage_backend(
 /// Deletes a storage backend.
 #[utoipa::path(
     delete,
-    path = "/api/v1/storage/backends/{id}",
+    path = "/api/v1/storage-backends/{id}",
     params(("id" = Uuid, Path, description="Backend ID")),
     responses(
         (status = 200, description = "Success"),

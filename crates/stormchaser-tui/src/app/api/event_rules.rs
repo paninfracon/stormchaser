@@ -8,7 +8,7 @@ impl<'a> App<'a> {
         }
 
         let res = self
-            .api_request(reqwest::Method::GET, "/api/v1/event-rules", None)
+            .api_request(reqwest::Method::GET, "/api/v1/rules", None)
             .await?;
 
         if res.status().is_success() {
@@ -90,10 +90,10 @@ impl<'a> App<'a> {
         let (method, path) = if let Some(id) = self.event_rule_edit_id {
             (
                 reqwest::Method::PATCH,
-                format!("/api/v1/event-rules/{}", id),
+                format!("/api/v1/rules/{}", id),
             )
         } else {
-            (reqwest::Method::POST, "/api/v1/event-rules".to_string())
+            (reqwest::Method::POST, "/api/v1/rules".to_string())
         };
 
         let payload = serde_json::json!({
@@ -129,7 +129,7 @@ impl<'a> App<'a> {
                 let res = self
                     .api_request(
                         reqwest::Method::DELETE,
-                        &format!("/api/v1/event-rules/{}", rule.id),
+                        &format!("/api/v1/rules/{}", rule.id),
                         None,
                     )
                     .await?;
@@ -142,5 +142,83 @@ impl<'a> App<'a> {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use stormchaser_model::event_rules::EventRule;
+    use tokio::sync::mpsc;
+    use uuid::Uuid;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn make_event_rule(id: Uuid) -> EventRule {
+        EventRule {
+            id,
+            name: "test-rule".to_string(),
+            description: None,
+            webhook_id: None,
+            event_type_pattern: "push".to_string(),
+            condition_expr: None,
+            workflow_name: "test".to_string(),
+            repo_url: "https://github.com/org/repo".to_string(),
+            workflow_path: "workflow.storm".to_string(),
+            git_ref: "main".to_string(),
+            input_mappings: serde_json::json!({}),
+            is_active: true,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_refresh_event_rules_uses_correct_path() {
+        let server = MockServer::start().await;
+        let id = Uuid::new_v4();
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/rules"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(vec![make_event_rule(id)]),
+            )
+            .mount(&server)
+            .await;
+
+        let (tx, _rx) = mpsc::channel(1);
+        let mut app = App::new(server.uri(), Some("token".to_string()), tx);
+
+        let result = app.refresh_event_rules().await;
+        assert!(result.is_ok());
+        assert_eq!(app.event_rules.len(), 1);
+        assert_eq!(app.event_rules[0].id, id);
+        assert!(app.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_delete_event_rule_uses_correct_path() {
+        let server = MockServer::start().await;
+        let id = Uuid::new_v4();
+
+        Mock::given(method("DELETE"))
+            .and(path(format!("/api/v1/rules/{}", id)))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/rules"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(Vec::<EventRule>::new()))
+            .mount(&server)
+            .await;
+
+        let (tx, _rx) = mpsc::channel(1);
+        let mut app = App::new(server.uri(), Some("token".to_string()), tx);
+        app.selected_event_rule = Some(make_event_rule(id));
+
+        let result = app.delete_selected_event_rule().await;
+        assert!(result.is_ok());
+        assert!(app.error.is_none());
     }
 }

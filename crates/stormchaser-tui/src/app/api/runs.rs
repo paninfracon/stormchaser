@@ -12,42 +12,40 @@ impl<'a> App<'a> {
             return Ok(());
         }
 
-        let mut query_params = Vec::new();
-        if let Some(owner) = &self.filter_owner {
-            query_params.push(format!("initiating_user={}", owner));
-        }
-        if let Some(name) = &self.filter_name {
-            query_params.push(format!("workflow_name={}", name));
-        }
-        if let Some(repo) = &self.filter_repo_url {
-            query_params.push(format!("repo_url={}", repo));
-        }
-        if let Some(path) = &self.filter_workflow_path {
-            query_params.push(format!("workflow_path={}", path));
-        }
-        if let Some(ca) = &self.filter_created_after {
-            query_params.push(format!("created_after={}", ca));
-        }
-        if let Some(cb) = &self.filter_created_before {
-            query_params.push(format!("created_before={}", cb));
-        }
-        if let Some(status) = &self.filter_status {
-            query_params.push(format!("status={}", status));
+        // Build query using Url to ensure filter values are properly percent-encoded.
+        let base = format!("{}/api/v1/runs", self.url);
+        let mut url = url::Url::parse(&base)?;
+        {
+            let mut pairs = url.query_pairs_mut();
+            if let Some(owner) = &self.filter_owner {
+                pairs.append_pair("initiating_user", owner);
+            }
+            if let Some(name) = &self.filter_name {
+                pairs.append_pair("workflow_name", name);
+            }
+            if let Some(repo) = &self.filter_repo_url {
+                pairs.append_pair("repo_url", repo);
+            }
+            if let Some(path) = &self.filter_workflow_path {
+                pairs.append_pair("workflow_path", path);
+            }
+            if let Some(ca) = &self.filter_created_after {
+                pairs.append_pair("created_after", ca);
+            }
+            if let Some(cb) = &self.filter_created_before {
+                pairs.append_pair("created_before", cb);
+            }
+            if let Some(status) = &self.filter_status {
+                pairs.append_pair("status", status);
+            }
         }
 
-        let query = if query_params.is_empty() {
-            String::new()
-        } else {
-            format!("?{}", query_params.join("&"))
-        };
-
-        let res = self
-            .api_request(
-                reqwest::Method::GET,
-                &format!("/api/v1/runs{}", query),
-                None,
-            )
-            .await?;
+        let client = reqwest::Client::new();
+        let mut req = client.request(reqwest::Method::GET, url);
+        if let Some(token) = &self.token {
+            req = req.header("Authorization", format!("Bearer {}", token));
+        }
+        let res = req.send().await?;
 
         if res.status().is_success() {
             self.runs = res.json::<Vec<crate::app::WorkflowRunDetail>>().await?;

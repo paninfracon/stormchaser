@@ -21,7 +21,7 @@ use uuid::Uuid;
 /// Create cron workflow.
 #[utoipa::path(
     post,
-    path = "/api/v1/cron",
+    path = "/api/v1/cron-workflows",
     responses(
         (status = 200, description = "Success"),
         (status = 400, description = "Bad Request"),
@@ -66,7 +66,7 @@ pub async fn create_cron_workflow(
 /// List cron workflows.
 #[utoipa::path(
     get,
-    path = "/api/v1/cron",
+    path = "/api/v1/cron-workflows",
     responses(
         (status = 200, description = "Success"),
         (status = 400, description = "Bad Request"),
@@ -89,7 +89,7 @@ pub async fn list_cron_workflows(
 /// Deletes a cron workflow.
 #[utoipa::path(
     delete,
-    path = "/api/v1/cron/{id}",
+    path = "/api/v1/cron-workflows/{id}",
     params(("id" = Uuid, Path, description="Cron ID")),
     responses(
         (status = 200, description = "Success"),

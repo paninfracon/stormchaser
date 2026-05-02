@@ -8,7 +8,7 @@ impl<'a> App<'a> {
         }
 
         let res = self
-            .api_request(reqwest::Method::GET, "/api/v1/cron", None)
+            .api_request(reqwest::Method::GET, "/api/v1/cron-workflows", None)
             .await?;
 
         if res.status().is_success() {
@@ -74,9 +74,12 @@ impl<'a> App<'a> {
         };
 
         let (method, path) = if let Some(id) = self.cron_edit_id {
-            (reqwest::Method::PATCH, format!("/api/v1/cron/{}", id))
+            (
+                reqwest::Method::PATCH,
+                format!("/api/v1/cron-workflows/{}", id),
+            )
         } else {
-            (reqwest::Method::POST, "/api/v1/cron".to_string())
+            (reqwest::Method::POST, "/api/v1/cron-workflows".to_string())
         };
 
         let payload = serde_json::json!({
@@ -110,7 +113,7 @@ impl<'a> App<'a> {
                 let res = self
                     .api_request(
                         reqwest::Method::DELETE,
-                        &format!("/api/v1/cron/{}", cron.id),
+                        &format!("/api/v1/cron-workflows/{}", cron.id),
                         None,
                     )
                     .await?;
@@ -123,5 +126,83 @@ impl<'a> App<'a> {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use stormchaser_model::cron::CronWorkflow;
+    use tokio::sync::mpsc;
+    use uuid::Uuid;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn make_cron_workflow(id: Uuid) -> CronWorkflow {
+        CronWorkflow {
+            id,
+            name: "test-cron".to_string(),
+            description: None,
+            cronspec: "* * * * *".to_string(),
+            workflow_name: "test".to_string(),
+            repo_url: "https://github.com/org/repo".to_string(),
+            workflow_path: "workflow.storm".to_string(),
+            git_ref: "main".to_string(),
+            inputs: serde_json::json!({}),
+            is_active: true,
+            secret_token: "secret".to_string(),
+            external_job_id: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_refresh_cron_workflows_uses_correct_path() {
+        let server = MockServer::start().await;
+        let id = Uuid::new_v4();
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/cron-workflows"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(vec![make_cron_workflow(id)]),
+            )
+            .mount(&server)
+            .await;
+
+        let (tx, _rx) = mpsc::channel(1);
+        let mut app = App::new(server.uri(), Some("token".to_string()), tx);
+
+        let result = app.refresh_cron_workflows().await;
+        assert!(result.is_ok());
+        assert_eq!(app.cron_workflows.len(), 1);
+        assert_eq!(app.cron_workflows[0].id, id);
+        assert!(app.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_delete_cron_workflow_uses_correct_path() {
+        let server = MockServer::start().await;
+        let id = Uuid::new_v4();
+
+        Mock::given(method("DELETE"))
+            .and(path(format!("/api/v1/cron-workflows/{}", id)))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/cron-workflows"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(Vec::<CronWorkflow>::new()))
+            .mount(&server)
+            .await;
+
+        let (tx, _rx) = mpsc::channel(1);
+        let mut app = App::new(server.uri(), Some("token".to_string()), tx);
+        app.selected_cron_workflow = Some(make_cron_workflow(id));
+
+        let result = app.delete_selected_cron_workflow().await;
+        assert!(result.is_ok());
+        assert!(app.error.is_none());
     }
 }
