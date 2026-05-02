@@ -232,7 +232,10 @@ async fn simulate_browser_login(login_url: &str, email: &str, password: &str) ->
             .find("name=\"req\" value=\"")
             .ok_or_else(|| anyhow::anyhow!("No req found"))?
             + 18;
-        let req_end = html2[req_start..].find('"').unwrap() + req_start;
+        let req_end = html2[req_start..]
+            .find('"')
+            .ok_or_else(|| anyhow::anyhow!("No req value end found in Dex approval response"))?
+            + req_start;
         let req_val = &html2[req_start..req_end];
 
         let _res3 = client
