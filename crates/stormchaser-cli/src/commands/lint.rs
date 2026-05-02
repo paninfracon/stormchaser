@@ -253,6 +253,8 @@ workflow "test_workflow" {{
 
     #[tokio::test]
     async fn test_lint_handle_invalid_spec() -> Result<()> {
+        let _guard = LINT_MUTEX.lock().await;
+        let _ = std::fs::remove_file(".stormchaser-schema.json");
         let mut file = NamedTempFile::new()?;
         writeln!(
             file,

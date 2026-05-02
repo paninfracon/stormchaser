@@ -7,6 +7,8 @@ description.workspace = true
 repository.workspace = true
 license.workspace = true
 
+[features]
+
 [lib]
 name = "stormchaser_api"
 path = "src/lib.rs"
