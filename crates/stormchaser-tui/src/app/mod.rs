@@ -213,6 +213,10 @@ pub struct App<'a> {
     pub webhook_is_active: bool,
     /// The ID of the webhook being edited, or None for creating a new one.
     pub webhook_edit_id: Option<Uuid>,
+    /// Whether the approval dialog is active.
+    pub approval_dialog_active: bool,
+    /// Text area for JSON inputs for step approval.
+    pub approval_inputs: ratatui_textarea::TextArea<'a>,
     /// Whether the file browser dialog is active.
     pub file_browser_active: bool,
     /// The state of the file explorer widget.
@@ -314,6 +318,8 @@ impl<'a> App<'a> {
             webhook_source_type_index: 0,
             webhook_is_active: false,
             webhook_edit_id: None,
+            approval_dialog_active: false,
+            approval_inputs: ratatui_textarea::TextArea::default(),
             file_browser_active: false,
             direct_submit_form: None,
             direct_submit_dsl: None,

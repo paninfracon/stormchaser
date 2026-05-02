@@ -159,6 +159,12 @@ impl<'a> App<'a> {
         self.webhook_is_active = true;
     }
 
+    /// Opens the step approval dialog.
+    pub fn open_approval_dialog(&mut self) {
+        self.approval_dialog_active = true;
+        self.approval_inputs = ratatui_textarea::TextArea::from(vec!["{}".to_string()]);
+    }
+
     /// Submits the data from the schedule git dialog to start a workflow run.
     pub async fn submit_schedule_git(&mut self) -> Result<()> {
         if self.schedule_git_inputs.len() == 3 {

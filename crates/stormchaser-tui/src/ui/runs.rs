@@ -196,6 +196,11 @@ pub(crate) fn render_run_detail(
             prefix, name, status_line, started
         ));
 
+        if status == "waiting_for_event" {
+            detail_text
+                .push_str("       └─ Action Required: Press 'A' to Approve, 'R' to Reject\n");
+        }
+
         if status == "succeeded" {
             if let (Some(s), Some(f)) = (started_raw, finished_raw) {
                 detail_text.push_str(&format!(

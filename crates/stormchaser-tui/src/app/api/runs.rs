@@ -98,6 +98,70 @@ impl<'a> App<'a> {
         Ok(())
     }
 
+    /// Approves the currently selected step in the active run.
+    pub async fn approve_selected_step(&mut self, inputs: serde_json::Value) -> Result<()> {
+        if let Some(run) = &self.selected_run {
+            if let Some(step) = run.steps.get(self.selected_step_index) {
+                let run_id = run.detail.id;
+                let step_id_str = step
+                    .instance
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default();
+                if let Ok(step_id) = Uuid::parse_str(step_id_str) {
+                    let res = self
+                        .api_request(
+                            reqwest::Method::POST,
+                            &format!("/api/v1/runs/{}/steps/{}/approve", run_id, step_id),
+                            Some(inputs.clone()),
+                        )
+                        .await?;
+
+                    if res.status().is_success() {
+                        self.error = None;
+                        self.approval_dialog_active = false;
+                        self.refresh_runs().await?;
+                    } else {
+                        self.error = Some(format!("Failed to approve step: {}", res.status()));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Rejects the currently selected step in the active run.
+    pub async fn reject_selected_step(&mut self) -> Result<()> {
+        if let Some(run) = &self.selected_run {
+            if let Some(step) = run.steps.get(self.selected_step_index) {
+                let run_id = run.detail.id;
+                let step_id_str = step
+                    .instance
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default();
+                if let Ok(step_id) = Uuid::parse_str(step_id_str) {
+                    let res = self
+                        .api_request(
+                            reqwest::Method::POST,
+                            &format!("/api/v1/runs/{}/steps/{}/reject", run_id, step_id),
+                            None,
+                        )
+                        .await?;
+
+                    if res.status().is_success() {
+                        self.error = None;
+                        self.approval_dialog_active = false;
+                        self.refresh_runs().await?;
+                    } else {
+                        self.error = Some(format!("Failed to reject step: {}", res.status()));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Starts a background task to listen for global workflow run updates via SSE.
     pub async fn start_listening_for_workflows(&mut self) {
         if let Some(handle) = self.workflow_handle.take() {

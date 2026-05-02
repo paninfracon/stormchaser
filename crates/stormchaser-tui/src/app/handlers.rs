@@ -439,6 +439,27 @@ impl<'a> App<'a> {
         }
     }
 
+    pub async fn handle_approval_dialog_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.approval_dialog_active = false;
+            }
+            KeyCode::Char('a') | KeyCode::Char('A')
+                if key
+                    .modifiers
+                    .contains(ratatui::crossterm::event::KeyModifiers::CONTROL) =>
+            {
+                let inputs_str = self.approval_inputs.lines().join("\n");
+                let inputs_json =
+                    serde_json::from_str(&inputs_str).unwrap_or(serde_json::json!({}));
+                let _ = self.approve_selected_step(inputs_json).await;
+            }
+            _ => {
+                self.approval_inputs.input(key);
+            }
+        }
+    }
+
     pub async fn handle_direct_submit_form_key(&mut self, key: KeyEvent) {
         if let Some(ref mut form) = self.direct_submit_form {
             form.handle_input(key);
@@ -579,6 +600,12 @@ impl<'a> App<'a> {
             }
             KeyCode::Char('a') => {
                 self.log_auto_scroll = !self.log_auto_scroll;
+            }
+            KeyCode::Char('A') if self.active_pane == Pane::RunDetail => {
+                self.open_approval_dialog();
+            }
+            KeyCode::Char('R') if self.active_pane == Pane::RunDetail => {
+                let _ = self.reject_selected_step().await;
             }
             KeyCode::Char('c')
                 if self.active_pane == Pane::StorageBackendsList

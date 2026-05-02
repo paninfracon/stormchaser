@@ -79,6 +79,8 @@ async fn handle_app_event<'a>(app: &mut App<'a>, event: AppEvent) -> bool {
                 app.handle_storage_backend_dialog_key(key).await;
             } else if app.webhook_dialog_active {
                 app.handle_webhook_dialog_key(key).await;
+            } else if app.approval_dialog_active {
+                app.handle_approval_dialog_key(key).await;
             } else if app.direct_submit_form.is_some() {
                 app.handle_direct_submit_form_key(key).await;
             } else if app.file_browser_active {

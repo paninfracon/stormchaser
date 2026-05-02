@@ -160,3 +160,41 @@ pub(crate) fn render_schedule_git_dialog(f: &mut Frame, app: &mut App) {
         chunks[3],
     );
 }
+
+pub(crate) fn render_approval_dialog(f: &mut Frame, app: &mut App) {
+    let area = centered_rect(60, 40, f.area());
+    f.render_widget(Clear, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Approve Step ")
+        .border_style(Style::default().fg(Color::Green));
+    f.render_widget(block, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .margin(2)
+        .constraints(
+            [
+                Constraint::Min(5),    // JSON Inputs
+                Constraint::Length(3), // Help text
+            ]
+            .as_ref(),
+        )
+        .split(area);
+
+    let mut text_area = app.approval_inputs.clone();
+    text_area.set_block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("JSON Inputs:")
+            .border_style(Style::default().fg(Color::Yellow)),
+    );
+    f.render_widget(&text_area, chunks[0]);
+
+    f.render_widget(
+        Paragraph::new("Press Ctrl+A to Approve, Esc to Cancel")
+            .style(Style::default().fg(Color::Yellow)),
+        chunks[1],
+    );
+}

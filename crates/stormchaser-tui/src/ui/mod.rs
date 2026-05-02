@@ -67,6 +67,8 @@ pub fn ui(f: &mut Frame, app: &mut App) {
         render_storage_backend_dialog(f, app);
     } else if app.webhook_dialog_active {
         render_webhook_dialog(f, app);
+    } else if app.approval_dialog_active {
+        render_approval_dialog(f, app);
     } else if let Some(form) = &mut app.direct_submit_form {
         let area = centered_rect(60, 60, f.area());
         f.render_widget(Clear, area);
