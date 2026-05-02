@@ -224,10 +224,7 @@ pub fn app(state: AppState) -> Router {
             "/runs/:id/steps/:step_id/logs/stream",
             get(stream_step_logs_api),
         )
-        .route(
-            "/runs/:id/steps/:step_id/logs",
-            get(get_step_logs_api),
-        )
+        .route("/runs/:id/steps/:step_id/logs", get(get_step_logs_api))
         .route("/runs/:id/logs/stream", get(stream_run_logs_api))
         .route("/runs/:id/status/stream", get(stream_run_status_api))
         .route("/runs/direct", post(direct_run))

@@ -164,9 +164,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/api/v1/cron-workflows"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(vec![make_cron_workflow(id)]),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(vec![make_cron_workflow(id)]))
             .mount(&server)
             .await;
 

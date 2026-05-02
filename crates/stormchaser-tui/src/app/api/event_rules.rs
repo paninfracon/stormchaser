@@ -88,10 +88,7 @@ impl<'a> App<'a> {
         };
 
         let (method, path) = if let Some(id) = self.event_rule_edit_id {
-            (
-                reqwest::Method::PATCH,
-                format!("/api/v1/rules/{}", id),
-            )
+            (reqwest::Method::PATCH, format!("/api/v1/rules/{}", id))
         } else {
             (reqwest::Method::POST, "/api/v1/rules".to_string())
         };
@@ -180,9 +177,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/api/v1/rules"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(vec![make_event_rule(id)]),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(vec![make_event_rule(id)]))
             .mount(&server)
             .await;
 
