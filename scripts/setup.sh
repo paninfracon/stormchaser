@@ -359,6 +359,6 @@ fi
 
 echo -e "${GREEN}>>> Stormchaser is UP ($MODE mode)!${NC}"
 echo -e "${BLUE}API:${NC} http://localhost:${PORT_API}"
-if [[ "$MODE" == "hybrid" || "$MODE" == "microk8s" ]]; then
+if [[ -f "$REPO_ROOT/.tmp/kubeconfig" ]]; then
     echo -e "${BLUE}Kubeconfig:${NC} .tmp/kubeconfig"
 fi
