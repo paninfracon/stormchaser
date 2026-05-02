@@ -103,6 +103,126 @@ fn render_webhooks_tab() {
 }
 
 #[test]
+fn render_event_rules_tab() {
+    let mut app = create_test_app();
+    app.active_pane = Pane::EventRulesList;
+
+    let created_at = Utc.timestamp_opt(1609459200, 0).unwrap();
+    let updated_at = Utc.timestamp_opt(1609459200, 0).unwrap();
+
+    app.event_rules = vec![stormchaser_model::event_rules::EventRule {
+        id: uuid::Uuid::nil(),
+        name: "test-rule".to_string(),
+        description: Some("Test Rule".to_string()),
+        webhook_id: Some(uuid::Uuid::nil()),
+        event_type_pattern: "push".to_string(),
+        condition_expr: Some("payload.ref == 'refs/heads/main'".to_string()),
+        workflow_name: "test".to_string(),
+        repo_url: "http://example.com".to_string(),
+        workflow_path: "test.storm".to_string(),
+        git_ref: "main".to_string(),
+        input_mappings: serde_json::json!({}),
+        is_active: true,
+        created_at,
+        updated_at,
+    }];
+    app.selected_event_rule = app.event_rules.first().cloned();
+
+    let backend = TestBackend::new(100, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    terminal.draw(|f| ui(f, &mut app)).unwrap();
+    assert_debug_snapshot!(terminal.backend());
+}
+
+#[test]
+fn render_event_rule_dialog() {
+    let mut app = create_test_app();
+    app.active_pane = Pane::EventRulesList;
+    app.event_rule_dialog_active = true;
+    app.event_rule_inputs = vec![
+        ratatui_textarea::TextArea::default(),
+        ratatui_textarea::TextArea::default(),
+        ratatui_textarea::TextArea::default(),
+        ratatui_textarea::TextArea::default(),
+        ratatui_textarea::TextArea::default(),
+        ratatui_textarea::TextArea::default(),
+        ratatui_textarea::TextArea::default(),
+        ratatui_textarea::TextArea::default(),
+        ratatui_textarea::TextArea::default(),
+        ratatui_textarea::TextArea::default(),
+    ];
+    app.event_rule_inputs[0].insert_str("new-rule");
+    app.event_rule_inputs[3].insert_str("push");
+    app.event_rule_inputs[5].insert_str("test");
+
+    let backend = TestBackend::new(100, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    terminal.draw(|f| ui(f, &mut app)).unwrap();
+    assert_debug_snapshot!(terminal.backend());
+}
+
+#[test]
+fn render_cron_workflows_tab() {
+    let mut app = create_test_app();
+    app.active_pane = Pane::CronWorkflowsList;
+
+    let created_at = Utc.timestamp_opt(1609459200, 0).unwrap();
+    let updated_at = Utc.timestamp_opt(1609459200, 0).unwrap();
+
+    app.cron_workflows = vec![stormchaser_model::cron::CronWorkflow {
+        id: uuid::Uuid::nil(),
+        name: "test-cron".to_string(),
+        description: Some("Test Cron".to_string()),
+        cronspec: "* * * * *".to_string(),
+        workflow_name: "test".to_string(),
+        repo_url: "http://example.com".to_string(),
+        workflow_path: "test.storm".to_string(),
+        git_ref: "main".to_string(),
+        inputs: serde_json::json!({}),
+        secret_token: "secret".to_string(),
+        is_active: true,
+        external_job_id: None,
+        created_at,
+        updated_at,
+    }];
+    app.selected_cron_workflow = app.cron_workflows.first().cloned();
+
+    let backend = TestBackend::new(100, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    terminal.draw(|f| ui(f, &mut app)).unwrap();
+    assert_debug_snapshot!(terminal.backend());
+}
+
+#[test]
+fn render_cron_dialog() {
+    let mut app = create_test_app();
+    app.active_pane = Pane::CronWorkflowsList;
+    app.cron_dialog_active = true;
+    app.cron_inputs = vec![
+        ratatui_textarea::TextArea::default(),
+        ratatui_textarea::TextArea::default(),
+        ratatui_textarea::TextArea::default(),
+        ratatui_textarea::TextArea::default(),
+        ratatui_textarea::TextArea::default(),
+        ratatui_textarea::TextArea::default(),
+        ratatui_textarea::TextArea::default(),
+        ratatui_textarea::TextArea::default(),
+    ];
+    app.cron_inputs[0].insert_str("new-cron");
+    app.cron_inputs[2].insert_str("* * * * *");
+    app.cron_inputs[3].insert_str("test");
+
+    let backend = TestBackend::new(100, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    terminal.draw(|f| ui(f, &mut app)).unwrap();
+    assert_debug_snapshot!(terminal.backend());
+}
+
+#[test]
 fn render_webhook_dialog() {
     let mut app = create_test_app();
     app.active_pane = Pane::WebhooksList;

@@ -202,6 +202,8 @@ mod tests {
     use std::io::Write;
     use tempfile::NamedTempFile;
 
+    static LINT_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     #[test]
     fn test_parse_step_schema_valid() {
         let (t, p) = parse_step_schema("CustomType=local.json").unwrap();
@@ -304,6 +306,8 @@ workflow "test_workflow" {{
 
     #[tokio::test]
     async fn test_lint_handle_prepare() -> Result<()> {
+        let _guard = LINT_MUTEX.lock().await;
+        let _ = std::fs::remove_file(".stormchaser-schema.json");
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/api/v1/schema"))
