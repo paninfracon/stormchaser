@@ -218,6 +218,7 @@ pub async fn get_workflow_run(
                     instance.id,
                     instance.started_at,
                     instance.finished_at,
+                    Some(100), // Reduce payload size for full detail, TUI will fetch on demand
                 )
                 .await
                 .unwrap_or_else(|e| {

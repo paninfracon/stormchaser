@@ -1,15 +1,24 @@
 use crate::{AppState, AuthClaims};
 use axum::response::sse::Event;
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
+    Json,
 };
 use futures::StreamExt;
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
+use utoipa::ToSchema;
 use uuid::Uuid;
+
+#[derive(Deserialize, ToSchema)]
+pub struct LogsQuery {
+    #[schema(example = 100)]
+    pub limit: Option<usize>,
+}
 
 /// Format log event.
 pub fn format_log_event(line: &str) -> Event {
@@ -72,6 +81,66 @@ pub async fn stream_step_logs_api(
     });
 
     Ok(axum::response::sse::Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default()))
+}
+
+/// Get step logs api.
+#[utoipa::path(
+    get,
+    path = "/api/v1/runs/{run_id}/steps/{step_id}/logs",
+    params(
+        ("run_id" = Uuid, Path, description="Run ID"),
+        ("step_id" = String, Path, description="Step ID"),
+        ("limit" = Option<usize>, Query, description="Limit log lines")
+    ),
+    responses(
+        (status = 200, description = "Success", body = Vec<String>),
+        (status = 400, description = "Bad Request"),
+        (status = 404, description = "Not Found"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    tag = "step"
+)]
+pub async fn get_step_logs_api(
+    AuthClaims(_claims): AuthClaims,
+    State(state): State<AppState>,
+    Path((run_id, step_name)): Path<(Uuid, String)>,
+    Query(query): Query<LogsQuery>,
+) -> Result<Json<Vec<String>>, StatusCode> {
+    let log_backend = match &state.log_backend {
+        Some(backend) => backend,
+        None => return Err(StatusCode::NOT_IMPLEMENTED),
+    };
+
+    let step_id = crate::db::get_step_id_by_name(&state.pool, run_id, &step_name)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let step_id = step_id.ok_or(StatusCode::NOT_FOUND)?;
+
+    let instances = crate::db::get_step_instances(&state.pool, run_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let instance = instances
+        .into_iter()
+        .find(|i| i.id == step_id)
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let logs = log_backend
+        .fetch_step_logs(
+            &step_name,
+            step_id,
+            instance.started_at,
+            instance.finished_at,
+            query.limit,
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to fetch logs: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(logs))
 }
 
 /// Streams run logs.

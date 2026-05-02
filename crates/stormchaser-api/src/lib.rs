@@ -75,6 +75,7 @@ pub use routes::*;
         routes::webhook::delete_event_rule,
         routes::webhook::handle_webhook,
         routes::step::stream_step_logs_api,
+        routes::step::get_step_logs_api,
         routes::step::stream_run_logs_api,
         routes::step::stream_run_status_api,
         routes::schema::get_schema,

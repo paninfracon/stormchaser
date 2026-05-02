@@ -96,6 +96,9 @@ async fn handle_app_event<'a>(app: &mut App<'a>, event: AppEvent) -> bool {
         AppEvent::LogLine(run_id, line) => {
             app.handle_log_line(run_id, line);
         }
+        AppEvent::StepLogsFetched(run_id, step_index, logs) => {
+            app.handle_step_logs_fetched(run_id, step_index, logs);
+        }
         AppEvent::WorkflowUpdate(run) => {
             app.handle_workflow_update(run);
         }

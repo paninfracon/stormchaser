@@ -223,6 +223,8 @@ pub struct App<'a> {
     pub direct_submit_dsl: Option<String>,
     /// A cache of recently loaded full workflow run details.
     pub cached_runs: HashMap<Uuid, WorkflowRunFullDetail>,
+    /// A set of step instance IDs for which full logs have been fetched.
+    pub fetched_steps: std::collections::HashSet<Uuid>,
     /// Marker to satisfy lifetime requirements for the struct.
     pub _marker: std::marker::PhantomData<&'a ()>,
 }
@@ -316,6 +318,7 @@ impl<'a> App<'a> {
             direct_submit_form: None,
             direct_submit_dsl: None,
             cached_runs: HashMap::new(),
+            fetched_steps: std::collections::HashSet::new(),
             file_explorer: tui_file_explorer::FileExplorer::new(
                 std::env::current_dir().unwrap_or_default(),
                 vec!["storm".to_string()],

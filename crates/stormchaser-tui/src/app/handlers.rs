@@ -216,8 +216,34 @@ impl<'a> App<'a> {
     }
 
     /// Appends a new log line to the appropriate step within the selected run.
+    pub fn handle_step_logs_fetched(&mut self, run_id: Uuid, step_index: usize, logs: Vec<String>) {
+        if let Some(run) = &mut self.selected_run {
+            if run.detail.id == run_id {
+                if let Some(step) = run.steps.get_mut(step_index) {
+                    let mut final_logs = logs;
+                    // Append any logs from the current step.logs that are not in the newly fetched logs.
+                    // This preserves any live SSE lines that arrived during the fetch request.
+                    for line in &step.logs {
+                        if !final_logs.contains(line) {
+                            final_logs.push(line.clone());
+                        }
+                    }
+                    step.logs = final_logs;
+
+                    if self.selected_step_index == step_index {
+                        self.run_logs.clear();
+                        self.run_logs.extend_from_slice(&step.logs);
+
+                        if self.log_auto_scroll {
+                            self.log_scroll = self.run_logs.len().saturating_sub(1);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    /// Appends a new log line to the appropriate step within the selected run.
     pub fn handle_log_line(&mut self, run_id: Uuid, line: String) {
-        let line = line.replace('\r', "");
         if let Some(run) = &mut self.selected_run {
             if run.detail.id == run_id {
                 let mut step_name_and_clean_line = None;
@@ -231,7 +257,8 @@ impl<'a> App<'a> {
                             let clean_line = line
                                 .strip_prefix(&prefix)
                                 .unwrap_or(&line)
-                                .trim()
+                                .strip_prefix(' ')
+                                .unwrap_or_else(|| line.strip_prefix(&prefix).unwrap_or(&line))
                                 .to_string();
                             step.logs.push(clean_line.clone());
                             step_name_and_clean_line = Some((name.to_string(), clean_line));
@@ -707,6 +734,37 @@ mod tests {
                 .unwrap(),
             "running"
         );
+    }
+
+    #[test]
+    fn test_handle_step_logs_fetched_merge_with_live() {
+        let mut app = setup_app();
+        let run_id = Uuid::new_v4();
+
+        let mut step = mock_step_detail("test_step", "running");
+        step.logs = vec!["live log 1".to_string(), "live log 2".to_string()];
+
+        let detail = mock_full_detail(run_id, RunStatus::Running, vec![step]);
+        app.selected_run = Some(detail);
+        app.selected_step_index = 0;
+
+        let fetched_logs = vec![
+            "historic log 1".to_string(),
+            "historic log 2".to_string(),
+            "live log 1".to_string(), // simulate overlap
+        ];
+
+        app.handle_step_logs_fetched(run_id, 0, fetched_logs);
+
+        let updated_step = &app.selected_run.as_ref().unwrap().steps[0];
+        assert_eq!(updated_step.logs.len(), 4);
+        assert_eq!(updated_step.logs[0], "historic log 1");
+        assert_eq!(updated_step.logs[1], "historic log 2");
+        assert_eq!(updated_step.logs[2], "live log 1");
+        assert_eq!(updated_step.logs[3], "live log 2");
+
+        assert_eq!(app.run_logs.len(), 4);
+        assert_eq!(app.run_logs[3], "live log 2");
     }
 
     #[test]

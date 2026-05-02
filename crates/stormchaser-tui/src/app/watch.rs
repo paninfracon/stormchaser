@@ -6,7 +6,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 impl<'a> App<'a> {
-    /// Re-populates the log view buffer from the currently selected step's logs.
+    /// Re-populates the log view buffer from the currently selected step's logs and fetches full logs.
     pub fn refresh_step_logs(&mut self, reset_scroll: bool) {
         if let Some(run) = &self.selected_run {
             if let Some(step) = run.steps.get(self.selected_step_index) {
@@ -18,6 +18,55 @@ impl<'a> App<'a> {
                     self.log_scroll = 0;
                     self.log_auto_scroll = true;
                 }
+
+                let step_id = step
+                    .instance
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| uuid::Uuid::parse_str(s).ok());
+
+                if let Some(id) = step_id {
+                    if self.fetched_steps.contains(&id) {
+                        return;
+                    }
+                    self.fetched_steps.insert(id);
+                }
+
+                // Spawn background task to fetch full historical logs for this step
+                let run_id = run.detail.id;
+                let step_name = step
+                    .instance
+                    .get("step_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                let url = self.url.clone();
+                let token = self.token.clone();
+                let tx = self.status_tx.clone();
+                let step_index = self.selected_step_index;
+
+                tokio::spawn(async move {
+                    if let Some(token) = token {
+                        let client = reqwest::Client::new();
+                        if let Ok(res) = client
+                            .get(format!(
+                                "{}/api/v1/runs/{}/steps/{}/logs?limit=5000",
+                                url, run_id, step_name
+                            ))
+                            .header("Authorization", format!("Bearer {}", token))
+                            .send()
+                            .await
+                        {
+                            if res.status().is_success() {
+                                if let Ok(logs) = res.json::<Vec<String>>().await {
+                                    let _ = tx
+                                        .send(AppEvent::StepLogsFetched(run_id, step_index, logs))
+                                        .await;
+                                }
+                            }
+                        }
+                    }
+                });
             } else {
                 self.run_logs.clear();
                 if reset_scroll {
