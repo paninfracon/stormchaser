@@ -192,6 +192,20 @@ pub async fn get_step_instances(
     .fetch_all(pool)
     .await
 }
+/// Retrieves a single step instance by its UUID and run ID.
+pub async fn get_step_instance_by_id(
+    pool: &PgPool,
+    run_id: Uuid,
+    step_id: Uuid,
+) -> Result<Option<step::StepInstance>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT * FROM combined_step_instances WHERE run_id = $1 AND id = $2",
+    )
+    .bind(run_id)
+    .bind(step_id)
+    .fetch_optional(pool)
+    .await
+}
 /// Retrieves the outputs for a specific step instance.
 /// Get step outputs.
 pub async fn get_step_outputs(
@@ -550,9 +564,11 @@ pub async fn update_storage_backend(
         separated.push("config = ").push_bind_unseparated(cfg);
     }
     if let Some(role) = &payload.aws_assume_role_arn {
+        // An empty string is treated as a request to clear the ARN (set to NULL).
+        let value: Option<&str> = if role.is_empty() { None } else { Some(role.as_str()) };
         separated
             .push("aws_assume_role_arn = ")
-            .push_bind_unseparated(role);
+            .push_bind_unseparated(value);
     }
     if let Some(is_default) = payload.is_default_sfs {
         separated

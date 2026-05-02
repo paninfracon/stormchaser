@@ -25,21 +25,18 @@ impl<'a> App<'a> {
                     .and_then(|v| v.as_str())
                     .and_then(|s| uuid::Uuid::parse_str(s).ok());
 
-                if let Some(id) = step_id {
-                    if self.fetched_steps.contains(&id) {
-                        return;
-                    }
-                    self.fetched_steps.insert(id);
+                let Some(id) = step_id else {
+                    // Without a stable UUID we cannot dedupe or fetch logs reliably.
+                    return;
+                };
+
+                if self.fetched_steps.contains(&id) {
+                    return;
                 }
+                self.fetched_steps.insert(id);
 
                 // Spawn background task to fetch full historical logs for this step
                 let run_id = run.detail.id;
-                let step_name = step
-                    .instance
-                    .get("step_name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string();
                 let url = self.url.clone();
                 let token = self.token.clone();
                 let tx = self.status_tx.clone();
@@ -51,7 +48,7 @@ impl<'a> App<'a> {
                         if let Ok(res) = client
                             .get(format!(
                                 "{}/api/v1/runs/{}/steps/{}/logs?limit=5000",
-                                url, run_id, step_name
+                                url, run_id, id
                             ))
                             .header("Authorization", format!("Bearer {}", token))
                             .send()

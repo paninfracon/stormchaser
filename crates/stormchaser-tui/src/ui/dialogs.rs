@@ -72,7 +72,7 @@ pub(crate) fn render_filter_dialog(f: &mut Frame, app: &mut App) {
     f.render_widget(Paragraph::new(status_text).block(status_block), chunks[6]);
 
     f.render_widget(
-        Paragraph::new("Press Enter to Apply, Esc to Cancel")
+        Paragraph::new("Press Ctrl+Enter to Apply, Esc to Cancel")
             .style(Style::default().fg(Color::Yellow)),
         chunks[7],
     );

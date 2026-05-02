@@ -312,7 +312,7 @@ pub struct UpdateStorageBackendRequest {
     /// The config.
     #[schema(value_type = Object)]
     pub config: Option<Value>,
-    /// Optional AWS role ARN.
+    /// Optional AWS role ARN. Set to an empty string to clear an existing ARN.
     pub aws_assume_role_arn: Option<String>,
     /// The is default sfs.
     pub is_default_sfs: Option<bool>,

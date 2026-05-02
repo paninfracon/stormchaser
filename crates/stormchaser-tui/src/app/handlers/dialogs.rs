@@ -3,6 +3,9 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 impl<'a> App<'a> {
     pub async fn handle_filter_dialog_key(&mut self, key: KeyEvent) {
+        // Focus layout: 0..=5 are the 6 text inputs, 6 is the status selector.
+        const FOCUS_COUNT: usize = 7;
+        const STATUS_FOCUS: usize = 6;
         match key.code {
             KeyCode::Esc => {
                 self.filter_dialog_active = false;
@@ -12,45 +15,24 @@ impl<'a> App<'a> {
                     .modifiers
                     .contains(ratatui::crossterm::event::KeyModifiers::CONTROL) =>
             {
-                self.filter_dialog_active = false;
-                self.filter_owner =
-                    Some(self.filter_inputs[0].lines().join("\n").trim().to_string())
-                        .filter(|s| !s.is_empty());
-                self.filter_name =
-                    Some(self.filter_inputs[1].lines().join("\n").trim().to_string())
-                        .filter(|s| !s.is_empty());
-                self.filter_repo_url =
-                    Some(self.filter_inputs[2].lines().join("\n").trim().to_string())
-                        .filter(|s| !s.is_empty());
-                self.filter_workflow_path =
-                    Some(self.filter_inputs[3].lines().join("\n").trim().to_string())
-                        .filter(|s| !s.is_empty());
-
-                let status_str = crate::app::FILTER_STATUS_OPTIONS[self.filter_status_index];
-                if status_str == "Any" {
-                    self.filter_status = None;
-                } else {
-                    self.filter_status = Some(status_str.to_lowercase());
-                }
-
-                let _ = self.refresh_runs().await;
+                let _ = self.apply_filters().await;
             }
             KeyCode::BackTab => {
-                self.filter_focus = (self.filter_focus + 4) % 5;
+                self.filter_focus = (self.filter_focus + FOCUS_COUNT - 1) % FOCUS_COUNT;
             }
             KeyCode::Tab => {
-                self.filter_focus = (self.filter_focus + 1) % 5;
+                self.filter_focus = (self.filter_focus + 1) % FOCUS_COUNT;
             }
-            KeyCode::Left if self.filter_focus == 4 => {
+            KeyCode::Left if self.filter_focus == STATUS_FOCUS => {
                 let opts_len = crate::app::FILTER_STATUS_OPTIONS.len();
                 self.filter_status_index = (self.filter_status_index + opts_len - 1) % opts_len;
             }
-            KeyCode::Right if self.filter_focus == 4 => {
+            KeyCode::Right if self.filter_focus == STATUS_FOCUS => {
                 let opts_len = crate::app::FILTER_STATUS_OPTIONS.len();
                 self.filter_status_index = (self.filter_status_index + 1) % opts_len;
             }
             _ => {
-                if self.filter_focus < 4 {
+                if self.filter_focus < STATUS_FOCUS {
                     self.filter_inputs[self.filter_focus].input(key);
                 }
             }

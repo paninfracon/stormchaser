@@ -29,7 +29,7 @@ pub fn format_log_event(line: &str) -> Event {
 #[utoipa::path(
     get,
     path = "/api/v1/runs/{run_id}/steps/{step_id}/logs/stream",
-    params(("run_id" = Uuid, Path, description="Run ID"), ("step_id" = String, Path, description="Step ID")),
+    params(("run_id" = Uuid, Path, description="Run ID"), ("step_id" = Uuid, Path, description="Step instance ID")),
     responses(
         (status = 200, description = "Success"),
         (status = 400, description = "Bad Request"),
@@ -41,7 +41,7 @@ pub fn format_log_event(line: &str) -> Event {
 pub async fn stream_step_logs_api(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path((run_id, step_name)): Path<(Uuid, String)>,
+    Path((run_id, step_id)): Path<(Uuid, Uuid)>,
 ) -> Result<
     axum::response::sse::Sse<
         impl futures::stream::Stream<Item = Result<Event, std::convert::Infallible>>,
@@ -53,14 +53,13 @@ pub async fn stream_step_logs_api(
         None => return Err(StatusCode::NOT_IMPLEMENTED),
     };
 
-    let step_id = crate::db::get_step_id_by_name(&state.pool, run_id, &step_name)
+    let instance = crate::db::get_step_instance_by_id(&state.pool, run_id, step_id)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let step_id = step_id.ok_or(StatusCode::NOT_FOUND)?;
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     let rx = log_backend
-        .stream_step_logs(&step_name, step_id)
+        .stream_step_logs(&instance.step_name, step_id)
         .await
         .map_err(|e| {
             tracing::error!("Failed to stream logs: {}", e);
@@ -89,7 +88,7 @@ pub async fn stream_step_logs_api(
     path = "/api/v1/runs/{run_id}/steps/{step_id}/logs",
     params(
         ("run_id" = Uuid, Path, description="Run ID"),
-        ("step_id" = String, Path, description="Step ID"),
+        ("step_id" = Uuid, Path, description="Step instance ID"),
         ("limit" = Option<usize>, Query, description="Limit log lines")
     ),
     responses(
@@ -103,7 +102,7 @@ pub async fn stream_step_logs_api(
 pub async fn get_step_logs_api(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path((run_id, step_name)): Path<(Uuid, String)>,
+    Path((run_id, step_id)): Path<(Uuid, Uuid)>,
     Query(query): Query<LogsQuery>,
 ) -> Result<Json<Vec<String>>, StatusCode> {
     let log_backend = match &state.log_backend {
@@ -111,24 +110,14 @@ pub async fn get_step_logs_api(
         None => return Err(StatusCode::NOT_IMPLEMENTED),
     };
 
-    let step_id = crate::db::get_step_id_by_name(&state.pool, run_id, &step_name)
+    let instance = crate::db::get_step_instance_by_id(&state.pool, run_id, step_id)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let step_id = step_id.ok_or(StatusCode::NOT_FOUND)?;
-
-    let instances = crate::db::get_step_instances(&state.pool, run_id)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let instance = instances
-        .into_iter()
-        .find(|i| i.id == step_id)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
     let logs = log_backend
         .fetch_step_logs(
-            &step_name,
+            &instance.step_name,
             step_id,
             instance.started_at,
             instance.finished_at,

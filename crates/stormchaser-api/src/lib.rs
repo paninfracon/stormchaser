@@ -221,8 +221,12 @@ pub fn app(state: AppState) -> Router {
         .route("/runs/:id/summaries", get(list_run_test_summaries))
         .route("/runs/:id/reports/:report_id", get(get_test_report))
         .route(
-            "/runs/:id/steps/:step_name/logs/stream",
+            "/runs/:id/steps/:step_id/logs/stream",
             get(stream_step_logs_api),
+        )
+        .route(
+            "/runs/:id/steps/:step_id/logs",
+            get(get_step_logs_api),
         )
         .route("/runs/:id/logs/stream", get(stream_run_logs_api))
         .route("/runs/:id/status/stream", get(stream_run_status_api))
