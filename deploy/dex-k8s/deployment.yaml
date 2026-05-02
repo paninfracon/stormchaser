@@ -57,7 +57,7 @@ spec:
         - name: STORMCHASER_DB_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: stormchaser-db-secret
+              name: stormchaser-postgresql
               key: password
         ports:
         - containerPort: 5556

@@ -7,7 +7,7 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 echo -e "${BLUE}>>> Generating test token...${NC}"
-TOKEN=$(python3 generate_dev_token.py)
+TOKEN=$(python3 scripts/generate_dev_token.py)
 
 echo -e "${BLUE}>>> Discovering API endpoint...${NC}"
 API_IP=$(microk8s kubectl get svc -n stormchaser stormchaser-stormchaser-orchestration-api -o jsonpath='{.spec.clusterIP}')

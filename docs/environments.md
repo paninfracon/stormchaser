@@ -24,13 +24,13 @@ local machine, complete with automated log management and monitoring
 
 ### Step 1: Run the Deployment Script
 
-The provided `setup-microk8s.sh` script automates the process of building the
+The provided `setup.sh` script automates the process of building the
 Stormchaser Docker images, generating required TLS certificates, configuring
 MicroK8s CRDs, and deploying the full stack via the umbrella Helm chart.
 
 ```bash
 # Execute the deployment script
-./scripts/setup-microk8s.sh
+./scripts/setup.sh --mode microk8s
 ```
 
 ### Step 2: Accessing the Infrastructure
@@ -228,3 +228,35 @@ You should see:
 
 At this point, you can configure your CLI to point to the external API's
 LoadBalancer or Ingress endpoint to submit workflows!
+
+---
+
+## 4. Teardown and Cleanup
+
+If you need to reset your local development environment to a completely clean
+state, follow these steps to remove all Docker containers, clean Cargo build
+artifacts, and reset MicroK8s.
+
+> [!WARNING]
+> These commands are destructive and will completely wipe all local Docker and
+> MicroK8s state. This includes tearing down **all** containers, volumes, and
+> Kubernetes resources, even those not related to Stormchaser (i.e., other
+> tenants, projects, or workloads running in your local Docker or MicroK8s
+> engines). Proceed with caution if you use these engines for other projects.
+
+```bash
+# 1. Stop and remove Docker Compose resources
+docker compose down -v --remove-orphans
+
+# 2. Prune Docker system (removes stopped containers, dangling images, build cache)
+docker system prune -f
+
+# 3. Clean Cargo build artifacts
+cargo clean
+
+# 4. Reset MicroK8s (requires elevated privileges)
+sudo microk8s reset
+
+# 5. Remove temporary local directories
+rm -rf .tmp scripts/.tmp
+```

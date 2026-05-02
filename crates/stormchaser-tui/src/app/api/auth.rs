@@ -129,6 +129,41 @@ impl<'a> App<'a> {
         Ok(())
     }
 
+    /// Automatically logs in using the provided email and password by simulating a browser flow.
+    pub async fn auto_login(&mut self, email: &str, password: &str) -> Result<()> {
+        self.state = AppState::LoggingIn;
+        self.error = None;
+        let port = 8080;
+        let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port)).await?;
+        let callback_url = format!("http://localhost:{}/callback", port);
+
+        let login_url = format!(
+            "{}/api/v1/auth/login?callback_url={}",
+            self.url,
+            urlencoding::encode(&callback_url)
+        );
+
+        let tx = self.status_tx.clone();
+        let email_str = email.to_string();
+        let password_str = password.to_string();
+        let url = self.url.clone();
+
+        tokio::spawn(async move {
+            handle_oauth_callback(listener, tx, url, callback_url).await;
+        });
+
+        let tx2 = self.status_tx.clone();
+        tokio::spawn(async move {
+            if let Err(e) = simulate_browser_login(&login_url, &email_str, &password_str).await {
+                let _ = tx2
+                    .send(AppEvent::LoginFailed(format!("Auto-login failed: {}", e)))
+                    .await;
+            }
+        });
+
+        Ok(())
+    }
+
     /// Refreshes the access token using the stored refresh token.
     pub async fn refresh_session(&mut self) -> Result<bool> {
         if let Some(refresh_token) = self.refresh_token.clone() {
@@ -156,6 +191,62 @@ impl<'a> App<'a> {
         self.state = AppState::LoggedOut;
         Ok(false)
     }
+}
+
+async fn simulate_browser_login(login_url: &str, email: &str, password: &str) -> Result<()> {
+    let client = reqwest::Client::builder().cookie_store(true).build()?;
+
+    let res1 = client.get(login_url).send().await?;
+    let url1 = res1.url().clone();
+    let html = res1.text().await?;
+
+    let action_start = html
+        .find("action=\"")
+        .ok_or_else(|| anyhow::anyhow!("No action found in Dex response"))?
+        + 8;
+    let action_end = html[action_start..]
+        .find('"')
+        .ok_or_else(|| anyhow::anyhow!("No action end found"))?
+        + action_start;
+    let action = &html[action_start..action_end].replace("&amp;", "&");
+
+    let base_url = format!(
+        "{}://{}",
+        url1.scheme(),
+        url1.host_str().unwrap_or("127.0.0.1")
+    );
+    let port = url1.port().map(|p| format!(":{}", p)).unwrap_or_default();
+    let dex_login_url = format!("{}{}{}", base_url, port, action);
+
+    let res2 = client
+        .post(&dex_login_url)
+        .form(&[("login", email), ("password", password)])
+        .send()
+        .await?;
+
+    let url2 = res2.url().clone();
+    let html2 = res2.text().await?;
+
+    if html2.contains("Grant Access") {
+        let req_start = html2
+            .find("name=\"req\" value=\"")
+            .ok_or_else(|| anyhow::anyhow!("No req found"))?
+            + 18;
+        let req_end = html2[req_start..].find('"').unwrap() + req_start;
+        let req_val = &html2[req_start..req_end];
+
+        let _res3 = client
+            .post(url2)
+            .form(&[("approval", "approve"), ("req", req_val)])
+            .send()
+            .await?;
+    } else if html2.contains("Invalid login or password") || !html2.contains("Log in to") {
+        return Err(anyhow::anyhow!(
+            "Invalid login credentials or unexpected Dex response"
+        ));
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

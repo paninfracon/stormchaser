@@ -3,6 +3,7 @@ import urllib.parse
 import urllib.error
 import json
 import sys
+import os
 
 class ConditionalRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -14,6 +15,9 @@ opener = urllib.request.build_opener(ConditionalRedirectHandler())
 urllib.request.install_opener(opener)
 
 def get_token():
+    port_dex = os.environ.get("PORT_DEX", "5556")
+    port_api = os.environ.get("PORT_API", "3000")
+
     def get_password(username):
         try:
             with open("deploy/dex/credentials.generated", "r") as f:
@@ -24,7 +28,7 @@ def get_token():
             pass
         return "password"
 
-    auth_url = "http://127.0.0.1:5556/dex/auth?client_id=stormchaser-cli&redirect_uri=http://localhost:8080/callback&response_type=code&scope=openid+profile+email"
+    auth_url = f"http://127.0.0.1:{port_dex}/dex/auth?client_id=stormchaser-cli&redirect_uri=http://localhost:8080/callback&response_type=code&scope=openid+profile+email"
     req1 = urllib.request.Request(auth_url)
     try:
         resp1 = urllib.request.urlopen(req1)
@@ -32,7 +36,7 @@ def get_token():
         action_start = html.find('action="') + 8
         action_end = html.find('"', action_start)
         action = html[action_start:action_end]
-        login_url = "http://127.0.0.1:5556" + action.replace('&amp;', '&')
+        login_url = f"http://127.0.0.1:{port_dex}" + action.replace('&amp;', '&')
 
         password = get_password('stormchaser-admin@paninfracon.net')
         data = urllib.parse.urlencode({'login': 'stormchaser-admin@paninfracon.net', 'password': password}).encode('ascii')
@@ -67,7 +71,7 @@ def get_token():
                 'sso_token': code,
                 'callback_url': 'http://localhost:8080/callback'
             }).encode('utf-8')
-            api_req = urllib.request.Request("http://127.0.0.1:3000/api/v1/auth/exchange", data=api_data, method='POST')
+            api_req = urllib.request.Request(f"http://127.0.0.1:{port_api}/api/v1/auth/exchange", data=api_data, method='POST')
             api_req.add_header('Content-Type', 'application/json')
             api_resp = urllib.request.urlopen(api_req)
             access_token = json.loads(api_resp.read())['access_token']
@@ -84,7 +88,7 @@ def get_token():
                     'sso_token': code,
                     'callback_url': 'http://localhost:8080/callback'
                 }).encode('utf-8')
-                api_req = urllib.request.Request("http://127.0.0.1:3000/api/v1/auth/exchange", data=api_data, method='POST')
+                api_req = urllib.request.Request(f"http://127.0.0.1:{port_api}/api/v1/auth/exchange", data=api_data, method='POST')
                 api_req.add_header('Content-Type', 'application/json')
                 api_resp = urllib.request.urlopen(api_req)
                 access_token = json.loads(api_resp.read())['access_token']

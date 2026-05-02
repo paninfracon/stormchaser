@@ -66,7 +66,34 @@ async fn handle_app_event<'a>(app: &mut App<'a>, event: AppEvent) -> bool {
             if app.state == AppState::LoggedOut || app.state == AppState::LoggingIn {
                 match key.code {
                     KeyCode::Enter if app.state == AppState::LoggedOut => {
+                        if app.auto_login_credentials.is_empty() {
+                            let _ = app.login().await;
+                        } else {
+                            if let Some((email, password)) = app
+                                .auto_login_credentials
+                                .get(app.auto_login_index)
+                                .cloned()
+                            {
+                                let _ = app.auto_login(&email, &password).await;
+                            }
+                        }
+                    }
+                    KeyCode::Char('b') if app.state == AppState::LoggedOut => {
                         let _ = app.login().await;
+                    }
+                    KeyCode::Up
+                        if app.state == AppState::LoggedOut
+                            && !app.auto_login_credentials.is_empty()
+                            && app.auto_login_index > 0 =>
+                    {
+                        app.auto_login_index -= 1;
+                    }
+                    KeyCode::Down
+                        if app.state == AppState::LoggedOut
+                            && !app.auto_login_credentials.is_empty()
+                            && app.auto_login_index < app.auto_login_credentials.len() - 1 =>
+                    {
+                        app.auto_login_index += 1;
                     }
                     KeyCode::Char('q') => return true,
                     _ => {}

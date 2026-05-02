@@ -82,7 +82,10 @@ pub(crate) fn render_runs_tab(f: &mut Frame, area: Rect, app: &mut App) {
         .border_style(Style::default().fg(detail_border_color));
 
     if app.runs.is_empty() {
-        f.render_widget(detail_block, chunks[1]);
+        let empty_paragraph = Paragraph::new("\n\n   No workflow runs to display.")
+            .style(Style::default().fg(Color::DarkGray))
+            .block(detail_block);
+        f.render_widget(empty_paragraph, chunks[1]);
         return;
     }
 

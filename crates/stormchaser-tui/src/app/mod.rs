@@ -266,6 +266,10 @@ pub struct App<'a> {
     pub direct_submit_form: Option<ratatui_form::Form>,
     /// The loaded DSL content for direct submission.
     pub direct_submit_dsl: Option<String>,
+    /// Credentials loaded from deploy/dex/credentials.generated
+    pub auto_login_credentials: Vec<(String, String)>,
+    /// Index of the selected auto-login credential
+    pub auto_login_index: usize,
     /// A cache of recently loaded full workflow run details.
     pub cached_runs: HashMap<Uuid, WorkflowRunFullDetail>,
     /// A set of step instance IDs for which full logs have been fetched.
@@ -305,6 +309,18 @@ pub mod watch;
 impl<'a> App<'a> {
     /// Creates a new instance of the TUI application state.
     pub fn new(url: String, token: Option<String>, status_tx: mpsc::Sender<AppEvent>) -> Self {
+        let mut auto_login_credentials = Vec::new();
+        if let Ok(content) = std::fs::read_to_string("deploy/dex/credentials.generated") {
+            for line in content.lines() {
+                if let Some((email, password)) = line.split_once(": ") {
+                    if email.contains('@') {
+                        auto_login_credentials
+                            .push((email.trim().to_string(), password.trim().to_string()));
+                    }
+                }
+            }
+        }
+
         Self {
             url,
             state: AppState::LoggedOut,
@@ -380,6 +396,8 @@ impl<'a> App<'a> {
             file_browser_active: false,
             direct_submit_form: None,
             direct_submit_dsl: None,
+            auto_login_credentials,
+            auto_login_index: 0,
             cached_runs: HashMap::new(),
             fetched_steps: std::collections::HashSet::new(),
             file_explorer: tui_file_explorer::FileExplorer::new(
