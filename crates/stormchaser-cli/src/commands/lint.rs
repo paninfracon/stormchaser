@@ -61,7 +61,10 @@ pub async fn handle(
         return Ok(());
     }
 
-    let file_path = command.file.context("No workflow file provided to lint")?;
+    let file_path = command
+        .file
+        .clone()
+        .context("No workflow file provided to lint")?;
     let content = std::fs::read_to_string(&file_path)
         .with_context(|| format!("Failed to read file: {:?}", file_path))?;
 
@@ -75,32 +78,7 @@ pub async fn handle(
     let instance = serde_json::to_value(&workflow)?;
 
     // Generate base schema
-    let mut root_schema = if command.remote || command.prepare {
-        let req_url = format!("{}/api/v1/schema", url);
-        let resp = http_client
-            .get(&req_url)
-            .send()
-            .await?
-            .error_for_status()
-            .with_context(|| format!("Failed to fetch remote schema from {}", req_url))?;
-        let json: Value = resp.json().await?;
-
-        if command.prepare {
-            std::fs::write(
-                ".stormchaser-schema.json",
-                serde_json::to_string_pretty(&json)?,
-            )?;
-            println!("✓ Downloaded and saved remote schema to .stormchaser-schema.json");
-        }
-
-        serde_json::from_value(json).context("Failed to parse remote schema")?
-    } else if Path::new(".stormchaser-schema.json").exists() {
-        let content = std::fs::read_to_string(".stormchaser-schema.json")
-            .context("Failed to read .stormchaser-schema.json")?;
-        serde_json::from_str(&content).context("Failed to parse .stormchaser-schema.json")?
-    } else {
-        generate_dsl_schema()
-    };
+    let mut root_schema = resolve_base_schema(&command, url, http_client).await?;
 
     let mut spec_schemas = HashMap::new();
 
@@ -130,6 +108,39 @@ pub async fn handle(
 
     println!("✓ Workflow successfully validated against schema.");
     Ok(())
+}
+
+async fn resolve_base_schema(
+    command: &LintCommand,
+    url: &str,
+    http_client: &reqwest_middleware::ClientWithMiddleware,
+) -> Result<schemars::schema::RootSchema> {
+    if command.remote || command.prepare {
+        let req_url = format!("{}/api/v1/schema", url);
+        let resp = http_client
+            .get(&req_url)
+            .send()
+            .await?
+            .error_for_status()
+            .with_context(|| format!("Failed to fetch remote schema from {}", req_url))?;
+        let json: Value = resp.json().await?;
+
+        if command.prepare {
+            std::fs::write(
+                ".stormchaser-schema.json",
+                serde_json::to_string_pretty(&json)?,
+            )?;
+            println!("✓ Downloaded and saved remote schema to .stormchaser-schema.json");
+        }
+
+        serde_json::from_value(json).context("Failed to parse remote schema")
+    } else if Path::new(".stormchaser-schema.json").exists() {
+        let content = std::fs::read_to_string(".stormchaser-schema.json")
+            .context("Failed to read .stormchaser-schema.json")?;
+        serde_json::from_str(&content).context("Failed to parse .stormchaser-schema.json")
+    } else {
+        Ok(generate_dsl_schema())
+    }
 }
 
 /// Loads a JSON schema from a local file or directly from a local git repository without checkout.
@@ -190,6 +201,8 @@ mod tests {
     use reqwest_middleware::ClientBuilder;
     use std::io::Write;
     use tempfile::NamedTempFile;
+
+    static LINT_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     #[test]
     fn test_parse_step_schema_valid() {
@@ -293,6 +306,8 @@ workflow "test_workflow" {{
 
     #[tokio::test]
     async fn test_lint_handle_prepare() -> Result<()> {
+        let _guard = LINT_MUTEX.lock().await;
+        let _ = std::fs::remove_file(".stormchaser-schema.json");
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/api/v1/schema"))

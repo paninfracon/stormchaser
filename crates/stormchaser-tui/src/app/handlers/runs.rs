@@ -216,8 +216,34 @@ impl<'a> App<'a> {
     }
 
     /// Appends a new log line to the appropriate step within the selected run.
+    pub fn handle_step_logs_fetched(&mut self, run_id: Uuid, step_index: usize, logs: Vec<String>) {
+        if let Some(run) = &mut self.selected_run {
+            if run.detail.id == run_id {
+                if let Some(step) = run.steps.get_mut(step_index) {
+                    let mut final_logs = logs;
+                    // Append any logs from the current step.logs that are not in the newly fetched logs.
+                    // This preserves any live SSE lines that arrived during the fetch request.
+                    for line in &step.logs {
+                        if !final_logs.contains(line) {
+                            final_logs.push(line.clone());
+                        }
+                    }
+                    step.logs = final_logs;
+
+                    if self.selected_step_index == step_index {
+                        self.run_logs.clear();
+                        self.run_logs.extend_from_slice(&step.logs);
+
+                        if self.log_auto_scroll {
+                            self.log_scroll = self.run_logs.len().saturating_sub(1);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    /// Appends a new log line to the appropriate step within the selected run.
     pub fn handle_log_line(&mut self, run_id: Uuid, line: String) {
-        let line = line.replace('\r', "");
         if let Some(run) = &mut self.selected_run {
             if run.detail.id == run_id {
                 let mut step_name_and_clean_line = None;
@@ -231,7 +257,8 @@ impl<'a> App<'a> {
                             let clean_line = line
                                 .strip_prefix(&prefix)
                                 .unwrap_or(&line)
-                                .trim()
+                                .strip_prefix(' ')
+                                .unwrap_or_else(|| line.strip_prefix(&prefix).unwrap_or(&line))
                                 .to_string();
                             step.logs.push(clean_line.clone());
                             step_name_and_clean_line = Some((name.to_string(), clean_line));

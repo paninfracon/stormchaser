@@ -302,6 +302,7 @@ pub async fn handle_step_completed(
                     step_id,
                     current_step_instance.started_at,
                     current_step_instance.finished_at,
+                    Some(5000), // Get up to 5000 lines for output scraping
                 )
                 .await
                 .unwrap_or_default();

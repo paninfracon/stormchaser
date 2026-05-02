@@ -4,10 +4,11 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 /// Configuration for an external webhook integration.
-#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
+#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow, ToSchema)]
 pub struct WebhookConfig {
     /// Unique identifier for the webhook configuration.
     pub id: Uuid,
@@ -34,7 +35,7 @@ pub struct WebhookConfig {
 }
 
 /// Defines a rule for triggering workflows based on incoming events.
-#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
+#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow, ToSchema)]
 pub struct EventRule {
     /// Unique identifier for the event rule.
     pub id: Uuid,

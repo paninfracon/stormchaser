@@ -65,8 +65,8 @@ pub struct EnqueueRequest {
     pub workflow_path: String,
     /// The git ref.
     pub git_ref: String,
-    #[schema(value_type = Object)]
     /// The inputs.
+    #[schema(value_type = Object)]
     pub inputs: Value,
     /// The overrides.
     pub overrides: Option<RunOverrides>,
@@ -146,6 +146,7 @@ pub struct WorkflowRunDetail {
     /// The error.
     pub error: Option<String>,
     /// The inputs.
+    #[schema(value_type = Object)]
     pub inputs: Value,
     /// The secrets.
     pub secrets: Value,
@@ -185,16 +186,17 @@ pub struct StepDetail {
     pub logs: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 /// Directrunrequest.
 pub struct DirectRunRequest {
     /// The dsl.
     pub dsl: String,
     /// The inputs.
+    #[schema(value_type = Object)]
     pub inputs: Value,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 /// Createwebhookrequest.
 pub struct CreateWebhookRequest {
     /// The name.
@@ -207,7 +209,22 @@ pub struct CreateWebhookRequest {
     pub secret_token: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
+/// Updatewebhookrequest.
+pub struct UpdateWebhookRequest {
+    /// The name.
+    pub name: Option<String>,
+    /// The description.
+    pub description: Option<String>,
+    /// The source type.
+    pub source_type: Option<String>, // e.g. "github", "generic"
+    /// The secret token.
+    pub secret_token: Option<String>,
+    /// Is active.
+    pub is_active: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
 /// Createeventrulerequest.
 pub struct CreateEventRuleRequest {
     /// The name.
@@ -232,7 +249,7 @@ pub struct CreateEventRuleRequest {
     pub input_mappings: HashMap<String, String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 /// Createcronworkflowrequest.
 pub struct CreateCronWorkflowRequest {
     /// The name.
@@ -250,10 +267,11 @@ pub struct CreateCronWorkflowRequest {
     /// The git ref.
     pub git_ref: String,
     /// The inputs.
+    #[schema(value_type = Object)]
     pub inputs: Value,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 /// Cronworkflowresponse.
 pub struct CronWorkflowResponse {
     /// The id.
@@ -264,7 +282,7 @@ pub struct CronWorkflowResponse {
     pub external_job_id: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 /// Createstoragebackendrequest.
 pub struct CreateStorageBackendRequest {
     /// The name.
@@ -274,12 +292,15 @@ pub struct CreateStorageBackendRequest {
     /// The backend type.
     pub backend_type: BackendType,
     /// The config.
+    #[schema(value_type = Object)]
     pub config: Value,
+    /// Optional AWS role ARN.
+    pub aws_assume_role_arn: Option<String>,
     /// The is default sfs.
     pub is_default_sfs: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 /// Updatestoragebackendrequest.
 pub struct UpdateStorageBackendRequest {
     /// The name.
@@ -289,7 +310,10 @@ pub struct UpdateStorageBackendRequest {
     /// The backend type.
     pub backend_type: Option<BackendType>,
     /// The config.
+    #[schema(value_type = Object)]
     pub config: Option<Value>,
+    /// Optional AWS role ARN. Set to an empty string to clear an existing ARN.
+    pub aws_assume_role_arn: Option<String>,
     /// The is default sfs.
     pub is_default_sfs: Option<bool>,
 }

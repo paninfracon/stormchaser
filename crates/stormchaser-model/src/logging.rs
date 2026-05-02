@@ -38,6 +38,7 @@ impl LogBackend {
         step_id: Uuid,
         started_at: Option<chrono::DateTime<chrono::Utc>>,
         finished_at: Option<chrono::DateTime<chrono::Utc>>,
+        limit: Option<usize>,
     ) -> Result<Vec<String>> {
         let job_name = format!(
             "storm-{}-{}",
@@ -47,11 +48,11 @@ impl LogBackend {
 
         match self {
             LogBackend::Loki { url } => {
-                self.fetch_loki_logs(url, &job_name, started_at, finished_at)
+                self.fetch_loki_logs(url, &job_name, started_at, finished_at, limit)
                     .await
             }
             LogBackend::Elasticsearch { url, index } => {
-                self.fetch_elasticsearch_logs(url, index, &job_name, started_at, finished_at)
+                self.fetch_elasticsearch_logs(url, index, &job_name, started_at, finished_at, limit)
                     .await
             }
         }
@@ -158,20 +159,19 @@ impl LogBackend {
         job_name: &str,
         started_at: Option<chrono::DateTime<chrono::Utc>>,
         finished_at: Option<chrono::DateTime<chrono::Utc>>,
+        limit: Option<usize>,
     ) -> Result<Vec<String>> {
         let query = format!("{{job_name=\"{}\"}}", job_name);
         let url = format!("{}/loki/api/v1/query_range", loki_url.trim_end_matches('/'));
 
         let client = self.create_client();
         let forward = "forward".to_string();
-        let limit = "5000".to_string();
 
-        let start_time = started_at
+        let mut start_time = started_at
             .map(|t| t - chrono::Duration::minutes(1))
             .unwrap_or_else(|| chrono::Utc::now() - chrono::Duration::days(30))
             .timestamp_nanos_opt()
-            .unwrap_or(0)
-            .to_string();
+            .unwrap_or(0);
 
         let end_time = finished_at
             .unwrap_or_else(chrono::Utc::now)
@@ -182,35 +182,86 @@ impl LogBackend {
             .unwrap_or(0)
             .to_string();
 
-        let resp = client
-            .get(&url)
-            .query(&[
-                ("query", &query),
-                ("direction", &forward),
-                ("limit", &limit),
-                ("start", &start_time),
-                ("end", &end_time),
-            ])
-            .send()
-            .await?;
-
-        if !resp.status().is_success() {
-            return Err(anyhow::anyhow!("Loki returned status {}", resp.status()));
-        }
-
-        let data: Value = resp.json().await?;
         let mut logs = Vec::new();
+        let target_limit = limit.unwrap_or(usize::MAX);
+        let mut seen = std::collections::HashSet::new(); // to prevent duplicate lines if timestamps collide
 
-        if let Some(streams) = data["data"]["result"].as_array() {
-            for stream in streams {
-                if let Some(values) = stream["values"].as_array() {
-                    for entry in values {
-                        if let Some(log_line) = entry.get(1).and_then(|v| v.as_str()) {
-                            logs.push(log_line.to_string());
+        loop {
+            let req_limit =
+                std::cmp::min(target_limit.saturating_sub(logs.len()), 5000).to_string();
+            let start_time_str = start_time.to_string();
+
+            let resp = client
+                .get(&url)
+                .query(&[
+                    ("query", &query),
+                    ("direction", &forward),
+                    ("limit", &req_limit),
+                    ("start", &start_time_str),
+                    ("end", &end_time),
+                ])
+                .send()
+                .await?;
+
+            if !resp.status().is_success() {
+                return Err(anyhow::anyhow!("Loki returned status {}", resp.status()));
+            }
+
+            let data: serde_json::Value = resp.json().await?;
+            let mut fetched_count = 0;
+            let mut highest_timestamp = start_time;
+            let mut new_logs_added = false;
+
+            if let Some(streams) = data["data"]["result"].as_array() {
+                for stream in streams {
+                    if let Some(values) = stream["values"].as_array() {
+                        for entry in values {
+                            fetched_count += 1;
+
+                            // Track highest timestamp for pagination
+                            if let Some(ts_str) = entry.get(0).and_then(|v| v.as_str()) {
+                                if let Ok(ts) = ts_str.parse::<i64>() {
+                                    if ts > highest_timestamp {
+                                        highest_timestamp = ts;
+                                    }
+                                }
+                            }
+
+                            if let Some(log_line) = entry.get(1).and_then(|v| v.as_str()) {
+                                // Prevent duplicates that might occur on exact page boundaries
+                                let entry_key = (
+                                    entry
+                                        .get(0)
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("")
+                                        .to_string(),
+                                    log_line.to_string(),
+                                );
+                                if seen.insert(entry_key) {
+                                    new_logs_added = true;
+                                    for line in log_line.lines() {
+                                        logs.push(line.to_string());
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
+
+            if fetched_count == 0
+                || logs.len() >= target_limit
+                || (fetched_count > 0 && !new_logs_added)
+            {
+                break;
+            }
+
+            // Advance start_time to highest_timestamp. The `seen` set prevents duplicate processing.
+            start_time = highest_timestamp;
+        }
+
+        if let Some(l) = limit {
+            logs.truncate(l);
         }
 
         Ok(logs)
@@ -223,6 +274,7 @@ impl LogBackend {
         job_name: &str,
         started_at: Option<chrono::DateTime<chrono::Utc>>,
         finished_at: Option<chrono::DateTime<chrono::Utc>>,
+        limit: Option<usize>,
     ) -> Result<Vec<String>> {
         let url = format!("{}/{}/_search", es_url.trim_end_matches('/'), index);
 
@@ -237,49 +289,88 @@ impl LogBackend {
             .unwrap_or_else(chrono::Utc::now)
             .to_rfc3339();
 
-        let query = serde_json::json!({
-            "query": {
-                "bool": {
-                    "must": [
-                        { "term": { "job_name.keyword": job_name } }
-                    ],
-                    "filter": [
-                        {
-                            "range": {
-                                "@timestamp": {
-                                    "gte": gte,
-                                    "lte": lte
+        let mut logs = Vec::new();
+        let target_limit = limit.unwrap_or(usize::MAX);
+        let mut search_after: Option<serde_json::Value> = None;
+
+        loop {
+            let req_size = std::cmp::min(target_limit.saturating_sub(logs.len()), 5000);
+
+            let mut query = serde_json::json!({
+                "query": {
+                    "bool": {
+                        "must": [
+                            { "term": { "job_name.keyword": job_name } }
+                        ],
+                        "filter": [
+                            {
+                                "range": {
+                                    "@timestamp": {
+                                        "gte": gte,
+                                        "lte": lte
+                                    }
                                 }
                             }
+                        ]
+                    }
+                },
+                "sort": [
+                    { "@timestamp": "asc" },
+                    { "_id": "asc" } // Add tiebreaker
+                ],
+                "size": req_size
+            });
+
+            if let Some(sa) = &search_after {
+                query
+                    .as_object_mut()
+                    .unwrap()
+                    .insert("search_after".to_string(), sa.clone());
+            }
+
+            let client = self.create_client();
+            let resp = client.post(&url).json(&query).send().await?;
+
+            if !resp.status().is_success() {
+                return Err(anyhow::anyhow!(
+                    "Elasticsearch returned status {}",
+                    resp.status()
+                ));
+            }
+
+            let data: serde_json::Value = resp.json().await?;
+            let mut fetched_count = 0;
+            let mut last_sort_value = None;
+            let mut new_logs_added = false;
+
+            if let Some(hits) = data["hits"]["hits"].as_array() {
+                for hit in hits {
+                    fetched_count += 1;
+                    if let Some(message) = hit["_source"]["message"].as_str() {
+                        new_logs_added = true;
+                        for line in message.lines() {
+                            logs.push(line.to_string());
                         }
-                    ]
-                }
-            },
-            "sort": [
-                { "@timestamp": "asc" }
-            ],
-            "size": 5000
-        });
-
-        let client = self.create_client();
-        let resp = client.post(&url).json(&query).send().await?;
-
-        if !resp.status().is_success() {
-            return Err(anyhow::anyhow!(
-                "Elasticsearch returned status {}",
-                resp.status()
-            ));
-        }
-
-        let data: Value = resp.json().await?;
-        let mut logs = Vec::new();
-
-        if let Some(hits) = data["hits"]["hits"].as_array() {
-            for hit in hits {
-                if let Some(message) = hit["_source"]["message"].as_str() {
-                    logs.push(message.to_string());
+                    }
+                    if let Some(sort) = hit.get("sort") {
+                        last_sort_value = Some(sort.clone());
+                    }
                 }
             }
+
+            if fetched_count == 0
+                || logs.len() >= target_limit
+                || last_sort_value.is_none()
+                || (fetched_count > 0 && !new_logs_added)
+            {
+                break;
+            }
+
+            search_after = last_sort_value;
+        }
+
+        if let Some(l) = limit {
+            logs.truncate(l);
         }
 
         Ok(logs)
@@ -327,7 +418,7 @@ mod tests {
         let step_id = Uuid::new_v4();
 
         let logs = backend
-            .fetch_step_logs("test-step", step_id, None, None)
+            .fetch_step_logs("test-step", step_id, None, None, Some(2))
             .await
             .expect("Failed to fetch loki logs");
 
@@ -391,7 +482,7 @@ mod tests {
         let step_id = Uuid::new_v4();
 
         let logs = backend
-            .fetch_step_logs("test-step", step_id, None, None)
+            .fetch_step_logs("test-step", step_id, None, None, Some(2))
             .await
             .expect("Failed to fetch es logs");
 
@@ -416,7 +507,7 @@ mod tests {
         let step_id = Uuid::new_v4();
 
         let result = backend
-            .fetch_step_logs("test-step", step_id, None, None)
+            .fetch_step_logs("test-step", step_id, None, None, Some(2))
             .await;
 
         assert!(result.is_err());
@@ -443,7 +534,7 @@ mod tests {
         let step_id = Uuid::new_v4();
 
         let result = backend
-            .fetch_step_logs("test-step", step_id, None, None)
+            .fetch_step_logs("test-step", step_id, None, None, Some(2))
             .await;
 
         assert!(result.is_err());

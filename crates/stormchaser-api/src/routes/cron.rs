@@ -19,6 +19,17 @@ use stormchaser_model::workflow::RunStatus;
 use uuid::Uuid;
 
 /// Create cron workflow.
+#[utoipa::path(
+    post,
+    path = "/api/v1/cron-workflows",
+    responses(
+        (status = 200, description = "Success"),
+        (status = 400, description = "Bad Request"),
+        (status = 404, description = "Not Found"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    tag = "cron"
+)]
 pub async fn create_cron_workflow(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -53,6 +64,17 @@ pub async fn create_cron_workflow(
 }
 
 /// List cron workflows.
+#[utoipa::path(
+    get,
+    path = "/api/v1/cron-workflows",
+    responses(
+        (status = 200, description = "Success"),
+        (status = 400, description = "Bad Request"),
+        (status = 404, description = "Not Found"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    tag = "cron"
+)]
 pub async fn list_cron_workflows(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -65,6 +87,18 @@ pub async fn list_cron_workflows(
 }
 
 /// Deletes a cron workflow.
+#[utoipa::path(
+    delete,
+    path = "/api/v1/cron-workflows/{id}",
+    params(("id" = Uuid, Path, description="Cron ID")),
+    responses(
+        (status = 200, description = "Success"),
+        (status = 400, description = "Bad Request"),
+        (status = 404, description = "Not Found"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    tag = "cron"
+)]
 pub async fn delete_cron_workflow(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -93,6 +127,23 @@ pub async fn delete_cron_workflow(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/cron-trigger/{id}",
+    params(
+        ("id" = Uuid, Path, description = "Cron workflow ID")
+    ),
+    responses(
+        (status = 200, description = "Workflow triggered", body = EnqueueResponse),
+        (status = 401, description = "Unauthorized"),
+        (status = 404, description = "Cron workflow not found"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    security(
+        ("bearer_auth" = [])
+    ),
+    tag = "cron"
+)]
 /// Trigger cron workflow.
 pub async fn trigger_cron_workflow(
     headers: HeaderMap,

@@ -2,10 +2,11 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 /// Supported storage backend types for artifacts and engine data.
-#[derive(Debug, Serialize, Deserialize, Clone, sqlx::Type, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone, sqlx::Type, PartialEq, Eq, ToSchema)]
 #[sqlx(type_name = "backend_type", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum BackendType {
@@ -22,7 +23,7 @@ pub enum BackendType {
 }
 
 /// Represents a configured storage backend instance.
-#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
+#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow, ToSchema)]
 pub struct StorageBackend {
     /// Unique identifier for the storage backend.
     pub id: Uuid,
@@ -34,6 +35,8 @@ pub struct StorageBackend {
     pub backend_type: BackendType,
     /// JSON configuration specific to the backend type.
     pub config: Value,
+    /// Optional AWS role ARN to assume via STS (primarily for S3).
+    pub aws_assume_role_arn: Option<String>,
     /// Whether this backend is the default Stormchaser File System (SFS).
     pub is_default_sfs: bool,
     /// Optional custom CA certificate for mTLS.
@@ -49,7 +52,7 @@ pub struct StorageBackend {
 }
 
 /// Registry of workflow artifacts stored in backends.
-#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
+#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow, ToSchema)]
 pub struct ArtifactRegistry {
     /// Unique identifier for the artifact record.
     pub id: Uuid,

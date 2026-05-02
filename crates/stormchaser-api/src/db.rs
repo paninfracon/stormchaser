@@ -192,6 +192,20 @@ pub async fn get_step_instances(
     .fetch_all(pool)
     .await
 }
+/// Retrieves a single step instance by its UUID and run ID.
+pub async fn get_step_instance_by_id(
+    pool: &PgPool,
+    run_id: Uuid,
+    step_id: Uuid,
+) -> Result<Option<step::StepInstance>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT * FROM combined_step_instances WHERE run_id = $1 AND id = $2",
+    )
+    .bind(run_id)
+    .bind(step_id)
+    .fetch_optional(pool)
+    .await
+}
 /// Retrieves the outputs for a specific step instance.
 /// Get step outputs.
 pub async fn get_step_outputs(
@@ -271,6 +285,61 @@ pub async fn delete_webhook(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> 
         .await?;
     Ok(())
 }
+
+/// Updates an existing webhook configuration.
+pub async fn update_webhook(
+    pool: &PgPool,
+    id: Uuid,
+    name: Option<String>,
+    description: Option<Option<String>>,
+    source_type: Option<String>,
+    secret_token: Option<Option<String>>,
+    is_active: Option<bool>,
+) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    let mut webhook =
+        match sqlx::query_as::<_, WebhookConfig>("SELECT * FROM webhooks WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await?
+        {
+            Some(w) => w,
+            None => return Err(sqlx::Error::RowNotFound),
+        };
+
+    if let Some(n) = name {
+        webhook.name = n;
+    }
+    if let Some(d) = description {
+        webhook.description = d;
+    }
+    if let Some(st) = source_type {
+        webhook.source_type = st;
+    }
+    if let Some(t) = secret_token {
+        webhook.secret_token = t;
+    }
+    if let Some(a) = is_active {
+        webhook.is_active = a;
+    }
+
+    sqlx::query(
+        "UPDATE webhooks SET name = $1, description = $2, source_type = $3, secret_token = $4, is_active = $5, updated_at = NOW() WHERE id = $6",
+    )
+    .bind(webhook.name)
+    .bind(webhook.description)
+    .bind(webhook.source_type)
+    .bind(webhook.secret_token)
+    .bind(webhook.is_active)
+    .bind(id)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    Ok(())
+}
+
 /// Creates a new event rule.
 #[allow(clippy::too_many_arguments)]
 /// Create event rule.
@@ -424,6 +493,7 @@ pub async fn unset_default_sfs(tx: &mut Transaction<'_, Postgres>) -> Result<(),
 }
 /// Creates a new storage backend.
 /// Create storage backend.
+#[allow(clippy::too_many_arguments)]
 pub async fn create_storage_backend(
     tx: &mut Transaction<'_, Postgres>,
     id: Uuid,
@@ -431,12 +501,13 @@ pub async fn create_storage_backend(
     description: &Option<String>,
     backend_type: &storage::BackendType,
     config: &Value,
+    aws_assume_role_arn: &Option<String>,
     is_default_sfs: bool,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"
-        INSERT INTO storage_backends (id, name, description, backend_type, config, is_default_sfs)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO storage_backends (id, name, description, backend_type, config, aws_assume_role_arn, is_default_sfs)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         "#,
     )
     .bind(id)
@@ -444,6 +515,7 @@ pub async fn create_storage_backend(
     .bind(description)
     .bind(backend_type)
     .bind(config)
+    .bind(aws_assume_role_arn)
     .bind(is_default_sfs)
     .execute(&mut **tx)
     .await?;
@@ -488,10 +560,17 @@ pub async fn update_storage_backend(
     if let Some(bt) = &payload.backend_type {
         separated.push("backend_type = ").push_bind_unseparated(bt);
     }
-    if let Some(config) = &payload.config {
-        separated.push("config = ").push_bind_unseparated(config);
+    if let Some(cfg) = &payload.config {
+        separated.push("config = ").push_bind_unseparated(cfg);
     }
-    if let Some(is_default) = &payload.is_default_sfs {
+    if let Some(role) = &payload.aws_assume_role_arn {
+        // An empty string is treated as a request to clear the ARN (set to NULL).
+        let value: Option<&str> = if role.is_empty() { None } else { Some(role.as_str()) };
+        separated
+            .push("aws_assume_role_arn = ")
+            .push_bind_unseparated(value);
+    }
+    if let Some(is_default) = payload.is_default_sfs {
         separated
             .push("is_default_sfs = ")
             .push_bind_unseparated(is_default);

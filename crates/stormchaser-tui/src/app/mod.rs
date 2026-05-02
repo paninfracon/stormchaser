@@ -8,6 +8,8 @@ use stormchaser_model::workflow::RunStatus;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+use stormchaser_model::cron;
+use stormchaser_model::event_rules;
 use stormchaser_model::storage;
 use stormchaser_model::test_report;
 
@@ -94,6 +96,22 @@ pub enum Pane {
     RunDetail,
     /// The pane displaying test results for a selected run.
     TestResults,
+    /// The pane displaying the list of storage backends.
+    StorageBackendsList,
+    /// The pane displaying detailed information for a selected storage backend.
+    StorageBackendDetail,
+    /// The pane displaying the list of webhooks.
+    WebhooksList,
+    /// The pane displaying detailed information for a selected webhook.
+    WebhookDetail,
+    /// The pane displaying the list of event rules.
+    EventRulesList,
+    /// The pane displaying detailed information for a selected event rule.
+    EventRuleDetail,
+    /// The pane displaying the list of cron workflows.
+    CronWorkflowsList,
+    /// The pane displaying detailed information for a selected cron workflow.
+    CronWorkflowDetail,
 }
 
 /// The main application state holding all data and UI status for the TUI.
@@ -126,12 +144,38 @@ pub struct App<'a> {
     pub runs_state: ListState,
     /// The full details of the currently selected run, if any.
     pub selected_run: Option<WorkflowRunFullDetail>,
+    /// The current list of storage backends.
+    pub storage_backends: Vec<storage::StorageBackend>,
+    /// The state of the storage backends list widget.
+    pub storage_backends_state: ListState,
+    /// The currently selected storage backend.
+    pub selected_storage_backend: Option<storage::StorageBackend>,
+    /// The current list of webhooks.
+    pub webhooks: Vec<event_rules::WebhookConfig>,
+    /// The state of the webhooks list widget.
+    pub webhooks_state: ListState,
+    /// The currently selected webhook.
+    pub selected_webhook: Option<event_rules::WebhookConfig>,
+    /// The current list of event rules.
+    pub event_rules: Vec<event_rules::EventRule>,
+    /// The state of the event rules list widget.
+    pub event_rules_state: ListState,
+    /// The currently selected event rule.
+    pub selected_event_rule: Option<event_rules::EventRule>,
+    /// The current list of cron workflows.
+    pub cron_workflows: Vec<cron::CronWorkflow>,
+    /// The state of the cron workflows list widget.
+    pub cron_workflows_state: ListState,
+    /// The currently selected cron workflow.
+    pub selected_cron_workflow: Option<cron::CronWorkflow>,
     /// The index of the currently selected step within the detailed run view.
     pub selected_step_index: usize,
     /// The aggregated logs for the current view.
     pub run_logs: Vec<String>,
     /// The current scroll position within the logs view.
     pub log_scroll: usize,
+    /// The current horizontal scroll position within the logs view.
+    pub log_scroll_x: u16,
     /// Whether log view should automatically scroll to the bottom on new logs.
     pub log_auto_scroll: bool,
     /// The current scroll position within the overview pane.
@@ -166,6 +210,54 @@ pub struct App<'a> {
     pub schedule_git_focus: usize,
     /// The text area inputs for the schedule git dialog.
     pub schedule_git_inputs: Vec<ratatui_textarea::TextArea<'a>>,
+    /// Whether the storage backend dialog is active.
+    pub storage_backend_dialog_active: bool,
+    /// The index of the focused input in the storage backend dialog.
+    pub storage_backend_focus: usize,
+    /// The text area inputs for the storage backend dialog.
+    pub storage_backend_inputs: Vec<ratatui_textarea::TextArea<'a>>,
+    /// The index of the selected backend type.
+    pub storage_backend_type_index: usize,
+    /// Whether the backend is the default SFS.
+    pub storage_backend_is_default: bool,
+    /// The ID of the storage backend being edited, or None for creating a new one.
+    pub storage_backend_edit_id: Option<Uuid>,
+    /// Whether the webhook dialog is active.
+    pub webhook_dialog_active: bool,
+    /// The index of the focused input in the webhook dialog.
+    pub webhook_focus: usize,
+    /// The text area inputs for the webhook dialog.
+    pub webhook_inputs: Vec<ratatui_textarea::TextArea<'a>>,
+    /// The index of the selected webhook source type.
+    pub webhook_source_type_index: usize,
+    /// Whether the webhook is active.
+    pub webhook_is_active: bool,
+    /// The ID of the webhook being edited, or None for creating a new one.
+    pub webhook_edit_id: Option<Uuid>,
+    /// Whether the event rule dialog is active.
+    pub event_rule_dialog_active: bool,
+    /// The index of the focused input in the event rule dialog.
+    pub event_rule_focus: usize,
+    /// The text area inputs for the event rule dialog.
+    pub event_rule_inputs: Vec<ratatui_textarea::TextArea<'a>>,
+    /// Whether the event rule is active.
+    pub event_rule_is_active: bool,
+    /// The ID of the event rule being edited, or None for creating a new one.
+    pub event_rule_edit_id: Option<Uuid>,
+    /// Whether the cron workflow dialog is active.
+    pub cron_dialog_active: bool,
+    /// The index of the focused input in the cron dialog.
+    pub cron_focus: usize,
+    /// The text area inputs for the cron dialog.
+    pub cron_inputs: Vec<ratatui_textarea::TextArea<'a>>,
+    /// Whether the cron workflow is active.
+    pub cron_is_active: bool,
+    /// The ID of the cron workflow being edited, or None for creating a new one.
+    pub cron_edit_id: Option<Uuid>,
+    /// Whether the approval dialog is active.
+    pub approval_dialog_active: bool,
+    /// Text area for JSON inputs for step approval.
+    pub approval_inputs: ratatui_textarea::TextArea<'a>,
     /// Whether the file browser dialog is active.
     pub file_browser_active: bool,
     /// The state of the file explorer widget.
@@ -176,6 +268,8 @@ pub struct App<'a> {
     pub direct_submit_dsl: Option<String>,
     /// A cache of recently loaded full workflow run details.
     pub cached_runs: HashMap<Uuid, WorkflowRunFullDetail>,
+    /// A set of step instance IDs for which full logs have been fetched.
+    pub fetched_steps: std::collections::HashSet<Uuid>,
     /// Marker to satisfy lifetime requirements for the struct.
     pub _marker: std::marker::PhantomData<&'a ()>,
 }
@@ -190,6 +284,12 @@ pub const FILTER_STATUS_OPTIONS: &[&str] = &[
     "Failed",
     "Aborted",
 ];
+
+/// The available storage backend types.
+pub const BACKEND_TYPE_OPTIONS: &[&str] = &["S3", "Oci", "Jfrog", "Gcs", "Azure"];
+
+/// The available webhook source types.
+pub const WEBHOOK_SOURCE_TYPE_OPTIONS: &[&str] = &["github", "generic"];
 
 /// API interaction methods.
 pub mod api;
@@ -220,9 +320,22 @@ impl<'a> App<'a> {
             runs: Vec::new(),
             runs_state: ListState::default(),
             selected_run: None,
+            storage_backends: Vec::new(),
+            storage_backends_state: ListState::default(),
+            selected_storage_backend: None,
+            webhooks: Vec::new(),
+            webhooks_state: ListState::default(),
+            selected_webhook: None,
+            event_rules: Vec::new(),
+            event_rules_state: ListState::default(),
+            selected_event_rule: None,
+            cron_workflows: Vec::new(),
+            cron_workflows_state: ListState::default(),
+            selected_cron_workflow: None,
             selected_step_index: 0,
             run_logs: Vec::new(),
             log_scroll: 0,
+            log_scroll_x: 0,
             log_auto_scroll: true,
             overview_scroll: 0,
             active_pane: Pane::RunsList,
@@ -240,10 +353,35 @@ impl<'a> App<'a> {
             schedule_git_dialog_active: false,
             schedule_git_focus: 0,
             schedule_git_inputs: Vec::new(),
+            storage_backend_dialog_active: false,
+            storage_backend_focus: 0,
+            storage_backend_inputs: Vec::new(),
+            storage_backend_type_index: 0,
+            storage_backend_is_default: false,
+            storage_backend_edit_id: None,
+            webhook_dialog_active: false,
+            webhook_focus: 0,
+            webhook_inputs: Vec::new(),
+            webhook_source_type_index: 0,
+            webhook_is_active: false,
+            webhook_edit_id: None,
+            event_rule_dialog_active: false,
+            event_rule_focus: 0,
+            event_rule_inputs: Vec::new(),
+            event_rule_is_active: false,
+            event_rule_edit_id: None,
+            cron_dialog_active: false,
+            cron_focus: 0,
+            cron_inputs: Vec::new(),
+            cron_is_active: false,
+            cron_edit_id: None,
+            approval_dialog_active: false,
+            approval_inputs: ratatui_textarea::TextArea::default(),
             file_browser_active: false,
             direct_submit_form: None,
             direct_submit_dsl: None,
             cached_runs: HashMap::new(),
+            fetched_steps: std::collections::HashSet::new(),
             file_explorer: tui_file_explorer::FileExplorer::new(
                 std::env::current_dir().unwrap_or_default(),
                 vec!["storm".to_string()],

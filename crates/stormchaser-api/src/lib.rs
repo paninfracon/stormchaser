@@ -50,6 +50,34 @@ pub use routes::*;
         routes::workflow::enqueue_workflow,
         routes::workflow::list_workflow_runs,
         routes::workflow::get_workflow_run,
+        routes::workflow::delete_workflow_run_api,
+        routes::workflow::direct_run,
+        routes::workflow::stream_workflow_runs_api,
+        routes::cron::create_cron_workflow,
+        routes::cron::list_cron_workflows,
+        routes::cron::delete_cron_workflow,
+        routes::cron::trigger_cron_workflow,
+        routes::storage::create_storage_backend,
+        routes::storage::list_storage_backends,
+        routes::storage::get_storage_backend,
+        routes::storage::update_storage_backend,
+        routes::storage::delete_storage_backend,
+        routes::storage::list_run_artifacts,
+        routes::storage::list_run_test_reports,
+        routes::storage::list_run_test_summaries,
+        routes::storage::get_test_report,
+        routes::webhook::create_webhook,
+        routes::webhook::list_webhooks,
+        routes::webhook::get_webhook,
+        routes::webhook::delete_webhook,
+        routes::webhook::create_event_rule,
+        routes::webhook::list_event_rules,
+        routes::webhook::delete_event_rule,
+        routes::webhook::handle_webhook,
+        routes::step::stream_step_logs_api,
+        routes::step::get_step_logs_api,
+        routes::step::stream_run_logs_api,
+        routes::step::stream_run_status_api,
         routes::schema::get_schema,
         hitl::approve_step_link
     ),
@@ -58,12 +86,27 @@ pub use routes::*;
             AuthExchangeRequest, AuthExchangeResponse, AuthRefreshRequest,
             EnqueueRequest, EnqueueResponse, RunOverrides,
             ListRunsQuery, WorkflowRunDetail,
-            WorkflowRunFullDetail, StepDetail
+            WorkflowRunFullDetail, StepDetail,
+            CreateCronWorkflowRequest, CronWorkflowResponse,
+            stormchaser_model::cron::CronWorkflow,
+            CreateStorageBackendRequest, UpdateStorageBackendRequest,
+            stormchaser_model::storage::StorageBackend, stormchaser_model::storage::BackendType,
+            stormchaser_model::storage::ArtifactRegistry,
+            stormchaser_model::test_report::TestCase, stormchaser_model::test_report::TestCaseStatus,
+            stormchaser_model::test_report::TestSummary, stormchaser_model::test_report::TestReport,
+            CreateWebhookRequest, CreateEventRuleRequest,
+            stormchaser_model::event_rules::WebhookConfig, stormchaser_model::event_rules::EventRule,
+            DirectRunRequest
         )
     ),
     tags(
         (name = "stormchaser", description = "Stormchaser API"),
-        (name = "hitl", description = "Human-in-the-Loop")
+        (name = "hitl", description = "Human-in-the-Loop"),
+        (name = "cron", description = "Cron workflows"),
+        (name = "storage", description = "Storage and artifacts"),
+        (name = "webhook", description = "Webhooks and rules"),
+        (name = "step", description = "Step actions"),
+        (name = "workflow", description = "Workflow actions")
     ),
     security(
         ("bearer_auth" = [])
@@ -178,14 +221,23 @@ pub fn app(state: AppState) -> Router {
         .route("/runs/:id/summaries", get(list_run_test_summaries))
         .route("/runs/:id/reports/:report_id", get(get_test_report))
         .route(
-            "/runs/:id/steps/:step_name/logs/stream",
+            "/runs/:id/steps/:step_id/logs/stream",
             get(stream_step_logs_api),
+        )
+        .route(
+            "/runs/:id/steps/:step_id/logs",
+            get(get_step_logs_api),
         )
         .route("/runs/:id/logs/stream", get(stream_run_logs_api))
         .route("/runs/:id/status/stream", get(stream_run_status_api))
         .route("/runs/direct", post(direct_run))
         .route("/webhooks", get(list_webhooks).post(create_webhook))
-        .route("/webhooks/:id", get(get_webhook).delete(delete_webhook))
+        .route(
+            "/webhooks/:id",
+            get(get_webhook)
+                .patch(update_webhook)
+                .delete(delete_webhook),
+        )
         .route(
             "/cron-workflows",
             get(list_cron_workflows).post(create_cron_workflow),

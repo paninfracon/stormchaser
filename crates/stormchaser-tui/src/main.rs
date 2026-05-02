@@ -1,19 +1,17 @@
 use anyhow::Result;
 use clap::Parser;
 use ratatui::crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
 use std::time::Duration;
-use stormchaser_tui::app::{App, AppState, Pane};
+use stormchaser_tui::app::{App, AppState};
 use stormchaser_tui::ui::ui;
 use stormchaser_tui::AppEvent;
 use tokio::sync::mpsc;
-
-use stormchaser_tui::app;
 
 #[derive(Parser)]
 struct Cli {
@@ -74,153 +72,21 @@ async fn handle_app_event<'a>(app: &mut App<'a>, event: AppEvent) -> bool {
                     _ => {}
                 }
             } else if app.filter_dialog_active {
-                let focus_count = app.filter_inputs.len() + 1;
-                match key.code {
-                    KeyCode::Esc => {
-                        app.filter_dialog_active = false;
-                    }
-                    KeyCode::Enter => {
-                        let _ = app.apply_filters().await;
-                    }
-                    KeyCode::Up | KeyCode::BackTab => {
-                        app.filter_focus = (app.filter_focus + focus_count - 1) % focus_count;
-                    }
-                    KeyCode::Down | KeyCode::Tab => {
-                        app.filter_focus = (app.filter_focus + 1) % focus_count;
-                    }
-                    KeyCode::Left if app.filter_focus == 6 => {
-                        let opts_len = app::FILTER_STATUS_OPTIONS.len();
-                        app.filter_status_index =
-                            (app.filter_status_index + opts_len - 1) % opts_len;
-                    }
-                    KeyCode::Right if app.filter_focus == 6 => {
-                        let opts_len = app::FILTER_STATUS_OPTIONS.len();
-                        app.filter_status_index = (app.filter_status_index + 1) % opts_len;
-                    }
-                    _ => {
-                        if app.filter_focus < 6 {
-                            app.filter_inputs[app.filter_focus].input(key);
-                        }
-                    }
-                }
+                app.handle_filter_dialog_key(key).await;
             } else if app.schedule_git_dialog_active {
-                let focus_count = app.schedule_git_inputs.len();
-                match key.code {
-                    KeyCode::Esc => {
-                        app.schedule_git_dialog_active = false;
-                    }
-                    KeyCode::Enter => {
-                        let _ = app.submit_schedule_git().await;
-                    }
-                    KeyCode::Up | KeyCode::BackTab => {
-                        app.schedule_git_focus =
-                            (app.schedule_git_focus + focus_count - 1) % focus_count;
-                    }
-                    KeyCode::Down | KeyCode::Tab => {
-                        app.schedule_git_focus = (app.schedule_git_focus + 1) % focus_count;
-                    }
-                    _ => {
-                        app.schedule_git_inputs[app.schedule_git_focus].input(key);
-                    }
-                }
-            } else if let Some(ref mut form) = app.direct_submit_form {
-                form.handle_input(key);
-                match form.result() {
-                    ratatui_form::FormResult::Submitted => {
-                        let _ = app.submit_direct_form().await;
-                    }
-                    ratatui_form::FormResult::Cancelled => {
-                        app.direct_submit_form = None;
-                        app.direct_submit_dsl = None;
-                    }
-                    ratatui_form::FormResult::Active => {}
-                }
+                app.handle_schedule_git_dialog_key(key).await;
+            } else if app.storage_backend_dialog_active {
+                app.handle_storage_backend_dialog_key(key).await;
+            } else if app.webhook_dialog_active {
+                app.handle_webhook_dialog_key(key).await;
+            } else if app.approval_dialog_active {
+                app.handle_approval_dialog_key(key).await;
+            } else if app.direct_submit_form.is_some() {
+                app.handle_direct_submit_form_key(key).await;
             } else if app.file_browser_active {
-                match key.code {
-                    KeyCode::Esc => {
-                        app.file_browser_active = false;
-                    }
-                    KeyCode::Enter => {
-                        if app.file_explorer.current_entry().is_some_and(|e| e.is_dir) {
-                            let _ = app.file_explorer.handle_key(key);
-                        } else {
-                            let _ = app.submit_file().await;
-                        }
-                    }
-                    _ => {
-                        let _ = app.file_explorer.handle_key(key);
-                    }
-                }
+                app.handle_file_browser_key(key).await;
             } else {
-                match key.code {
-                    KeyCode::Char('e') | KeyCode::Char('r') => {
-                        app.open_file_browser();
-                    }
-                    KeyCode::Char('f') | KeyCode::Char('/') => {
-                        app.open_filter_dialog();
-                    }
-                    KeyCode::Char('q') => return true,
-                    KeyCode::Char('j') | KeyCode::Down => {
-                        if app.active_pane == Pane::RunsList {
-                            app.next_run();
-                        } else {
-                            app.next_step();
-                        }
-                    }
-                    KeyCode::Char('k') | KeyCode::Up => {
-                        if app.active_pane == Pane::RunsList {
-                            app.previous_run();
-                        } else {
-                            app.previous_step();
-                        }
-                    }
-                    KeyCode::Tab => {
-                        app.active_pane = match app.active_pane {
-                            Pane::RunsList => Pane::RunDetail,
-                            Pane::RunDetail => Pane::TestResults,
-                            Pane::TestResults => Pane::RunsList,
-                        };
-                    }
-                    KeyCode::Char('t') => {
-                        if app.active_pane == Pane::TestResults {
-                            app.active_pane = Pane::RunDetail;
-                        } else {
-                            app.active_pane = Pane::TestResults;
-                        }
-                    }
-                    KeyCode::Char('h') | KeyCode::Left => {
-                        app.active_pane = Pane::RunsList;
-                    }
-                    KeyCode::Char('l') | KeyCode::Right => {
-                        app.active_pane = Pane::RunDetail;
-                    }
-                    KeyCode::Char('[') => {
-                        app.scroll_logs_up();
-                    }
-                    KeyCode::Char(']') => {
-                        app.scroll_logs_down();
-                    }
-                    KeyCode::Char('{') => {
-                        app.scroll_overview_up();
-                    }
-                    KeyCode::Char('}') => {
-                        app.scroll_overview_down();
-                    }
-                    KeyCode::PageUp => {
-                        for _ in 0..10 {
-                            app.scroll_logs_up();
-                        }
-                    }
-                    KeyCode::PageDown => {
-                        for _ in 0..10 {
-                            app.scroll_logs_down();
-                        }
-                    }
-                    KeyCode::Char('a') => {
-                        app.log_auto_scroll = !app.log_auto_scroll;
-                    }
-                    _ => {}
-                }
+                return app.handle_default_key(key).await;
             }
         }
         AppEvent::StatusUpdate(run_id, status) => {
@@ -231,6 +97,9 @@ async fn handle_app_event<'a>(app: &mut App<'a>, event: AppEvent) -> bool {
         }
         AppEvent::LogLine(run_id, line) => {
             app.handle_log_line(run_id, line);
+        }
+        AppEvent::StepLogsFetched(run_id, step_index, logs) => {
+            app.handle_step_logs_fetched(run_id, step_index, logs);
         }
         AppEvent::WorkflowUpdate(run) => {
             app.handle_workflow_update(run);
@@ -248,6 +117,10 @@ async fn handle_app_event<'a>(app: &mut App<'a>, event: AppEvent) -> bool {
             app.error = None;
             app.start_listening_for_workflows().await;
             let _ = app.refresh_runs().await;
+            let _ = app.refresh_storage_backends().await;
+            let _ = app.refresh_webhooks().await;
+            let _ = app.refresh_event_rules().await;
+            let _ = app.refresh_cron_workflows().await;
         }
         AppEvent::LoginFailed(err) => {
             app.error = Some(err);
@@ -283,6 +156,10 @@ async fn main() -> Result<()> {
     if app.token.is_some() {
         app.start_listening_for_workflows().await;
         let _ = app.refresh_runs().await;
+        let _ = app.refresh_storage_backends().await;
+        let _ = app.refresh_webhooks().await;
+        let _ = app.refresh_event_rules().await;
+        let _ = app.refresh_cron_workflows().await;
     }
 
     // Input loop
@@ -303,10 +180,22 @@ async fn main() -> Result<()> {
         terminal.draw(|f| ui(f, &mut app))?;
 
         if let Some(event) = rx.recv().await {
+            if let AppEvent::Terminal(Event::Key(key)) = &event {
+                if key.code == KeyCode::Char('l') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                    terminal.clear()?;
+                }
+            }
             should_quit = handle_app_event(&mut app, event).await;
 
             while !should_quit {
                 if let Ok(next_event) = rx.try_recv() {
+                    if let AppEvent::Terminal(Event::Key(key)) = &next_event {
+                        if key.code == KeyCode::Char('l')
+                            && key.modifiers.contains(KeyModifiers::CONTROL)
+                        {
+                            terminal.clear()?;
+                        }
+                    }
                     should_quit = handle_app_event(&mut app, next_event).await;
                 } else {
                     break;

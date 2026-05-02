@@ -22,6 +22,8 @@ pub enum AppEvent {
     StepUpdate(Uuid, String, String), // run_id, step_name, status
     /// A new log line received for a specific workflow run.
     LogLine(Uuid, String), // run_id, line
+    /// Fetched historical logs for a specific step.
+    StepLogsFetched(Uuid, usize, Vec<String>), // run_id, step_index, logs
     /// An update with partial details for a workflow run, typically from the run list.
     WorkflowUpdate(app::WorkflowRunDetail),
     /// An update with full details for a workflow run, including steps and artifacts.

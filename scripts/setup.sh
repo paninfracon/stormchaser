@@ -248,9 +248,11 @@ os.chmod(cred_path, stat.S_IRUSR | stat.S_IWUSR)
 
 with open(out_path, "w") as f:
     f.write(content)
+
 os.chmod(out_path, stat.S_IRUSR | stat.S_IWUSR)
 
 print(f"Dex credentials written to {cred_path} (mode 0600).")
+print(f"Dex config written to {out_path} (mode 0600).")
 EOF
 fi
 

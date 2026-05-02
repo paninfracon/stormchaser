@@ -1,15 +1,24 @@
 use crate::{AppState, AuthClaims};
 use axum::response::sse::Event;
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
+    Json,
 };
 use futures::StreamExt;
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
+use utoipa::ToSchema;
 use uuid::Uuid;
+
+#[derive(Deserialize, ToSchema)]
+pub struct LogsQuery {
+    #[schema(example = 100)]
+    pub limit: Option<usize>,
+}
 
 /// Format log event.
 pub fn format_log_event(line: &str) -> Event {
@@ -17,10 +26,22 @@ pub fn format_log_event(line: &str) -> Event {
 }
 
 /// Stream step logs api.
+#[utoipa::path(
+    get,
+    path = "/api/v1/runs/{run_id}/steps/{step_id}/logs/stream",
+    params(("run_id" = Uuid, Path, description="Run ID"), ("step_id" = Uuid, Path, description="Step instance ID")),
+    responses(
+        (status = 200, description = "Success"),
+        (status = 400, description = "Bad Request"),
+        (status = 404, description = "Not Found"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    tag = "step"
+)]
 pub async fn stream_step_logs_api(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path((run_id, step_name)): Path<(Uuid, String)>,
+    Path((run_id, step_id)): Path<(Uuid, Uuid)>,
 ) -> Result<
     axum::response::sse::Sse<
         impl futures::stream::Stream<Item = Result<Event, std::convert::Infallible>>,
@@ -32,14 +53,13 @@ pub async fn stream_step_logs_api(
         None => return Err(StatusCode::NOT_IMPLEMENTED),
     };
 
-    let step_id = crate::db::get_step_id_by_name(&state.pool, run_id, &step_name)
+    let instance = crate::db::get_step_instance_by_id(&state.pool, run_id, step_id)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let step_id = step_id.ok_or(StatusCode::NOT_FOUND)?;
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     let rx = log_backend
-        .stream_step_logs(&step_name, step_id)
+        .stream_step_logs(&instance.step_name, step_id)
         .await
         .map_err(|e| {
             tracing::error!("Failed to stream logs: {}", e);
@@ -62,7 +82,69 @@ pub async fn stream_step_logs_api(
     Ok(axum::response::sse::Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default()))
 }
 
+/// Get step logs api.
+#[utoipa::path(
+    get,
+    path = "/api/v1/runs/{run_id}/steps/{step_id}/logs",
+    params(
+        ("run_id" = Uuid, Path, description="Run ID"),
+        ("step_id" = Uuid, Path, description="Step instance ID"),
+        ("limit" = Option<usize>, Query, description="Limit log lines")
+    ),
+    responses(
+        (status = 200, description = "Success", body = Vec<String>),
+        (status = 400, description = "Bad Request"),
+        (status = 404, description = "Not Found"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    tag = "step"
+)]
+pub async fn get_step_logs_api(
+    AuthClaims(_claims): AuthClaims,
+    State(state): State<AppState>,
+    Path((run_id, step_id)): Path<(Uuid, Uuid)>,
+    Query(query): Query<LogsQuery>,
+) -> Result<Json<Vec<String>>, StatusCode> {
+    let log_backend = match &state.log_backend {
+        Some(backend) => backend,
+        None => return Err(StatusCode::NOT_IMPLEMENTED),
+    };
+
+    let instance = crate::db::get_step_instance_by_id(&state.pool, run_id, step_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let logs = log_backend
+        .fetch_step_logs(
+            &instance.step_name,
+            step_id,
+            instance.started_at,
+            instance.finished_at,
+            query.limit,
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to fetch logs: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(logs))
+}
+
 /// Streams run logs.
+#[utoipa::path(
+    get,
+    path = "/api/v1/runs/{run_id}/logs/stream",
+    params(("run_id" = Uuid, Path, description="Run ID")),
+    responses(
+        (status = 200, description = "Success"),
+        (status = 400, description = "Bad Request"),
+        (status = 404, description = "Not Found"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    tag = "step"
+)]
 pub async fn stream_run_logs_api(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
@@ -188,6 +270,20 @@ pub async fn stream_run_logs_api(
     Ok(axum::response::sse::Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default()))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/runs/{run_id}/status/stream",
+    params(
+        ("run_id" = Uuid, Path, description = "Run ID")
+    ),
+    responses(
+        (status = 200, description = "Status stream (SSE)")
+    ),
+    security(
+        ("bearer_auth" = [])
+    ),
+    tag = "step"
+)]
 /// Stream run status api.
 pub async fn stream_run_status_api(
     AuthClaims(_claims): AuthClaims,

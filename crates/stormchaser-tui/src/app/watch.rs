@@ -6,7 +6,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 impl<'a> App<'a> {
-    /// Re-populates the log view buffer from the currently selected step's logs.
+    /// Re-populates the log view buffer from the currently selected step's logs and fetches full logs.
     pub fn refresh_step_logs(&mut self, reset_scroll: bool) {
         if let Some(run) = &self.selected_run {
             if let Some(step) = run.steps.get(self.selected_step_index) {
@@ -18,6 +18,52 @@ impl<'a> App<'a> {
                     self.log_scroll = 0;
                     self.log_auto_scroll = true;
                 }
+
+                let step_id = step
+                    .instance
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| uuid::Uuid::parse_str(s).ok());
+
+                let Some(id) = step_id else {
+                    // Without a stable UUID we cannot dedupe or fetch logs reliably.
+                    return;
+                };
+
+                if self.fetched_steps.contains(&id) {
+                    return;
+                }
+                self.fetched_steps.insert(id);
+
+                // Spawn background task to fetch full historical logs for this step
+                let run_id = run.detail.id;
+                let url = self.url.clone();
+                let token = self.token.clone();
+                let tx = self.status_tx.clone();
+                let step_index = self.selected_step_index;
+
+                tokio::spawn(async move {
+                    if let Some(token) = token {
+                        let client = reqwest::Client::new();
+                        if let Ok(res) = client
+                            .get(format!(
+                                "{}/api/v1/runs/{}/steps/{}/logs?limit=5000",
+                                url, run_id, id
+                            ))
+                            .header("Authorization", format!("Bearer {}", token))
+                            .send()
+                            .await
+                        {
+                            if res.status().is_success() {
+                                if let Ok(logs) = res.json::<Vec<String>>().await {
+                                    let _ = tx
+                                        .send(AppEvent::StepLogsFetched(run_id, step_index, logs))
+                                        .await;
+                                }
+                            }
+                        }
+                    }
+                });
             } else {
                 self.run_logs.clear();
                 if reset_scroll {
@@ -195,5 +241,77 @@ mod tests {
         // Because it is cached, start_watching should return early and not set handles
         assert!(app.watcher_handle.is_none());
         assert!(app.log_handle.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_start_watching_sse_success() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        let id = Uuid::new_v4();
+
+        let sse_status_body = "event: run_status\ndata: {\"status\": \"running\"}\n\n";
+        let sse_log_body = "event: log\ndata: [test] Log message\n\n";
+
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v1/runs/{}/status/stream", id)))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(sse_status_body),
+            )
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v1/runs/{}/logs/stream", id)))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(sse_log_body),
+            )
+            .mount(&server)
+            .await;
+
+        let (tx, mut rx) = mpsc::channel(100);
+        let mut app = App::new(server.uri(), Some("token".to_string()), tx);
+
+        app.start_watching(id).await;
+
+        assert!(app.watcher_handle.is_some());
+        assert!(app.log_handle.is_some());
+
+        // We expect to receive StatusUpdate and LogLine events
+        let mut received_status = false;
+        let mut received_log = false;
+
+        // The tasks are running in the background. We need to yield to let them make progress.
+        for _ in 0..5 {
+            // Allow a few iterations
+            if let Ok(event) =
+                tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv()).await
+            {
+                match event {
+                    Some(AppEvent::StatusUpdate(run_id, status)) => {
+                        assert_eq!(run_id, id);
+                        assert_eq!(status, "{\"status\": \"running\"}");
+                        received_status = true;
+                    }
+                    Some(AppEvent::LogLine(run_id, log)) => {
+                        assert_eq!(run_id, id);
+                        assert_eq!(log, "[test] Log message");
+                        received_log = true;
+                    }
+                    _ => {}
+                }
+            }
+            if received_status && received_log {
+                break;
+            }
+        }
+
+        assert!(received_status, "Did not receive StatusUpdate event");
+        assert!(received_log, "Did not receive LogLine event");
     }
 }

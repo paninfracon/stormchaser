@@ -100,6 +100,7 @@ The project is divided into specialized crates to ensure a clear separation of c
 - **Recording changes**: Update the changelog with brief summaries of major changes. Before releasing a new version ensure that the changelog and other documentation is complete and current
 - **Workflow readability**: In the `.storm` files wrap shell commands in HCL 'here' docs and line split them appropriately to promote readability
 - **Function Returns**: Don't use tuple returns from functions unless absolutely necessary, or an error type return, instead use a proper struct with named fields
+- **Secret Management**: Never hardcode passwords, even for tests or development environments
 
 ### 5. UI/UX Guidelines
 
