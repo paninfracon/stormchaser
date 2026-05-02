@@ -291,7 +291,7 @@ pub async fn update_webhook(
             .await?
         {
             Some(w) => w,
-            None => return Ok(()),
+            None => return Err(sqlx::Error::RowNotFound),
         };
 
     if let Some(n) = name {
