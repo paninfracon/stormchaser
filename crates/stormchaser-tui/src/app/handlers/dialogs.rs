@@ -226,7 +226,7 @@ impl<'a> App<'a> {
             form.handle_input(key);
             match form.result() {
                 ratatui_form::FormResult::Submitted => {
-                    let _ = self.submit_file().await;
+                    let _ = self.submit_direct_form().await;
                 }
                 ratatui_form::FormResult::Cancelled => {
                     self.direct_submit_form = None;
