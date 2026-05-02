@@ -530,8 +530,8 @@ async fn test_stream_step_logs() {
         .oneshot(
             Request::builder()
                 .uri(format!(
-                    "/api/v1/runs/{}/steps/test-step/logs/stream",
-                    run_id
+                    "/api/v1/runs/{}/steps/{}/logs/stream",
+                    run_id, step_id
                 ))
                 .header("Authorization", format!("Bearer {}", get_token()))
                 .extension(ConnectInfo(addr))
