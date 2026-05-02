@@ -6,13 +6,17 @@ use ratatui::{
     Frame,
 };
 
+pub mod cron;
 pub mod dialogs;
+pub mod event_rules;
 pub mod runs;
 pub mod storage;
 pub mod utils;
 pub mod webhooks;
 
+use cron::*;
 use dialogs::*;
+use event_rules::*;
 use runs::*;
 use storage::*;
 use utils::*;
@@ -39,6 +43,14 @@ pub fn ui(f: &mut Frame, app: &mut App) {
         || app.active_pane == crate::app::Pane::WebhookDetail
     {
         render_webhooks_tab(f, chunks[0], app);
+    } else if app.active_pane == crate::app::Pane::EventRulesList
+        || app.active_pane == crate::app::Pane::EventRuleDetail
+    {
+        render_event_rules_tab(f, chunks[0], app);
+    } else if app.active_pane == crate::app::Pane::CronWorkflowsList
+        || app.active_pane == crate::app::Pane::CronWorkflowDetail
+    {
+        render_cron_workflows_tab(f, chunks[0], app);
     } else {
         render_runs_tab(f, chunks[0], app);
     }
@@ -47,7 +59,7 @@ pub fn ui(f: &mut Frame, app: &mut App) {
     let status_text = if let Some(err) = &app.error {
         format!("Error: {}", err)
     } else {
-        "Tabs: 1-Runs 2-Backends 3-Webhooks | Panes: Tab/h/l | Nav: j/k | Scroll: [/]/PgUp/PgDn | Actions: c(reate)/e(dit)/d(elete) | Filter: f | Quit: q"
+        "Tabs: 1-Runs 2-Backends 3-Webhooks 4-Rules 5-Cron | Panes: Tab/h/l | Nav: j/k | Scroll: [/]/PgUp/PgDn | Actions: c(reate)/e(dit)/d(elete) | Filter: f | Quit: q"
             .to_string()
     };
     let status_bar = Paragraph::new(status_text)
@@ -67,6 +79,10 @@ pub fn ui(f: &mut Frame, app: &mut App) {
         render_storage_backend_dialog(f, app);
     } else if app.webhook_dialog_active {
         render_webhook_dialog(f, app);
+    } else if app.event_rule_dialog_active {
+        render_event_rule_dialog(f, app);
+    } else if app.cron_dialog_active {
+        render_cron_dialog(f, app);
     } else if app.approval_dialog_active {
         render_approval_dialog(f, app);
     } else if let Some(form) = &mut app.direct_submit_form {

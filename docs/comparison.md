@@ -84,4 +84,29 @@ handle "Big Data" well but are often too slow or heavy for "DevOps" tasks like:
 
 **Stormchaser is built for the latter.** It optimizes for the **Developer
 Experience (DX)** through its HCL-based DSL and for **Operator Confidence**
-through its Fail-Closed OPA security and rigorous resource quotas. uotas.
+through its Fail-Closed OPA security and rigorous resource quotas.
+
+---
+
+## TUI vs. CLI Feature Matrix
+
+While both tools interact with the same underlying API and core models, they are
+optimized for different phases of the DevOps lifecycle. The CLI is focused on
+scripting, authoring, and point-in-time interactions, while the TUI is designed
+for real-time observability, troubleshooting, and interactive management.
+
+| Feature / Capability | CLI (`stormchaser-cli`) | TUI (`stormchaser-tui`) |
+| :--- | :---: | :---: |
+| **Primary Use Case** | Scripting, CI/CD, DSL Authoring | Live Monitoring, Troubleshooting |
+| **Execution Mode** | Headless / Synchronous | Interactive / Real-time (SSE) |
+| **Workflow Execution** | `run` (file), `enqueue` (git) | Integrated File Browser & Form |
+| **Log Viewing** | Streaming (`logs` cmd) | Paginated & Streamed UI Viewer |
+| **Run Discovery** | `list` with flags | Visual List with Interactive Filters |
+| **DSL Linting & Validation**| `lint` (CLI-exclusive) | ❌ (Relies on server-side validation) |
+| **JSON Schema Export** | `schema` (CLI-exclusive) | ❌ |
+| **Human-in-the-Loop (HITL)**| `approve` command | Interactive Approval Dialog |
+| **Artifacts & Test Reports**| `artifacts`, `reports` | ❌ (Metadata view only) |
+| **Storage Backends** | Full CRUD via JSON payloads | Interactive CRUD Forms |
+| **Webhooks** | Full CRUD via JSON payloads | Interactive CRUD Forms |
+| **Event Rules & Cron** | Full CRUD (`rules`, `cron`) | Interactive CRUD Forms |
+| **Authentication** | OAuth Browser, Token generation | OAuth Browser Flow |

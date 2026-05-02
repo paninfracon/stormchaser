@@ -8,6 +8,7 @@ use stormchaser_model::workflow::RunStatus;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+use stormchaser_model::cron;
 use stormchaser_model::event_rules;
 use stormchaser_model::storage;
 use stormchaser_model::test_report;
@@ -103,6 +104,14 @@ pub enum Pane {
     WebhooksList,
     /// The pane displaying detailed information for a selected webhook.
     WebhookDetail,
+    /// The pane displaying the list of event rules.
+    EventRulesList,
+    /// The pane displaying detailed information for a selected event rule.
+    EventRuleDetail,
+    /// The pane displaying the list of cron workflows.
+    CronWorkflowsList,
+    /// The pane displaying detailed information for a selected cron workflow.
+    CronWorkflowDetail,
 }
 
 /// The main application state holding all data and UI status for the TUI.
@@ -147,6 +156,18 @@ pub struct App<'a> {
     pub webhooks_state: ListState,
     /// The currently selected webhook.
     pub selected_webhook: Option<event_rules::WebhookConfig>,
+    /// The current list of event rules.
+    pub event_rules: Vec<event_rules::EventRule>,
+    /// The state of the event rules list widget.
+    pub event_rules_state: ListState,
+    /// The currently selected event rule.
+    pub selected_event_rule: Option<event_rules::EventRule>,
+    /// The current list of cron workflows.
+    pub cron_workflows: Vec<cron::CronWorkflow>,
+    /// The state of the cron workflows list widget.
+    pub cron_workflows_state: ListState,
+    /// The currently selected cron workflow.
+    pub selected_cron_workflow: Option<cron::CronWorkflow>,
     /// The index of the currently selected step within the detailed run view.
     pub selected_step_index: usize,
     /// The aggregated logs for the current view.
@@ -213,6 +234,26 @@ pub struct App<'a> {
     pub webhook_is_active: bool,
     /// The ID of the webhook being edited, or None for creating a new one.
     pub webhook_edit_id: Option<Uuid>,
+    /// Whether the event rule dialog is active.
+    pub event_rule_dialog_active: bool,
+    /// The index of the focused input in the event rule dialog.
+    pub event_rule_focus: usize,
+    /// The text area inputs for the event rule dialog.
+    pub event_rule_inputs: Vec<ratatui_textarea::TextArea<'a>>,
+    /// Whether the event rule is active.
+    pub event_rule_is_active: bool,
+    /// The ID of the event rule being edited, or None for creating a new one.
+    pub event_rule_edit_id: Option<Uuid>,
+    /// Whether the cron workflow dialog is active.
+    pub cron_dialog_active: bool,
+    /// The index of the focused input in the cron dialog.
+    pub cron_focus: usize,
+    /// The text area inputs for the cron dialog.
+    pub cron_inputs: Vec<ratatui_textarea::TextArea<'a>>,
+    /// Whether the cron workflow is active.
+    pub cron_is_active: bool,
+    /// The ID of the cron workflow being edited, or None for creating a new one.
+    pub cron_edit_id: Option<Uuid>,
     /// Whether the approval dialog is active.
     pub approval_dialog_active: bool,
     /// Text area for JSON inputs for step approval.
@@ -282,6 +323,15 @@ impl<'a> App<'a> {
             storage_backends: Vec::new(),
             storage_backends_state: ListState::default(),
             selected_storage_backend: None,
+            webhooks: Vec::new(),
+            webhooks_state: ListState::default(),
+            selected_webhook: None,
+            event_rules: Vec::new(),
+            event_rules_state: ListState::default(),
+            selected_event_rule: None,
+            cron_workflows: Vec::new(),
+            cron_workflows_state: ListState::default(),
+            selected_cron_workflow: None,
             selected_step_index: 0,
             run_logs: Vec::new(),
             log_scroll: 0,
@@ -309,15 +359,22 @@ impl<'a> App<'a> {
             storage_backend_type_index: 0,
             storage_backend_is_default: false,
             storage_backend_edit_id: None,
-            webhooks: Vec::new(),
-            webhooks_state: ListState::default(),
-            selected_webhook: None,
             webhook_dialog_active: false,
             webhook_focus: 0,
             webhook_inputs: Vec::new(),
             webhook_source_type_index: 0,
             webhook_is_active: false,
             webhook_edit_id: None,
+            event_rule_dialog_active: false,
+            event_rule_focus: 0,
+            event_rule_inputs: Vec::new(),
+            event_rule_is_active: false,
+            event_rule_edit_id: None,
+            cron_dialog_active: false,
+            cron_focus: 0,
+            cron_inputs: Vec::new(),
+            cron_is_active: false,
+            cron_edit_id: None,
             approval_dialog_active: false,
             approval_inputs: ratatui_textarea::TextArea::default(),
             file_browser_active: false,

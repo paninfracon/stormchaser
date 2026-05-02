@@ -117,6 +117,10 @@ async fn handle_app_event<'a>(app: &mut App<'a>, event: AppEvent) -> bool {
             app.error = None;
             app.start_listening_for_workflows().await;
             let _ = app.refresh_runs().await;
+            let _ = app.refresh_storage_backends().await;
+            let _ = app.refresh_webhooks().await;
+            let _ = app.refresh_event_rules().await;
+            let _ = app.refresh_cron_workflows().await;
         }
         AppEvent::LoginFailed(err) => {
             app.error = Some(err);
@@ -154,6 +158,8 @@ async fn main() -> Result<()> {
         let _ = app.refresh_runs().await;
         let _ = app.refresh_storage_backends().await;
         let _ = app.refresh_webhooks().await;
+        let _ = app.refresh_event_rules().await;
+        let _ = app.refresh_cron_workflows().await;
     }
 
     // Input loop

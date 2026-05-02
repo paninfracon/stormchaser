@@ -439,6 +439,68 @@ impl<'a> App<'a> {
         }
     }
 
+    pub async fn handle_event_rule_dialog_key(&mut self, key: KeyEvent) {
+        let focus_count = self.event_rule_inputs.len() + 1; // inputs + is_active
+        match key.code {
+            KeyCode::Esc => {
+                self.event_rule_dialog_active = false;
+            }
+            KeyCode::Enter
+                if key
+                    .modifiers
+                    .contains(ratatui::crossterm::event::KeyModifiers::CONTROL) =>
+            {
+                let _ = self.submit_event_rule_form().await;
+            }
+            KeyCode::BackTab => {
+                self.event_rule_focus = (self.event_rule_focus + focus_count - 1) % focus_count;
+            }
+            KeyCode::Tab => {
+                self.event_rule_focus = (self.event_rule_focus + 1) % focus_count;
+            }
+            KeyCode::Char(' ') | KeyCode::Enter
+                if self.event_rule_focus == self.event_rule_inputs.len() =>
+            {
+                self.event_rule_is_active = !self.event_rule_is_active;
+            }
+            _ => {
+                if self.event_rule_focus < self.event_rule_inputs.len() {
+                    self.event_rule_inputs[self.event_rule_focus].input(key);
+                }
+            }
+        }
+    }
+
+    pub async fn handle_cron_dialog_key(&mut self, key: KeyEvent) {
+        let focus_count = self.cron_inputs.len() + 1; // inputs + is_active
+        match key.code {
+            KeyCode::Esc => {
+                self.cron_dialog_active = false;
+            }
+            KeyCode::Enter
+                if key
+                    .modifiers
+                    .contains(ratatui::crossterm::event::KeyModifiers::CONTROL) =>
+            {
+                let _ = self.submit_cron_workflow_form().await;
+            }
+            KeyCode::BackTab => {
+                self.cron_focus = (self.cron_focus + focus_count - 1) % focus_count;
+            }
+            KeyCode::Tab => {
+                self.cron_focus = (self.cron_focus + 1) % focus_count;
+            }
+            KeyCode::Char(' ') | KeyCode::Enter if self.cron_focus == self.cron_inputs.len() => {
+                self.cron_is_active = !self.cron_is_active;
+            }
+            _ => {
+                if self.cron_focus < self.cron_inputs.len() {
+                    self.cron_inputs[self.cron_focus].input(key);
+                }
+            }
+        }
+    }
+
     pub async fn handle_approval_dialog_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Esc => {
@@ -504,12 +566,16 @@ impl<'a> App<'a> {
                 Pane::RunsList => self.next_run(),
                 Pane::StorageBackendsList => self.next_storage_backend(),
                 Pane::WebhooksList => self.next_webhook(),
+                Pane::EventRulesList => self.next_event_rule(),
+                Pane::CronWorkflowsList => self.next_cron_workflow(),
                 _ => self.next_step(),
             },
             KeyCode::Char('k') | KeyCode::Up => match self.active_pane {
                 Pane::RunsList => self.previous_run(),
                 Pane::StorageBackendsList => self.previous_storage_backend(),
                 Pane::WebhooksList => self.previous_webhook(),
+                Pane::EventRulesList => self.previous_event_rule(),
+                Pane::CronWorkflowsList => self.previous_cron_workflow(),
                 _ => self.previous_step(),
             },
             KeyCode::Char('1') => {
@@ -521,6 +587,12 @@ impl<'a> App<'a> {
             KeyCode::Char('3') => {
                 self.active_pane = Pane::WebhooksList;
             }
+            KeyCode::Char('4') => {
+                self.active_pane = Pane::EventRulesList;
+            }
+            KeyCode::Char('5') => {
+                self.active_pane = Pane::CronWorkflowsList;
+            }
             KeyCode::Tab => {
                 self.active_pane = match self.active_pane {
                     Pane::RunsList => Pane::RunDetail,
@@ -529,7 +601,11 @@ impl<'a> App<'a> {
                     Pane::StorageBackendsList => Pane::StorageBackendDetail,
                     Pane::StorageBackendDetail => Pane::WebhooksList,
                     Pane::WebhooksList => Pane::WebhookDetail,
-                    Pane::WebhookDetail => Pane::RunsList,
+                    Pane::WebhookDetail => Pane::EventRulesList,
+                    Pane::EventRulesList => Pane::EventRuleDetail,
+                    Pane::EventRuleDetail => Pane::CronWorkflowsList,
+                    Pane::CronWorkflowsList => Pane::CronWorkflowDetail,
+                    Pane::CronWorkflowDetail => Pane::RunsList,
                 };
             }
             KeyCode::Char('t') => {
@@ -551,6 +627,8 @@ impl<'a> App<'a> {
                         Pane::RunDetail | Pane::TestResults => Pane::RunsList,
                         Pane::StorageBackendDetail => Pane::StorageBackendsList,
                         Pane::WebhookDetail => Pane::WebhooksList,
+                        Pane::EventRuleDetail => Pane::EventRulesList,
+                        Pane::CronWorkflowDetail => Pane::CronWorkflowsList,
                         other => other,
                     };
                 }
@@ -566,6 +644,8 @@ impl<'a> App<'a> {
                         Pane::RunsList => Pane::RunDetail,
                         Pane::StorageBackendsList => Pane::StorageBackendDetail,
                         Pane::WebhooksList => Pane::WebhookDetail,
+                        Pane::EventRulesList => Pane::EventRuleDetail,
+                        Pane::CronWorkflowsList => Pane::CronWorkflowDetail,
                         other => other,
                     };
                 }
@@ -619,6 +699,18 @@ impl<'a> App<'a> {
             {
                 self.open_webhook_dialog(false);
             }
+            KeyCode::Char('c')
+                if self.active_pane == Pane::EventRulesList
+                    || self.active_pane == Pane::EventRuleDetail =>
+            {
+                self.open_event_rule_dialog(false);
+            }
+            KeyCode::Char('c')
+                if self.active_pane == Pane::CronWorkflowsList
+                    || self.active_pane == Pane::CronWorkflowDetail =>
+            {
+                self.open_cron_dialog(false);
+            }
             KeyCode::Char('c') => {} // No-op if not in backends tab or webhooks tab
             KeyCode::Char('e') => {
                 if self.active_pane == Pane::StorageBackendsList
@@ -629,6 +721,14 @@ impl<'a> App<'a> {
                     || self.active_pane == Pane::WebhookDetail
                 {
                     self.open_webhook_dialog(true);
+                } else if self.active_pane == Pane::EventRulesList
+                    || self.active_pane == Pane::EventRuleDetail
+                {
+                    self.open_event_rule_dialog(true);
+                } else if self.active_pane == Pane::CronWorkflowsList
+                    || self.active_pane == Pane::CronWorkflowDetail
+                {
+                    self.open_cron_dialog(true);
                 } else {
                     self.open_file_browser();
                 }
@@ -644,6 +744,18 @@ impl<'a> App<'a> {
                     || self.active_pane == Pane::WebhookDetail =>
             {
                 let _ = self.delete_selected_webhook().await;
+            }
+            KeyCode::Char('d')
+                if self.active_pane == Pane::EventRulesList
+                    || self.active_pane == Pane::EventRuleDetail =>
+            {
+                let _ = self.delete_selected_event_rule().await;
+            }
+            KeyCode::Char('d')
+                if self.active_pane == Pane::CronWorkflowsList
+                    || self.active_pane == Pane::CronWorkflowDetail =>
+            {
+                let _ = self.delete_selected_cron_workflow().await;
             }
             KeyCode::Char('d') => {} // No-op if not in backends tab or webhooks tab
             KeyCode::Char('r') => {

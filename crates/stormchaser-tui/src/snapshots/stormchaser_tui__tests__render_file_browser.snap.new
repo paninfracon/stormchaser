@@ -1,5 +1,6 @@
 ---
 source: crates/stormchaser-tui/src/tests.rs
+assertion_line: 271
 expression: terminal.backend()
 ---
 TestBackend {
