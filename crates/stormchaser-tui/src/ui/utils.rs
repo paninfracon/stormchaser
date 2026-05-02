@@ -51,9 +51,12 @@ pub(crate) fn format_status(status: &str) -> String {
 
 pub(crate) fn format_time_str(ts: &str) -> String {
     if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(ts) {
-        dt.with_timezone(&chrono::Local)
-            .format("%Y-%m-%d %H:%M:%S")
-            .to_string()
+        #[cfg(test)]
+        let dt = dt.with_timezone(&chrono::Utc);
+        #[cfg(not(test))]
+        let dt = dt.with_timezone(&chrono::Local);
+
+        dt.format("%Y-%m-%d %H:%M:%S").to_string()
     } else {
         ts.to_string()
     }
