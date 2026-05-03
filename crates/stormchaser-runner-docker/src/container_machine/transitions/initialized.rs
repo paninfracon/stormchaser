@@ -330,6 +330,10 @@ impl DockerContainerMachine<state::Initialized> {
                 }
                 res => {
                     error!("Unpark failed for {}: {:?}", volume_name, res);
+                    let _ = self
+                        .docker
+                        .remove_container(&unpark_container_name, None)
+                        .await;
                     Err(anyhow::anyhow!(
                         "Unpark failed for {}: {:?}",
                         volume_name,
@@ -338,6 +342,10 @@ impl DockerContainerMachine<state::Initialized> {
                 }
             }
         } else {
+            let _ = self
+                .docker
+                .remove_container(&unpark_container_name, None)
+                .await;
             Err(anyhow::anyhow!("Wait stream ended unexpectedly"))
         }
     }

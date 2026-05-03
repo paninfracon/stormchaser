@@ -51,11 +51,34 @@ pub async fn handle_task(
     let received_at = chrono::Utc::now();
     tracing::info!("Received task message: {:?}", msg.subject);
 
-    let payload: Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+    let payload: Value = match serde_json::from_slice(&msg.payload) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::error!("Failed to parse task message payload: {:?}", e);
+            let _ = msg.ack().await;
+            return;
+        }
+    };
+
     let run_id_str = payload["run_id"].as_str().unwrap_or_default();
-    let run_id = Uuid::parse_str(run_id_str).unwrap_or_default();
+    let run_id = match Uuid::parse_str(run_id_str) {
+        Ok(id) => id,
+        Err(e) => {
+            tracing::error!("Invalid run_id '{}' in task message: {:?}", run_id_str, e);
+            let _ = msg.ack().await;
+            return;
+        }
+    };
+
     let step_id_str = payload["step_id"].as_str().unwrap_or_default();
-    let step_id = Uuid::parse_str(step_id_str).unwrap_or_default();
+    let step_id = match Uuid::parse_str(step_id_str) {
+        Ok(id) => id,
+        Err(e) => {
+            tracing::error!("Invalid step_id '{}' in task message: {:?}", step_id_str, e);
+            let _ = msg.ack().await;
+            return;
+        }
+    };
 
     let spec = serde_json::from_value(payload["spec"].clone()).unwrap_or(serde_json::Value::Null);
 
@@ -195,6 +218,7 @@ pub async fn handle_task(
             }
         }
         Err(e) => {
+            in_progress_handle.abort();
             tracing::error!("Failed to acquire K8s client: {:?}", e);
             let fail_event = serde_json::json!({
                 "run_id": run_id,
@@ -206,6 +230,7 @@ pub async fn handle_task(
             let _ = nats_client
                 .publish("stormchaser.step.failed", fail_event.to_string().into())
                 .await;
+            let _ = msg.double_ack().await;
         }
     }
 }
