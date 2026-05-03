@@ -276,23 +276,27 @@ fn contains(args: FuncArgs) -> Result<Value, String> {
     }
 }
 
+/// Returns the first argument that is neither `null` nor an empty string `""`.
+///
+/// This matches Terraform's `coalesce` semantics: for non-string types (numbers,
+/// booleans, arrays, objects) only `null` is skipped — `0`, `false`, and empty
+/// collections are all considered valid non-empty values.
 fn coalesce(args: FuncArgs) -> Result<Value, String> {
     if args.is_empty() {
         return Err("coalesce() expects at least 1 argument".to_string());
     }
     for arg in args.iter() {
-        if !arg.is_null() {
-            // Also treat empty string as null in coalesce if we follow some terraform semantics,
-            // but standard HCL coalesce returns the first non-null value.
-            if let Value::String(s) = arg {
-                if s.is_empty() {
-                    continue;
-                }
-            }
-            return Ok(arg.clone());
+        if arg.is_null() {
+            continue;
         }
+        if let Value::String(s) = arg {
+            if s.is_empty() {
+                continue;
+            }
+        }
+        return Ok(arg.clone());
     }
-    Err("coalesce() no non-null/non-empty arguments found".to_string())
+    Err("coalesce(): no non-null, non-empty-string arguments provided".to_string())
 }
 
 #[cfg(test)]
@@ -368,10 +372,29 @@ mod tests {
     }
 
     #[test]
-    fn test_logic_functions() {
+    fn test_coalesce_skips_null_and_empty_string() {
+        // Skips null and empty strings, returns first valid string.
         assert_eq!(
             eval_with_stdlib("coalesce(\"\", null, \"first\", \"second\")"),
             json!("first")
         );
+    }
+
+    #[test]
+    fn test_coalesce_returns_zero_number() {
+        // Terraform: 0 is a valid non-empty value — must not be skipped.
+        assert_eq!(eval_with_stdlib("coalesce(0, 1)"), json!(0));
+    }
+
+    #[test]
+    fn test_coalesce_returns_false_bool() {
+        // Terraform: false is a valid non-empty value — must not be skipped.
+        assert_eq!(eval_with_stdlib("coalesce(false, true)"), json!(false));
+    }
+
+    #[test]
+    fn test_coalesce_returns_empty_array() {
+        // Terraform: empty array is a valid non-empty value — must not be skipped.
+        assert_eq!(eval_with_stdlib("coalesce([], [1, 2])"), json!([]));
     }
 }

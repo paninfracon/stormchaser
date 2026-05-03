@@ -699,7 +699,10 @@ Stormchaser provides a set of built-in functions extending HCL to handle common 
 
 **Logic & Types:**
 
-* `coalesce(any...)`: Returns the first non-null and non-empty argument.
+* `coalesce(any...)`: Returns the first argument that is neither `null` nor an empty string `""`.
+  This matches [Terraform's `coalesce` semantics](https://developer.hashicorp.com/terraform/language/functions/coalesce):
+  only `null` and the empty string are skipped. Non-string values such as `0`, `false`, and empty
+  collections (`[]`, `{}`) are considered valid and will be returned as-is.
 
 **Path & Filesystem:**
 
