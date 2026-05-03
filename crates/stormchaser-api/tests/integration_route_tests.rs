@@ -787,7 +787,7 @@ async fn test_run_from_git() {
         tls_reloader.clone(),
     )
     .await
-    .unwrap();
+    .expect("handle_workflow_queued failed");
 
     // Advance StartPending -> Running
     stormchaser_engine::handler::workflow::handle_workflow_start_pending(
@@ -797,13 +797,21 @@ async fn test_run_from_git() {
         tls_reloader.clone(),
     )
     .await
-    .unwrap();
+    .expect("handle_workflow_start_pending failed");
 
-    let step_id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM step_instances WHERE run_id = $1")
-        .bind(uuid::Uuid::parse_str(run_id).unwrap())
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let mut step_id_opt = None;
+    for _ in 0..10 {
+        if let Ok(id) = sqlx::query_scalar("SELECT id FROM step_instances WHERE run_id = $1")
+            .bind(uuid::Uuid::parse_str(run_id).unwrap())
+            .fetch_one(&pool)
+            .await
+        {
+            step_id_opt = Some(id);
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    let step_id: uuid::Uuid = step_id_opt.expect("Step instance was never created");
 
     // Mock runner completing the step
     stormchaser_engine::handler::step::events::handle_step_completed(
@@ -818,7 +826,7 @@ async fn test_run_from_git() {
         tls_reloader.clone(),
     )
     .await
-    .unwrap();
+    .expect("handle_step_completed failed");
 
     // Verify the workflow completes successfully.
     let mut success = false;

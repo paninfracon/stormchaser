@@ -1,0 +1,21 @@
+{
+  "model": {
+    "name": "gemini-3.1-flash",
+    "base_url": "http://localhost:11434/v1"
+  },
+  "general": {
+    "plan": {
+      "enabled": true,
+      "modelRouting": true
+    }
+  },
+  "experimental": {
+    "gemmaModelRouter": {
+      "enabled": true,
+      "classifier": {
+        "host": "http://localhost:9379",
+        "model": "gemma3-1b-gpu-custom"
+      }
+    }
+  }
+}

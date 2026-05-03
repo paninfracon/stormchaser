@@ -1,3 +1,6 @@
+pub mod ses;
+pub mod smtp;
+
 use anyhow::Result;
 use serde_json::Value;
 use sqlx::PgPool;
@@ -8,8 +11,6 @@ use uuid::Uuid;
 #[cfg(feature = "email")]
 use crate::handler::{fetch_outputs, fetch_run_context, fetch_step_instance};
 #[cfg(feature = "email")]
-use anyhow::Context;
-#[cfg(feature = "email")]
 use chrono::Utc;
 #[cfg(feature = "email")]
 use stormchaser_model::dsl::{self, EmailBackend};
@@ -17,155 +18,6 @@ use stormchaser_model::dsl::{self, EmailBackend};
 use stormchaser_model::workflow;
 #[cfg(feature = "email")]
 use tracing::{error, info};
-
-#[cfg(feature = "email")]
-/// Smtpparams.
-pub struct SmtpParams {
-    /// The server.
-    pub server: String,
-    /// The port.
-    pub port: u16,
-    pub username: Option<String>,
-    /// The password.
-    pub password: Option<String>,
-    pub use_tls: bool,
-    pub use_mtls: bool,
-}
-
-#[cfg(feature = "email")]
-fn build_smtp_transport(params: SmtpParams) -> Result<lettre::SmtpTransport> {
-    use lettre::transport::smtp::client::{Tls, TlsParameters};
-    use lettre::SmtpTransport;
-
-    let mut mailer_builder = SmtpTransport::relay(&params.server)?.port(params.port);
-
-    if params.use_tls || params.use_mtls {
-        if params.use_mtls {
-            return Err(anyhow::anyhow!(
-                "mTLS for SMTP is currently unsupported due to lettre limitations."
-            ));
-        }
-
-        let tls_parameters = TlsParameters::builder(params.server).build_rustls()?;
-        mailer_builder = mailer_builder.tls(Tls::Required(tls_parameters));
-    }
-
-    if let (Some(user), Some(pass)) = (params.username, params.password) {
-        let credentials = lettre::transport::smtp::authentication::Credentials::new(user, pass);
-        mailer_builder = mailer_builder.credentials(credentials);
-    }
-
-    Ok(mailer_builder.build())
-}
-
-#[cfg(feature = "aws-ses")]
-async fn build_ses_client(
-    region: Option<String>,
-    role_arn: Option<String>,
-    run_id: Uuid,
-) -> Result<aws_sdk_ses::Client> {
-    let mut config_loader = aws_config::defaults(aws_config::BehaviorVersion::v2026_01_12());
-    if let Some(r) = region {
-        config_loader = config_loader.region(aws_config::Region::new(r));
-    }
-    let config = config_loader.load().await;
-
-    if let Some(role) = role_arn {
-        let sts_client = aws_sdk_sts::Client::new(&config);
-        let session_name = format!("stormchaser-ses-{}", run_id);
-
-        let assume_role_res = sts_client
-            .assume_role()
-            .role_arn(role)
-            .role_session_name(session_name)
-            .send()
-            .await?;
-
-        let credentials = assume_role_res
-            .credentials()
-            .context("Missing credentials from assume_role")?;
-
-        let assumed_credentials = aws_sdk_ses::config::Credentials::new(
-            credentials.access_key_id(),
-            credentials.secret_access_key(),
-            Some(credentials.session_token().to_string()),
-            None,
-            "StsAssumedRole",
-        );
-
-        let provider = aws_sdk_ses::config::SharedCredentialsProvider::new(assumed_credentials);
-        let assumed_config = aws_sdk_ses::config::Builder::from(&config)
-            .credentials_provider(provider)
-            .build();
-
-        Ok(aws_sdk_ses::Client::from_conf(assumed_config))
-    } else {
-        Ok(aws_sdk_ses::Client::new(&config))
-    }
-}
-
-#[cfg(feature = "aws-ses")]
-#[allow(clippy::too_many_arguments)]
-async fn send_email_ses(
-    from: String,
-    to: Vec<String>,
-    cc: Option<Vec<String>>,
-    bcc: Option<Vec<String>>,
-    subject: String,
-    body: String,
-    html: bool,
-    region: Option<String>,
-    role_arn: Option<String>,
-    configuration_set_name: Option<String>,
-    run_id: Uuid,
-) -> Result<()> {
-    use aws_sdk_ses::types::{Body, Content, Destination, Message};
-
-    let client = build_ses_client(region, role_arn, run_id).await?;
-
-    let mut dest_builder = Destination::builder();
-    for addr in to {
-        dest_builder = dest_builder.to_addresses(addr);
-    }
-    if let Some(ccs) = cc {
-        for addr in ccs {
-            dest_builder = dest_builder.cc_addresses(addr);
-        }
-    }
-    if let Some(bccs) = bcc {
-        for addr in bccs {
-            dest_builder = dest_builder.bcc_addresses(addr);
-        }
-    }
-    let destination = dest_builder.build();
-
-    let content = Content::builder().data(body).charset("UTF-8").build()?;
-    let mut body_builder = Body::builder();
-    if html {
-        body_builder = body_builder.html(content);
-    } else {
-        body_builder = body_builder.text(content);
-    }
-
-    let message = Message::builder()
-        .subject(Content::builder().data(subject).charset("UTF-8").build()?)
-        .body(body_builder.build())
-        .build();
-
-    let mut request = client
-        .send_email()
-        .source(from)
-        .destination(destination)
-        .message(message);
-
-    if let Some(cs) = configuration_set_name {
-        request = request.configuration_set_name(cs);
-    }
-
-    request.send().await?;
-
-    Ok(())
-}
 
 #[cfg(feature = "email")]
 /// Handle email send.
@@ -258,7 +110,7 @@ async fn send_via_ses(
 ) -> Result<()> {
     #[cfg(feature = "aws-ses")]
     {
-        match send_email_ses(
+        match self::ses::send_email_ses(
             spec.from.clone(),
             spec.to.clone(),
             spec.cc.clone(),
@@ -342,7 +194,7 @@ async fn send_via_smtp(
     };
 
     // 5. Send Email
-    let smtp_params = SmtpParams {
+    let smtp_params = self::smtp::SmtpParams {
         server: spec.smtp_server.clone().unwrap_or_else(|| {
             std::env::var("SMTP_SERVER").unwrap_or_else(|_| "localhost".to_string())
         }),
@@ -368,7 +220,7 @@ async fn send_via_smtp(
             .unwrap_or_else(|| std::env::var("SMTP_USE_MTLS").unwrap_or_default() == "true"),
     };
 
-    let mailer = build_smtp_transport(smtp_params)?;
+    let mailer = self::smtp::build_smtp_transport(smtp_params)?;
 
     match mailer.send(&message) {
         Ok(_) => {
@@ -616,7 +468,7 @@ async fn send_test_report_via_ses(
 ) -> Result<()> {
     #[cfg(feature = "aws-ses")]
     {
-        match send_email_ses(
+        match self::ses::send_email_ses(
             spec.from.clone(),
             spec.to.clone(),
             None,
@@ -676,7 +528,7 @@ async fn send_test_report_via_smtp(
 
     let message = builder.body(rendered_body)?;
 
-    let smtp_params = SmtpParams {
+    let smtp_params = self::smtp::SmtpParams {
         server: spec.smtp_server.clone().unwrap_or_else(|| {
             std::env::var("SMTP_SERVER").unwrap_or_else(|_| "localhost".to_string())
         }),
@@ -702,7 +554,7 @@ async fn send_test_report_via_smtp(
             .unwrap_or_else(|| std::env::var("SMTP_USE_MTLS").unwrap_or_default() == "true"),
     };
 
-    let mailer = build_smtp_transport(smtp_params)?;
+    let mailer = self::smtp::build_smtp_transport(smtp_params)?;
     match mailer.send(&message) {
         Ok(_) => {
             info!("Test report email sent successfully for step {}", step_id);
@@ -842,38 +694,5 @@ mod tests {
 
         let rendered = render_test_report_body(&spec, &template_ctx).unwrap();
         assert_eq!(rendered.trim(), "Custom: custom-run-id");
-    }
-
-    #[test]
-    #[cfg(feature = "email")]
-    fn test_build_smtp_transport_basic() {
-        let params = SmtpParams {
-            server: "localhost".to_string(),
-            port: 25,
-            username: None,
-            password: None,
-            use_tls: false,
-            use_mtls: false,
-        };
-        let _mailer = build_smtp_transport(params).unwrap();
-    }
-
-    #[test]
-    #[cfg(feature = "email")]
-    fn test_build_smtp_transport_mtls_error() {
-        let params = SmtpParams {
-            server: "localhost".to_string(),
-            port: 25,
-            username: None,
-            password: None,
-            use_tls: false,
-            use_mtls: true,
-        };
-        let res = build_smtp_transport(params);
-        assert!(res.is_err());
-        assert_eq!(
-            res.unwrap_err().to_string(),
-            "mTLS for SMTP is currently unsupported due to lettre limitations."
-        );
     }
 }

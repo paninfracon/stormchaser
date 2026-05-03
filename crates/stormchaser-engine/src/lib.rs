@@ -27,6 +27,7 @@ pub mod resource_utils;
 pub mod s3;
 /// Secrets management interfaces and backends.
 pub mod secrets;
+pub mod stdlib;
 /// State machine for individual steps.
 pub mod step_machine;
 /// OpenTelemetry tracing and metrics initialization.

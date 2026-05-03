@@ -673,10 +673,36 @@ Stormchaser provides a set of built-in functions extending HCL to handle common 
 
 **String Manipulation:**
 
+* `upper(string)`: Converts a string to uppercase.
+* `lower(string)`: Converts a string to lowercase.
+* `trim(string, cutset)`: Removes leading and trailing characters specified in `cutset`.
+* `trimspace(string)`: Removes leading and trailing whitespace.
+* `split(separator, string)`: Splits a string into a list of strings by the given separator.
+* `join(separator, list)`: Joins a list of strings into a single string with the given separator.
+* `replace(string, old, new)`: Replaces all occurrences of `old` string with `new` string.
 * `uuid()`: **(Planned)** Generates a unique v4 UUID.
 * `slugify(string)`: **(Planned)** Converts a string to a URL-safe slug (lowercase, dashes).
-* `base64_encode(bytes)` / `base64_decode(string)`: **(Planned)** Standard base64 operations.
-* `json_encode(any)` / `json_decode(string)`: **(Planned)** Converts objects to/from JSON strings.
+
+**Encoding & Decoding:**
+
+* `base64encode(string)`: Encodes a string to base64.
+* `base64decode(string)`: Decodes a base64 string.
+* `jsonencode(any)`: Converts an HCL object/value to a JSON string.
+* `jsondecode(string)`: Parses a JSON string into an HCL object/value.
+
+**Collections:**
+
+* `length(any)`: Returns the number of elements in a list, map, or string.
+* `keys(map)`: Returns a list of keys from a map.
+* `values(map)`: Returns a list of values from a map.
+* `contains(list, value)`: Checks if a value is present in a list.
+
+**Logic & Types:**
+
+* `coalesce(any...)`: Returns the first argument that is neither `null` nor an empty string `""`.
+  This matches [Terraform's `coalesce` semantics](https://developer.hashicorp.com/terraform/language/functions/coalesce):
+  only `null` and the empty string are skipped. Non-string values such as `0`, `false`, and empty
+  collections (`[]`, `{}`) are considered valid and will be returned as-is.
 
 **Path & Filesystem:**
 

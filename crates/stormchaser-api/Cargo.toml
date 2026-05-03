@@ -74,6 +74,8 @@ dotenvy = "0.15.7"
 stormchaser-engine = { path = "../stormchaser-engine" }
 tempfile = "3.27.0"
 walkdir = "2.5.0"
+rsa = { version = "0.9.10", features = ["getrandom", "pem"] }
+base64.workspace = true
 
 [build-dependencies]
 vergen = { workspace = true }
