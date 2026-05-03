@@ -1,0 +1,235 @@
+use serde_json::Value;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::time::sleep;
+use uuid::Uuid;
+
+use stormchaser_model::dsl;
+
+use crate::cluster::ClusterPool;
+use crate::job_machine;
+
+pub fn fallback_step(payload: &Value, spec: serde_json::Value) -> stormchaser_model::dsl::Step {
+    stormchaser_model::dsl::Step {
+        name: payload["step_name"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        r#type: payload["step_type"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        spec,
+        params: serde_json::from_value(payload["params"].clone()).unwrap_or_default(),
+        condition: None,
+        strategy: None,
+        aggregation: Vec::new(),
+        iterate: None,
+        iterate_as: None,
+        steps: None,
+        next: Vec::new(),
+        on_failure: None,
+        retry: None,
+        timeout: None,
+        allow_failure: None,
+        start_marker: None,
+        end_marker: None,
+        outputs: Vec::new(),
+        reports: Vec::new(),
+        artifacts: None,
+    }
+}
+
+pub async fn handle_task(
+    msg: async_nats::jetstream::message::Message,
+    cluster_pool: Arc<ClusterPool>,
+    nats_client: async_nats::Client,
+    runner_id: String,
+    encryption_key: Option<String>,
+) {
+    let received_at = chrono::Utc::now();
+    tracing::info!("Received task message: {:?}", msg.subject);
+
+    let payload: Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
+    let run_id_str = payload["run_id"].as_str().unwrap_or_default();
+    let run_id = Uuid::parse_str(run_id_str).unwrap_or_default();
+    let step_id_str = payload["step_id"].as_str().unwrap_or_default();
+    let step_id = Uuid::parse_str(step_id_str).unwrap_or_default();
+
+    let spec = serde_json::from_value(payload["spec"].clone()).unwrap_or(serde_json::Value::Null);
+
+    let step_dsl: dsl::Step = if let Some(dsl_val) = payload.get("step_dsl") {
+        if !dsl_val.is_null() {
+            if let Ok(mut step) = serde_json::from_value::<dsl::Step>(dsl_val.clone()) {
+                step.spec = spec;
+                step
+            } else {
+                fallback_step(&payload, spec)
+            }
+        } else {
+            fallback_step(&payload, spec)
+        }
+    } else {
+        fallback_step(&payload, spec)
+    };
+    let storage: Option<HashMap<String, Value>> =
+        serde_json::from_value(payload["storage"].clone()).ok();
+    let test_report_urls: Option<HashMap<String, Value>> =
+        serde_json::from_value(payload["test_report_urls"].clone()).ok();
+
+    let in_progress_msg = msg.clone();
+    let in_progress_handle = tokio::spawn(async move {
+        loop {
+            sleep(Duration::from_secs(15)).await;
+            let _ = in_progress_msg
+                .ack_with(async_nats::jetstream::message::AckKind::Progress)
+                .await;
+        }
+    });
+
+    // Notify orchestrator that we are starting
+    let running_event = serde_json::json!({
+        "run_id": run_id,
+        "step_id": step_id,
+        "status": "running",
+        "runner_id": runner_id,
+        "timestamp": chrono::Utc::now(),
+    });
+    let _ = nats_client
+        .publish("stormchaser.step.running", running_event.to_string().into())
+        .await;
+
+    let target_cluster = "local"; // In future, get from affinity/params
+    match cluster_pool.get_client(target_cluster).await {
+        Ok((client, cluster_version)) => {
+            let namespace =
+                std::env::var("KUBERNETES_NAMESPACE").unwrap_or_else(|_| "default".to_string());
+            let metadata = job_machine::JobMetadata {
+                run_id,
+                step_id,
+                step_dsl,
+                namespace,
+                received_at,
+                cluster_version,
+                encryption_key,
+                storage,
+                test_report_urls,
+            };
+
+            let machine = job_machine::K8sJobMachine::new(client.clone(), metadata.clone());
+
+            let result = match machine.start().await {
+                Ok(job_machine::StartResult::Running(running_machine)) => {
+                    running_machine.wait().await
+                }
+                Ok(job_machine::StartResult::Failed(finished_machine)) => {
+                    Ok(finished_machine.into_result())
+                }
+                Err(e) => Err(e),
+            };
+            in_progress_handle.abort();
+            let _ = msg.double_ack().await;
+            match result {
+                Ok(job_machine::JobState::Succeeded(metrics)) => {
+                    tracing::info!("Step {} (Run {}) completed successfully", step_id, run_id);
+                    let complete_event = serde_json::json!({
+                        "run_id": run_id,
+                        "step_id": step_id,
+                        "status": "succeeded",
+                        "runner_id": runner_id,
+                        "exit_code": metrics.exit_code,
+                        "storage_hashes": metrics.storage_hashes,
+                        "artifacts": metrics.artifacts,
+                        "test_reports": metrics.test_reports,
+                        "outputs": {
+                            "k8s exit code": metrics.exit_code,
+                            "Number of attempts": metrics.attempts,
+                            "run duration": format!("{}ms", metrics.duration_ms),
+                            "run latency": format!("{}ms", metrics.latency_ms),
+                        }
+                    });
+                    let _ = nats_client
+                        .publish(
+                            "stormchaser.step.completed",
+                            complete_event.to_string().into(),
+                        )
+                        .await;
+                }
+                Ok(job_machine::JobState::Failed(reason, metrics)) => {
+                    tracing::error!("Step {} (Run {}) failed: {}", step_id, run_id, reason);
+                    let fail_event = serde_json::json!({
+                        "run_id": run_id,
+                        "step_id": step_id,
+                        "status": "failed",
+                        "error": reason,
+                        "runner_id": runner_id,
+                        "exit_code": metrics.exit_code,
+                        "storage_hashes": metrics.storage_hashes,
+                        "artifacts": metrics.artifacts,
+                        "test_reports": metrics.test_reports,
+                        "outputs": {
+                            "k8s exit code": metrics.exit_code,
+                            "Number of attempts": metrics.attempts,
+                            "run duration": format!("{}ms", metrics.duration_ms),
+                            "run latency": format!("{}ms", metrics.latency_ms),
+                        }
+                    });
+                    let _ = nats_client
+                        .publish("stormchaser.step.failed", fail_event.to_string().into())
+                        .await;
+                }
+                Err(e) => {
+                    tracing::error!("Error running K8s job for step {}: {:?}", step_id, e);
+                    let fail_event = serde_json::json!({
+                        "run_id": run_id,
+                        "step_id": step_id,
+                        "status": "failed",
+                        "error": format!("{:?}", e),
+                        "runner_id": runner_id,
+                    });
+                    let _ = nats_client
+                        .publish("stormchaser.step.failed", fail_event.to_string().into())
+                        .await;
+                }
+            }
+        }
+        Err(e) => {
+            tracing::error!("Failed to acquire K8s client: {:?}", e);
+            let fail_event = serde_json::json!({
+                "run_id": run_id,
+                "step_id": step_id,
+                "status": "failed",
+                "error": format!("Failed to acquire K8s client: {:?}", e),
+                "runner_id": runner_id,
+            });
+            let _ = nats_client
+                .publish("stormchaser.step.failed", fail_event.to_string().into())
+                .await;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_fallback_step() {
+        let payload = json!({
+            "step_name": "test-step",
+            "step_type": "K8sJob",
+            "params": {
+                "image": "nginx"
+            }
+        });
+        let spec = json!({"parallelism": 2});
+
+        let step = fallback_step(&payload, spec.clone());
+        assert_eq!(step.name, "test-step");
+        assert_eq!(step.r#type, "K8sJob");
+        assert_eq!(step.spec, spec);
+        assert_eq!(step.params.get("image").unwrap(), "nginx");
+    }
+}

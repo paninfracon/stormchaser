@@ -94,3 +94,10 @@ Stormchaser follows a strict **Fail-Closed** security philosophy regarding OPA:
 | `TLS_CERT_PATH` | Path to the component's client certificate. | Component identity for mTLS. |
 | `TLS_KEY_PATH` | Path to the component's private key. | Component identity for mTLS. |
 | `TLS_SERVER_NAME` | Expected TLS server name (optional). | Prevents MITM attacks. |
+
+## 5. Encryption at rest
+
+There are two main areas to consider for encryption at rest:
+
+1. Postgres DB - standard techniques are well documented for this
+2. NATS Jetstream - NATS documentation notes that whilst NATS supports at rest encryption, host native file system encryption is preferred

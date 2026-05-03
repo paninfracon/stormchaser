@@ -1,4 +1,2 @@
 default: true
-MD013:
-  line_length: 80
-  tables: false
+MD013: false

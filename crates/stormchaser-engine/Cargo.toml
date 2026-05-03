@@ -56,7 +56,7 @@ opentelemetry-semantic-conventions = { workspace = true }
 parking_lot = { workspace = true }
 hex = "0.4"
 sha2 = "0.10"
-hcl-rs = { workspace = true }
+hcl-rs.workspace = true
 wasmtime = { workspace = true }
 regex = "1.12.3"
 base64 = "0.22.1"

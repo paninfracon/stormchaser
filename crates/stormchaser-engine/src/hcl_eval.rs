@@ -77,6 +77,7 @@ pub fn create_context(inputs: Value, run_id: Uuid, steps: Value) -> HclContext<'
     ctx.declare_var("steps", json_to_hcl(steps));
 
     ctx.declare_func("secret", FuncDef::new(secret_lookup, [ParamType::Any]));
+    crate::stdlib::register_stdlib(&mut ctx);
 
     ctx
 }

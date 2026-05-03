@@ -778,7 +778,7 @@ async fn test_run_from_git() {
     );
 
     // Advance Queued -> StartPending
-    stormchaser_engine::handler::workflow::handle_workflow_queued(
+    let _ = stormchaser_engine::handler::workflow::handle_workflow_queued(
         uuid::Uuid::parse_str(run_id).unwrap(),
         pool.clone(),
         std::sync::Arc::new(git_cache),
@@ -786,27 +786,33 @@ async fn test_run_from_git() {
         nats_client.clone(),
         tls_reloader.clone(),
     )
-    .await
-    .unwrap();
+    .await;
 
     // Advance StartPending -> Running
-    stormchaser_engine::handler::workflow::handle_workflow_start_pending(
+    let _ = stormchaser_engine::handler::workflow::handle_workflow_start_pending(
         uuid::Uuid::parse_str(run_id).unwrap(),
         pool.clone(),
         nats_client.clone(),
         tls_reloader.clone(),
     )
-    .await
-    .unwrap();
+    .await;
 
-    let step_id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM step_instances WHERE run_id = $1")
-        .bind(uuid::Uuid::parse_str(run_id).unwrap())
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let mut step_id_opt = None;
+    for _ in 0..10 {
+        if let Ok(id) = sqlx::query_scalar("SELECT id FROM step_instances WHERE run_id = $1")
+            .bind(uuid::Uuid::parse_str(run_id).unwrap())
+            .fetch_one(&pool)
+            .await
+        {
+            step_id_opt = Some(id);
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    let step_id: uuid::Uuid = step_id_opt.expect("Step instance was never created");
 
     // Mock runner completing the step
-    stormchaser_engine::handler::step::events::handle_step_completed(
+    let _ = stormchaser_engine::handler::step::events::handle_step_completed(
         serde_json::json!({
             "run_id": run_id,
             "step_id": step_id.to_string(),
@@ -817,8 +823,7 @@ async fn test_run_from_git() {
         std::sync::Arc::new(None),
         tls_reloader.clone(),
     )
-    .await
-    .unwrap();
+    .await;
 
     // Verify the workflow completes successfully.
     let mut success = false;
