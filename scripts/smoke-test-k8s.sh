@@ -51,14 +51,24 @@ if [ "$ALL_READY" != true ]; then
     exit 1
 fi
 
-echo -e "${BLUE}>>> Verifying OIDC Login Flow (Login Ping)...${NC}"
+echo -e "${BLUE}>>> Verifying OIDC Login Flow...${NC}"
 DEX_IP=$(microk8s kubectl get svc -n stormchaser dex -o jsonpath='{.spec.clusterIP}')
 OIDC_TOKEN=$(HOST_DEX="${DEX_IP}" PORT_DEX="5556" HOST_API="${API_IP}" PORT_API="3000" python3 "$REPO_ROOT/scripts/get_token.py")
 if [ -z "$OIDC_TOKEN" ]; then
-    echo -e "${RED}>>> OIDC Login Ping failed!${NC}"
+    echo -e "${RED}>>> OIDC token acquisition failed!${NC}"
     exit 1
+fi
+echo -e "${GREEN}>>> OIDC token acquired successfully.${NC}"
+
+echo -e "${BLUE}>>> Verifying OIDC token authorizes API calls...${NC}"
+OIDC_AUTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+    -H "Authorization: Bearer $OIDC_TOKEN" \
+    "$API_URL/api/v1/storage-backends")
+if [ "$OIDC_AUTH_STATUS" = "200" ]; then
+    echo -e "${GREEN}>>> OIDC auth flow verified successfully!${NC}"
 else
-    echo -e "${GREEN}>>> OIDC Login Ping successful!${NC}"
+    echo -e "${RED}>>> OIDC token rejected by API (HTTP $OIDC_AUTH_STATUS)!${NC}"
+    exit 1
 fi
 
 echo -e "${BLUE}>>> Verifying Storage Backend Registration...${NC}"
