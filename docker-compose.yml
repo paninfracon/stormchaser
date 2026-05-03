@@ -165,7 +165,7 @@ services:
       OIDC_ISSUER: http://dex:5556/dex
       OIDC_EXTERNAL_ISSUER: http://localhost:5556/dex
       OIDC_CLIENT_ID: stormchaser-cli
-      OIDC_CLIENT_SECRET: stormchaser-cli-secret
+      OIDC_CLIENT_SECRET: '${STORMCHASER_CLI_SECRET?Error: STORMCHASER_CLI_SECRET is not set}'
       LOKI_URL: http://loki:3100
       OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4317
       OTEL_SERVICE_NAME: stormchaser-api

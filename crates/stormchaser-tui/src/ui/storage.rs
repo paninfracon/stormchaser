@@ -65,11 +65,24 @@ pub(crate) fn render_storage_backends_tab(f: &mut Frame, area: Rect, app: &mut A
         .border_style(Style::default().fg(detail_border_color));
 
     if app.storage_backends.is_empty() {
-        f.render_widget(detail_block, chunks[1]);
+        let empty_paragraph = Paragraph::new("\n\n   No storage backends to display.")
+            .style(Style::default().fg(Color::DarkGray))
+            .block(detail_block);
+        f.render_widget(empty_paragraph, chunks[1]);
         return;
     }
 
     if let Some(backend) = &app.selected_storage_backend {
+        let mut masked_config = backend.config.clone();
+        if let Some(obj) = masked_config.as_object_mut() {
+            if obj.contains_key("secret_key") {
+                obj.insert(
+                    "secret_key".to_string(),
+                    serde_json::Value::String("********".to_string()),
+                );
+            }
+        }
+
         let detail_text = format!(
             "ID: {}\nName: {}\nDescription: {}\nType: {:?}\nDefault SFS: {}\nCreated At: {}\n\nConfig:\n{}",
             backend.id,
@@ -78,7 +91,7 @@ pub(crate) fn render_storage_backends_tab(f: &mut Frame, area: Rect, app: &mut A
             backend.backend_type,
             backend.is_default_sfs,
             format_time_str(&backend.created_at.to_rfc3339()),
-            serde_json::to_string_pretty(&backend.config).unwrap_or_default()
+            serde_json::to_string_pretty(&masked_config).unwrap_or_default()
         );
         let detail_paragraph = Paragraph::new(detail_text).block(detail_block);
         f.render_widget(detail_paragraph, chunks[1]);

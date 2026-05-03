@@ -20,6 +20,7 @@ pub(crate) fn build_k8s_containers(
         init_containers.push(Container {
             name: "inject-agent".to_string(),
             image: Some(agent_img.clone()),
+            image_pull_policy: if agent_img.contains("stormchaser-agent") { Some("IfNotPresent".to_string()) } else { None },
             command: Some(vec!["/bin/sh".to_string(), "-c".to_string(), "cp /usr/local/bin/stormchaser-agent /stormchaser/agent/stormchaser-agent && chmod +x /stormchaser/agent/stormchaser-agent".to_string()]),
             volume_mounts: Some(vec![VolumeMount {
                 name: "storm-agent".to_string(),
@@ -121,8 +122,8 @@ pub(crate) fn build_k8s_containers(
     let container = Container {
         name: "worker".to_string(),
         image: Some(final_image.clone()),
-        image_pull_policy: if final_image == "docker.io/library/stormchaser-agent:v1" {
-            Some("Never".to_string())
+        image_pull_policy: if final_image.contains("stormchaser-agent") {
+            Some("IfNotPresent".to_string())
         } else {
             None
         },

@@ -6,8 +6,11 @@ BLUE='\033[0;34m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
+REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." &> /dev/null && pwd)
+cd "$REPO_ROOT"
+
 echo -e "${BLUE}>>> Generating test token...${NC}"
-TOKEN=$(python3 generate_dev_token.py)
+TOKEN=$(python3 "$REPO_ROOT/scripts/generate_dev_token.py")
 
 echo -e "${BLUE}>>> Discovering API endpoint...${NC}"
 API_IP=$(microk8s kubectl get svc -n stormchaser stormchaser-stormchaser-orchestration-api -o jsonpath='{.spec.clusterIP}')
@@ -49,7 +52,7 @@ if [ "$ALL_READY" != true ]; then
 fi
 
 echo -e "${BLUE}>>> Running test workflow (tests/hello-world.storm)...${NC}"
-RUN_JSON=$(cargo run -q -p stormchaser-cli -- --url "$API_URL" --token "$TOKEN" run tests/hello-world.storm)
+RUN_JSON=$(cargo run -q -p stormchaser-cli -- --url "$API_URL" --token "$TOKEN" run "$REPO_ROOT/tests/hello-world.storm")
 RUN_ID=$(echo "$RUN_JSON" | grep -oP '(?<="run_id": ")[^"]*')
 
 if [ -z "$RUN_ID" ]; then

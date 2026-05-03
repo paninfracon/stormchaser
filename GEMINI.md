@@ -100,7 +100,9 @@ The project is divided into specialized crates to ensure a clear separation of c
 - **Recording changes**: Update the changelog with brief summaries of major changes. Before releasing a new version ensure that the changelog and other documentation is complete and current
 - **Workflow readability**: In the `.storm` files wrap shell commands in HCL 'here' docs and line split them appropriately to promote readability
 - **Function Returns**: Don't use tuple returns from functions unless absolutely necessary, or an error type return, instead use a proper struct with named fields
-- **Secret Management**: Never hardcode passwords, even for tests or development environments
+- **Secret Management**: Never hardcode passwords, even for tests or development environments.
+  - **WARNING - AI Test Environments**: NEVER modify or overwrite the `.env` file with static passwords (e.g. `STORMCHASER_DEV_PASSWORD=password`) to "fix" failing tests or coverage runs. This desynchronizes the Docker volumes from the expected credentials, causing cascading authentication failures across PostgreSQL and Dex. Always rely on the project's `./scripts/setup.sh` to generate and manage secure, random credentials.
+  - **WARNING - SQL Offline**: Never inject `return;` into tests when `SQL_OFFLINE=true` is set. `SQL_OFFLINE` is an `sqlx` compiler flag, not a runtime bypass. Bypassing tests causes spurious passes.
 
 ### 5. UI/UX Guidelines
 
@@ -116,6 +118,7 @@ The project is divided into specialized crates to ensure a clear separation of c
   - **Efficient Reporting**: Use summary-only tools (e.g., `cargo llvm-cov --summary-only`) to avoid generating or processing thousands of lines of raw coverage data unless specifically requested.
 - **Format**: Run Cargo format *before* attempting to check in or run tests.
 - **Improvement**: When assessing code quality for improvements do not attempt to implment new features.
+- **Honoring tests**: Never shortcut tests to just return when fixing test failures
 
 ## Agent Performance & Context Efficiency
 

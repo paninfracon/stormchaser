@@ -541,7 +541,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
         "runner_type": "k8s",
         "protocol_version": "v1",
         "nats_subject": nats_subject,
-        "capabilities": ["k8s", "linux", "container"],
+        "capabilities": ["k8s", "docker", "linux", "container"],
         "step_types": [
             {
                 "step_type": "RunContainer",

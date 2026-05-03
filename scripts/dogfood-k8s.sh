@@ -9,7 +9,7 @@ NC='\033[0m' # No Color
 REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." &> /dev/null && pwd)
 
 echo -e "${BLUE}>>> Generating test token...${NC}"
-TOKEN=$(python3 generate_dev_token.py)
+TOKEN=$(python3 "$REPO_ROOT/scripts/generate_dev_token.py")
 
 echo -e "${BLUE}>>> Creating repository tarball...${NC}"
 TEMP_TAR="/tmp/stormchaser-dogfood.tar.gz"

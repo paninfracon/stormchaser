@@ -143,6 +143,11 @@ stormchaser-telemetry:
 
 loki:
   enabled: true
+  monitoring:
+    selfMonitoring:
+      enabled: false
+      grafanaAgent:
+        installOperator: false
   loki:
     auth_enabled: false
     commonConfig:

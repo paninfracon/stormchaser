@@ -108,9 +108,9 @@ pub(crate) fn render_login_screen(f: &mut Frame, app: &mut App) {
         .margin(2)
         .constraints(
             [
-                Constraint::Length(1),
+                Constraint::Length(2),
+                Constraint::Min(3),
                 Constraint::Length(3),
-                Constraint::Min(0),
             ]
             .as_ref(),
         )
@@ -119,9 +119,11 @@ pub(crate) fn render_login_screen(f: &mut Frame, app: &mut App) {
     f.render_widget(block, area);
 
     let msg = if app.state == AppState::LoggingIn {
-        "Opening Web Browser for authentication... Waiting for login to complete. 'q' to Quit"
-    } else {
+        "Authenticating... Please wait or 'q' to Quit"
+    } else if app.auto_login_credentials.is_empty() {
         "Press Enter to login via Web Browser, 'q' to Quit"
+    } else {
+        "Select account (↑/↓) and press Enter to Auto-Login\nOr press 'b' for Web Browser login, 'q' to Quit"
     };
 
     f.render_widget(
@@ -129,10 +131,30 @@ pub(crate) fn render_login_screen(f: &mut Frame, app: &mut App) {
         chunks[0],
     );
 
+    if !app.auto_login_credentials.is_empty() && app.state == AppState::LoggedOut {
+        let items: Vec<ratatui::widgets::ListItem> = app
+            .auto_login_credentials
+            .iter()
+            .enumerate()
+            .map(|(i, (email, _))| {
+                let style = if i == app.auto_login_index {
+                    Style::default().fg(Color::Black).bg(Color::Cyan)
+                } else {
+                    Style::default().fg(Color::White)
+                };
+                ratatui::widgets::ListItem::new(ratatui::text::Line::from(format!("> {}", email)))
+                    .style(style)
+            })
+            .collect();
+        let list =
+            ratatui::widgets::List::new(items).block(Block::default().borders(Borders::NONE));
+        f.render_widget(list, chunks[1]);
+    }
+
     if let Some(err) = &app.error {
         f.render_widget(
             Paragraph::new(format!("Error: {}", err)).style(Style::default().fg(Color::Red)),
-            chunks[1],
+            chunks[2],
         );
     }
 }
