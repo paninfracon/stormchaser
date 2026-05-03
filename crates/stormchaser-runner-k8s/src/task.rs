@@ -55,7 +55,9 @@ pub async fn handle_task(
         Ok(v) => v,
         Err(e) => {
             tracing::error!("Failed to parse task message payload: {:?}", e);
-            let _ = msg.ack().await;
+            if let Err(ack_err) = msg.ack().await {
+                tracing::warn!("Failed to ack unparseable task message: {:?}", ack_err);
+            }
             return;
         }
     };
@@ -65,7 +67,9 @@ pub async fn handle_task(
         Ok(id) => id,
         Err(e) => {
             tracing::error!("Invalid run_id '{}' in task message: {:?}", run_id_str, e);
-            let _ = msg.ack().await;
+            if let Err(ack_err) = msg.ack().await {
+                tracing::warn!("Failed to ack invalid-run_id task message: {:?}", ack_err);
+            }
             return;
         }
     };
@@ -75,7 +79,9 @@ pub async fn handle_task(
         Ok(id) => id,
         Err(e) => {
             tracing::error!("Invalid step_id '{}' in task message: {:?}", step_id_str, e);
-            let _ = msg.ack().await;
+            if let Err(ack_err) = msg.ack().await {
+                tracing::warn!("Failed to ack invalid-step_id task message: {:?}", ack_err);
+            }
             return;
         }
     };
@@ -230,7 +236,12 @@ pub async fn handle_task(
             let _ = nats_client
                 .publish("stormchaser.step.failed", fail_event.to_string().into())
                 .await;
-            let _ = msg.double_ack().await;
+            if let Err(ack_err) = msg.double_ack().await {
+                tracing::warn!(
+                    "Failed to ack task message after client acquisition failure: {:?}",
+                    ack_err
+                );
+            }
         }
     }
 }

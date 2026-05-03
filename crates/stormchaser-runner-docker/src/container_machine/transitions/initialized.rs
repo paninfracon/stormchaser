@@ -322,18 +322,30 @@ impl DockerContainerMachine<state::Initialized> {
                     info!("Unpark successful for {}", volume_name);
                     // Wait for logs
                     sleep(Duration::from_secs(15)).await;
-                    let _ = self
+                    if let Err(e) = self
                         .docker
                         .remove_container(&unpark_container_name, None)
-                        .await;
+                        .await
+                    {
+                        error!(
+                            "Failed to remove unpark container {}: {:?}",
+                            unpark_container_name, e
+                        );
+                    }
                     Ok(())
                 }
                 res => {
                     error!("Unpark failed for {}: {:?}", volume_name, res);
-                    let _ = self
+                    if let Err(e) = self
                         .docker
                         .remove_container(&unpark_container_name, None)
-                        .await;
+                        .await
+                    {
+                        error!(
+                            "Failed to remove unpark container {}: {:?}",
+                            unpark_container_name, e
+                        );
+                    }
                     Err(anyhow::anyhow!(
                         "Unpark failed for {}: {:?}",
                         volume_name,
@@ -342,10 +354,16 @@ impl DockerContainerMachine<state::Initialized> {
                 }
             }
         } else {
-            let _ = self
+            if let Err(e) = self
                 .docker
                 .remove_container(&unpark_container_name, None)
-                .await;
+                .await
+            {
+                error!(
+                    "Failed to remove unpark container {}: {:?}",
+                    unpark_container_name, e
+                );
+            }
             Err(anyhow::anyhow!("Wait stream ended unexpectedly"))
         }
     }
