@@ -14,6 +14,7 @@ pub async fn unpark_storage(
     url: &str,
     expected_hash: Option<&str>,
     destination: &str,
+    no_extract: bool,
 ) -> Result<()> {
     info!("Unparking storage from {} to {}...", url, destination);
     let client = reqwest::Client::new();
@@ -53,15 +54,28 @@ pub async fn unpark_storage(
         );
     }
 
-    info!("Extracting tarball...");
-    std::fs::create_dir_all(destination)?;
-    // Use tar crate properly for extraction
-    let tar_gz = File::open(&tar_path)?;
-    let decoder = flate2::read::GzDecoder::new(tar_gz);
-    let mut archive = tar::Archive::new(decoder);
-    archive.unpack(destination)?;
+    if no_extract {
+        info!("Moving raw file to destination...");
+        if let Some(parent) = std::path::Path::new(destination).parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        if let Err(e) = std::fs::rename(&tar_path, destination) {
+            warn!("Rename failed ({}), falling back to copy...", e);
+            std::fs::copy(&tar_path, destination)?;
+            let _ = std::fs::remove_file(&tar_path);
+        }
+    } else {
+        info!("Extracting tarball...");
+        std::fs::create_dir_all(destination)?;
+        // Use tar crate properly for extraction
+        let tar_gz = File::open(&tar_path)?;
+        let decoder = flate2::read::GzDecoder::new(tar_gz);
+        let mut archive = tar::Archive::new(decoder);
+        archive.unpack(destination)?;
 
-    let _ = std::fs::remove_file(tar_path);
+        let _ = std::fs::remove_file(tar_path);
+    }
+
     info!("Successfully unparked storage");
     Ok(())
 }
@@ -83,7 +97,32 @@ pub async fn park_storage(urls: Value, paths: Value) -> Result<HashMap<String, S
                         let tar_gz = File::create(&tar_path)?;
                         let enc = GzEncoder::new(tar_gz, Compression::default());
                         let mut tar = tar::Builder::new(enc);
-                        tar.append_dir_all(".", mount_path)?;
+
+                        let preserve = url_val.get("preserve").and_then(|p| p.as_array());
+                        if let Some(paths) = preserve {
+                            if !paths.is_empty() {
+                                for path_val in paths {
+                                    if let Some(path_str) = path_val.as_str() {
+                                        let src_path =
+                                            std::path::Path::new(mount_path).join(path_str);
+                                        if src_path.exists() {
+                                            if src_path.is_dir() {
+                                                tar.append_dir_all(path_str, &src_path)?;
+                                            } else {
+                                                tar.append_path_with_name(&src_path, path_str)?;
+                                            }
+                                        } else {
+                                            warn!("Preserved path not found: {}", path_str);
+                                        }
+                                    }
+                                }
+                            } else {
+                                tar.append_dir_all(".", mount_path)?;
+                            }
+                        } else {
+                            tar.append_dir_all(".", mount_path)?;
+                        }
+
                         tar.finish()?;
                     }
 
@@ -175,7 +214,7 @@ mod tests {
             .await;
 
         let url = format!("{}/storage.tar.gz", mock_server.uri());
-        unpark_storage(&url, Some(&expected_hash), dest.to_str().unwrap())
+        unpark_storage(&url, Some(&expected_hash), dest.to_str().unwrap(), false)
             .await
             .unwrap();
 

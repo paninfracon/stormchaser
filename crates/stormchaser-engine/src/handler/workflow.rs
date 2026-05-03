@@ -69,7 +69,41 @@ pub async fn handle_workflow_timeout(
     };
 
     // 2. Mark all non-terminal steps as failed
-    crate::db::fail_pending_steps_for_run_on_timeout(&pool, run_id).await?;
+    let steps: Vec<stormchaser_model::step::StepInstance> =
+        crate::db::get_step_instances_by_run_id(&pool, run_id).await?;
+
+    let mut tx = pool.begin().await?;
+    for step in steps {
+        match step.status {
+            stormchaser_model::step::StepStatus::Pending => {
+                crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::from_instance(step)
+                    .fail("Workflow timed out".to_string(), None, &mut *tx)
+                    .await?;
+            }
+            stormchaser_model::step::StepStatus::UnpackingSfs => {
+                crate::step_machine::StepMachine::<crate::step_machine::state::UnpackingSfs>::from_instance(step)
+                    .fail("Workflow timed out".to_string(), None, &mut *tx)
+                    .await?;
+            }
+            stormchaser_model::step::StepStatus::Running => {
+                crate::step_machine::StepMachine::<crate::step_machine::state::Running>::from_instance(step)
+                    .fail("Workflow timed out".to_string(), None, &mut *tx)
+                    .await?;
+            }
+            stormchaser_model::step::StepStatus::PackingSfs => {
+                crate::step_machine::StepMachine::<crate::step_machine::state::PackingSfs>::from_instance(step)
+                    .fail("Workflow timed out".to_string(), None, &mut *tx)
+                    .await?;
+            }
+            stormchaser_model::step::StepStatus::WaitingForEvent => {
+                crate::step_machine::StepMachine::<crate::step_machine::state::WaitingForEvent>::from_instance(step)
+                    .fail("Workflow timed out".to_string(), None, &mut *tx)
+                    .await?;
+            }
+            _ => {}
+        }
+    }
+    tx.commit().await?;
 
     // 3. Publish abort event
     let event = serde_json::json!({

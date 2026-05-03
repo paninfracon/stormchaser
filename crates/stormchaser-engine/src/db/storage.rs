@@ -250,3 +250,31 @@ where
         .fetch_optional(executor)
         .await
 }
+
+pub async fn get_artifact_by_name<'a, E>(
+    executor: E,
+    run_id: Uuid,
+    artifact_name: &str,
+) -> Result<Option<(Uuid, String)>, sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    let record = sqlx::query(
+        r#"
+        SELECT backend_id, remote_path
+        FROM artifact_registry
+        WHERE run_id = $1 AND artifact_name = $2
+        ORDER BY created_at DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(run_id)
+    .bind(artifact_name)
+    .fetch_optional(executor)
+    .await?;
+
+    Ok(record.map(|r| {
+        use sqlx::Row;
+        (r.get("backend_id"), r.get("remote_path"))
+    }))
+}

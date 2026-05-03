@@ -106,7 +106,39 @@ pub async fn dispatch_step_instance(
 
                 let mut provision_data = Vec::new();
                 for mut prov in storage.provision {
-                    if let Some(url) = &prov.url {
+                    if prov.resource_type == "artifact" {
+                        // For artifacts, the name corresponds to the artifact_name in the DB
+                        if let Some((backend_id, remote_path)) =
+                            crate::db::get_artifact_by_name(&pool, run_id, &prov.name).await?
+                        {
+                            let backend_info_opt: Option<
+                                stormchaser_model::storage::StorageBackend,
+                            > = crate::db::get_storage_backend_by_id(&pool, backend_id).await?;
+                            if let Some(backend_info) = backend_info_opt {
+                                if backend_info.backend_type
+                                    == stormchaser_model::storage::BackendType::S3
+                                {
+                                    if let Some(bucket) =
+                                        backend_info.config.get("bucket").and_then(|b| b.as_str())
+                                    {
+                                        let client =
+                                            crate::s3::get_s3_client(&backend_info).await?;
+                                        let expires = std::time::Duration::from_secs(3600);
+                                        let artifact_url = crate::s3::generate_presigned_url(
+                                            &client,
+                                            bucket,
+                                            &remote_path,
+                                            false,
+                                            expires,
+                                        )
+                                        .await?;
+                                        prov.url = Some(artifact_url);
+                                        // The agent needs to know it's an artifact so it doesn't extract it
+                                    }
+                                }
+                            }
+                        }
+                    } else if let Some(url) = &prov.url {
                         let mut val = Value::String(url.clone());
                         let hcl_ctx = crate::hcl_eval::create_context(
                             run_context.inputs.clone(),
@@ -123,6 +155,25 @@ pub async fn dispatch_step_instance(
                     provision_data.push(prov);
                 }
 
+                let mut preserve = storage.preserve.clone();
+                if let Some(mounts) = resolved_spec
+                    .get("storage_mounts")
+                    .and_then(|m| m.as_array())
+                {
+                    for mount in mounts {
+                        if let Some(name) = mount.get("name").and_then(|n| n.as_str()) {
+                            if name == storage.name {
+                                if let Some(p) = mount.get("preserve").and_then(|p| p.as_array()) {
+                                    preserve = p
+                                        .iter()
+                                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                        .collect();
+                                }
+                            }
+                        }
+                    }
+                }
+
                 storage_urls.insert(
                     storage.name.clone(),
                     serde_json::json!({
@@ -131,6 +182,7 @@ pub async fn dispatch_step_instance(
                         "expected_hash": last_hash.map(|h| h.0),
                         "artifacts": artifacts_data,
                         "provision": provision_data,
+                        "preserve": preserve,
                     }),
                 );
             }

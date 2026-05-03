@@ -46,7 +46,7 @@ curl -s -X POST "$API_URL/api/v1/storage-backends" \
       "bucket": "stormchaser-sfs",
       "region": "us-east-1",
       "access_key": "stormchaser",
-      "secret_key": "stormchaser",
+      "secret_key": "'"$STORMCHASER_MINIO_PASSWORD"'",
       "force_path_style": true
     }
   }' | jq .

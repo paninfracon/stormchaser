@@ -441,6 +441,37 @@ impl Config {
     }
 }
 
+fn fallback_step(payload: &Value, spec: serde_json::Value) -> stormchaser_model::dsl::Step {
+    stormchaser_model::dsl::Step {
+        name: payload["step_name"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        r#type: payload["step_type"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        spec,
+        params: serde_json::from_value(payload["params"].clone()).unwrap_or_default(),
+        condition: None,
+        strategy: None,
+        aggregation: Vec::new(),
+        iterate: None,
+        iterate_as: None,
+        steps: None,
+        next: Vec::new(),
+        on_failure: None,
+        retry: None,
+        timeout: None,
+        allow_failure: None,
+        start_marker: None,
+        end_marker: None,
+        outputs: Vec::new(),
+        reports: Vec::new(),
+        artifacts: None,
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let config = Config::from_env(std::env::vars());
@@ -724,42 +755,21 @@ async fn handle_task(
     let step_id_str = payload["step_id"].as_str().unwrap_or_default();
     let step_id = Uuid::parse_str(step_id_str).unwrap_or_default();
 
-    let step_dsl: dsl::Step = match serde_json::from_value(payload["spec"].clone()) {
-        Ok(spec) => {
-            // Reconstruct Step from resolved spec and other fields
-            dsl::Step {
-                name: payload["step_name"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_string(),
-                r#type: payload["step_type"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_string(),
-                spec,
-                params: serde_json::from_value(payload["params"].clone()).unwrap_or_default(),
-                condition: None,
-                strategy: None,
-                aggregation: Vec::new(),
-                iterate: None,
-                iterate_as: None,
-                steps: None,
-                next: Vec::new(),
-                on_failure: None,
-                retry: None,
-                timeout: None,
-                allow_failure: None,
-                start_marker: None,
-                end_marker: None,
-                outputs: Vec::new(),
-                reports: Vec::new(),
-                artifacts: None,
+    let spec = serde_json::from_value(payload["spec"].clone()).unwrap_or(serde_json::Value::Null);
+
+    let step_dsl: dsl::Step = if let Some(dsl_val) = payload.get("step_dsl") {
+        if !dsl_val.is_null() {
+            if let Ok(mut step) = serde_json::from_value::<dsl::Step>(dsl_val.clone()) {
+                step.spec = spec;
+                step
+            } else {
+                fallback_step(&payload, spec)
             }
+        } else {
+            fallback_step(&payload, spec)
         }
-        Err(e) => {
-            tracing::error!("Failed to parse step spec: {:?}", e);
-            return;
-        }
+    } else {
+        fallback_step(&payload, spec)
     };
     let storage: Option<HashMap<String, Value>> =
         serde_json::from_value(payload["storage"].clone()).ok();

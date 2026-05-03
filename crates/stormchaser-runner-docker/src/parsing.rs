@@ -7,16 +7,17 @@ use stormchaser_model::dsl;
 /// Parses a `dsl::Step` from a JSON payload received via NATS.
 /// Falls back to constructing a step from basic fields if the full `step_dsl` is missing.
 pub fn parse_step_from_nats_payload(payload: &Value) -> Result<dsl::Step> {
+    let spec =
+        serde_json::from_value(payload["spec"].clone()).context("Failed to parse step spec")?;
+
     if let Some(dsl_val) = payload.get("step_dsl") {
         if !dsl_val.is_null() {
-            if let Ok(step) = serde_json::from_value(dsl_val.clone()) {
+            if let Ok(mut step) = serde_json::from_value::<dsl::Step>(dsl_val.clone()) {
+                step.spec = spec;
                 return Ok(step);
             }
         }
     }
-
-    let spec =
-        serde_json::from_value(payload["spec"].clone()).context("Failed to parse step spec")?;
 
     Ok(dsl::Step {
         name: payload["step_name"]

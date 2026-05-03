@@ -18,7 +18,7 @@ echo -e "${BLUE}>>> Detected Host IP: $HOST_IP${NC}"
 # 2. Create Repository Tarball
 echo -e "${BLUE}>>> Creating repository tarball (respecting .gitignore)...${NC}"
 TEMP_TAR="/tmp/stormchaser-dogfood.tar.gz"
-(cd "$REPO_ROOT" && git ls-files -z | tar -czf "$TEMP_TAR" --null -T -)
+(cd "$REPO_ROOT" && { git ls-files -z; find .tmp/ratatui-form -type f -print0; find tests/certs -type f -print0; } | sort -z -u | tar -czf "$TEMP_TAR" --null -T -)
 
 # 3. Upload to Local S3 (MinIO)
 echo -e "${BLUE}>>> Uploading tarball to local S3...${NC}"
@@ -84,9 +84,11 @@ INPUTS=$(jq -n --arg url "$REPO_URL" --arg ip "$HOST_IP" --arg kubeconfig "$KUBE
   --arg port_dex "${PORT_DEX:-5556}" \
   --arg port_s3 "${PORT_S3:-9000}" \
   --arg port_reg "${PORT_REG:-32000}" \
-  --arg port_opa "${PORT_OPA:-8181}" '{
+  --arg port_opa "${PORT_OPA:-8181}" \
+  --arg db_pwd "$STORMCHASER_DEV_PASSWORD" '{
   "repo_url": $url,
   "host_ip": $ip,
+  "db_password": $db_pwd,
   "kubeconfig": $kubeconfig,
   "port_api": $port_api,
   "port_db": $port_db,

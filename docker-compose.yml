@@ -24,6 +24,7 @@ services:
 
   dex:
     image: dexidp/dex:v2.41.1
+    user: "0:0"
     volumes:
       - ./deploy/dex/config.generated.yaml:/etc/dex/config.docker.yaml:ro
     ports:
@@ -163,7 +164,7 @@ services:
       NATS_URL: nats://nats:4222
       RUST_LOG: stormchaser_api=debug
       OIDC_ISSUER: http://dex:5556/dex
-      OIDC_EXTERNAL_ISSUER: http://localhost:5556/dex
+      OIDC_EXTERNAL_ISSUER: http://localhost:${PORT_DEX:-5556}/dex
       OIDC_CLIENT_ID: stormchaser-cli
       OIDC_CLIENT_SECRET: '${STORMCHASER_CLI_SECRET?Error: STORMCHASER_CLI_SECRET is not set}'
       LOKI_URL: http://loki:3100
