@@ -15,6 +15,8 @@ opener = urllib.request.build_opener(ConditionalRedirectHandler())
 urllib.request.install_opener(opener)
 
 def get_token():
+    host_dex = os.environ.get("HOST_DEX", "127.0.0.1")
+    host_api = os.environ.get("HOST_API", "127.0.0.1")
     port_dex = os.environ.get("PORT_DEX", "5556")
     port_api = os.environ.get("PORT_API", "3000")
 
@@ -28,7 +30,7 @@ def get_token():
             pass
         return "password"
 
-    auth_url = f"http://127.0.0.1:{port_dex}/dex/auth?client_id=stormchaser-cli&redirect_uri=http://localhost:8080/callback&response_type=code&scope=openid+profile+email"
+    auth_url = f"http://{host_dex}:{port_dex}/dex/auth?client_id=stormchaser-cli&redirect_uri=http://localhost:8080/callback&response_type=code&scope=openid+profile+email"
     req1 = urllib.request.Request(auth_url)
     try:
         resp1 = urllib.request.urlopen(req1)
@@ -36,7 +38,7 @@ def get_token():
         action_start = html.find('action="') + 8
         action_end = html.find('"', action_start)
         action = html[action_start:action_end]
-        login_url = f"http://127.0.0.1:{port_dex}" + action.replace('&amp;', '&')
+        login_url = f"http://{host_dex}:{port_dex}" + action.replace('&amp;', '&')
 
         password = get_password('stormchaser-admin@paninfracon.net')
         data = urllib.parse.urlencode({'login': 'stormchaser-admin@paninfracon.net', 'password': password}).encode('ascii')
@@ -71,7 +73,7 @@ def get_token():
                 'sso_token': code,
                 'callback_url': 'http://localhost:8080/callback'
             }).encode('utf-8')
-            api_req = urllib.request.Request(f"http://127.0.0.1:{port_api}/api/v1/auth/exchange", data=api_data, method='POST')
+            api_req = urllib.request.Request(f"http://{host_api}:{port_api}/api/v1/auth/exchange", data=api_data, method='POST')
             api_req.add_header('Content-Type', 'application/json')
             api_resp = urllib.request.urlopen(api_req)
             access_token = json.loads(api_resp.read())['access_token']
@@ -88,7 +90,7 @@ def get_token():
                     'sso_token': code,
                     'callback_url': 'http://localhost:8080/callback'
                 }).encode('utf-8')
-                api_req = urllib.request.Request(f"http://127.0.0.1:{port_api}/api/v1/auth/exchange", data=api_data, method='POST')
+                api_req = urllib.request.Request(f"http://{host_api}:{port_api}/api/v1/auth/exchange", data=api_data, method='POST')
                 api_req.add_header('Content-Type', 'application/json')
                 api_resp = urllib.request.urlopen(api_req)
                 access_token = json.loads(api_resp.read())['access_token']

@@ -10,7 +10,7 @@ use chrono::Utc;
 use futures::StreamExt;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use stormchaser_model::dsl::CommonContainerSpec;
 use tokio::time::sleep;
@@ -110,8 +110,15 @@ impl DockerContainerMachine<state::Initialized> {
                                         )
                                         .await;
                                 }
-                                self.unpark_storage(&volume_name, &mount.mount_path, get_url)
-                                    .await?;
+                                self.unpark_storage(
+                                    &volume_name,
+                                    &mount.mount_path,
+                                    &mount.mount_path,
+                                    get_url,
+                                    false,
+                                    None,
+                                )
+                                .await?;
                             }
                         } else if let Some(provision) =
                             urls.get("provision").and_then(|p| p.as_array())
@@ -141,15 +148,48 @@ impl DockerContainerMachine<state::Initialized> {
                                     }
                                     let mut full_dest = PathBuf::from(&mount.mount_path);
                                     if dest != "/" && !dest.is_empty() {
-                                        let relative_dest =
-                                            dest.trim_start_matches('/').replace('/', "");
+                                        let relative_dest = dest.trim_start_matches('/');
+                                        // Reject path traversal and Windows-style drive prefixes.
+                                        for component in Path::new(relative_dest).components() {
+                                            match component {
+                                                std::path::Component::ParentDir => {
+                                                    anyhow::bail!(
+                                                        "Provision destination '{}' contains illegal path traversal (..)",
+                                                        dest
+                                                    );
+                                                }
+                                                std::path::Component::Prefix(_) => {
+                                                    anyhow::bail!(
+                                                        "Provision destination '{}' contains an illegal absolute path prefix",
+                                                        dest
+                                                    );
+                                                }
+                                                _ => {}
+                                            }
+                                        }
                                         full_dest.push(relative_dest);
                                     }
 
+                                    let resource_type =
+                                        prov.get("resource_type").and_then(|r| r.as_str());
+                                    let is_extract = resource_type != Some("artifact");
+                                    let prov_mode = prov
+                                        .get("mode")
+                                        .and_then(|m| m.as_str())
+                                        .map(str::to_owned);
+                                    info!(
+                                        "Provisioning resource_type: {:?}, is_extract: {}",
+                                        resource_type, is_extract
+                                    );
+
+                                    let full_dest_str = full_dest.to_string_lossy().into_owned();
                                     self.unpark_storage(
                                         &volume_name,
-                                        full_dest.to_str().unwrap_or(&mount.mount_path),
+                                        &mount.mount_path,
+                                        &full_dest_str,
                                         url,
+                                        !is_extract,
+                                        prov_mode.as_deref(),
                                     )
                                     .await?;
                                 }
@@ -213,24 +253,37 @@ impl DockerContainerMachine<state::Initialized> {
     async fn unpark_storage(
         &self,
         volume_name: &str,
-        mount_path: &str,
+        volume_mount_path: &str,
+        destination_path: &str,
         get_url: &str,
+        no_extract: bool,
+        mode: Option<&str>,
     ) -> Result<()> {
         let agent_image = "stormchaser-agent:v1";
         let unpark_container_name = format!("unpark-{}", Uuid::new_v4());
+
+        let mut cmd = vec![
+            "/usr/local/bin/stormchaser-agent".to_string(),
+            "unpark".to_string(),
+            "--url".to_string(),
+            get_url.to_string(),
+            "--destination".to_string(),
+            destination_path.to_string(),
+        ];
+        if no_extract {
+            cmd.push("--no-extract".to_string());
+        }
+        if let Some(m) = mode {
+            cmd.push("--mode".to_string());
+            cmd.push(m.to_string());
+        }
+
         let config = Config {
             image: Some(agent_image.to_string()),
-            cmd: Some(vec![
-                "/usr/local/bin/stormchaser-agent".to_string(),
-                "unpark".to_string(),
-                "--url".to_string(),
-                get_url.to_string(),
-                "--destination".to_string(),
-                mount_path.to_string(),
-            ]),
+            cmd: Some(cmd),
             host_config: Some(HostConfig {
                 mounts: Some(vec![Mount {
-                    target: Some(mount_path.to_string()),
+                    target: Some(volume_mount_path.to_string()),
                     source: Some(volume_name.to_string()),
                     typ: Some(MountTypeEnum::VOLUME),
                     ..Default::default()

@@ -225,8 +225,7 @@ pub async fn handle_step_completed(
                 };
 
                 if let Some(bid) = backend_id {
-                    let remote_path =
-                        format!("artifacts/{}/{}/{}/{}", run_id, step_id, s.name, name);
+                    let remote_path = format!("artifacts/{}/{}/{}", run_id, s.name, name);
                     crate::db::insert_artifact_registry(
                         &mut *tx,
                         run_id,

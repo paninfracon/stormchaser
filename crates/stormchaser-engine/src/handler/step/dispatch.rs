@@ -106,7 +106,55 @@ pub async fn dispatch_step_instance(
 
                 let mut provision_data = Vec::new();
                 for mut prov in storage.provision {
-                    if let Some(url) = &prov.url {
+                    if prov.resource_type == "artifact" {
+                        // For artifacts, the name corresponds to the artifact_name in the DB
+                        let (backend_id, remote_path) =
+                            crate::db::get_artifact_by_name(&pool, run_id, &prov.name)
+                                .await?
+                                .with_context(|| {
+                                    format!("Artifact '{}' not found for run {}", prov.name, run_id)
+                                })?;
+                        let backend_info: stormchaser_model::storage::StorageBackend =
+                            crate::db::get_storage_backend_by_id(&pool, backend_id)
+                                .await?
+                                .with_context(|| {
+                                    format!(
+                                        "Storage backend {} not found for artifact '{}'",
+                                        backend_id, prov.name
+                                    )
+                                })?;
+                        if backend_info.backend_type != stormchaser_model::storage::BackendType::S3
+                        {
+                            anyhow::bail!(
+                                "Artifact '{}' requires an S3 backend for provisioning; \
+                                 backend '{}' is not S3",
+                                prov.name,
+                                backend_info.name
+                            );
+                        }
+                        let bucket = backend_info
+                            .config
+                            .get("bucket")
+                            .and_then(|b: &serde_json::Value| b.as_str())
+                            .with_context(|| {
+                                format!(
+                                    "Missing 'bucket' in config for backend '{}' (artifact '{}')",
+                                    backend_info.name, prov.name
+                                )
+                            })?;
+                        let client = crate::s3::get_s3_client(&backend_info).await?;
+                        let expires = std::time::Duration::from_secs(3600);
+                        prov.url = Some(
+                            crate::s3::generate_presigned_url(
+                                &client,
+                                bucket,
+                                &remote_path,
+                                false,
+                                expires,
+                            )
+                            .await?,
+                        );
+                    } else if let Some(url) = &prov.url {
                         let mut val = Value::String(url.clone());
                         let hcl_ctx = crate::hcl_eval::create_context(
                             run_context.inputs.clone(),
@@ -123,6 +171,25 @@ pub async fn dispatch_step_instance(
                     provision_data.push(prov);
                 }
 
+                let mut preserve = storage.preserve.clone();
+                if let Some(mounts) = resolved_spec
+                    .get("storage_mounts")
+                    .and_then(|m| m.as_array())
+                {
+                    for mount in mounts {
+                        if let Some(name) = mount.get("name").and_then(|n| n.as_str()) {
+                            if name == storage.name {
+                                if let Some(p) = mount.get("preserve").and_then(|p| p.as_array()) {
+                                    preserve = p
+                                        .iter()
+                                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                        .collect();
+                                }
+                            }
+                        }
+                    }
+                }
+
                 storage_urls.insert(
                     storage.name.clone(),
                     serde_json::json!({
@@ -131,6 +198,7 @@ pub async fn dispatch_step_instance(
                         "expected_hash": last_hash.map(|h| h.0),
                         "artifacts": artifacts_data,
                         "provision": provision_data,
+                        "preserve": preserve,
                     }),
                 );
             }

@@ -36,19 +36,21 @@ echo ">>> Registering local Minio as default SFS backend..."
 curl -s -X POST "$API_URL/api/v1/storage-backends" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{
-    "name": "local-minio",
-    "description": "Local Minio S3-compatible storage for SFS parking",
-    "backend_type": "s3",
-    "is_default_sfs": true,
-    "config": {
-      "endpoint": "http://s3:9000",
-      "bucket": "stormchaser-sfs",
-      "region": "us-east-1",
-      "access_key": "stormchaser",
-      "secret_key": "stormchaser",
-      "force_path_style": true
-    }
-  }' | jq .
+  -d "$(jq -n \
+    --arg secret "$STORMCHASER_MINIO_PASSWORD" \
+    '{
+      "name": "local-minio",
+      "description": "Local Minio S3-compatible storage for SFS parking",
+      "backend_type": "s3",
+      "is_default_sfs": true,
+      "config": {
+        "endpoint": "http://s3:9000",
+        "bucket": "stormchaser-sfs",
+        "region": "us-east-1",
+        "access_key": "stormchaser",
+        "secret_key": $secret,
+        "force_path_style": true
+      }
+    }')" | jq .
 
 echo -e "\n>>> Storage backend registered successfully."

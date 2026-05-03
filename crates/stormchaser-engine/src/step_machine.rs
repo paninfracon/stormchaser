@@ -95,6 +95,27 @@ impl StepMachine<state::Pending> {
             _state: std::marker::PhantomData,
         })
     }
+
+    #[tracing::instrument(skip(self, executor), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
+    /// Fail.
+    pub async fn fail(
+        mut self,
+        error: String,
+        exit_code: Option<i32>,
+        executor: &mut sqlx::PgConnection,
+    ) -> Result<StepMachine<state::Failed>> {
+        self.instance.status = StepStatus::Failed;
+        self.instance.finished_at = Some(Utc::now());
+        self.instance.error = Some(error);
+        self.instance.exit_code = exit_code;
+
+        crate::persistence::persist_step_instance(&self.instance, executor).await?;
+
+        Ok(StepMachine {
+            instance: self.instance,
+            _state: std::marker::PhantomData,
+        })
+    }
 }
 
 #[allow(dead_code)]
@@ -339,6 +360,27 @@ impl StepMachine<state::WaitingForEvent> {
     /// Into instance.
     pub fn into_instance(self) -> StepInstance {
         self.instance
+    }
+
+    #[tracing::instrument(skip(self, executor), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
+    /// Fail.
+    pub async fn fail(
+        mut self,
+        error: String,
+        exit_code: Option<i32>,
+        executor: &mut sqlx::PgConnection,
+    ) -> Result<StepMachine<state::Failed>> {
+        self.instance.status = StepStatus::Failed;
+        self.instance.finished_at = Some(Utc::now());
+        self.instance.error = Some(error);
+        self.instance.exit_code = exit_code;
+
+        crate::persistence::persist_step_instance(&self.instance, executor).await?;
+
+        Ok(StepMachine {
+            instance: self.instance,
+            _state: std::marker::PhantomData,
+        })
     }
 }
 

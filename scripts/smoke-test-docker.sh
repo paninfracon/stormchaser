@@ -9,31 +9,38 @@ NC='\033[0m' # No Color
 REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." &> /dev/null && pwd)
 cd "$REPO_ROOT"
 
+# Load environment variables if present
+if [ -f "$REPO_ROOT/.env" ]; then
+    set -a
+    source "$REPO_ROOT/.env"
+    set +a
+fi
+
 echo -e "${BLUE}>>> Generating test token...${NC}"
 TOKEN=$(python3 "$REPO_ROOT/scripts/generate_dev_token.py")
 
-echo -e "${BLUE}>>> Discovering API endpoint...${NC}"
-API_IP=$(microk8s kubectl get svc -n stormchaser stormchaser-stormchaser-orchestration-api -o jsonpath='{.spec.clusterIP}')
-API_URL="http://${API_IP}:3000"
+PORT_API=${PORT_API:-3000}
+PORT_LOKI=${PORT_LOKI:-3100}
+PORT_TEMPO=${PORT_TEMPO:-3200}
+PORT_S3=${PORT_S3:-9000}
+PORT_GRAFANA=${PORT_GRAFANA:-3002}
+PORT_PROMETHEUS=${PORT_PROMETHEUS:-9090}
+
+API_URL="http://localhost:${PORT_API}"
 
 echo -e "${BLUE}>>> Checking Service Health (API, Engine, Loki, Tempo, MinIO, Grafana, Prometheus)...${NC}"
-LOKI_IP=$(microk8s kubectl get svc -n stormchaser stormchaser-loki -o jsonpath='{.spec.clusterIP}')
-TEMPO_IP=$(microk8s kubectl get svc -n stormchaser stormchaser-tempo -o jsonpath='{.spec.clusterIP}')
-MINIO_IP=$(microk8s kubectl get svc -n stormchaser stormchaser-minio -o jsonpath='{.spec.clusterIP}')
-GRAFANA_IP=$(microk8s kubectl get svc -n stormchaser stormchaser-grafana -o jsonpath='{.spec.clusterIP}')
-PROM_IP=$(microk8s kubectl get svc -n stormchaser stormchaser-prometheus-server -o jsonpath='{.spec.clusterIP}')
 
 ALL_READY=false
 for i in {1..24}; do
     API_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/api/health" || echo "000")
-    LOKI_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://$LOKI_IP:3100/ready" || echo "000")
-    TEMPO_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://$TEMPO_IP:3100/ready" || echo "000")
-    MINIO_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://$MINIO_IP:9000/minio/health/live" || echo "000")
-    GRAFANA_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://$GRAFANA_IP:80/api/health" || echo "000")
-    PROM_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://$PROM_IP:80/-/ready" || echo "000")
+    LOKI_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${PORT_LOKI}/ready" || echo "000")
+    TEMPO_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${PORT_TEMPO}/ready" || echo "000")
+    MINIO_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${PORT_S3}/minio/health/live" || echo "000")
+    GRAFANA_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${PORT_GRAFANA}/api/health" || echo "000")
+    PROM_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${PORT_PROMETHEUS}/-/ready" || echo "000")
 
     ENGINE_STATUS="000"
-    if microk8s kubectl get pods -n stormchaser -l app.kubernetes.io/component=engine -o jsonpath='{.items[*].status.phase}' | grep -q "Running"; then
+    if docker ps --format '{{.Names}}' | grep -q "orchestration-engine"; then
         ENGINE_STATUS="200"
     fi
 
@@ -52,8 +59,7 @@ if [ "$ALL_READY" != true ]; then
 fi
 
 echo -e "${BLUE}>>> Verifying OIDC Login Flow...${NC}"
-DEX_IP=$(microk8s kubectl get svc -n stormchaser dex -o jsonpath='{.spec.clusterIP}')
-OIDC_TOKEN=$(HOST_DEX="${DEX_IP}" PORT_DEX="5556" HOST_API="${API_IP}" PORT_API="3000" python3 "$REPO_ROOT/scripts/get_token.py")
+OIDC_TOKEN=$(PORT_DEX="${PORT_DEX:-5556}" PORT_API="${PORT_API:-3000}" python3 "$REPO_ROOT/scripts/get_token.py")
 if [ -z "$OIDC_TOKEN" ]; then
     echo -e "${RED}>>> OIDC token acquisition failed!${NC}"
     exit 1
@@ -118,8 +124,7 @@ fi
 
 # Verify traces are in tempo
 echo -e "${BLUE}>>> Verifying Tempo Traces...${NC}"
-TEMPO_IP=$(microk8s kubectl get svc -n stormchaser stormchaser-tempo -o jsonpath='{.spec.clusterIP}')
-TEMPO_URL="http://${TEMPO_IP}:3100"
+TEMPO_URL="http://localhost:${PORT_TEMPO}"
 
 TRACE_FOUND=false
 for i in {1..10}; do

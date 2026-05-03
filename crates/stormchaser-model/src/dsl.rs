@@ -285,6 +285,9 @@ pub struct StorageMount {
     pub mount_path: String,
     /// Whether the mount should be read-only.
     pub read_only: Option<bool>,
+    /// Step-specific paths to preserve when parking the volume, overriding the top-level storage config.
+    #[serde(default)]
+    pub preserve: Option<Vec<String>>,
 }
 
 /// Minimal common set of arguments for running containers (portable across runners)

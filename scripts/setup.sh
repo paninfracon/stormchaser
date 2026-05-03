@@ -72,6 +72,7 @@ cleanup_k8s() {
 cleanup_docker() {
     echo -e "${BLUE}>>> Stopping Docker services...${NC}"
     docker compose -p stormchaser-docker --profile "*" down -v || true
+    docker compose -p stormchaser-hybrid --profile "*" down -v || true
     docker compose -p stormchaser-k8s --profile "*" down -v || true
     docker compose --profile "*" down -v || true
 }

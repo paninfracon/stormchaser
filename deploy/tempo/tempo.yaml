@@ -8,15 +8,6 @@ distributor:
         http:
         grpc:
 
-ingester:
-  max_block_duration: 5m               # cut the headblock every 5 minutes
-
-compactor:
-  compaction:
-    compaction_cycle: 10s
-    block_retention: 1h
-    compacted_block_retention: 1h
-
 metrics_generator:
   registry:
     external_labels:
@@ -34,6 +25,3 @@ storage:
       path: /tmp/tempo/wal             # where to store the wal locally
     local:
       path: /tmp/tempo/blocks          # where to store the blocks locally
-
-overrides:
-  metrics_generator_processors: [service-graphs, span-metrics] # enables api-graphs and span-metrics

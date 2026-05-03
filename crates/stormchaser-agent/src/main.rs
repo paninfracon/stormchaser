@@ -67,6 +67,15 @@ pub enum Commands {
         /// The destination directory to extract to
         #[arg(short, long)]
         destination: String,
+
+        /// If set, the downloaded file will not be extracted but saved directly to the destination path
+        #[arg(long)]
+        no_extract: bool,
+
+        /// Optional file mode (octal string, e.g. "0755") to apply to the downloaded file.
+        /// Only meaningful when `--no-extract` is set.
+        #[arg(long)]
+        mode: Option<String>,
     },
 }
 
@@ -84,8 +93,17 @@ pub async fn run_agent(cli: Cli) -> Result<()> {
             url,
             expected_hash,
             destination,
+            no_extract,
+            mode,
         } => {
-            unpark_storage(&url, expected_hash.as_deref(), &destination).await?;
+            unpark_storage(
+                &url,
+                expected_hash.as_deref(),
+                &destination,
+                no_extract,
+                mode.as_deref(),
+            )
+            .await?;
             Ok(())
         }
         Commands::Run {
@@ -173,10 +191,14 @@ mod tests {
                 url,
                 expected_hash,
                 destination,
+                no_extract,
+                mode,
             } => {
                 assert_eq!(url, "http://example.com/data.tar.gz");
                 assert_eq!(expected_hash.unwrap(), "abcdef123456");
                 assert_eq!(destination, "/data");
+                assert!(!no_extract);
+                assert!(mode.is_none());
             }
             _ => panic!("Expected Unpark command"),
         }

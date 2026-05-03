@@ -46,11 +46,11 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install oras CLI
-RUN curl -LO "https://github.com/oras-project/oras/releases/download/v1.1.0/oras_1.1.0_linux_amd64.tar.gz" && \
+RUN curl -LO "https://github.com/oras-project/oras/releases/download/v1.2.0/oras_1.2.0_linux_amd64.tar.gz" && \
     mkdir -p oras-install/ && \
-    tar -zxf oras_1.1.0_linux_amd64.tar.gz -C oras-install/ && \
+    tar -zxf oras_1.2.0_linux_amd64.tar.gz -C oras-install/ && \
     mv oras-install/oras /usr/local/bin/ && \
-    rm -rf oras_1.1.0_linux_amd64.tar.gz oras-install/
+    rm -rf oras_1.2.0_linux_amd64.tar.gz oras-install/
 
 WORKDIR /app
 

@@ -155,7 +155,7 @@ async fn test_artifact_persistence_on_completion() {
     assert_eq!(artifact.1, backend_id);
     assert_eq!(
         artifact.2,
-        format!("artifacts/{}/{}/workspace/app-bin", run_id, step.id)
+        format!("artifacts/{}/workspace/app-bin", run_id)
     );
 }
 

@@ -24,6 +24,20 @@ workflow "dogfood" {
     }
   }
 
+  storage "image_build_context" {
+    size = "1Gi"
+    provision "repo" {
+      resource_type = "download"
+      url           = inputs.repo_url
+      destination   = "/"
+    }
+    provision "api_binary" {
+      resource_type = "artifact"
+      name          = "api_binary"
+      destination   = "/target/release/stormchaser-api"
+    }
+  }
+
   steps {
     step "build" "RunContainer" {
       image = "rustlang/rust:nightly"
@@ -49,7 +63,11 @@ workflow "dogfood" {
     step "test" "RunContainer" {
       image = "rustlang/rust:nightly"
       storage_mounts = [
-        { name = "workspace", mount_path = "/app" }
+        {
+          name       = "workspace",
+          mount_path = "/app",
+          preserve   = ["target/release/stormchaser-api", "Dockerfile.prebuilt", "deploy"]
+        }
       ]
       env = [
         { name = "DATABASE_URL", value = "postgres://stormchaser:${inputs.db_password}@stormchaser-postgresql.stormchaser.svc.cluster.local:5432/stormchaser" },
@@ -77,7 +95,7 @@ workflow "dogfood" {
       image      = "quay.io/buildah/stable:v1.35"
       privileged = true
       storage_mounts = [
-        { name = "workspace", mount_path = "/app" }
+        { name = "image_build_context", mount_path = "/app" }
       ]
       command = ["/bin/sh", "-c"]
       args = [<<-EOF
