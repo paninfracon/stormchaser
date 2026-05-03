@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use serde_json::Value;
@@ -15,6 +15,7 @@ pub async fn unpark_storage(
     expected_hash: Option<&str>,
     destination: &str,
     no_extract: bool,
+    mode: Option<&str>,
 ) -> Result<()> {
     info!("Unparking storage from {} to {}...", url, destination);
     let client = reqwest::Client::new();
@@ -63,6 +64,9 @@ pub async fn unpark_storage(
             warn!("Rename failed ({}), falling back to copy...", e);
             std::fs::copy(&tar_path, destination)?;
             let _ = std::fs::remove_file(&tar_path);
+        }
+        if let Some(mode_str) = mode {
+            apply_file_mode(destination, mode_str)?;
         }
     } else {
         info!("Extracting tarball...");
@@ -174,6 +178,30 @@ pub async fn park_storage(urls: Value, paths: Value) -> Result<HashMap<String, S
     Ok(hashes)
 }
 
+/// Sets Unix file permissions from an octal mode string (e.g. `"0755"` or `"0o755"`).
+///
+/// On non-Unix targets this is a no-op.
+#[cfg(unix)]
+fn apply_file_mode(path: &str, mode_str: &str) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let octal = mode_str.strip_prefix("0o").unwrap_or(mode_str);
+    let bits = u32::from_str_radix(octal, 8).with_context(|| {
+        format!(
+            "Invalid file mode '{}': expected octal string e.g. '0755'",
+            mode_str
+        )
+    })?;
+    let perms = std::fs::Permissions::from_mode(bits);
+    std::fs::set_permissions(path, perms)
+        .with_context(|| format!("Failed to set mode {:#o} on '{}'", bits, path))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn apply_file_mode(_path: &str, _mode_str: &str) -> Result<()> {
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,9 +242,15 @@ mod tests {
             .await;
 
         let url = format!("{}/storage.tar.gz", mock_server.uri());
-        unpark_storage(&url, Some(&expected_hash), dest.to_str().unwrap(), false)
-            .await
-            .unwrap();
+        unpark_storage(
+            &url,
+            Some(&expected_hash),
+            dest.to_str().unwrap(),
+            false,
+            None,
+        )
+        .await
+        .unwrap();
 
         assert!(dest.join("test.txt").exists());
         let content = std::fs::read_to_string(dest.join("test.txt")).unwrap();

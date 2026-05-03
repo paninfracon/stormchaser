@@ -8,10 +8,15 @@ use uuid::Uuid;
 
 // Helper to setup database test environment. Assuming a setup script handles standard test env setup.
 async fn setup_db() -> Result<PgPool> {
-    let pool = PgPool::connect(&std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://stormchaser:password@localhost:5432/stormchaser".to_string()
-    }))
-    .await?;
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        dotenvy::dotenv().ok();
+        format!(
+            "postgres://stormchaser:{}@localhost:5432/stormchaser",
+            std::env::var("STORMCHASER_DEV_PASSWORD")
+                .expect("STORMCHASER_DEV_PASSWORD must be set (run scripts/setup.sh first)")
+        )
+    });
+    let pool = PgPool::connect(&db_url).await?;
     Ok(pool)
 }
 
@@ -21,10 +26,7 @@ async fn test_step_machine_pending_fail() -> Result<()> {
         return Ok(());
     }
 
-    let pool = match setup_db().await {
-        Ok(p) => p,
-        Err(_) => return Ok(()), // Skip if DB is unavailable
-    };
+    let pool = setup_db().await?;
 
     let mut tx = pool.begin().await?;
 
@@ -86,10 +88,7 @@ async fn test_step_machine_waiting_for_event_fail() -> Result<()> {
         return Ok(());
     }
 
-    let pool = match setup_db().await {
-        Ok(p) => p,
-        Err(_) => return Ok(()), // Skip if DB is unavailable
-    };
+    let pool = setup_db().await?;
 
     let mut tx = pool.begin().await?;
 

@@ -10,7 +10,7 @@ use chrono::Utc;
 use futures::StreamExt;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use stormchaser_model::dsl::CommonContainerSpec;
 use tokio::time::sleep;
@@ -116,6 +116,7 @@ impl DockerContainerMachine<state::Initialized> {
                                     &mount.mount_path,
                                     get_url,
                                     false,
+                                    None,
                                 )
                                 .await?;
                             }
@@ -148,23 +149,47 @@ impl DockerContainerMachine<state::Initialized> {
                                     let mut full_dest = PathBuf::from(&mount.mount_path);
                                     if dest != "/" && !dest.is_empty() {
                                         let relative_dest = dest.trim_start_matches('/');
+                                        // Reject path traversal and Windows-style drive prefixes.
+                                        for component in Path::new(relative_dest).components() {
+                                            match component {
+                                                std::path::Component::ParentDir => {
+                                                    anyhow::bail!(
+                                                        "Provision destination '{}' contains illegal path traversal (..)",
+                                                        dest
+                                                    );
+                                                }
+                                                std::path::Component::Prefix(_) => {
+                                                    anyhow::bail!(
+                                                        "Provision destination '{}' contains an illegal absolute path prefix",
+                                                        dest
+                                                    );
+                                                }
+                                                _ => {}
+                                            }
+                                        }
                                         full_dest.push(relative_dest);
                                     }
 
                                     let resource_type =
                                         prov.get("resource_type").and_then(|r| r.as_str());
                                     let is_extract = resource_type != Some("artifact");
+                                    let prov_mode = prov
+                                        .get("mode")
+                                        .and_then(|m| m.as_str())
+                                        .map(str::to_owned);
                                     info!(
                                         "Provisioning resource_type: {:?}, is_extract: {}",
                                         resource_type, is_extract
                                     );
 
+                                    let full_dest_str = full_dest.to_string_lossy().into_owned();
                                     self.unpark_storage(
                                         &volume_name,
                                         &mount.mount_path,
-                                        &full_dest.to_string_lossy(),
+                                        &full_dest_str,
                                         url,
                                         !is_extract,
+                                        prov_mode.as_deref(),
                                     )
                                     .await?;
                                 }
@@ -232,6 +257,7 @@ impl DockerContainerMachine<state::Initialized> {
         destination_path: &str,
         get_url: &str,
         no_extract: bool,
+        mode: Option<&str>,
     ) -> Result<()> {
         let agent_image = "stormchaser-agent:v1";
         let unpark_container_name = format!("unpark-{}", Uuid::new_v4());
@@ -246,6 +272,10 @@ impl DockerContainerMachine<state::Initialized> {
         ];
         if no_extract {
             cmd.push("--no-extract".to_string());
+        }
+        if let Some(m) = mode {
+            cmd.push("--mode".to_string());
+            cmd.push(m.to_string());
         }
 
         let config = Config {

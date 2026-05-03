@@ -108,36 +108,52 @@ pub async fn dispatch_step_instance(
                 for mut prov in storage.provision {
                     if prov.resource_type == "artifact" {
                         // For artifacts, the name corresponds to the artifact_name in the DB
-                        if let Some((backend_id, remote_path)) =
-                            crate::db::get_artifact_by_name(&pool, run_id, &prov.name).await?
+                        let (backend_id, remote_path) =
+                            crate::db::get_artifact_by_name(&pool, run_id, &prov.name)
+                                .await?
+                                .with_context(|| {
+                                    format!("Artifact '{}' not found for run {}", prov.name, run_id)
+                                })?;
+                        let backend_info: stormchaser_model::storage::StorageBackend =
+                            crate::db::get_storage_backend_by_id(&pool, backend_id)
+                                .await?
+                                .with_context(|| {
+                                    format!(
+                                        "Storage backend {} not found for artifact '{}'",
+                                        backend_id, prov.name
+                                    )
+                                })?;
+                        if backend_info.backend_type != stormchaser_model::storage::BackendType::S3
                         {
-                            let backend_info_opt: Option<
-                                stormchaser_model::storage::StorageBackend,
-                            > = crate::db::get_storage_backend_by_id(&pool, backend_id).await?;
-                            if let Some(backend_info) = backend_info_opt {
-                                if backend_info.backend_type
-                                    == stormchaser_model::storage::BackendType::S3
-                                {
-                                    if let Some(bucket) =
-                                        backend_info.config.get("bucket").and_then(|b| b.as_str())
-                                    {
-                                        let client =
-                                            crate::s3::get_s3_client(&backend_info).await?;
-                                        let expires = std::time::Duration::from_secs(3600);
-                                        let artifact_url = crate::s3::generate_presigned_url(
-                                            &client,
-                                            bucket,
-                                            &remote_path,
-                                            false,
-                                            expires,
-                                        )
-                                        .await?;
-                                        prov.url = Some(artifact_url);
-                                        // The agent needs to know it's an artifact so it doesn't extract it
-                                    }
-                                }
-                            }
+                            anyhow::bail!(
+                                "Artifact '{}' requires an S3 backend for provisioning; \
+                                 backend '{}' is not S3",
+                                prov.name,
+                                backend_info.name
+                            );
                         }
+                        let bucket = backend_info
+                            .config
+                            .get("bucket")
+                            .and_then(|b: &serde_json::Value| b.as_str())
+                            .with_context(|| {
+                                format!(
+                                    "Missing 'bucket' in config for backend '{}' (artifact '{}')",
+                                    backend_info.name, prov.name
+                                )
+                            })?;
+                        let client = crate::s3::get_s3_client(&backend_info).await?;
+                        let expires = std::time::Duration::from_secs(3600);
+                        prov.url = Some(
+                            crate::s3::generate_presigned_url(
+                                &client,
+                                bucket,
+                                &remote_path,
+                                false,
+                                expires,
+                            )
+                            .await?,
+                        );
                     } else if let Some(url) = &prov.url {
                         let mut val = Value::String(url.clone());
                         let hcl_ctx = crate::hcl_eval::create_context(
