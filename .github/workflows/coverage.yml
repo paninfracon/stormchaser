@@ -35,10 +35,13 @@ jobs:
         run: |
           STORMCHASER_DEV_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
           STORMCHASER_MINIO_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
+          STORMCHASER_CLI_SECRET="stormchaser-cli-secret"
           echo "STORMCHASER_DEV_PASSWORD=$STORMCHASER_DEV_PASSWORD" >> .env
           echo "STORMCHASER_MINIO_PASSWORD=$STORMCHASER_MINIO_PASSWORD" >> .env
+          echo "STORMCHASER_CLI_SECRET=$STORMCHASER_CLI_SECRET" >> .env
           echo "STORMCHASER_DEV_PASSWORD=$STORMCHASER_DEV_PASSWORD" >> $GITHUB_ENV
           echo "STORMCHASER_MINIO_PASSWORD=$STORMCHASER_MINIO_PASSWORD" >> $GITHUB_ENV
+          echo "STORMCHASER_CLI_SECRET=$STORMCHASER_CLI_SECRET" >> $GITHUB_ENV
 
       - name: Start Infrastructure (NATS, Postgres)
         run: docker compose up -d --wait nats postgres
