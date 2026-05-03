@@ -299,6 +299,10 @@ elif [ "$MODE" == "microk8s" ]; then
     )
 
     echo -e "${BLUE}>>> Deploying Dex Identity Provider...${NC}"
+    if ! python3 -c "from passlib.hash import bcrypt" 2>/dev/null; then
+        echo -e "${RED}Error: passlib[bcrypt] is not installed. Please run: pip install passlib[bcrypt]${NC}" >&2
+        exit 1
+    fi
     for persona in admin dev ops sec; do
         secret_name="dex-${persona}-secret"
         if ! microk8s kubectl get secret "$secret_name" -n "$NAMESPACE" >/dev/null 2>&1; then
