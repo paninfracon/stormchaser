@@ -1,12 +1,11 @@
 use crate::container_machine::{ContainerMetadata, ContainerState, DockerContainerMachine};
-use crate::parsing::parse_step_from_docker_labels;
+use crate::parsing::{parse_step_from_docker_labels, parse_step_from_nats_payload};
 use anyhow::Result;
 use bollard::container::ListContainersOptions;
 use bollard::Docker;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::time::Duration;
-use stormchaser_model::dsl;
 use tokio::time::sleep;
 use tracing::{error, info, warn};
 use uuid::Uuid;
@@ -210,48 +209,12 @@ pub async fn handle_task(
     let step_id_str = payload["step_id"].as_str().unwrap_or_default();
     let step_id = Uuid::parse_str(step_id_str).unwrap_or_default();
 
-    let step_dsl: dsl::Step = match payload.get("step_dsl").and_then(|v| {
-        if !v.is_null() {
-            serde_json::from_value(v.clone()).ok()
-        } else {
-            None
+    let step_dsl = match parse_step_from_nats_payload(&payload) {
+        Ok(step) => step,
+        Err(e) => {
+            error!("Failed to parse step spec: {:?}", e);
+            return;
         }
-    }) {
-        Some(step) => step,
-        None => match serde_json::from_value(payload["spec"].clone()) {
-            Ok(spec) => dsl::Step {
-                name: payload["step_name"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_string(),
-                r#type: payload["step_type"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_string(),
-                spec,
-                params: serde_json::from_value(payload["params"].clone()).unwrap_or_default(),
-                condition: None,
-                strategy: None,
-                aggregation: Vec::new(),
-                iterate: None,
-                iterate_as: None,
-                steps: None,
-                next: Vec::new(),
-                on_failure: None,
-                retry: None,
-                timeout: None,
-                allow_failure: None,
-                start_marker: None,
-                end_marker: None,
-                outputs: Vec::new(),
-                reports: Vec::new(),
-                artifacts: None,
-            },
-            Err(e) => {
-                error!("Failed to parse step spec: {:?}", e);
-                return;
-            }
-        },
     };
 
     let storage: Option<HashMap<String, Value>> =
