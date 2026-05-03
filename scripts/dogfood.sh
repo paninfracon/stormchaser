@@ -18,7 +18,15 @@ echo -e "${BLUE}>>> Detected Host IP: $HOST_IP${NC}"
 # 2. Create Repository Tarball
 echo -e "${BLUE}>>> Creating repository tarball (respecting .gitignore)...${NC}"
 TEMP_TAR="/tmp/stormchaser-dogfood.tar.gz"
-(cd "$REPO_ROOT" && { git ls-files -z; find .tmp/ratatui-form -type f -print0; find tests/certs -type f -print0; } | sort -z -u | tar -czf "$TEMP_TAR" --null -T -)
+(cd "$REPO_ROOT" && {
+    git ls-files -z
+    if [ -d .tmp/ratatui-form ]; then
+        find .tmp/ratatui-form -type f -print0
+    fi
+    if [ -d tests/certs ]; then
+        find tests/certs -type f -print0
+    fi
+} | sort -z -u | tar -czf "$TEMP_TAR" --null -T -)
 
 # 3. Upload to Local S3 (MinIO)
 echo -e "${BLUE}>>> Uploading tarball to local S3...${NC}"
