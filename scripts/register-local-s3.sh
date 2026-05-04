@@ -30,21 +30,24 @@ if [ -z "$STORMCHASER_MINIO_PASSWORD" ]; then
 fi
 export AWS_SECRET_ACCESS_KEY="$STORMCHASER_MINIO_PASSWORD"
 export AWS_DEFAULT_REGION="us-east-1"
-aws --endpoint-url "http://localhost:9000" s3 mb "s3://stormchaser-sfs" 2>/dev/null || true
+AWS_ENDPOINT=${AWS_ENDPOINT:-"http://localhost:9000"}
+aws --endpoint-url "$AWS_ENDPOINT" s3 mb "s3://stormchaser-sfs" 2>/dev/null || true
 
 echo ">>> Registering local Minio as default SFS backend..."
+S3_ENDPOINT=${S3_ENDPOINT:-"http://s3:9000"}
 curl -s -X POST "$API_URL/api/v1/storage-backends" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d "$(jq -n \
     --arg secret "$STORMCHASER_MINIO_PASSWORD" \
+    --arg endpoint "$S3_ENDPOINT" \
     '{
       "name": "local-minio",
       "description": "Local Minio S3-compatible storage for SFS parking",
       "backend_type": "s3",
       "is_default_sfs": true,
       "config": {
-        "endpoint": "http://s3:9000",
+        "endpoint": $endpoint,
         "bucket": "stormchaser-sfs",
         "region": "us-east-1",
         "access_key": "stormchaser",

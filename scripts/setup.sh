@@ -329,8 +329,16 @@ if command -v python3 >/dev/null 2>&1 && [ -f "$REPO_ROOT/scripts/generate_dev_t
     if [ -n "$STORMCHASER_TOKEN" ]; then
         if [[ "$MODE" == "docker" ]]; then
             STORMCHASER_API_URL=http://localhost:${PORT_API} "$REPO_ROOT/scripts/register-local-s3.sh"
+        elif [[ "$MODE" == "hybrid" ]]; then
+            # For hybrid mode, the runner is in K8s and MinIO is in Docker Compose
+            # So the runner needs to access MinIO via the host IP.
+            # And AWS CLI needs to access Minio via localhost:PORT_S3 (which is 9002 in hybrid)
+            AWS_ENDPOINT="http://localhost:${PORT_S3}" \
+            S3_ENDPOINT="http://$HOST_IP:${PORT_S3}" \
+            STORMCHASER_API_URL="http://localhost:${PORT_API}" \
+            "$REPO_ROOT/scripts/register-local-s3.sh"
         else
-            # For microk8s and hybrid, we need the dynamically generated password and cluster-internal DNS
+            # For microk8s, we need the dynamically generated password and cluster-internal DNS
             echo -e "${BLUE}>>> Registering cluster MinIO backend for SFS...${NC}"
             MINIO_PASSWORD=$(microk8s kubectl get secret -n stormchaser stormchaser-minio -o jsonpath='{.data.root-password}' | base64 -d)
             API_URL="http://localhost:${PORT_API}"
