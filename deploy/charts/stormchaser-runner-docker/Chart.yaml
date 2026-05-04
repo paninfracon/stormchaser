@@ -2,5 +2,5 @@ apiVersion: v2
 name: stormchaser-runner-docker
 description: A Helm chart for deploying the Stormchaser Docker Runner as a DaemonSet
 type: application
-version: 0.1.0
+version: 1.2.0
 appVersion: "1.0.0"

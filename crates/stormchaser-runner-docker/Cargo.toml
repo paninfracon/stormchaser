@@ -34,5 +34,8 @@ getrandom = { version = "0.2", features = ["js"] }
 async-trait.workspace = true
 bytes = "1.11.1"
 
+[build-dependencies]
+vergen = { workspace = true }
+
 [dev-dependencies]
 mockall = "0.14.0"

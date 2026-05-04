@@ -1,8 +1,14 @@
 target/
-.git/
 .cargo/
 .idea/
 .vscode/
 **/target/
 *.png
 *.mmd
+
+# Only include the essential Git files required by vergen for tagging
+.git/*
+!.git/HEAD
+!.git/config
+!.git/refs/
+!.git/objects/

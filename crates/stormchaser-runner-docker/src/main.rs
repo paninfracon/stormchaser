@@ -97,7 +97,14 @@ pub async fn run_runner(config: Config) -> Result<()> {
         warn!("State encryption is DISABLED. Sensitive step data in Docker labels will be stored in plaintext.");
     }
 
-    info!("Starting Stormchaser Docker Runner: {}", runner_id);
+    info!(
+        "Starting Stormchaser Docker Runner {} (rev: {}, branch: {}, built: {}): {}",
+        env!("CARGO_PKG_VERSION"),
+        env!("VERGEN_GIT_SHA"),
+        env!("VERGEN_GIT_BRANCH"),
+        env!("VERGEN_BUILD_TIMESTAMP"),
+        runner_id
+    );
 
     // Initialize Docker client
     let docker =

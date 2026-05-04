@@ -59,7 +59,14 @@ pub async fn run_runner(config: Config) -> Result<()> {
         warn!("State encryption is DISABLED. Sensitive step data in K8s annotations will be stored in plaintext.");
     }
 
-    info!("Starting Stormchaser K8s Runner: {}", runner_id);
+    info!(
+        "Starting Stormchaser K8s Runner {} (rev: {}, branch: {}, built: {}): {}",
+        env!("CARGO_PKG_VERSION"),
+        env!("VERGEN_GIT_SHA"),
+        env!("VERGEN_GIT_BRANCH"),
+        env!("VERGEN_BUILD_TIMESTAMP"),
+        runner_id
+    );
 
     // Initialize Kubernetes Cluster Pool
     let cluster_pool = Arc::new(ClusterPool::new());

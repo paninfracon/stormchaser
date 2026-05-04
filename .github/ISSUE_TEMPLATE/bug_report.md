@@ -26,7 +26,7 @@ If applicable, add screenshots or paste CLI/runner logs to help explain your pro
 **Environment (please complete the following information):**
 
 - OS: [e.g. Ubuntu 22.04]
-- Stormchaser Version: [e.g. 0.1.0]
+- Stormchaser Version: [e.g. 1.2.0]
 - Runner (if applicable): [e.g. K8s, Docker]
 - Database Version: [e.g. Postgres 15]
 
