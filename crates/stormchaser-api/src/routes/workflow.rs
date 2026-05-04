@@ -96,11 +96,14 @@ pub async fn enqueue_workflow(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // Publish to NATS
-    let event = serde_json::json!({
-        "run_id": run_id,
-        "event_type": "workflow_queued",
-        "timestamp": chrono::Utc::now(),
-    });
+    let event = stormchaser_model::events::WorkflowQueuedEvent {
+        run_id,
+        event_type: "workflow_queued".to_string(),
+        timestamp: chrono::Utc::now(),
+        dsl: None,
+        inputs: None,
+        initiating_user: None,
+    };
 
     stormchaser_model::nats::publish_cloudevent(
         &async_nats::jetstream::new(state.nats.clone()),

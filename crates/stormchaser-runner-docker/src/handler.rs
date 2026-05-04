@@ -302,21 +302,38 @@ pub async fn handle_task(
     match result {
         Ok(ContainerState::Succeeded(metrics)) => {
             info!("Step {} (Run {}) completed successfully", step_id, run_id);
-            let event = json!({
-                "run_id": run_id,
-                "step_id": step_id,
-                "status": "succeeded",
-                "runner_id": runner_id,
-                "exit_code": metrics.exit_code,
-                "storage_hashes": metrics.storage_hashes,
-                "artifacts": metrics.artifacts,
-                "test_reports": metrics.test_reports,
-                "outputs": {
-                    "docker exit code": metrics.exit_code,
-                    "run duration": format!("{}ms", metrics.duration_ms),
-                    "run latency": format!("{}ms", metrics.latency_ms),
-                }
-            });
+            let mut outputs = std::collections::HashMap::new();
+            outputs.insert(
+                "docker exit code".to_string(),
+                serde_json::json!(metrics.exit_code),
+            );
+            outputs.insert(
+                "run duration".to_string(),
+                serde_json::json!(format!("{}ms", metrics.duration_ms)),
+            );
+            outputs.insert(
+                "run latency".to_string(),
+                serde_json::json!(format!("{}ms", metrics.latency_ms)),
+            );
+
+            let event = stormchaser_model::events::StepCompletedEvent {
+                run_id,
+                step_id,
+                event_type: "stormchaser.v1.step.completed".to_string(),
+                runner_id: Some(runner_id.clone()),
+                exit_code: metrics.exit_code.map(|c| c as i32),
+                storage_hashes: metrics.storage_hashes.map(|h| {
+                    h.into_iter()
+                        .map(|(k, v)| (k, serde_json::json!(v)))
+                        .collect()
+                }),
+                artifacts: metrics.artifacts,
+                test_reports: metrics
+                    .test_reports
+                    .and_then(|v| v.as_object().map(|obj| obj.clone().into_iter().collect())),
+                outputs: Some(outputs),
+                timestamp: chrono::Utc::now(),
+            };
             let _ = stormchaser_model::nats::publish_cloudevent(
                 &async_nats::jetstream::new(nats_client.clone()),
                 "stormchaser.v1.step.completed",
@@ -330,22 +347,39 @@ pub async fn handle_task(
         }
         Ok(ContainerState::Failed(reason, metrics)) => {
             error!("Step {} (Run {}) failed: {}", step_id, run_id, reason);
-            let event = json!({
-                "run_id": run_id,
-                "step_id": step_id,
-                "status": "failed",
-                "error": reason,
-                "runner_id": runner_id,
-                "exit_code": metrics.exit_code,
-                "storage_hashes": metrics.storage_hashes,
-                "artifacts": metrics.artifacts,
-                "test_reports": metrics.test_reports,
-                "outputs": {
-                    "docker exit code": metrics.exit_code,
-                    "run duration": format!("{}ms", metrics.duration_ms),
-                    "run latency": format!("{}ms", metrics.latency_ms),
-                }
-            });
+            let mut outputs = std::collections::HashMap::new();
+            outputs.insert(
+                "docker exit code".to_string(),
+                serde_json::json!(metrics.exit_code),
+            );
+            outputs.insert(
+                "run duration".to_string(),
+                serde_json::json!(format!("{}ms", metrics.duration_ms)),
+            );
+            outputs.insert(
+                "run latency".to_string(),
+                serde_json::json!(format!("{}ms", metrics.latency_ms)),
+            );
+
+            let event = stormchaser_model::events::StepFailedEvent {
+                run_id,
+                step_id,
+                event_type: "stormchaser.v1.step.failed".to_string(),
+                error: reason,
+                runner_id: Some(runner_id.clone()),
+                exit_code: metrics.exit_code.map(|c| c as i32),
+                storage_hashes: metrics.storage_hashes.map(|h| {
+                    h.into_iter()
+                        .map(|(k, v)| (k, serde_json::json!(v)))
+                        .collect()
+                }),
+                artifacts: metrics.artifacts,
+                test_reports: metrics
+                    .test_reports
+                    .and_then(|v| v.as_object().map(|obj| obj.clone().into_iter().collect())),
+                outputs: Some(outputs),
+                timestamp: chrono::Utc::now(),
+            };
             let _ = stormchaser_model::nats::publish_cloudevent(
                 &async_nats::jetstream::new(nats_client.clone()),
                 "stormchaser.v1.step.failed",

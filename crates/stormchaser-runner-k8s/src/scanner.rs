@@ -222,20 +222,37 @@ pub async fn scan_for_orphans(
                             }
                             job_machine::JobState::Failed(reason, metrics) => {
                                 warn!("Adopted step {} failed: {}", step_id, reason);
-                                let event = json!({
-                                    "run_id": run_id,
-                                    "step_id": step_id,
-                                    "status": "failed",
-                                    "error": reason,
-                                    "runner_id": r_id,
-                                    "exit_code": metrics.exit_code,
-                                    "outputs": {
-                                        "k8s exit code": metrics.exit_code,
-                                        "Number of attempts": metrics.attempts,
-                                        "run duration": format!("{}ms", metrics.duration_ms),
-                                        "run latency": format!("{}ms", metrics.latency_ms),
-                                    }
-                                });
+                                let mut outputs = std::collections::HashMap::new();
+                                outputs.insert(
+                                    "k8s exit code".to_string(),
+                                    serde_json::json!(metrics.exit_code),
+                                );
+                                outputs.insert(
+                                    "Number of attempts".to_string(),
+                                    serde_json::json!(metrics.attempts),
+                                );
+                                outputs.insert(
+                                    "run duration".to_string(),
+                                    serde_json::json!(format!("{}ms", metrics.duration_ms)),
+                                );
+                                outputs.insert(
+                                    "run latency".to_string(),
+                                    serde_json::json!(format!("{}ms", metrics.latency_ms)),
+                                );
+
+                                let event = stormchaser_model::events::StepFailedEvent {
+                                    run_id,
+                                    step_id,
+                                    event_type: "stormchaser.v1.step.failed".to_string(),
+                                    error: reason,
+                                    runner_id: Some(r_id.clone()),
+                                    exit_code: metrics.exit_code,
+                                    storage_hashes: None,
+                                    artifacts: None,
+                                    test_reports: None,
+                                    outputs: Some(outputs),
+                                    timestamp: chrono::Utc::now(),
+                                };
                                 let _ = stormchaser_model::nats::publish_cloudevent(
                                     &async_nats::jetstream::new(nats.clone()),
                                     "stormchaser.v1.step.failed",

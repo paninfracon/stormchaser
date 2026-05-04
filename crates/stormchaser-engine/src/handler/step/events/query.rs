@@ -20,16 +20,17 @@ pub async fn handle_step_query(
 
     if let Some(reply_subject) = reply {
         let response = if let Some(s) = step {
-            serde_json::json!({
-                "step_id": step_id,
-                "status": s.status,
-                "exists": true
-            })
+            stormchaser_model::events::StepQueryResponseEvent {
+                step_id,
+                status: Some(format!("{:?}", s.status)),
+                exists: true,
+            }
         } else {
-            serde_json::json!({
-                "step_id": step_id,
-                "exists": false
-            })
+            stormchaser_model::events::StepQueryResponseEvent {
+                step_id,
+                status: None,
+                exists: false,
+            }
         };
         stormchaser_model::nats::publish_cloudevent(
             &async_nats::jetstream::new(nats_client.clone()),

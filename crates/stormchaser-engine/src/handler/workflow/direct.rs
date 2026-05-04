@@ -101,11 +101,11 @@ pub async fn handle_workflow_direct(
     tx.commit().await?;
 
     // 4. Emit event for transition to StartPending
-    let event = serde_json::json!({
-        "run_id": run_id,
-        "event_type": "workflow_start_pending",
-        "timestamp": Utc::now(),
-    });
+    let event = stormchaser_model::events::WorkflowStartPendingEvent {
+        run_id,
+        event_type: "workflow_start_pending".to_string(),
+        timestamp: Utc::now(),
+    };
     let js = async_nats::jetstream::new(nats_client);
     stormchaser_model::nats::publish_cloudevent(
         &js,

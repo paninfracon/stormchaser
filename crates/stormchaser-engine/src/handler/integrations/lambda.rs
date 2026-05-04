@@ -158,15 +158,21 @@ async fn handle_lambda_response(
         // Save output
         crate::db::upsert_step_output(&pool, step_id, "response", &payload).await?;
 
-        let event = serde_json::json!({
-            "run_id": run_id,
-            "step_id": step_id,
-            "event_type": "step_completed",
-            "outputs": {
-                "response": payload,
-            },
-            "timestamp": Utc::now(),
-        });
+        let mut outputs_map = std::collections::HashMap::new();
+        outputs_map.insert("response".to_string(), payload.clone());
+
+        let event = stormchaser_model::events::StepCompletedEvent {
+            run_id,
+            step_id,
+            event_type: "stormchaser.v1.step.completed".to_string(),
+            outputs: Some(outputs_map),
+            exit_code: Some(0),
+            runner_id: None,
+            storage_hashes: None,
+            artifacts: None,
+            test_reports: None,
+            timestamp: Utc::now(),
+        };
         let js = async_nats::jetstream::new(nats_client);
         stormchaser_model::nats::publish_cloudevent(
             &js,

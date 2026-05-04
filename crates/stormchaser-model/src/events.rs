@@ -57,8 +57,20 @@ pub struct WorkflowAbortedEvent {
 pub struct StepScheduledEvent {
     pub run_id: Uuid,
     pub step_id: Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step_type: Option<String>,
     pub event_type: String,
     pub step_dsl: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spec: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub params: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub storage: Option<HashMap<String, Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub test_report_urls: Option<HashMap<String, Value>>,
     pub timestamp: DateTime<Utc>,
 }
 
@@ -76,6 +88,14 @@ pub struct StepCompletedEvent {
     pub step_id: Uuid,
     pub event_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub runner_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub storage_hashes: Option<HashMap<String, Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifacts: Option<HashMap<String, Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub test_reports: Option<HashMap<String, Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub outputs: Option<HashMap<String, Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i32>,
@@ -90,6 +110,16 @@ pub struct StepFailedEvent {
     pub error: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runner_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub storage_hashes: Option<HashMap<String, Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifacts: Option<HashMap<String, Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub test_reports: Option<HashMap<String, Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outputs: Option<HashMap<String, Value>>,
     pub timestamp: DateTime<Utc>,
 }
 

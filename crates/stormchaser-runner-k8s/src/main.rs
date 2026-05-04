@@ -241,9 +241,11 @@ pub async fn run_runner(config: Config) -> Result<()> {
                 break;
             }
             _ = heartbeat_interval.tick() => {
-                let heartbeat_payload = json!({
-                    "runner_id": heartbeat_id,
-                });
+                let heartbeat_payload = stormchaser_model::events::RunnerHeartbeatEvent {
+                    runner_id: heartbeat_id.clone(),
+                    version: env!("CARGO_PKG_VERSION").to_string(),
+                    state: "online".to_string(),
+                };
 
                 if let Err(e) = stormchaser_model::nats::publish_cloudevent(&async_nats::jetstream::new(heartbeat_client.clone()), "stormchaser.v1.runner.heartbeat", "stormchaser.v1.runner.heartbeat", "/stormchaser", serde_json::to_value(heartbeat_payload).unwrap(), Some("1.0"), None)
                     .await

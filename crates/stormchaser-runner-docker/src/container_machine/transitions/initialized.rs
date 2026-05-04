@@ -223,12 +223,12 @@ impl DockerContainerMachine<state::Initialized> {
             .await?;
 
         if let Some(nats) = &self.nats {
-            let running_event = serde_json::json!({
-                "run_id": self.metadata.run_id,
-                "step_id": self.metadata.step_id,
-                "status": "running",
-                "timestamp": chrono::Utc::now(),
-            });
+            let running_event = stormchaser_model::events::StepRunningEvent {
+                run_id: self.metadata.run_id,
+                step_id: self.metadata.step_id,
+                event_type: "stormchaser.v1.step.running".to_string(),
+                timestamp: chrono::Utc::now(),
+            };
             let _ = stormchaser_model::nats::publish_cloudevent(
                 &async_nats::jetstream::new(nats.clone()),
                 "stormchaser.v1.step.running",

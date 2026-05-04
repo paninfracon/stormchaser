@@ -256,13 +256,19 @@ pub async fn handle_task(
         Err(e) => {
             in_progress_handle.abort();
             tracing::error!("Failed to acquire K8s client: {:?}", e);
-            let fail_event = serde_json::json!({
-                "run_id": run_id,
-                "step_id": step_id,
-                "status": "failed",
-                "error": format!("Failed to acquire K8s client: {:?}", e),
-                "runner_id": runner_id,
-            });
+            let fail_event = stormchaser_model::events::StepFailedEvent {
+                run_id,
+                step_id,
+                event_type: "stormchaser.v1.step.failed".to_string(),
+                error: format!("Failed to acquire K8s client: {:?}", e),
+                runner_id: Some(runner_id.clone()),
+                exit_code: None,
+                storage_hashes: None,
+                artifacts: None,
+                test_reports: None,
+                outputs: None,
+                timestamp: chrono::Utc::now(),
+            };
             let _ = stormchaser_model::nats::publish_cloudevent(
                 &async_nats::jetstream::new(nats_client.clone()),
                 "stormchaser.v1.step.failed",

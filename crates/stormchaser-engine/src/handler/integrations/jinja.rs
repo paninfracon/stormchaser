@@ -109,15 +109,21 @@ async fn save_output_and_complete(
 
     tx.commit().await?;
 
-    let event = serde_json::json!({
-        "run_id": run_id,
-        "step_id": step_id,
-        "event_type": "step_completed",
-        "outputs": {
-            &output_key: rendered,
-        },
-        "timestamp": Utc::now(),
-    });
+    let mut outputs_map = std::collections::HashMap::new();
+    outputs_map.insert(output_key.clone(), serde_json::json!(rendered));
+
+    let event = stormchaser_model::events::StepCompletedEvent {
+        run_id,
+        step_id,
+        event_type: "stormchaser.v1.step.completed".to_string(),
+        outputs: Some(outputs_map),
+        exit_code: Some(0),
+        runner_id: None,
+        storage_hashes: None,
+        artifacts: None,
+        test_reports: None,
+        timestamp: Utc::now(),
+    };
     let js = async_nats::jetstream::new(nats_client);
     stormchaser_model::nats::publish_cloudevent(
         &js,

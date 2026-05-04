@@ -85,7 +85,7 @@ The project is divided into specialized crates to ensure a clear separation of c
 - **Long Methods**: Don't create over long methods when they are not necessary, split them down into more focussed smaller methods.
 - **Long conditional branches**: In if, loop, switch, and other control structures factor out long conditional branches into method calls
 - **Duplicate code**: Avoid c+v style duplicate code, factor out similar methods to utility functions
-- **Security**: Avoid common security errors
+- **Security**: Avoid common security errors such as path traversal, sql injection, string concat etc
 - **Re-inventing the Wheel**: Before implementing any functional block ensure that there is not an existing crate for it; if there is prefer the existing crate
 - **Standard Dirs**: Use operating system standard directories for e.g. caches
 - **Anti-patterns**: Avoid standard anti-patterns like God Classes
@@ -103,6 +103,7 @@ The project is divided into specialized crates to ensure a clear separation of c
 - **Secret Management**: Never hardcode passwords, even for tests or development environments.
   - **WARNING - AI Test Environments**: NEVER modify or overwrite the `.env` file with static passwords (e.g. `STORMCHASER_DEV_PASSWORD=password`) to "fix" failing tests or coverage runs. This desynchronizes the Docker volumes from the expected credentials, causing cascading authentication failures across PostgreSQL and Dex. Always rely on the project's `./scripts/setup.sh` to generate and manage secure, random credentials.
   - **WARNING - SQL Offline**: Never inject `return;` into tests when `SQL_OFFLINE=true` is set. `SQL_OFFLINE` is an `sqlx` compiler flag, not a runtime bypass. Bypassing tests causes spurious passes.
+- **Strong Typing**: Never assemble data using string concat or low level (e.g. json types) objects, always define a struct and serialize it instead
 
 ### 5. UI/UX Guidelines
 

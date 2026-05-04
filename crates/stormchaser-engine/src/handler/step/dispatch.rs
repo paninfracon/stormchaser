@@ -342,18 +342,19 @@ pub async fn dispatch_step_instance(
         }
     }
 
-    let payload = serde_json::json!({
-        "run_id": run_id,
-        "step_id": step_instance_id,
-        "step_name": step_name,
-        "step_type": step_type,
-        "spec": resolved_spec,
-        "params": resolved_params,
-        "storage": storage_urls,
-        "test_report_urls": test_report_urls,
-        "timestamp": Utc::now(),
-        "step_dsl": dsl_step_val,
-    });
+    let payload = stormchaser_model::events::StepScheduledEvent {
+        run_id,
+        step_id: step_instance_id,
+        step_name: Some(step_name.to_string()),
+        step_type: Some(step_type.clone()),
+        spec: Some(resolved_spec),
+        params: Some(resolved_params.clone()),
+        storage: Some(storage_urls.into_iter().collect()),
+        test_report_urls: Some(test_report_urls.into_iter().collect()),
+        timestamp: Utc::now(),
+        event_type: "stormchaser.v1.step.scheduled".to_string(),
+        step_dsl: dsl_step_val,
+    };
 
     let js = async_nats::jetstream::new(nats_client);
     let subject = format!("stormchaser.v1.step.scheduled.{}", step_type.to_lowercase());
