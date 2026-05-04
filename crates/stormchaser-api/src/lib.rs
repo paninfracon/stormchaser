@@ -118,7 +118,7 @@ pub struct ApiDoc;
 /// Counter metric for tracking the total number of enqueued workflow runs
 pub static RUNS_ENQUEUED: Lazy<Counter<u64>> = Lazy::new(|| {
     global::meter("stormchaser-api")
-        .u64_counter("stormchaser.runs_enqueued")
+        .u64_counter("stormchaser.v1.runs_enqueued")
         .with_description("Total number of runs enqueued")
         .build()
 });

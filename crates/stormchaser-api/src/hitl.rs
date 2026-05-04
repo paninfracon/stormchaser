@@ -130,9 +130,9 @@ pub async fn approve_step_link(
     };
 
     let subject = if is_approve {
-        "stormchaser.step.completed"
+        "stormchaser.v1.step.completed"
     } else {
-        "stormchaser.step.failed"
+        "stormchaser.v1.step.failed"
     };
 
     match state
@@ -290,7 +290,7 @@ pub async fn approve_step(
 
     match state
         .nats
-        .publish("stormchaser.step.completed", payload.to_string().into())
+        .publish("stormchaser.v1.step.completed", payload.to_string().into())
         .await
     {
         Ok(_) => (StatusCode::OK, "Approved").into_response(),
@@ -345,10 +345,16 @@ pub async fn reject_step(
         "error": "Rejected by human",
     });
 
-    match state
-        .nats
-        .publish("stormchaser.step.failed", payload.to_string().into())
-        .await
+    match stormchaser_model::nats::publish_cloudevent(
+        &async_nats::jetstream::new(state.nats.clone()),
+        "stormchaser.v1.step.failed",
+        "stormchaser.v1.step.failed",
+        "/stormchaser/api",
+        serde_json::to_value(payload).unwrap(),
+        Some("1.0"),
+        None,
+    )
+    .await
     {
         Ok(_) => (StatusCode::OK, "Rejected").into_response(),
         Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Failed to publish").into_response(),
@@ -385,7 +391,7 @@ pub async fn correlate_event(
     match state
         .nats
         .publish(
-            "stormchaser.step.completed",
+            "stormchaser.v1.step.completed",
             nats_payload.to_string().into(),
         )
         .await

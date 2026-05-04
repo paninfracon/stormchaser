@@ -102,11 +102,17 @@ pub async fn enqueue_workflow(
         "timestamp": chrono::Utc::now(),
     });
 
-    state
-        .nats
-        .publish("stormchaser.run.queued", event.to_string().into())
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    stormchaser_model::nats::publish_cloudevent(
+        &async_nats::jetstream::new(state.nats.clone()),
+        "stormchaser.v1.run.queued",
+        "stormchaser.v1.run.queued",
+        "/stormchaser/api",
+        serde_json::to_value(event).unwrap(),
+        Some("1.0"),
+        None,
+    )
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     RUNS_ENQUEUED.add(
         1,
@@ -336,7 +342,7 @@ pub async fn direct_run(
 
     state
         .nats
-        .publish("stormchaser.run.direct", event.to_string().into())
+        .publish("stormchaser.v1.run.direct", event.to_string().into())
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -373,7 +379,7 @@ pub async fn stream_workflow_runs_api(
     let pool = state.pool.clone();
 
     tokio::spawn(async move {
-        let mut subscriber = match nats.subscribe("stormchaser.run.>").await {
+        let mut subscriber = match nats.subscribe("stormchaser.v1.run.>").await {
             Ok(sub) => sub,
             Err(e) => {
                 tracing::error!("Failed to subscribe to NATS for workflow runs: {:?}", e);
@@ -382,9 +388,14 @@ pub async fn stream_workflow_runs_api(
         };
 
         while let Some(msg) = subscriber.next().await {
-            let payload: Value = match serde_json::from_slice(&msg.payload) {
-                Ok(p) => p,
+            let ce: cloudevents::Event = match serde_json::from_slice(&msg.payload) {
+                Ok(e) => e,
                 Err(_) => continue,
+            };
+            let payload: Value = if let Some(cloudevents::Data::Json(v)) = ce.data() {
+                v.clone()
+            } else {
+                continue;
             };
 
             if let Some(run_id_str) = payload.get("run_id").and_then(|id| id.as_str()) {

@@ -103,7 +103,7 @@ impl DockerContainerMachine<state::Initialized> {
                                     });
                                     let _ = nats
                                         .publish(
-                                            "stormchaser.step.unpacking_sfs",
+                                            "stormchaser.v1.step.unpacking_sfs",
                                             unpacking_event.to_string().into(),
                                         )
                                         .await;
@@ -139,7 +139,7 @@ impl DockerContainerMachine<state::Initialized> {
                                         });
                                         let _ = nats
                                             .publish(
-                                                "stormchaser.step.unpacking_sfs",
+                                                "stormchaser.v1.step.unpacking_sfs",
                                                 unpacking_event.to_string().into(),
                                             )
                                             .await;
@@ -229,9 +229,16 @@ impl DockerContainerMachine<state::Initialized> {
                 "status": "running",
                 "timestamp": chrono::Utc::now(),
             });
-            let _ = nats
-                .publish("stormchaser.step.running", running_event.to_string().into())
-                .await;
+            let _ = stormchaser_model::nats::publish_cloudevent(
+                &async_nats::jetstream::new(nats.clone()),
+                "stormchaser.v1.step.running",
+                "stormchaser.v1.step.running",
+                "/stormchaser",
+                serde_json::to_value(running_event).unwrap(),
+                Some("1.0"),
+                None,
+            )
+            .await;
         }
 
         Ok(StartResult::Running(DockerContainerMachine {

@@ -43,4 +43,7 @@ The CLI commands that rely on streaming or real-time interaction are currently u
 **Action Items:**
 
 - [ ] Write integration tests for the `logs` command. This will likely require setting up a mock `SSE` (Server-Sent Events) endpoint or mocking the internal HTTP client to simulate an active log stream.
-- [ ] Write integration tests for the `watch` command. Similar to `logs`, mock the endpoint providing continuous run status updates and verify that the CLI correctly formats and outputs the streaming data to stdout.
+
+## 4. Architectural Enhancements
+
+- [ ] **Dynamic Schema Resolution via OCI Event Streams**: Consume event streams from the OCI schema registry to trigger dynamic schema cache updates, allowing instant validation rule changes without waiting for the background sync interval.

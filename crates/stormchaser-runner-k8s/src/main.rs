@@ -126,7 +126,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
         .context("Failed to connect to NATS")?;
 
     // 3. Register with the Orchestration Engine
-    let nats_subject = format!("stormchaser.runner.k8s.{}", runner_id);
+    let nats_subject = format!("stormchaser.v1.runner.k8s.{}", runner_id);
 
     // Generate JSON Schemas for our supported step types
     let common_schema = schemars::schema_for!(dsl::CommonContainerSpec);
@@ -156,7 +156,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
 
     nats_client
         .publish(
-            "stormchaser.runner.register",
+            "stormchaser.v1.runner.register",
             registration_payload.to_string().into(),
         )
         .await
@@ -209,7 +209,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
             "k8s-runner",
             async_nats::jetstream::consumer::pull::Config {
                 durable_name: Some("k8s-runner".to_string()),
-                filter_subject: "stormchaser.step.scheduled.>".to_string(),
+                filter_subject: "stormchaser.v1.step.scheduled.>".to_string(),
                 ..Default::default()
             },
         )
@@ -245,8 +245,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
                     "runner_id": heartbeat_id,
                 });
 
-                if let Err(e) = heartbeat_client
-                    .publish("stormchaser.runner.heartbeat", heartbeat_payload.to_string().into())
+                if let Err(e) = stormchaser_model::nats::publish_cloudevent(&async_nats::jetstream::new(heartbeat_client.clone()), "stormchaser.v1.runner.heartbeat", "stormchaser.v1.runner.heartbeat", "/stormchaser", serde_json::to_value(heartbeat_payload).unwrap(), Some("1.0"), None)
                     .await
                 {
                     error!("Failed to publish heartbeat: {:?}", e);
@@ -292,7 +291,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
     });
     let _ = nats_client
         .publish(
-            "stormchaser.runner.offline",
+            "stormchaser.v1.runner.offline",
             deregistration_payload.to_string().into(),
         )
         .await;

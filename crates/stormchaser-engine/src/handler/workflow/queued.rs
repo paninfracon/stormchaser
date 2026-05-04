@@ -197,9 +197,17 @@ pub async fn handle_workflow_queued(
         "timestamp": chrono::Utc::now(),
     });
     let js = async_nats::jetstream::new(nats_client);
-    js.publish("stormchaser.run.start_pending", event.to_string().into())
-        .await
-        .with_context(|| format!("Failed to publish start_pending event for {}", run_id))?;
+    stormchaser_model::nats::publish_cloudevent(
+        &js,
+        "stormchaser.v1.run.start_pending",
+        "stormchaser.v1.run.start_pending",
+        "/stormchaser",
+        serde_json::to_value(event).unwrap(),
+        Some("1.0"),
+        None,
+    )
+    .await
+    .with_context(|| format!("Failed to publish start_pending event for {}", run_id))?;
 
     // 8. Transition to Running
     let _ = machine.start(&mut *pool.acquire().await?).await?;

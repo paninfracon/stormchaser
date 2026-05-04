@@ -106,17 +106,17 @@ pub async fn scan_for_orphans(
 
                 let annotations = job.metadata.annotations.as_ref();
                 let received_at = annotations
-                    .and_then(|a| a.get("stormchaser.io/received-at"))
+                    .and_then(|a| a.get("stormchaser.v1.io/received-at"))
                     .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
                     .map(|dt| dt.with_timezone(&Utc))
                     .unwrap_or_else(chrono::Utc::now);
 
                 let is_encrypted = annotations
-                    .and_then(|a| a.get("stormchaser.io/state-encrypted"))
+                    .and_then(|a| a.get("stormchaser.v1.io/state-encrypted"))
                     .map(|v| v == "true")
                     .unwrap_or(false);
 
-                let raw_step_dsl = annotations.and_then(|a| a.get("stormchaser.io/step-dsl"));
+                let raw_step_dsl = annotations.and_then(|a| a.get("stormchaser.v1.io/step-dsl"));
 
                 let step_dsl = reconstruct_step(
                     &job_name,
@@ -138,7 +138,10 @@ pub async fn scan_for_orphans(
                     });
 
                     match nats
-                        .request("stormchaser.step.query", query_payload.to_string().into())
+                        .request(
+                            "stormchaser.v1.step.query",
+                            query_payload.to_string().into(),
+                        )
                         .await
                     {
                         Ok(reply) => {
@@ -206,9 +209,16 @@ pub async fn scan_for_orphans(
                                         "run latency": format!("{}ms", metrics.latency_ms),
                                     }
                                 });
-                                let _ = nats
-                                    .publish("stormchaser.step.completed", event.to_string().into())
-                                    .await;
+                                let _ = stormchaser_model::nats::publish_cloudevent(
+                                    &async_nats::jetstream::new(nats.clone()),
+                                    "stormchaser.v1.step.completed",
+                                    "stormchaser.v1.step.completed",
+                                    "/stormchaser",
+                                    serde_json::to_value(event).unwrap(),
+                                    Some("1.0"),
+                                    None,
+                                )
+                                .await;
                             }
                             job_machine::JobState::Failed(reason, metrics) => {
                                 warn!("Adopted step {} failed: {}", step_id, reason);
@@ -226,9 +236,16 @@ pub async fn scan_for_orphans(
                                         "run latency": format!("{}ms", metrics.latency_ms),
                                     }
                                 });
-                                let _ = nats
-                                    .publish("stormchaser.step.failed", event.to_string().into())
-                                    .await;
+                                let _ = stormchaser_model::nats::publish_cloudevent(
+                                    &async_nats::jetstream::new(nats.clone()),
+                                    "stormchaser.v1.step.failed",
+                                    "stormchaser.v1.step.failed",
+                                    "/stormchaser",
+                                    serde_json::to_value(event).unwrap(),
+                                    Some("1.0"),
+                                    None,
+                                )
+                                .await;
                             }
                         },
                         Err(e) => error!("Error adopting job {}: {:?}", job_name, e),

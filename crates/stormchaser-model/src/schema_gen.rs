@@ -1,6 +1,73 @@
 use crate::dsl::*;
+use crate::events::{
+    RunnerHeartbeatEvent, RunnerOfflineEvent, RunnerRegisterEvent, StepCompletedEvent,
+    StepFailedEvent, StepQueryEvent, StepQueryResponseEvent, StepRunningEvent, StepScheduledEvent,
+    WorkflowAbortedEvent, WorkflowCompletedEvent, WorkflowFailedEvent, WorkflowQueuedEvent,
+    WorkflowRunningEvent, WorkflowStartPendingEvent,
+};
 use schemars::schema::{ObjectValidation, RootSchema, Schema, SchemaObject, SubschemaValidation};
-use schemars::Map;
+use schemars::{schema_for, Map};
+
+/// Generates a map of all event schemas.
+pub fn generate_event_schemas() -> HashMap<String, RootSchema> {
+    let mut schemas = HashMap::new();
+    schemas.insert(
+        "WorkflowQueuedEvent".to_string(),
+        schema_for!(WorkflowQueuedEvent),
+    );
+    schemas.insert(
+        "WorkflowStartPendingEvent".to_string(),
+        schema_for!(WorkflowStartPendingEvent),
+    );
+    schemas.insert(
+        "WorkflowRunningEvent".to_string(),
+        schema_for!(WorkflowRunningEvent),
+    );
+    schemas.insert(
+        "WorkflowCompletedEvent".to_string(),
+        schema_for!(WorkflowCompletedEvent),
+    );
+    schemas.insert(
+        "WorkflowFailedEvent".to_string(),
+        schema_for!(WorkflowFailedEvent),
+    );
+    schemas.insert(
+        "WorkflowAbortedEvent".to_string(),
+        schema_for!(WorkflowAbortedEvent),
+    );
+    schemas.insert(
+        "StepScheduledEvent".to_string(),
+        schema_for!(StepScheduledEvent),
+    );
+    schemas.insert(
+        "StepRunningEvent".to_string(),
+        schema_for!(StepRunningEvent),
+    );
+    schemas.insert(
+        "StepCompletedEvent".to_string(),
+        schema_for!(StepCompletedEvent),
+    );
+    schemas.insert("StepFailedEvent".to_string(), schema_for!(StepFailedEvent));
+    schemas.insert("StepQueryEvent".to_string(), schema_for!(StepQueryEvent));
+    schemas.insert(
+        "StepQueryResponseEvent".to_string(),
+        schema_for!(StepQueryResponseEvent),
+    );
+    schemas.insert(
+        "RunnerRegisterEvent".to_string(),
+        schema_for!(RunnerRegisterEvent),
+    );
+    schemas.insert(
+        "RunnerHeartbeatEvent".to_string(),
+        schema_for!(RunnerHeartbeatEvent),
+    );
+    schemas.insert(
+        "RunnerOfflineEvent".to_string(),
+        schema_for!(RunnerOfflineEvent),
+    );
+    schemas
+}
+
 use serde_json::Value;
 use std::collections::HashMap;
 

@@ -153,7 +153,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
         .context("Failed to connect to NATS")?;
 
     // 3. Register with the Orchestration Engine
-    let nats_subject = format!("stormchaser.runner.docker.{}", runner_id);
+    let nats_subject = format!("stormchaser.v1.runner.docker.{}", runner_id);
 
     // Generate JSON Schema for our supported step type
     let common_schema = schemars::schema_for!(dsl::CommonContainerSpec);
@@ -176,7 +176,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
 
     nats_client
         .publish(
-            "stormchaser.runner.register",
+            "stormchaser.v1.runner.register",
             registration_payload.to_string().into(),
         )
         .await
@@ -220,7 +220,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
             "docker-runner",
             async_nats::jetstream::consumer::pull::Config {
                 durable_name: Some("docker-runner".to_string()),
-                filter_subject: "stormchaser.step.scheduled.runcontainer".to_string(),
+                filter_subject: "stormchaser.v1.step.scheduled.runcontainer".to_string(),
                 ..Default::default()
             },
         )
@@ -256,8 +256,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
                     "runner_id": heartbeat_id,
                 });
 
-                if let Err(e) = heartbeat_client
-                    .publish("stormchaser.runner.heartbeat", heartbeat_payload.to_string().into())
+                if let Err(e) = stormchaser_model::nats::publish_cloudevent(&async_nats::jetstream::new(heartbeat_client.clone()), "stormchaser.v1.runner.heartbeat", "stormchaser.v1.runner.heartbeat", "/stormchaser", serde_json::to_value(heartbeat_payload).unwrap(), Some("1.0"), None)
                     .await
                 {
                     error!("Failed to publish heartbeat: {:?}", e);

@@ -8,7 +8,7 @@ pub async fn init_jetstream(nats_client: &async_nats::Client) -> Result<jetstrea
     // Ensure the stormchaser stream exists
     js.get_or_create_stream(Config {
         name: "stormchaser".to_string(),
-        subjects: vec!["stormchaser.>".to_string()],
+        subjects: vec!["stormchaser.v1.>".to_string()],
         ..Default::default()
     })
     .await?;

@@ -33,6 +33,7 @@ rand = "0.8"
 getrandom = { version = "0.2", features = ["js"] }
 async-trait.workspace = true
 bytes = "1.11.1"
+cloudevents-sdk = "0.9.0"
 
 [build-dependencies]
 vergen = { workspace = true }

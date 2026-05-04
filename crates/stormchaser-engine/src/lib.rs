@@ -47,7 +47,7 @@ use std::time::Duration;
 /// Counter metric for the total number of started workflow runs.
 pub static RUNS_STARTED: Lazy<Counter<u64>> = Lazy::new(|| {
     global::meter("stormchaser-engine")
-        .u64_counter("stormchaser.runs_started")
+        .u64_counter("stormchaser.v1.runs_started")
         .with_description("Total number of runs started")
         .build()
 });
@@ -55,7 +55,7 @@ pub static RUNS_STARTED: Lazy<Counter<u64>> = Lazy::new(|| {
 /// Counter metric for the total number of successfully completed workflow runs.
 pub static RUNS_COMPLETED: Lazy<Counter<u64>> = Lazy::new(|| {
     global::meter("stormchaser-engine")
-        .u64_counter("stormchaser.runs_completed")
+        .u64_counter("stormchaser.v1.runs_completed")
         .with_description("Total number of runs completed successfully")
         .build()
 });
@@ -63,7 +63,7 @@ pub static RUNS_COMPLETED: Lazy<Counter<u64>> = Lazy::new(|| {
 /// Counter metric for the total number of failed workflow runs.
 pub static RUNS_FAILED: Lazy<Counter<u64>> = Lazy::new(|| {
     global::meter("stormchaser-engine")
-        .u64_counter("stormchaser.runs_failed")
+        .u64_counter("stormchaser.v1.runs_failed")
         .with_description("Total number of runs failed")
         .build()
 });
@@ -71,7 +71,7 @@ pub static RUNS_FAILED: Lazy<Counter<u64>> = Lazy::new(|| {
 /// Counter metric for the total number of started workflow steps.
 pub static STEPS_STARTED: Lazy<Counter<u64>> = Lazy::new(|| {
     global::meter("stormchaser-engine")
-        .u64_counter("stormchaser.steps_started")
+        .u64_counter("stormchaser.v1.steps_started")
         .with_description("Total number of steps started")
         .build()
 });
@@ -79,7 +79,7 @@ pub static STEPS_STARTED: Lazy<Counter<u64>> = Lazy::new(|| {
 /// Counter metric for the total number of successfully completed workflow steps.
 pub static STEPS_COMPLETED: Lazy<Counter<u64>> = Lazy::new(|| {
     global::meter("stormchaser-engine")
-        .u64_counter("stormchaser.steps_completed")
+        .u64_counter("stormchaser.v1.steps_completed")
         .with_description("Total number of steps completed successfully")
         .build()
 });
@@ -87,7 +87,7 @@ pub static STEPS_COMPLETED: Lazy<Counter<u64>> = Lazy::new(|| {
 /// Counter metric for the total number of failed workflow steps.
 pub static STEPS_FAILED: Lazy<Counter<u64>> = Lazy::new(|| {
     global::meter("stormchaser-engine")
-        .u64_counter("stormchaser.steps_failed")
+        .u64_counter("stormchaser.v1.steps_failed")
         .with_description("Total number of steps failed")
         .build()
 });
@@ -95,7 +95,7 @@ pub static STEPS_FAILED: Lazy<Counter<u64>> = Lazy::new(|| {
 /// Histogram metric for the duration of step executions in seconds.
 pub static STEP_DURATION: Lazy<Histogram<f64>> = Lazy::new(|| {
     global::meter("stormchaser-engine")
-        .f64_histogram("stormchaser.step_duration_seconds")
+        .f64_histogram("stormchaser.v1.step_duration_seconds")
         .with_description("Duration of step execution in seconds")
         .build()
 });

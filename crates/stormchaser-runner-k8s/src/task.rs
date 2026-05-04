@@ -51,15 +51,24 @@ pub async fn handle_task(
     let received_at = chrono::Utc::now();
     tracing::info!("Received task message: {:?}", msg.subject);
 
-    let payload: Value = match serde_json::from_slice(&msg.payload) {
-        Ok(v) => v,
+    let ce: cloudevents::Event = match serde_json::from_slice(&msg.payload) {
+        Ok(e) => e,
         Err(e) => {
-            tracing::error!("Failed to parse task message payload: {:?}", e);
-            if let Err(ack_err) = msg.ack().await {
-                tracing::warn!("Failed to ack unparseable task message: {:?}", ack_err);
+            tracing::error!("Failed to parse CloudEvent payload: {:?}", e);
+            if let Err(ack_err) = msg.double_ack().await {
+                tracing::warn!("Failed to ack message after parsing error: {:?}", ack_err);
             }
             return;
         }
+    };
+    let payload: Value = if let Some(cloudevents::Data::Json(v)) = ce.data() {
+        v.clone()
+    } else {
+        tracing::error!("CloudEvent data is not JSON");
+        if let Err(ack_err) = msg.ack().await {
+            tracing::warn!("Failed to ack unparseable task message: {:?}", ack_err);
+        }
+        return;
     };
 
     let run_id_str = payload["run_id"].as_str().unwrap_or_default();
@@ -125,9 +134,16 @@ pub async fn handle_task(
         "runner_id": runner_id,
         "timestamp": chrono::Utc::now(),
     });
-    let _ = nats_client
-        .publish("stormchaser.step.running", running_event.to_string().into())
-        .await;
+    let _ = stormchaser_model::nats::publish_cloudevent(
+        &async_nats::jetstream::new(nats_client.clone()),
+        "stormchaser.v1.step.running",
+        "stormchaser.v1.step.running",
+        "/stormchaser",
+        serde_json::to_value(running_event).unwrap(),
+        Some("1.0"),
+        None,
+    )
+    .await;
 
     let target_cluster = "local"; // In future, get from affinity/params
     match cluster_pool.get_client(target_cluster).await {
@@ -180,7 +196,7 @@ pub async fn handle_task(
                     });
                     let _ = nats_client
                         .publish(
-                            "stormchaser.step.completed",
+                            "stormchaser.v1.step.completed",
                             complete_event.to_string().into(),
                         )
                         .await;
@@ -204,9 +220,16 @@ pub async fn handle_task(
                             "run latency": format!("{}ms", metrics.latency_ms),
                         }
                     });
-                    let _ = nats_client
-                        .publish("stormchaser.step.failed", fail_event.to_string().into())
-                        .await;
+                    let _ = stormchaser_model::nats::publish_cloudevent(
+                        &async_nats::jetstream::new(nats_client.clone()),
+                        "stormchaser.v1.step.failed",
+                        "stormchaser.v1.step.failed",
+                        "/stormchaser",
+                        serde_json::to_value(fail_event).unwrap(),
+                        Some("1.0"),
+                        None,
+                    )
+                    .await;
                 }
                 Err(e) => {
                     tracing::error!("Error running K8s job for step {}: {:?}", step_id, e);
@@ -217,9 +240,16 @@ pub async fn handle_task(
                         "error": format!("{:?}", e),
                         "runner_id": runner_id,
                     });
-                    let _ = nats_client
-                        .publish("stormchaser.step.failed", fail_event.to_string().into())
-                        .await;
+                    let _ = stormchaser_model::nats::publish_cloudevent(
+                        &async_nats::jetstream::new(nats_client.clone()),
+                        "stormchaser.v1.step.failed",
+                        "stormchaser.v1.step.failed",
+                        "/stormchaser",
+                        serde_json::to_value(fail_event).unwrap(),
+                        Some("1.0"),
+                        None,
+                    )
+                    .await;
                 }
             }
         }
@@ -233,9 +263,16 @@ pub async fn handle_task(
                 "error": format!("Failed to acquire K8s client: {:?}", e),
                 "runner_id": runner_id,
             });
-            let _ = nats_client
-                .publish("stormchaser.step.failed", fail_event.to_string().into())
-                .await;
+            let _ = stormchaser_model::nats::publish_cloudevent(
+                &async_nats::jetstream::new(nats_client.clone()),
+                "stormchaser.v1.step.failed",
+                "stormchaser.v1.step.failed",
+                "/stormchaser",
+                serde_json::to_value(fail_event).unwrap(),
+                Some("1.0"),
+                None,
+            )
+            .await;
             if let Err(ack_err) = msg.double_ack().await {
                 tracing::warn!(
                     "Failed to ack task message after client acquisition failure: {:?}",

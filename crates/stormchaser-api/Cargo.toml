@@ -62,6 +62,7 @@ futures.workspace = true
 utoipa = { version = "5.4.0", features = ["axum_extras", "uuid", "chrono"] }
 utoipa-swagger-ui = { version = "8.0", features = ["axum", "vendored"] }
 bytes = "1.11.1"
+cloudevents-sdk = "0.9.0"
 
 [dev-dependencies]
 rand = "0.8"

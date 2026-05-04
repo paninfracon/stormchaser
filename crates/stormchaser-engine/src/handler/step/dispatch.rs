@@ -356,7 +356,16 @@ pub async fn dispatch_step_instance(
     });
 
     let js = async_nats::jetstream::new(nats_client);
-    let subject = format!("stormchaser.step.scheduled.{}", step_type.to_lowercase());
-    js.publish(subject, payload.to_string().into()).await?;
+    let subject = format!("stormchaser.v1.step.scheduled.{}", step_type.to_lowercase());
+    stormchaser_model::nats::publish_cloudevent(
+        &js,
+        &subject,
+        &subject,
+        "/stormchaser",
+        serde_json::to_value(payload).unwrap(),
+        Some("1.0"),
+        None,
+    )
+    .await?;
     Ok(())
 }

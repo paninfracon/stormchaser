@@ -246,7 +246,7 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
             "orchestration-engine",
             async_nats::jetstream::consumer::pull::Config {
                 durable_name: Some("orchestration-engine".to_string()),
-                filter_subject: "stormchaser.>".to_string(),
+                filter_subject: "stormchaser.v1.>".to_string(),
                 ..Default::default()
             },
         )
@@ -255,7 +255,7 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
     let mut messages = consumer.messages().await?;
 
     // Standard NATS subscriber for Request/Reply (queries)
-    let mut query_subscriber = nats_client.subscribe("stormchaser.step.query").await?;
+    let mut query_subscriber = nats_client.subscribe("stormchaser.v1.step.query").await?;
 
     info!("Engine listening for events and queries");
 
@@ -266,18 +266,18 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
                     Some(Ok(message)) => {
                         let subject = message.subject.to_string();
                         // Ignore tasks meant for runners
-                        if subject.starts_with("stormchaser.step.scheduled.") {
+                        if subject.starts_with("stormchaser.v1.step.scheduled.") {
                             let _ = message.ack().await;
                             continue;
                         }
 
                         tracing::debug!("Received event on {}: {:?}", subject, message.payload);
 
-                        let payload: Value = match serde_json::from_slice(&message.payload) {
-                            Ok(p) => p,
+                        let ce: cloudevents::Event = match serde_json::from_slice(&message.payload) {
+                            Ok(e) => e,
                             Err(e) => {
                                 tracing::error!(
-                                    "Failed to parse payload from {}: {:?}. Payload: {:?}",
+                                    "Failed to parse CloudEvent from {}: {:?}. Payload: {:?}",
                                     subject,
                                     e,
                                     String::from_utf8_lossy(&message.payload)
@@ -285,6 +285,14 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
                                 let _ = message.ack().await;
                                 continue;
                             }
+                        };
+
+                        let payload: Value = if let Some(cloudevents::Data::Json(v)) = ce.data() {
+                            v.clone()
+                        } else {
+                            tracing::error!("CloudEvent data from {} is not JSON", subject);
+                            let _ = message.ack().await;
+                            continue;
                         };
 
 
@@ -312,12 +320,18 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
             }
             message = query_subscriber.next() => {
                 if let Some(message) = message {
-                    let payload: Value = match serde_json::from_slice(&message.payload) {
-                        Ok(p) => p,
+                    let ce: cloudevents::Event = match serde_json::from_slice(&message.payload) {
+                        Ok(e) => e,
                         Err(e) => {
-                            tracing::error!("Failed to parse query payload: {:?}", e);
+                            tracing::error!("Failed to parse CloudEvent payload: {:?}", e);
                             continue;
                         }
+                    };
+                    let payload: Value = if let Some(cloudevents::Data::Json(v)) = ce.data() {
+                        v.clone()
+                    } else {
+                        tracing::error!("Query CloudEvent data is not JSON");
+                        continue;
                     };
                     let pool = pool.clone();
                     let nats_client = nats_client.clone();

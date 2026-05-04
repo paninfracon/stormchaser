@@ -61,10 +61,10 @@ pub fn do_build_job_spec(
 
     let mut annotations = BTreeMap::from([
         (
-            "stormchaser.io/received-at".to_string(),
+            "stormchaser.v1.io/received-at".to_string(),
             metadata.received_at.to_rfc3339(),
         ),
-        ("stormchaser.io/step-dsl".to_string(), step_dsl_val),
+        ("stormchaser.v1.io/step-dsl".to_string(), step_dsl_val),
     ]);
     if let Some(ea) = step_spec.extra_annotations {
         annotations.extend(ea);
@@ -72,7 +72,7 @@ pub fn do_build_job_spec(
 
     if metadata.encryption_key.is_some() {
         annotations.insert(
-            "stormchaser.io/state-encrypted".to_string(),
+            "stormchaser.v1.io/state-encrypted".to_string(),
             "true".to_string(),
         );
     }

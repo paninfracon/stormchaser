@@ -166,6 +166,7 @@ docker run --rm \
 ## Git Commit Messages
 
 For non-trivial commit messages (those containing backticks, multiple lines, or complex characters), **always use a temporary file** instead of passing the message directly via `-m`. This avoids shell interpolation and escaping issues.
+Never commit to `trunk` branch without explict autorization
 
 ```bash
 git commit -F commit_msg.txt

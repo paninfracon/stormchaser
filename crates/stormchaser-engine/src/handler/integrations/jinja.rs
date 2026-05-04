@@ -119,8 +119,16 @@ async fn save_output_and_complete(
         "timestamp": Utc::now(),
     });
     let js = async_nats::jetstream::new(nats_client);
-    js.publish("stormchaser.step.completed", event.to_string().into())
-        .await?;
+    stormchaser_model::nats::publish_cloudevent(
+        &js,
+        "stormchaser.v1.step.completed",
+        "stormchaser.v1.step.completed",
+        "/stormchaser",
+        serde_json::to_value(event).unwrap(),
+        Some("1.0"),
+        None,
+    )
+    .await?;
 
     Ok(())
 }

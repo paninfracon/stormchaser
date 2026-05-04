@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "StepQueryEvent",
+  "type": "object",
+  "required": [
+    "run_id",
+    "step_id"
+  ],
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "step_id": {
+      "type": "string",
+      "format": "uuid"
+    }
+  }
+}

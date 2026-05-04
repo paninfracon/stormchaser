@@ -168,8 +168,16 @@ async fn handle_lambda_response(
             "timestamp": Utc::now(),
         });
         let js = async_nats::jetstream::new(nats_client);
-        js.publish("stormchaser.step.completed", event.to_string().into())
-            .await?;
+        stormchaser_model::nats::publish_cloudevent(
+            &js,
+            "stormchaser.v1.step.completed",
+            "stormchaser.v1.step.completed",
+            "/stormchaser",
+            serde_json::to_value(event).unwrap(),
+            Some("1.0"),
+            None,
+        )
+        .await?;
     } else {
         // Failure
         let error_msg = format!(
@@ -194,8 +202,16 @@ async fn handle_lambda_response(
             "timestamp": Utc::now(),
         });
         let js = async_nats::jetstream::new(nats_client);
-        js.publish("stormchaser.step.failed", event.to_string().into())
-            .await?;
+        stormchaser_model::nats::publish_cloudevent(
+            &js,
+            "stormchaser.v1.step.failed",
+            "stormchaser.v1.step.failed",
+            "/stormchaser",
+            serde_json::to_value(event).unwrap(),
+            Some("1.0"),
+            None,
+        )
+        .await?;
     }
 
     Ok(())

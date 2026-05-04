@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "StepFailedEvent",
+  "type": "object",
+  "required": [
+    "error",
+    "event_type",
+    "run_id",
+    "step_id",
+    "timestamp"
+  ],
+  "properties": {
+    "error": {
+      "type": "string"
+    },
+    "event_type": {
+      "type": "string"
+    },
+    "exit_code": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "int32"
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "step_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

@@ -31,9 +31,16 @@ pub async fn handle_step_query(
                 "exists": false
             })
         };
-        nats_client
-            .publish(reply_subject, response.to_string().into())
-            .await?;
+        stormchaser_model::nats::publish_cloudevent(
+            &async_nats::jetstream::new(nats_client.clone()),
+            &reply_subject,
+            &reply_subject,
+            "/stormchaser",
+            serde_json::to_value(response).unwrap(),
+            Some("1.0"),
+            None,
+        )
+        .await?;
     }
 
     Ok(())

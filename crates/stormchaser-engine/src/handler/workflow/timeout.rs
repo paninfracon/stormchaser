@@ -100,8 +100,16 @@ pub async fn handle_workflow_timeout(
         "timestamp": Utc::now(),
     });
     let js = async_nats::jetstream::new(nats_client);
-    js.publish("stormchaser.run.aborted", event.to_string().into())
-        .await?;
+    stormchaser_model::nats::publish_cloudevent(
+        &js,
+        "stormchaser.v1.run.aborted",
+        "stormchaser.v1.run.aborted",
+        "/stormchaser",
+        serde_json::to_value(event).unwrap(),
+        Some("1.0"),
+        None,
+    )
+    .await?;
 
     // 4. Archive
     archive_workflow(run_id, pool).await?;

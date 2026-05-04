@@ -166,7 +166,7 @@ impl DockerContainerMachine<state::Running> {
                 });
                 let _ = nats
                     .publish(
-                        "stormchaser.step.packing_sfs",
+                        "stormchaser.v1.step.packing_sfs",
                         packing_event.to_string().into(),
                     )
                     .await;

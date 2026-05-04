@@ -93,14 +93,14 @@ impl<S> DockerContainerMachine<S> {
             self.metadata.step_id.to_string(),
         );
         labels.insert(
-            "stormchaser.io/received-at".to_string(),
+            "stormchaser.v1.io/received-at".to_string(),
             self.metadata.received_at.to_rfc3339(),
         );
-        labels.insert("stormchaser.io/step-dsl".to_string(), step_dsl_val);
+        labels.insert("stormchaser.v1.io/step-dsl".to_string(), step_dsl_val);
 
         if self.metadata.encryption_key.is_some() {
             labels.insert(
-                "stormchaser.io/state-encrypted".to_string(),
+                "stormchaser.v1.io/state-encrypted".to_string(),
                 "true".to_string(),
             );
         }

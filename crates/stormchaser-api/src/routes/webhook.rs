@@ -444,11 +444,17 @@ pub async fn handle_webhook(
             "timestamp": chrono::Utc::now(),
         });
 
-        state
-            .nats
-            .publish("stormchaser.run.queued", event.to_string().into())
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        stormchaser_model::nats::publish_cloudevent(
+            &async_nats::jetstream::new(state.nats.clone()),
+            "stormchaser.v1.run.queued",
+            "stormchaser.v1.run.queued",
+            "/stormchaser",
+            serde_json::to_value(event).unwrap(),
+            Some("1.0"),
+            None,
+        )
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
         triggered_count += 1;
         tracing::info!(

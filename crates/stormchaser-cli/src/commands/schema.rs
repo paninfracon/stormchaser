@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use clap::{Subcommand, ValueEnum};
 use stormchaser_dsl::hcl_schema::json_schema_to_hcl;
-use stormchaser_model::schema_gen::generate_dsl_schema;
+use stormchaser_model::schema_gen::{generate_dsl_schema, generate_event_schemas};
 
 /// Output format for schema generation.
 #[derive(ValueEnum, Clone, Debug)]
@@ -21,6 +21,12 @@ pub enum SchemaCommands {
         #[arg(short, long, value_enum, default_value_t = SchemaFormat::Json)]
         format: SchemaFormat,
     },
+    /// Generate schemas for NATS events and output them to a directory
+    GenerateEvents {
+        /// Output directory
+        #[arg(short, long, default_value = "schemas")]
+        output_dir: String,
+    },
 }
 
 /// Handles the `schema` command logic.
@@ -39,6 +45,16 @@ pub fn handle(command: SchemaCommands) -> Result<()> {
                 SchemaFormat::Json => {
                     println!("{}", serde_json::to_string_pretty(&schema)?);
                 }
+            }
+        }
+        SchemaCommands::GenerateEvents { output_dir } => {
+            std::fs::create_dir_all(&output_dir)?;
+            let schemas = generate_event_schemas();
+            for (name, schema) in schemas {
+                let filename = format!("{}/{}.json", output_dir, name);
+                let json_str = serde_json::to_string_pretty(&schema)?;
+                std::fs::write(&filename, json_str)?;
+                println!("✓ Wrote schema to {}", filename);
             }
         }
     }

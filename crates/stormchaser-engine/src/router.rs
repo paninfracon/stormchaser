@@ -20,7 +20,7 @@ pub async fn handle_message(
     log_backend: Arc<Option<LogBackend>>,
 ) {
     match subject {
-        "stormchaser.run.queued" => {
+        "stormchaser.v1.run.queued" => {
             let run_id_str = match payload["run_id"].as_str() {
                 Some(id) => id,
                 None => {
@@ -56,7 +56,7 @@ pub async fn handle_message(
                 let _ = message.double_ack().await;
             });
         }
-        "stormchaser.run.direct" => {
+        "stormchaser.v1.run.direct" => {
             let run_id_str = match payload["run_id"].as_str() {
                 Some(id) => id,
                 None => {
@@ -85,7 +85,7 @@ pub async fn handle_message(
                 let _ = message.double_ack().await;
             });
         }
-        "stormchaser.run.start_pending" => {
+        "stormchaser.v1.run.start_pending" => {
             let run_id_str = match payload["run_id"].as_str() {
                 Some(id) => id,
                 None => {
@@ -115,7 +115,7 @@ pub async fn handle_message(
                 let _ = message.double_ack().await;
             });
         }
-        "stormchaser.runner.register" => {
+        "stormchaser.v1.runner.register" => {
             tokio::spawn(async move {
                 if let Err(e) = handler::handle_runner_registration(payload, pool).await {
                     tracing::error!("Failed to handle runner registration: {:?}", e);
@@ -123,7 +123,7 @@ pub async fn handle_message(
                 let _ = message.double_ack().await;
             });
         }
-        "stormchaser.runner.heartbeat" => {
+        "stormchaser.v1.runner.heartbeat" => {
             tokio::spawn(async move {
                 if let Err(e) = handler::handle_runner_heartbeat(payload, pool).await {
                     tracing::error!("Failed to handle runner heartbeat: {:?}", e);
@@ -131,7 +131,7 @@ pub async fn handle_message(
                 let _ = message.double_ack().await;
             });
         }
-        "stormchaser.runner.offline" => {
+        "stormchaser.v1.runner.offline" => {
             tokio::spawn(async move {
                 if let Err(e) = handler::handle_runner_offline(payload, pool).await {
                     tracing::error!("Failed to handle runner offline: {:?}", e);
@@ -139,7 +139,7 @@ pub async fn handle_message(
                 let _ = message.double_ack().await;
             });
         }
-        "stormchaser.step.register_wasm" => {
+        "stormchaser.v1.step.register_wasm" => {
             tokio::spawn(async move {
                 if let Err(e) = handler::handle_wasm_registration(payload, pool).await {
                     tracing::error!("Failed to handle WASM step registration: {:?}", e);
@@ -147,7 +147,7 @@ pub async fn handle_message(
                 let _ = message.double_ack().await;
             });
         }
-        "stormchaser.step.unpacking_sfs" => {
+        "stormchaser.v1.step.unpacking_sfs" => {
             tokio::spawn(async move {
                 if let Err(e) = handler::handle_step_unpacking_sfs(payload, pool).await {
                     tracing::error!("Failed to handle step unpacking_sfs event: {:?}", e);
@@ -155,7 +155,7 @@ pub async fn handle_message(
                 let _ = message.double_ack().await;
             });
         }
-        "stormchaser.step.packing_sfs" => {
+        "stormchaser.v1.step.packing_sfs" => {
             tokio::spawn(async move {
                 if let Err(e) = handler::handle_step_packing_sfs(payload, pool).await {
                     tracing::error!("Failed to handle step packing_sfs event: {:?}", e);
@@ -163,7 +163,7 @@ pub async fn handle_message(
                 let _ = message.double_ack().await;
             });
         }
-        "stormchaser.step.running" => {
+        "stormchaser.v1.step.running" => {
             tokio::spawn(async move {
                 if let Err(e) = handler::handle_step_running(payload, pool).await {
                     tracing::error!("Failed to handle step running event: {:?}", e);
@@ -171,7 +171,7 @@ pub async fn handle_message(
                 let _ = message.double_ack().await;
             });
         }
-        "stormchaser.step.completed" => {
+        "stormchaser.v1.step.completed" => {
             tokio::spawn(async move {
                 if let Err(e) = handler::handle_step_completed(
                     payload,
@@ -187,7 +187,7 @@ pub async fn handle_message(
                 let _ = message.double_ack().await;
             });
         }
-        "stormchaser.step.failed" => {
+        "stormchaser.v1.step.failed" => {
             tokio::spawn(async move {
                 if let Err(e) =
                     handler::handle_step_failed(payload, pool, nats_client, tls_reloader).await

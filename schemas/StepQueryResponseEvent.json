@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "StepQueryResponseEvent",
+  "type": "object",
+  "required": [
+    "exists",
+    "step_id"
+  ],
+  "properties": {
+    "exists": {
+      "type": "boolean"
+    },
+    "status": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "step_id": {
+      "type": "string",
+      "format": "uuid"
+    }
+  }
+}
