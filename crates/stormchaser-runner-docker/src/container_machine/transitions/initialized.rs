@@ -376,9 +376,15 @@ impl DockerContainerMachine<state::Initialized> {
     }
 
     async fn pull_image(&self, image: &str) -> Result<()> {
+        let (from_image, tag) = match image.rsplit_once(':') {
+            Some((repo, t)) if !t.contains('/') => (repo, t),
+            _ => (image, "latest"),
+        };
+
         let mut pull_stream = self.docker.create_image(
             Some(CreateImageOptions {
-                from_image: image.to_string(),
+                from_image: from_image.to_string(),
+                tag: tag.to_string(),
                 ..Default::default()
             }),
             None,

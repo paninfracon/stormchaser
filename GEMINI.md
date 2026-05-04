@@ -141,7 +141,7 @@ The project is divided into specialized crates to ensure a clear separation of c
 - **Empirical Verification**: Before applying a fix, always reproduce the bug with a new test case.
 - **Idiomatic Updates**: Ensure all changes (including tests, documentation, and types) are complete and follow local conventions. Do not take shortcuts to minimize tool calls.
 
-## Tech Stack Decisons
+## 4. Tech Stack Decisons
 
 - **TUI Framework**: `ratatui` (latest stable).
 - **Backend**: `crossterm`.
@@ -149,7 +149,7 @@ The project is divided into specialized crates to ensure a clear separation of c
 - **Graph Logic**: `petgraph`.
 - **Text Editing**: `ratatui-textarea`.
 
-## Rendering Mermaid Diagrams
+## 5. Rendering Mermaid Diagrams
 
 To render Mermaid diagrams using the `mermaid-cli` Docker image, you must pass the current user and group IDs to avoid permission issues (`EACCES`).
 
@@ -164,7 +164,7 @@ docker run --rm \
   -o /data/your_diagram.png
 ```
 
-## Git Commit Messages
+## 6. Git Commit Messages
 
 For non-trivial commit messages (those containing backticks, multiple lines, or complex characters), **always use a temporary file** instead of passing the message directly via `-m`. This avoids shell interpolation and escaping issues.
 Never commit to `trunk` branch without explict autorization
@@ -172,3 +172,7 @@ Never commit to `trunk` branch without explict autorization
 ```bash
 git commit -F commit_msg.txt
 ```
+
+## 7. Privilage escalation
+
+When you need to use sudo for local privilage escalation, e.g. when cleaning up environments, use pkexec instead to get the desktop integration
