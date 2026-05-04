@@ -194,12 +194,16 @@ pub async fn handle_task(
                             "run latency": format!("{}ms", metrics.latency_ms),
                         }
                     });
-                    let _ = nats_client
-                        .publish(
-                            "stormchaser.v1.step.completed",
-                            complete_event.to_string().into(),
-                        )
-                        .await;
+                    let _ = stormchaser_model::nats::publish_cloudevent(
+                        &async_nats::jetstream::new(nats_client.clone()),
+                        "stormchaser.v1.step.completed",
+                        "stormchaser.v1.step.completed",
+                        "/stormchaser",
+                        complete_event,
+                        Some("1.0"),
+                        None,
+                    )
+                    .await;
                 }
                 Ok(job_machine::JobState::Failed(reason, metrics)) => {
                     tracing::error!("Step {} (Run {}) failed: {}", step_id, run_id, reason);
