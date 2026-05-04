@@ -130,7 +130,7 @@ pub async fn exchange_token(
         Some(j) => j,
         None => {
             tracing::warn!("kid {} not found in JWKS cache, attempting refresh", kid);
-            let new_jwks = crate::fetch_jwks(&oidc_config.jwks_url).await;
+            let new_jwks = crate::auth::jwks::fetch_jwks(&oidc_config.jwks_url).await;
             let mut jwks_write = state.jwks.write().await;
             *jwks_write = new_jwks;
 
@@ -273,7 +273,7 @@ pub async fn refresh_token(
         Some(j) => j,
         None => {
             tracing::warn!("kid {} not found in JWKS cache, attempting refresh", kid);
-            let new_jwks = crate::fetch_jwks(&oidc_config.jwks_url).await;
+            let new_jwks = crate::auth::jwks::fetch_jwks(&oidc_config.jwks_url).await;
             let mut jwks_write = state.jwks.write().await;
             *jwks_write = new_jwks;
 

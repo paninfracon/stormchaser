@@ -4,6 +4,8 @@ use std::collections::HashMap;
 pub mod auth;
 /// Module for cron.
 pub mod cron;
+/// Module for event rule.
+pub mod event_rule;
 /// Module for schema.
 pub mod schema;
 /// Module for step.

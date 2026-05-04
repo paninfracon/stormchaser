@@ -53,3 +53,31 @@ impl SchemaCache {
         });
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_schema_cache_insert_and_get() {
+        let cache = SchemaCache::default();
+        let schema_id = "test_schema_id".to_string();
+        let schema_val = serde_json::json!({"type": "object"});
+
+        // Should be empty initially
+        assert_eq!(cache.get(&schema_id).await, None);
+
+        // Insert
+        cache.insert(schema_id.clone(), schema_val.clone()).await;
+
+        // Should return the inserted value
+        assert_eq!(cache.get(&schema_id).await, Some(schema_val));
+    }
+
+    #[tokio::test]
+    async fn test_schema_cache_start_background_sync() {
+        let cache = SchemaCache::new();
+        // Since it's a mock implementation, we just verify it runs without panicking.
+        cache.start_background_sync("dummy_url".to_string());
+    }
+}

@@ -1,3 +1,4 @@
+pub mod jwks;
 /// OPA integration for authorization
 pub mod opa;
 
@@ -46,7 +47,7 @@ impl FromRequestParts<AppState> for AuthClaims {
 
                     if jwk_opt.is_none() {
                         tracing::warn!("kid {} not found in JWKS cache, attempting refresh", kid);
-                        let new_jwks = crate::fetch_jwks(&oidc_config.jwks_url).await;
+                        let new_jwks = crate::auth::jwks::fetch_jwks(&oidc_config.jwks_url).await;
                         let mut jwks_write = state.jwks.write().await;
                         *jwks_write = new_jwks;
                         jwk_opt = jwks_write.get(&kid).cloned();

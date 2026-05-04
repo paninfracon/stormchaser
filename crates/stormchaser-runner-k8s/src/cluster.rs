@@ -75,3 +75,23 @@ impl ClusterPool {
         self.clients.iter().map(|r| r.key().clone()).collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cluster_pool_new() {
+        let pool = ClusterPool::new();
+        assert!(pool.cluster_names().is_empty());
+    }
+
+    #[test]
+    fn test_cluster_pool_default() {
+        let pool = ClusterPool::default();
+        assert!(pool.cluster_names().is_empty());
+    }
+
+    // We avoid testing add_client and get_client because creating a kube::Client without a valid environment
+    // is error-prone and can fail tests. The structural logic of the pool is covered here.
+}

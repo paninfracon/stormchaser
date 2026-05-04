@@ -11,7 +11,8 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::Once;
-use stormchaser_api::{app, AppState, OidcConfig};
+use stormchaser_api::auth::jwks::OidcConfig;
+use stormchaser_api::{app, AppState};
 use stormchaser_model::auth::OpaClient;
 use tower::ServiceExt;
 use wiremock::{

@@ -13,8 +13,8 @@ use stormchaser_api::{
 };
 use stormchaser_model::auth::OpaClient;
 
-use stormchaser_api::fetch_jwks;
-use stormchaser_api::OidcConfig;
+use stormchaser_api::auth::jwks::fetch_jwks;
+use stormchaser_api::auth::jwks::OidcConfig;
 use stormchaser_model::LogBackend;
 use stormchaser_opa::OpaWasmInstance;
 use stormchaser_tls::TlsConfig;
