@@ -169,18 +169,17 @@ pub async fn scan_for_orphans(
                         .await
                     {
                         Ok(reply) => {
-                            let ce: cloudevents::Event = match serde_json::from_slice(
-                                &reply.payload,
-                            ) {
-                                Ok(e) => e,
-                                Err(e) => {
-                                    error!(
+                            let ce: cloudevents::Event =
+                                match serde_json::from_slice(&reply.payload) {
+                                    Ok(e) => e,
+                                    Err(e) => {
+                                        error!(
                                         "Failed to parse step query response as CloudEvent: {:?}",
                                         e
                                     );
-                                    return;
-                                }
-                            };
+                                        return;
+                                    }
+                                };
                             let response: Value = match ce.data() {
                                 Some(cloudevents::Data::Json(v)) => v.clone(),
                                 _ => {

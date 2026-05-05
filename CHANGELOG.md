@@ -7,8 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
+### Fixed
 
+- Fixed CI formatting issues in `stormchaser-runner-k8s`.
 - Refactored `stormchaser-engine/src/handler/integrations/email/mod.rs` to extract test report logic and adhere to the 500-line rule.
 - Refactored `stormchaser-api/src/routes/webhook.rs` to extract event rules logic.
 - Refactored `stormchaser-engine/src/handler/step/intrinsic/terraform.rs` into a module, separating tests.
