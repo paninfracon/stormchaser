@@ -112,6 +112,10 @@ workflow "dogfood" {
         apt-get update >/dev/null 2>&1
         apt-get install -y pkg-config libssl-dev libgit2-dev zlib1g-dev curl >/dev/null 2>&1
         cd /app
+        # test_enterprise_opa_rbac_integration: requires a live OPA sidecar not present in CI.
+        # test_run_from_git: requires outbound HTTPS access to github.com for a live git clone,
+        #   which is not available inside this step container; run this test locally with the
+        #   full service stack instead.
         SQLX_OFFLINE=true cargo test --release -p stormchaser-api --jobs 1 -- --test-threads=1 -Z unstable-options --format junit --skip test_enterprise_opa_rbac_integration --skip test_run_from_git > tests.xml
       EOF
       ]
