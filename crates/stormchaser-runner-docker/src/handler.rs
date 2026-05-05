@@ -220,11 +220,25 @@ pub async fn handle_task(
     let received_at = chrono::Utc::now();
     info!("Received task message: {:?}", msg.subject);
 
-    let ce: cloudevents::Event = serde_json::from_slice(&msg.payload).unwrap_or_default();
-    let payload: Value = if let Some(cloudevents::Data::Json(v)) = ce.data() {
-        v.clone()
-    } else {
-        Value::Null
+    let ce: cloudevents::Event = match serde_json::from_slice(&msg.payload) {
+        Ok(event) => event,
+        Err(e) => {
+            error!("Failed to deserialize CloudEvent from task message: {:?}", e);
+            let _ = msg
+                .ack_with(async_nats::jetstream::message::AckKind::Term)
+                .await;
+            return;
+        }
+    };
+    let payload: Value = match ce.data() {
+        Some(cloudevents::Data::Json(v)) => v.clone(),
+        _ => {
+            error!("Task message CloudEvent does not contain JSON data");
+            let _ = msg
+                .ack_with(async_nats::jetstream::message::AckKind::Term)
+                .await;
+            return;
+        }
     };
     let run_id_str = payload["run_id"].as_str().unwrap_or_default();
     let run_id = Uuid::parse_str(run_id_str).unwrap_or_default();
@@ -235,6 +249,9 @@ pub async fn handle_task(
         Ok(step) => step,
         Err(e) => {
             error!("Failed to parse step spec: {:?}", e);
+            let _ = msg
+                .ack_with(async_nats::jetstream::message::AckKind::Term)
+                .await;
             return;
         }
     };
