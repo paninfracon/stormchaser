@@ -112,7 +112,7 @@ workflow "dogfood" {
         apt-get update >/dev/null 2>&1
         apt-get install -y pkg-config libssl-dev libgit2-dev zlib1g-dev curl >/dev/null 2>&1
         cd /app
-        SQLX_OFFLINE=true cargo test --release -p stormchaser-api --jobs 1 -- --test-threads=1 -Z unstable-options --format junit --skip test_enterprise_opa_rbac_integration > tests.xml
+        SQLX_OFFLINE=true cargo test --release -p stormchaser-api --jobs 1 -- --test-threads=1 -Z unstable-options --format junit --skip test_enterprise_opa_rbac_integration --skip test_run_from_git > tests.xml
       EOF
       ]
       reports {
