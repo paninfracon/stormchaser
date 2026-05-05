@@ -40,7 +40,8 @@ async fn setup_app() -> Option<axum::Router> {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
+            std::env::var("STORMCHASER_DEV_PASSWORD")
+                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
     let pool = PgPoolOptions::new().connect(&db_url).await.ok()?;
@@ -244,7 +245,8 @@ async fn test_create_event_rule() {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
+            std::env::var("STORMCHASER_DEV_PASSWORD")
+                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
     let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
@@ -302,7 +304,8 @@ async fn test_stream_run_status() {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
+            std::env::var("STORMCHASER_DEV_PASSWORD")
+                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
     let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
@@ -352,7 +355,8 @@ async fn test_delete_cron_workflow() {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
+            std::env::var("STORMCHASER_DEV_PASSWORD")
+                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
     let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
@@ -399,7 +403,8 @@ async fn test_trigger_cron_workflow() {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
+            std::env::var("STORMCHASER_DEV_PASSWORD")
+                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
     let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
@@ -507,7 +512,8 @@ async fn test_stream_step_logs() {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
+            std::env::var("STORMCHASER_DEV_PASSWORD")
+                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
     let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
@@ -625,7 +631,8 @@ async fn test_delete_workflow_run() {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
+            std::env::var("STORMCHASER_DEV_PASSWORD")
+                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
     let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
@@ -763,7 +770,8 @@ async fn test_run_from_git() {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
+            std::env::var("STORMCHASER_DEV_PASSWORD")
+                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
     let pool = sqlx::PgPool::connect(&db_url).await.unwrap();

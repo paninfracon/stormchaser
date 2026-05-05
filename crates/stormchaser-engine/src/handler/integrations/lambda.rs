@@ -237,13 +237,16 @@ pub async fn handle_lambda_invoke(
 
 #[cfg(test)]
 mod tests {
+
     #[tokio::test]
     #[cfg(not(feature = "aws-lambda"))]
     async fn test_handle_lambda_invoke_not_enabled() {
+        use uuid::Uuid;
+
         // This test ensures the fallback bail out is covered
-        let run_id = Uuid::new_v4();
-        let step_id = Uuid::new_v4();
-        let spec = serde_json::json!({});
+        let _run_id = Uuid::new_v4();
+        let _step_id = Uuid::new_v4();
+        let _spec = serde_json::json!({});
         // In a real mock we would need a pg pool and nats client,
         // but since this immediately bails without using them, we can test it if we can construct dummies.
         // Wait, constructing a PgPool without a DB is hard.

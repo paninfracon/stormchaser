@@ -17,7 +17,14 @@ async fn setup_db() -> sqlx::PgPool {
     std::env::set_var("API_RATE_LIMIT_BURST_SIZE", "1000");
     std::env::set_var("CRON_ENGINE", "none");
 
-    let db_url = std::env::var("DATABASE_URL").unwrap();
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        dotenvy::dotenv().ok();
+        format!(
+            "postgres://stormchaser:{}@localhost:5432/stormchaser",
+            std::env::var("STORMCHASER_DEV_PASSWORD")
+                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
+        )
+    });
     PgPoolOptions::new()
         .max_connections(5)
         .connect(&db_url)

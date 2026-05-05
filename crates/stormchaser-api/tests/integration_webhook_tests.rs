@@ -23,7 +23,8 @@ async fn test_webhook_trigger() {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
+            std::env::var("STORMCHASER_DEV_PASSWORD")
+                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
     let pool = PgPoolOptions::new()
@@ -145,7 +146,8 @@ async fn test_github_webhook_signature() {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
+            std::env::var("STORMCHASER_DEV_PASSWORD")
+                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
     let pool = PgPoolOptions::new()
