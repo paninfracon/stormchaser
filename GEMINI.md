@@ -135,6 +135,7 @@ The project is divided into specialized crates to ensure a clear separation of c
 - **Snapshot Updates**: When intentional UI changes occur, use `INSTA_UPDATE=always cargo test` to update snapshots.
 - **Test Isolation**: Ensure tests do not write to real user configuration or cache directories. Always use `tempfile` or override path fields in the `App` instance during testing.
 - **UI Regression Suspicion**: Be highly suspicious if a code change that should be independent of the UI (e.g., changes in `model`, `parsing`, or `discovery`) causes a UI test or snapshot failure. Investigate whether the change inadvertently altered data structures or logic that the UI relies on before blindly updating snapshots.
+- **Test stability**: Do NOT fix test errors by removing parts of the tests as that removes critical validation of the project
 
 ### 3. Technical Integrity
 
