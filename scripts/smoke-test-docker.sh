@@ -101,7 +101,7 @@ echo -e "${BLUE}>>> Workflow started with ID: $RUN_ID${NC}"
 # Poll for completion
 STATUS="started"
 for i in {1..30}; do
-    STATUS_JSON=$(cargo run -q -p stormchaser-cli -- --url "$API_URL" --token "$TOKEN" runs get "$RUN_ID")
+    STATUS_JSON=$(cargo run -q -p stormchaser-cli -- --url "$API_URL" --token "$TOKEN" runs get "$RUN_ID" || echo "{}")
     # Using grep instead of jq to avoid depending on jq
     if echo "$STATUS_JSON" | grep -q '"status": "succeeded"'; then
         STATUS="succeeded"

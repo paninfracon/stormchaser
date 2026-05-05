@@ -39,22 +39,22 @@ export AWS_SECRET_ACCESS_KEY="$STORMCHASER_MINIO_PASSWORD"
 export AWS_DEFAULT_REGION="us-east-1"
 
 # Ensure bucket exists
-aws --endpoint-url "http://localhost:9000" s3 mb "s3://stormchaser-sfs" 2>/dev/null || true
+aws --endpoint-url "http://localhost:${PORT_S3:-9000}" s3 mb "s3://stormchaser-sfs" 2>/dev/null || true
 
 # Make bucket public for the download provisioner test
-aws --endpoint-url "http://localhost:9000" s3api put-bucket-policy --bucket stormchaser-sfs --policy '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":["s3:GetObject"],"Resource":["arn:aws:s3:::stormchaser-sfs/*"]}]}'
+aws --endpoint-url "http://localhost:${PORT_S3:-9000}" s3api put-bucket-policy --bucket stormchaser-sfs --policy '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":["s3:GetObject"],"Resource":["arn:aws:s3:::stormchaser-sfs/*"]}]}'
 
 # Upload the file
-aws --endpoint-url "http://localhost:9000" s3 cp "$TEMP_TAR" "s3://stormchaser-sfs/dogfood/repo.tar.gz"
+aws --endpoint-url "http://localhost:${PORT_S3:-9000}" s3 cp "$TEMP_TAR" "s3://stormchaser-sfs/dogfood/repo.tar.gz"
 
 # Internal URL for the runner
-REPO_URL="http://$HOST_IP:9000/stormchaser-sfs/dogfood/repo.tar.gz"
+REPO_URL="http://$HOST_IP:${PORT_S3:-9000}/stormchaser-sfs/dogfood/repo.tar.gz"
 
 # 4. Launch Workflow via API
 echo -e "${BLUE}>>> Launching dogfood workflow...${NC}"
 
 wait_for_api() {
-    local url="http://localhost:3000/healthz"
+    local url="http://localhost:${PORT_API:-3000}/healthz"
     local timeout=60
     local count=0
     until curl -s "$url" > /dev/null; do
@@ -108,7 +108,7 @@ INPUTS=$(jq -n --arg url "$REPO_URL" --arg ip "$HOST_IP" --arg kubeconfig "$KUBE
   "port_opa": $port_opa
 }')
 
-LAUNCH_RESP=$(curl -v -X POST "http://localhost:3000/api/v1/runs/direct" \
+LAUNCH_RESP=$(curl -v -X POST "http://localhost:${PORT_API:-3000}/api/v1/runs/direct" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d "$(jq -n --arg dsl "$DSL_CONTENT" --argjson inputs "$INPUTS" \

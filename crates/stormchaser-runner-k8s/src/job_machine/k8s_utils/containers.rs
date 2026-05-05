@@ -45,6 +45,7 @@ pub(crate) fn build_k8s_containers(
                         init_containers.push(Container {
                             name: normalize_resource_name(&mount.name, "unpark"),
                             image: Some(agent_image.clone().unwrap_or_else(|| "alpine:latest".to_string())),
+                            image_pull_policy: agent_image.as_ref().and_then(|img| if img.contains("stormchaser-agent") { Some("IfNotPresent".to_string()) } else { None }),
                             command: Some(vec!["/bin/sh".to_string()]),
                             args: Some(vec![
                                 "-c".to_string(),
@@ -78,6 +79,7 @@ pub(crate) fn build_k8s_containers(
                             init_containers.push(Container {
                                 name: format!("{}-{}", normalize_resource_name(&mount.name, "prov"), prov_idx),
                                 image: Some(agent_image.clone().unwrap_or_else(|| "alpine:latest".to_string())),
+                            image_pull_policy: agent_image.as_ref().and_then(|img| if img.contains("stormchaser-agent") { Some("IfNotPresent".to_string()) } else { None }),
                                 command: Some(vec!["/bin/sh".to_string()]),
                                 args: Some(vec![
                                     "-c".to_string(),
