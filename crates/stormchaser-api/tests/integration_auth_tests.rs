@@ -96,13 +96,7 @@ async fn setup_app(mock_server_url: String) -> Option<axum::Router> {
     let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = async_nats::connect(nats_url).await.ok()?;
 
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        dotenvy::dotenv().ok();
-        format!(
-            "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
-        )
-    });
+    let db_url = std::env::var("DATABASE_URL").unwrap();
     let pool = PgPoolOptions::new().connect(&db_url).await.ok()?;
 
     Some(app(AppState {
@@ -311,13 +305,7 @@ async fn test_auth_refresh_success() {
 async fn test_auth_exchange_network_error() {
     let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        dotenvy::dotenv().ok();
-        format!(
-            "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
-        )
-    });
+    let db_url = std::env::var("DATABASE_URL").unwrap();
     let pool = PgPoolOptions::new().connect(&db_url).await.unwrap();
     let app = stormchaser_api::app(AppState {
         pool,
@@ -621,13 +609,7 @@ async fn test_auth_exchange_invalid_signature() {
 async fn test_auth_refresh_network_error() {
     let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        dotenvy::dotenv().ok();
-        format!(
-            "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
-        )
-    });
+    let db_url = std::env::var("DATABASE_URL").unwrap();
     let pool = PgPoolOptions::new().connect(&db_url).await.unwrap();
     let app = stormchaser_api::app(AppState {
         pool,
