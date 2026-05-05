@@ -84,3 +84,4 @@ rustls = { version = "0.23", features = ["ring"] }
 quick-xml = { version = "0.37", features = ["serialize"] }
 tar = "0.4"
 flate2 = "1.0"
+jsonschema = { version = "0.46", default-features = false }

@@ -101,7 +101,13 @@ echo -e "${BLUE}>>> Workflow started with ID: $RUN_ID${NC}"
 # Poll for completion
 STATUS="started"
 for i in {1..30}; do
-    STATUS_JSON=$(cargo run -q -p stormchaser-cli -- --url "$API_URL" --token "$TOKEN" runs get "$RUN_ID" || echo "{}")
+    STATUS_JSON=$(cargo run -q -p stormchaser-cli -- --url "$API_URL" --token "$TOKEN" runs get "$RUN_ID" 2>&1)
+    CLI_EXIT=$?
+    if [ $CLI_EXIT -ne 0 ]; then
+        echo -e "${RED}>>> 'runs get' command failed (exit $CLI_EXIT):${NC}"
+        echo "$STATUS_JSON"
+        exit 1
+    fi
     # Using grep instead of jq to avoid depending on jq
     if echo "$STATUS_JSON" | grep -q '"status": "succeeded"'; then
         STATUS="succeeded"

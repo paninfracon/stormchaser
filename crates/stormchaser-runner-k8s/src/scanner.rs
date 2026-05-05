@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
+use cloudevents::EventBuilder;
 use k8s_openapi::api::batch::v1::Job;
 use kube::{
     api::{Api, ListParams},
@@ -15,6 +16,23 @@ use stormchaser_model::dsl;
 
 use crate::cluster::ClusterPool;
 use crate::job_machine;
+
+/// Builds a serialized CloudEvent payload for use with basic NATS `request`.
+fn build_cloudevent_payload(
+    event_type: &str,
+    source: &str,
+    data: Value,
+) -> anyhow::Result<Vec<u8>> {
+    let event = cloudevents::EventBuilderV10::new()
+        .id(Uuid::new_v4().to_string())
+        .ty(event_type)
+        .source(source)
+        .time(chrono::Utc::now())
+        .data("application/json", data)
+        .build()
+        .map_err(|e| anyhow::anyhow!("Failed to build CloudEvent: {}", e))?;
+    Ok(serde_json::to_vec(&event)?)
+}
 
 pub fn reconstruct_step(
     job_name: &str,
@@ -133,20 +151,43 @@ pub async fn scan_for_orphans(
 
                 tokio::spawn(async move {
                     // Before adopting, query the orchestrator to see if this step is still relevant
-                    let query_payload = json!({
-                        "step_id": step_id,
-                    });
+                    let query_data = json!({ "step_id": step_id });
+                    let query_ce_payload = match build_cloudevent_payload(
+                        "stormchaser.v1.step.query",
+                        "/stormchaser",
+                        query_data,
+                    ) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            error!("Failed to build step query CloudEvent: {:?}", e);
+                            return;
+                        }
+                    };
 
                     match nats
-                        .request(
-                            "stormchaser.v1.step.query",
-                            query_payload.to_string().into(),
-                        )
+                        .request("stormchaser.v1.step.query", query_ce_payload.into())
                         .await
                     {
                         Ok(reply) => {
-                            let response: Value =
-                                serde_json::from_slice(&reply.payload).unwrap_or_default();
+                            let ce: cloudevents::Event = match serde_json::from_slice(
+                                &reply.payload,
+                            ) {
+                                Ok(e) => e,
+                                Err(e) => {
+                                    error!(
+                                        "Failed to parse step query response as CloudEvent: {:?}",
+                                        e
+                                    );
+                                    return;
+                                }
+                            };
+                            let response: Value = match ce.data() {
+                                Some(cloudevents::Data::Json(v)) => v.clone(),
+                                _ => {
+                                    error!("Step query response CloudEvent has no JSON data");
+                                    return;
+                                }
+                            };
                             let status = response["status"].as_str().unwrap_or_default();
                             let exists = response["exists"].as_bool().unwrap_or(false);
 

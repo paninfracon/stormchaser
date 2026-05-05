@@ -9,7 +9,7 @@ Stormchaser utilizes **NATS JetStream** as its central nervous system. Every sta
 To ensure stability and interoperability, Stormchaser's eventing system adheres to two major standards:
 
 1. **CloudEvents**: All messages are wrapped in a standard [CloudEvents](https://cloudevents.io/) envelope.
-2. **JSON Schema**: The internal `data` payload of every CloudEvent is strictly validated against a versioned JSON Schema.
+2. **JSON Schema**: The internal `data` payload of every CloudEvent is described by a versioned JSON Schema, exported in the `schemas/` directory. Schema validation is enforced at the subscriber level: if a published schema is available and an incoming payload does not conform to it, the message is rejected and the mismatch is logged. If no schema is available for a given event type, the payload is accepted permissively.
 
 ## Connecting and Consuming Events
 
@@ -18,12 +18,22 @@ To ensure stability and interoperability, Stormchaser's eventing system adheres 
 Stormchaser uses subject-based routing with version tokens. This allows you to filter exactly what events your application receives without parsing the payloads.
 
 **Pattern:** `stormchaser.<version>.<domain>.<action>`
-**Example:** `stormchaser.v1.run.completed`
+**Example:** `stormchaser.v1.run.queued`
 
 You can use NATS wildcards to listen to broader categories:
 
-* `stormchaser.v1.run.>` : Listen to all workflow run events (queued, running, completed, failed, aborted).
-* `stormchaser.v1.step.>` : Listen to all step events.
+* `stormchaser.v1.run.>` : Listen to all workflow run events. Currently published subjects:
+  - `stormchaser.v1.run.queued` — A workflow run was submitted.
+  - `stormchaser.v1.run.direct` — A run started from an inline DSL payload.
+  - `stormchaser.v1.run.start_pending` — The engine is preparing to start a run.
+  - `stormchaser.v1.run.aborted` — A run was aborted (e.g. timeout).
+* `stormchaser.v1.step.>` : Listen to all step events. Currently published subjects:
+  - `stormchaser.v1.step.scheduled.<type>` — A step was dispatched to a runner (e.g. `stormchaser.v1.step.scheduled.runcontainer`).
+  - `stormchaser.v1.step.running` — A runner has picked up the step.
+  - `stormchaser.v1.step.completed` — A step finished successfully.
+  - `stormchaser.v1.step.failed` — A step failed.
+* `stormchaser.v1.runner.>` : Listen to runner lifecycle events.
+  - `stormchaser.v1.runner.register` — A runner has registered with the engine.
 
 ### The Message Payload
 
@@ -34,12 +44,12 @@ When your application receives a message, it will be a JSON-serialized CloudEven
   "specversion": "1.0",
   "id": "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d",
   "source": "/stormchaser",
-  "type": "stormchaser.v1.run.completed",
+  "type": "stormchaser.v1.run.queued",
   "time": "2026-05-04T12:00:00Z",
   "datacontenttype": "application/json",
   "data": {
     "run_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
-    "event_type": "workflow_completed",
+    "event_type": "stormchaser.v1.run.queued",
     "timestamp": "2026-05-04T12:00:00Z"
   }
 }
@@ -65,18 +75,18 @@ This provides immediate access to:
 
 ```rust
 use cloudevents::Event;
-use stormchaser_model::events::WorkflowCompletedEvent;
+use stormchaser_model::events::WorkflowQueuedEvent;
 use futures::StreamExt;
 
-// Assuming `subscriber` is an async_nats::Subscriber listening to "stormchaser.v1.run.completed"
+// Assuming `subscriber` is an async_nats::Subscriber listening to "stormchaser.v1.run.queued"
 while let Some(msg) = subscriber.next().await {
     // 1. Unwrap the CloudEvent envelope
     let ce: Event = serde_json::from_slice(&msg.payload)?;
 
     // 2. Extract and deserialize the strong type
     if let Some(cloudevents::Data::Json(v)) = ce.data() {
-        let event: WorkflowCompletedEvent = serde_json::from_value(v.clone())?;
-        println!("Workflow {} completed!", event.run_id);
+        let event: WorkflowQueuedEvent = serde_json::from_value(v.clone())?;
+        println!("Workflow {} queued!", event.run_id);
     }
 }
 ```

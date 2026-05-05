@@ -259,6 +259,25 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
 
     info!("Engine listening for events and queries");
 
+    // Build subject → schema type map for CloudEvent payload validation.
+    // Validation is permissive when a schema is not found for a subject.
+    let event_schemas = stormchaser_model::schema_gen::generate_event_schemas();
+    let subject_schema_map: std::collections::HashMap<&str, &str> = [
+        ("stormchaser.v1.run.queued", "WorkflowQueuedEvent"),
+        (
+            "stormchaser.v1.run.start_pending",
+            "WorkflowStartPendingEvent",
+        ),
+        ("stormchaser.v1.runner.register", "RunnerRegisterEvent"),
+        ("stormchaser.v1.runner.heartbeat", "RunnerHeartbeatEvent"),
+        ("stormchaser.v1.runner.offline", "RunnerOfflineEvent"),
+        ("stormchaser.v1.step.running", "StepRunningEvent"),
+        ("stormchaser.v1.step.completed", "StepCompletedEvent"),
+        ("stormchaser.v1.step.failed", "StepFailedEvent"),
+    ]
+    .into_iter()
+    .collect();
+
     loop {
         tokio::select! {
             message = messages.next() => {
@@ -295,6 +314,19 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
                             continue;
                         };
 
+                        // Validate payload against schema when one is available.
+                        let schema = subject_schema_map
+                            .get(subject.as_str())
+                            .and_then(|name| event_schemas.get(*name));
+                        if let Err(e) = stormchaser_model::nats::validate_against_schema(&payload, schema) {
+                            tracing::error!(
+                                "Rejecting CloudEvent on {}: schema validation failed: {}",
+                                subject,
+                                e
+                            );
+                            let _ = message.ack().await;
+                            continue;
+                        }
 
                         handle_message(
                             subject.as_str(),

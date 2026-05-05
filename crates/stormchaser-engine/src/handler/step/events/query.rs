@@ -20,9 +20,12 @@ pub async fn handle_step_query(
 
     if let Some(reply_subject) = reply {
         let response = if let Some(s) = step {
+            let status_str = serde_json::to_value(&s.status)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_string));
             stormchaser_model::events::StepQueryResponseEvent {
                 step_id,
-                status: Some(format!("{:?}", s.status)),
+                status: status_str,
                 exists: true,
             }
         } else {

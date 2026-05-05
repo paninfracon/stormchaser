@@ -399,9 +399,20 @@ impl DockerContainerMachine<state::Initialized> {
     }
 
     async fn pull_image(&self, image: &str) -> Result<()> {
-        let (from_image, tag) = match image.rsplit_once(':') {
-            Some((repo, t)) if !t.contains('/') => (repo, t),
-            _ => (image, "latest"),
+        // Parse image reference robustly:
+        // - Digest-pinned: `repo@sha256:...` → from_image=full ref, tag=""
+        // - Tagged:        `repo:tag`         → from_image=repo, tag=tag
+        // - Bare:          `repo`             → from_image=repo, tag="latest"
+        let (from_image, tag) = if image.contains('@') {
+            // Digest reference — pass the full string and let Docker handle it
+            (image, "")
+        } else {
+            match image.rsplit_once(':') {
+                // Only treat it as a tag if the part after `:` contains no `/`
+                // (to avoid splitting registry hosts like `registry.example.com:5000/repo`)
+                Some((repo, t)) if !t.contains('/') => (repo, t),
+                _ => (image, "latest"),
+            }
         };
 
         let mut pull_stream = self.docker.create_image(

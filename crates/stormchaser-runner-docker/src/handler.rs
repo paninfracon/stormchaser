@@ -4,6 +4,7 @@ use anyhow::Result;
 use async_nats::jetstream::message::{AckKind, Message};
 use bollard::container::ListContainersOptions;
 use bollard::Docker;
+use cloudevents::EventBuilder;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -18,6 +19,24 @@ async fn term_message(msg: &Message, reason: &str) {
     if let Err(e) = msg.ack_with(AckKind::Term).await {
         error!("Failed to send Term ack: {:?}", e);
     }
+}
+
+/// Builds a serialized CloudEvent payload for use with basic NATS `request`.
+fn build_cloudevent_payload(
+    event_type: &str,
+    source: &str,
+    data: Value,
+) -> anyhow::Result<bytes::Bytes> {
+    let event = cloudevents::EventBuilderV10::new()
+        .id(Uuid::new_v4().to_string())
+        .ty(event_type)
+        .source(source)
+        .time(chrono::Utc::now())
+        .data("application/json", data)
+        .build()
+        .map_err(|e| anyhow::anyhow!("Failed to build CloudEvent: {}", e))?;
+    let payload = serde_json::to_string(&event)?;
+    Ok(payload.into())
 }
 
 /// Scans Docker for containers labeled as managed by Stormchaser but not actively tracked.
@@ -100,20 +119,41 @@ pub async fn scan_for_orphans(
 
             tokio::spawn(async move {
                 // Before adopting, query the orchestrator to see if this step is still relevant
-                let query_payload = json!({
-                    "step_id": step_id,
-                });
+                let query_data = json!({ "step_id": step_id });
+                let query_ce_payload = match build_cloudevent_payload(
+                    "stormchaser.v1.step.query",
+                    "/stormchaser",
+                    query_data,
+                ) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        error!("Failed to build step query CloudEvent: {:?}", e);
+                        return;
+                    }
+                };
 
                 match nats
-                    .request(
-                        "stormchaser.v1.step.query",
-                        query_payload.to_string().into(),
-                    )
+                    .request("stormchaser.v1.step.query", query_ce_payload)
                     .await
                 {
                     Ok(reply) => {
-                        let response: Value =
-                            serde_json::from_slice(&reply.payload).unwrap_or_default();
+                        let ce: cloudevents::Event = match serde_json::from_slice(&reply.payload) {
+                            Ok(e) => e,
+                            Err(e) => {
+                                error!(
+                                    "Failed to parse step query response as CloudEvent: {:?}",
+                                    e
+                                );
+                                return;
+                            }
+                        };
+                        let response: Value = match ce.data() {
+                            Some(cloudevents::Data::Json(v)) => v.clone(),
+                            _ => {
+                                error!("Step query response CloudEvent has no JSON data");
+                                return;
+                            }
+                        };
                         let status = response["status"].as_str().unwrap_or_default();
                         let exists = response["exists"].as_bool().unwrap_or(false);
 
@@ -235,7 +275,10 @@ pub async fn handle_task(
         Err(e) => {
             term_message(
                 &msg,
-                &format!("Failed to deserialize CloudEvent from task message: {:?}", e),
+                &format!(
+                    "Failed to deserialize CloudEvent from task message: {:?}",
+                    e
+                ),
             )
             .await;
             return;
@@ -287,9 +330,7 @@ pub async fn handle_task(
     let in_progress_handle = tokio::spawn(async move {
         loop {
             sleep(Duration::from_secs(15)).await;
-            let _ = in_progress_msg
-                .ack_with(AckKind::Progress)
-                .await;
+            let _ = in_progress_msg.ack_with(AckKind::Progress).await;
         }
     });
 
