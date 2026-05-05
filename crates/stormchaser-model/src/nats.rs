@@ -4,7 +4,7 @@ use async_nats::HeaderMap;
 use cloudevents::{AttributesReader, EventBuilder, EventBuilderV10};
 use schemars::schema::RootSchema;
 use serde_json::Value;
-use tracing::{error, warn};
+use tracing::error;
 
 /// Validates a JSON value against a compiled JSON Schema.
 ///
@@ -52,8 +52,8 @@ pub fn extract_and_validate(
 
     if let Some(s) = schema {
         if let Err(e) = validate_against_schema(&data, Some(s)) {
-            warn!(
-                "Permissive schema mismatch for event type '{}': {}",
+            tracing::error!(
+                "Rejecting CloudEvent data for event type '{}': schema mismatch: {}",
                 event.ty(),
                 e
             );
