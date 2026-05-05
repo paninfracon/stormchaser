@@ -1,6 +1,7 @@
 use crate::container_machine::{ContainerMetadata, ContainerState, DockerContainerMachine};
 use crate::parsing::{parse_step_from_docker_labels, parse_step_from_nats_payload};
 use anyhow::Result;
+use async_nats::jetstream::message::{AckKind, Message};
 use bollard::container::ListContainersOptions;
 use bollard::Docker;
 use serde_json::{json, Value};
@@ -9,6 +10,15 @@ use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{error, info, warn};
 use uuid::Uuid;
+
+/// Terminates a JetStream message that cannot be processed, preventing redelivery loops.
+/// Logs the provided reason before sending the `Term` acknowledgement.
+async fn term_message(msg: &Message, reason: &str) {
+    error!("{}", reason);
+    if let Err(e) = msg.ack_with(AckKind::Term).await {
+        error!("Failed to send Term ack: {:?}", e);
+    }
+}
 
 /// Scans Docker for containers labeled as managed by Stormchaser but not actively tracked.
 /// If a step is no longer relevant to the orchestrator, it is cleaned up.
@@ -223,35 +233,47 @@ pub async fn handle_task(
     let ce: cloudevents::Event = match serde_json::from_slice(&msg.payload) {
         Ok(event) => event,
         Err(e) => {
-            error!("Failed to deserialize CloudEvent from task message: {:?}", e);
-            let _ = msg
-                .ack_with(async_nats::jetstream::message::AckKind::Term)
-                .await;
+            term_message(
+                &msg,
+                &format!("Failed to deserialize CloudEvent from task message: {:?}", e),
+            )
+            .await;
             return;
         }
     };
     let payload: Value = match ce.data() {
         Some(cloudevents::Data::Json(v)) => v.clone(),
         _ => {
-            error!("Task message CloudEvent does not contain JSON data");
-            let _ = msg
-                .ack_with(async_nats::jetstream::message::AckKind::Term)
-                .await;
+            term_message(&msg, "Task message CloudEvent does not contain JSON data").await;
             return;
         }
     };
-    let run_id_str = payload["run_id"].as_str().unwrap_or_default();
-    let run_id = Uuid::parse_str(run_id_str).unwrap_or_default();
-    let step_id_str = payload["step_id"].as_str().unwrap_or_default();
-    let step_id = Uuid::parse_str(step_id_str).unwrap_or_default();
+
+    let run_id = match payload["run_id"]
+        .as_str()
+        .and_then(|s| Uuid::parse_str(s).ok())
+    {
+        Some(id) => id,
+        None => {
+            term_message(&msg, "Task message missing or invalid run_id").await;
+            return;
+        }
+    };
+    let step_id = match payload["step_id"]
+        .as_str()
+        .and_then(|s| Uuid::parse_str(s).ok())
+    {
+        Some(id) => id,
+        None => {
+            term_message(&msg, "Task message missing or invalid step_id").await;
+            return;
+        }
+    };
 
     let step_dsl = match parse_step_from_nats_payload(&payload) {
         Ok(step) => step,
         Err(e) => {
-            error!("Failed to parse step spec: {:?}", e);
-            let _ = msg
-                .ack_with(async_nats::jetstream::message::AckKind::Term)
-                .await;
+            term_message(&msg, &format!("Failed to parse step spec: {:?}", e)).await;
             return;
         }
     };
@@ -266,7 +288,7 @@ pub async fn handle_task(
         loop {
             sleep(Duration::from_secs(15)).await;
             let _ = in_progress_msg
-                .ack_with(async_nats::jetstream::message::AckKind::Progress)
+                .ack_with(AckKind::Progress)
                 .await;
         }
     });
