@@ -7,6 +7,7 @@ use bollard::image::CreateImageOptions;
 use bollard::service::{HostConfig, Mount, MountTypeEnum};
 use bollard::volume::CreateVolumeOptions;
 use chrono::Utc;
+use cloudevents::EventBuilder;
 use futures::StreamExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -101,12 +102,23 @@ impl DockerContainerMachine<state::Initialized> {
                                         "status": "unpacking_sfs",
                                         "timestamp": chrono::Utc::now(),
                                     });
-                                    let _ = nats
-                                        .publish(
-                                            "stormchaser.step.unpacking_sfs",
-                                            unpacking_event.to_string().into(),
-                                        )
-                                        .await;
+                                    if let Ok(ce) = cloudevents::EventBuilderV10::new()
+                                        .id(uuid::Uuid::new_v4().to_string())
+                                        .ty("stormchaser.v1.step.unpacking_sfs")
+                                        .source("/stormchaser/runner")
+                                        .time(chrono::Utc::now())
+                                        .data("application/json", unpacking_event)
+                                        .build()
+                                    {
+                                        if let Ok(payload_bytes) = serde_json::to_vec(&ce) {
+                                            let _ = nats
+                                                .publish(
+                                                    "stormchaser.v1.step.unpacking_sfs",
+                                                    payload_bytes.into(),
+                                                )
+                                                .await;
+                                        }
+                                    }
                                 }
                                 self.unpark_storage(
                                     &volume_name,
@@ -137,12 +149,23 @@ impl DockerContainerMachine<state::Initialized> {
                                             "status": "unpacking_sfs",
                                             "timestamp": chrono::Utc::now(),
                                         });
-                                        let _ = nats
-                                            .publish(
-                                                "stormchaser.step.unpacking_sfs",
-                                                unpacking_event.to_string().into(),
-                                            )
-                                            .await;
+                                        if let Ok(ce) = cloudevents::EventBuilderV10::new()
+                                            .id(uuid::Uuid::new_v4().to_string())
+                                            .ty("stormchaser.v1.step.unpacking_sfs")
+                                            .source("/stormchaser/runner")
+                                            .time(chrono::Utc::now())
+                                            .data("application/json", unpacking_event)
+                                            .build()
+                                        {
+                                            if let Ok(payload_bytes) = serde_json::to_vec(&ce) {
+                                                let _ = nats
+                                                    .publish(
+                                                        "stormchaser.v1.step.unpacking_sfs",
+                                                        payload_bytes.into(),
+                                                    )
+                                                    .await;
+                                            }
+                                        }
                                     }
                                     let mut full_dest = PathBuf::from(&mount.mount_path);
                                     if dest != "/" && !dest.is_empty() {
@@ -223,15 +246,22 @@ impl DockerContainerMachine<state::Initialized> {
             .await?;
 
         if let Some(nats) = &self.nats {
-            let running_event = serde_json::json!({
-                "run_id": self.metadata.run_id,
-                "step_id": self.metadata.step_id,
-                "status": "running",
-                "timestamp": chrono::Utc::now(),
-            });
-            let _ = nats
-                .publish("stormchaser.step.running", running_event.to_string().into())
-                .await;
+            let running_event = stormchaser_model::events::StepRunningEvent {
+                run_id: self.metadata.run_id,
+                step_id: self.metadata.step_id,
+                event_type: "stormchaser.v1.step.running".to_string(),
+                timestamp: chrono::Utc::now(),
+            };
+            let _ = stormchaser_model::nats::publish_cloudevent(
+                &async_nats::jetstream::new(nats.clone()),
+                "stormchaser.v1.step.running",
+                "stormchaser.v1.step.running",
+                "/stormchaser",
+                serde_json::to_value(running_event).unwrap(),
+                Some("1.0"),
+                None,
+            )
+            .await;
         }
 
         Ok(StartResult::Running(DockerContainerMachine {
@@ -369,9 +399,26 @@ impl DockerContainerMachine<state::Initialized> {
     }
 
     async fn pull_image(&self, image: &str) -> Result<()> {
+        // Parse image reference robustly:
+        // - Digest-pinned: `repo@sha256:...` → from_image=full ref, tag=""
+        // - Tagged:        `repo:tag`         → from_image=repo, tag=tag
+        // - Bare:          `repo`             → from_image=repo, tag="latest"
+        let (from_image, tag) = if image.contains('@') {
+            // Digest reference — pass the full string and let Docker handle it
+            (image, "")
+        } else {
+            match image.rsplit_once(':') {
+                // Only treat it as a tag if the part after `:` contains no `/`
+                // (to avoid splitting registry hosts like `registry.example.com:5000/repo`)
+                Some((repo, t)) if !t.contains('/') => (repo, t),
+                _ => (image, "latest"),
+            }
+        };
+
         let mut pull_stream = self.docker.create_image(
             Some(CreateImageOptions {
-                from_image: image.to_string(),
+                from_image: from_image.to_string(),
+                tag: tag.to_string(),
                 ..Default::default()
             }),
             None,

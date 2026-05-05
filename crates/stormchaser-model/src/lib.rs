@@ -13,14 +13,20 @@ pub mod dsl;
 pub mod event;
 /// Rule-based trigger definitions for events.
 pub mod event_rules;
+/// Event schemas for CloudEvents.
+pub mod events;
 /// HCL expression evaluation models.
 pub mod hcl_eval;
 /// Logging configuration and log streaming types.
 pub mod logging;
+/// NATS helpers.
+pub mod nats;
 /// Outbox pattern models for reliable message publishing.
 pub mod outbox;
 /// Execution runner definitions and status models.
 pub mod runner;
+/// Schema cache for OCI schemas.
+pub mod schema_cache;
 /// Schema generation functions.
 pub mod schema_gen;
 /// Workflow step execution models and state.

@@ -13,11 +13,16 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 async fn setup_db() -> sqlx::PgPool {
+    std::env::set_var("API_RATE_LIMIT_PER_SECOND", "1000");
+    std::env::set_var("API_RATE_LIMIT_BURST_SIZE", "1000");
+    std::env::set_var("CRON_ENGINE", "none");
+
     let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
+            std::env::var("STORMCHASER_DEV_PASSWORD")
+                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
     PgPoolOptions::new()
@@ -83,11 +88,18 @@ async fn test_api_enqueue_inserts_quotas() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
-
+    let status = response.status();
     let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
         .await
         .unwrap();
+
+    if status != StatusCode::OK {
+        panic!(
+            "API request failed with status {}: {}",
+            status,
+            String::from_utf8_lossy(&body)
+        );
+    }
     let resp_data: EnqueueResponse = serde_json::from_slice(&body).unwrap();
     let run_id = resp_data.run_id;
 

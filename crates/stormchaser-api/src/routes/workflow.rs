@@ -96,17 +96,26 @@ pub async fn enqueue_workflow(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // Publish to NATS
-    let event = serde_json::json!({
-        "run_id": run_id,
-        "event_type": "workflow_queued",
-        "timestamp": chrono::Utc::now(),
-    });
+    let event = stormchaser_model::events::WorkflowQueuedEvent {
+        run_id,
+        event_type: "workflow_queued".to_string(),
+        timestamp: chrono::Utc::now(),
+        dsl: None,
+        inputs: None,
+        initiating_user: None,
+    };
 
-    state
-        .nats
-        .publish("stormchaser.run.queued", event.to_string().into())
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    stormchaser_model::nats::publish_cloudevent(
+        &async_nats::jetstream::new(state.nats.clone()),
+        "stormchaser.v1.run.queued",
+        "stormchaser.v1.run.queued",
+        "/stormchaser/api",
+        serde_json::to_value(event).unwrap(),
+        Some("1.0"),
+        None,
+    )
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     RUNS_ENQUEUED.add(
         1,
@@ -327,18 +336,38 @@ pub async fn direct_run(
     span.record("initiating_user", tracing::field::display(&user_id));
 
     // Publish to NATS stormchaser.run.direct
-    let event = serde_json::json!({
+    let payload_json = serde_json::json!({
         "run_id": run_id,
         "dsl": payload.dsl,
         "initiating_user": user_id,
         "inputs": payload.inputs,
     });
 
+    use cloudevents::{EventBuilder, EventBuilderV10};
+    let event = EventBuilderV10::new()
+        .id(uuid::Uuid::new_v4().to_string())
+        .ty("stormchaser.v1.run.direct")
+        .source("/stormchaser/api")
+        .time(chrono::Utc::now())
+        .data("application/json", payload_json)
+        .build()
+        .map_err(|e| {
+            tracing::error!("Failed to build CloudEvent: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    let event_str = serde_json::to_string(&event).unwrap_or_default();
+    let mut headers = async_nats::HeaderMap::new();
+    headers.insert("Content-Type", "application/cloudevents+json");
+
     state
         .nats
-        .publish("stormchaser.run.direct", event.to_string().into())
+        .publish_with_headers("stormchaser.v1.run.direct", headers, event_str.into())
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|e| {
+            tracing::error!("Failed to publish CloudEvent: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     Ok(Json(EnqueueResponse {
         run_id,
@@ -373,7 +402,7 @@ pub async fn stream_workflow_runs_api(
     let pool = state.pool.clone();
 
     tokio::spawn(async move {
-        let mut subscriber = match nats.subscribe("stormchaser.run.>").await {
+        let mut subscriber = match nats.subscribe("stormchaser.v1.run.>").await {
             Ok(sub) => sub,
             Err(e) => {
                 tracing::error!("Failed to subscribe to NATS for workflow runs: {:?}", e);
@@ -382,9 +411,14 @@ pub async fn stream_workflow_runs_api(
         };
 
         while let Some(msg) = subscriber.next().await {
-            let payload: Value = match serde_json::from_slice(&msg.payload) {
-                Ok(p) => p,
+            let ce: cloudevents::Event = match serde_json::from_slice(&msg.payload) {
+                Ok(e) => e,
                 Err(_) => continue,
+            };
+            let payload: Value = if let Some(cloudevents::Data::Json(v)) = ce.data() {
+                v.clone()
+            } else {
+                continue;
             };
 
             if let Some(run_id_str) = payload.get("run_id").and_then(|id| id.as_str()) {

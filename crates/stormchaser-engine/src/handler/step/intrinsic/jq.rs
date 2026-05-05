@@ -157,22 +157,42 @@ pub async fn try_dispatch(
                         "timestamp": Utc::now(),
                     });
                     let js = async_nats::jetstream::new(nats_client);
-                    let _ = js
-                        .publish("stormchaser.step.completed", event.to_string().into())
-                        .await;
+                    let _ = stormchaser_model::nats::publish_cloudevent(
+                        &js,
+                        "stormchaser.v1.step.completed",
+                        "stormchaser.v1.step.completed",
+                        "/stormchaser",
+                        serde_json::to_value(event).unwrap(),
+                        Some("1.0"),
+                        None,
+                    )
+                    .await;
                 }
                 Err(e) => {
-                    let event = serde_json::json!({
-                        "run_id": run_id,
-                        "step_id": step_instance_id,
-                        "event_type": "step_failed",
-                        "error": format!("JQ execution failed: {:?}", e),
-                        "timestamp": Utc::now(),
-                    });
+                    let event = stormchaser_model::events::StepFailedEvent {
+                        run_id,
+                        step_id: step_instance_id,
+                        event_type: "stormchaser.v1.step.failed".to_string(),
+                        error: format!("JQ execution failed: {:?}", e),
+                        runner_id: None,
+                        exit_code: None,
+                        storage_hashes: None,
+                        artifacts: None,
+                        test_reports: None,
+                        outputs: None,
+                        timestamp: Utc::now(),
+                    };
                     let js = async_nats::jetstream::new(nats_client);
-                    let _ = js
-                        .publish("stormchaser.step.failed", event.to_string().into())
-                        .await;
+                    let _ = stormchaser_model::nats::publish_cloudevent(
+                        &js,
+                        "stormchaser.v1.step.failed",
+                        "stormchaser.v1.step.failed",
+                        "/stormchaser",
+                        serde_json::to_value(event).unwrap(),
+                        Some("1.0"),
+                        None,
+                    )
+                    .await;
                 }
             }
 

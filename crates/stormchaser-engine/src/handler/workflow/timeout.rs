@@ -93,15 +93,22 @@ pub async fn handle_workflow_timeout(
     tx.commit().await?;
 
     // 3. Publish abort event
-    let event = serde_json::json!({
-        "run_id": run_id,
-        "event_type": "workflow_aborted",
-        "reason": "timeout",
-        "timestamp": Utc::now(),
-    });
+    let event = stormchaser_model::events::WorkflowAbortedEvent {
+        run_id,
+        event_type: "workflow_aborted".to_string(),
+        timestamp: Utc::now(),
+    };
     let js = async_nats::jetstream::new(nats_client);
-    js.publish("stormchaser.run.aborted", event.to_string().into())
-        .await?;
+    stormchaser_model::nats::publish_cloudevent(
+        &js,
+        "stormchaser.v1.run.aborted",
+        "stormchaser.v1.run.aborted",
+        "/stormchaser",
+        serde_json::to_value(event).unwrap(),
+        Some("1.0"),
+        None,
+    )
+    .await?;
 
     // 4. Archive
     archive_workflow(run_id, pool).await?;

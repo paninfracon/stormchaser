@@ -85,7 +85,7 @@ The project is divided into specialized crates to ensure a clear separation of c
 - **Long Methods**: Don't create over long methods when they are not necessary, split them down into more focussed smaller methods.
 - **Long conditional branches**: In if, loop, switch, and other control structures factor out long conditional branches into method calls
 - **Duplicate code**: Avoid c+v style duplicate code, factor out similar methods to utility functions
-- **Security**: Avoid common security errors
+- **Security**: Avoid common security errors such as path traversal, sql injection, string concat etc
 - **Re-inventing the Wheel**: Before implementing any functional block ensure that there is not an existing crate for it; if there is prefer the existing crate
 - **Standard Dirs**: Use operating system standard directories for e.g. caches
 - **Anti-patterns**: Avoid standard anti-patterns like God Classes
@@ -103,6 +103,7 @@ The project is divided into specialized crates to ensure a clear separation of c
 - **Secret Management**: Never hardcode passwords, even for tests or development environments.
   - **WARNING - AI Test Environments**: NEVER modify or overwrite the `.env` file with static passwords (e.g. `STORMCHASER_DEV_PASSWORD=password`) to "fix" failing tests or coverage runs. This desynchronizes the Docker volumes from the expected credentials, causing cascading authentication failures across PostgreSQL and Dex. Always rely on the project's `./scripts/setup.sh` to generate and manage secure, random credentials.
   - **WARNING - SQL Offline**: Never inject `return;` into tests when `SQL_OFFLINE=true` is set. `SQL_OFFLINE` is an `sqlx` compiler flag, not a runtime bypass. Bypassing tests causes spurious passes.
+- **Strong Typing**: Never assemble data using string concat or low level (e.g. json types) objects, always define a struct and serialize it instead
 
 ### 5. UI/UX Guidelines
 
@@ -134,13 +135,14 @@ The project is divided into specialized crates to ensure a clear separation of c
 - **Snapshot Updates**: When intentional UI changes occur, use `INSTA_UPDATE=always cargo test` to update snapshots.
 - **Test Isolation**: Ensure tests do not write to real user configuration or cache directories. Always use `tempfile` or override path fields in the `App` instance during testing.
 - **UI Regression Suspicion**: Be highly suspicious if a code change that should be independent of the UI (e.g., changes in `model`, `parsing`, or `discovery`) causes a UI test or snapshot failure. Investigate whether the change inadvertently altered data structures or logic that the UI relies on before blindly updating snapshots.
+- **Test stability**: Do NOT fix test errors by removing parts of the tests as that removes critical validation of the project
 
 ### 3. Technical Integrity
 
 - **Empirical Verification**: Before applying a fix, always reproduce the bug with a new test case.
 - **Idiomatic Updates**: Ensure all changes (including tests, documentation, and types) are complete and follow local conventions. Do not take shortcuts to minimize tool calls.
 
-## Tech Stack Decisons
+## 4. Tech Stack Decisons
 
 - **TUI Framework**: `ratatui` (latest stable).
 - **Backend**: `crossterm`.
@@ -148,7 +150,7 @@ The project is divided into specialized crates to ensure a clear separation of c
 - **Graph Logic**: `petgraph`.
 - **Text Editing**: `ratatui-textarea`.
 
-## Rendering Mermaid Diagrams
+## 5. Rendering Mermaid Diagrams
 
 To render Mermaid diagrams using the `mermaid-cli` Docker image, you must pass the current user and group IDs to avoid permission issues (`EACCES`).
 
@@ -163,10 +165,15 @@ docker run --rm \
   -o /data/your_diagram.png
 ```
 
-## Git Commit Messages
+## 6. Git Commit Messages
 
 For non-trivial commit messages (those containing backticks, multiple lines, or complex characters), **always use a temporary file** instead of passing the message directly via `-m`. This avoids shell interpolation and escaping issues.
+Never commit to `trunk` branch without explict autorization
 
 ```bash
 git commit -F commit_msg.txt
 ```
+
+## 7. Privilage escalation
+
+When you need to use sudo for local privilage escalation, e.g. when cleaning up environments, use pkexec instead to get the desktop integration

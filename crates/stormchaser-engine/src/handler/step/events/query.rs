@@ -20,20 +20,31 @@ pub async fn handle_step_query(
 
     if let Some(reply_subject) = reply {
         let response = if let Some(s) = step {
-            serde_json::json!({
-                "step_id": step_id,
-                "status": s.status,
-                "exists": true
-            })
+            let status_str = serde_json::to_value(&s.status)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_string));
+            stormchaser_model::events::StepQueryResponseEvent {
+                step_id,
+                status: status_str,
+                exists: true,
+            }
         } else {
-            serde_json::json!({
-                "step_id": step_id,
-                "exists": false
-            })
+            stormchaser_model::events::StepQueryResponseEvent {
+                step_id,
+                status: None,
+                exists: false,
+            }
         };
-        nats_client
-            .publish(reply_subject, response.to_string().into())
-            .await?;
+        stormchaser_model::nats::publish_cloudevent(
+            &async_nats::jetstream::new(nats_client.clone()),
+            &reply_subject,
+            &reply_subject,
+            "/stormchaser",
+            serde_json::to_value(response).unwrap(),
+            Some("1.0"),
+            None,
+        )
+        .await?;
     }
 
     Ok(())

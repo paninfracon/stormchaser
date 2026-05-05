@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "WorkflowRunningEvent",
+  "type": "object",
+  "required": [
+    "event_type",
+    "run_id",
+    "timestamp"
+  ],
+  "properties": {
+    "event_type": {
+      "type": "string"
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

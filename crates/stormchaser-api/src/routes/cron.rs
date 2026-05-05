@@ -224,17 +224,26 @@ pub async fn trigger_cron_workflow(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // Publish to NATS
-    let event = serde_json::json!({
-        "run_id": run_id,
-        "event_type": "workflow_queued",
-        "timestamp": chrono::Utc::now(),
-    });
+    let event = stormchaser_model::events::WorkflowQueuedEvent {
+        run_id,
+        event_type: "workflow_queued".to_string(),
+        timestamp: chrono::Utc::now(),
+        dsl: None,
+        inputs: None,
+        initiating_user: None,
+    };
 
-    state
-        .nats
-        .publish("stormchaser.run.queued", event.to_string().into())
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    stormchaser_model::nats::publish_cloudevent(
+        &async_nats::jetstream::new(state.nats.clone()),
+        "stormchaser.v1.run.queued",
+        "stormchaser.v1.run.queued",
+        "/stormchaser",
+        serde_json::to_value(event).unwrap(),
+        Some("1.0"),
+        None,
+    )
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(EnqueueResponse {
         run_id,

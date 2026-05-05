@@ -1,7 +1,6 @@
 //! Stormchaser API implementation.
 //! This crate contains the REST API for the Stormchaser system.
 
-use std::collections::HashMap;
 /// Authentication and authorization module
 pub mod auth;
 /// Database access module
@@ -35,6 +34,7 @@ use utoipa::OpenApi;
 
 use routes::auth::*;
 use routes::cron::*;
+use routes::event_rule::*;
 use routes::step::*;
 use routes::storage::*;
 use routes::webhook::*;
@@ -70,9 +70,9 @@ pub use routes::*;
         routes::webhook::list_webhooks,
         routes::webhook::get_webhook,
         routes::webhook::delete_webhook,
-        routes::webhook::create_event_rule,
-        routes::webhook::list_event_rules,
-        routes::webhook::delete_event_rule,
+        routes::event_rule::create_event_rule,
+        routes::event_rule::list_event_rules,
+        routes::event_rule::delete_event_rule,
         routes::webhook::handle_webhook,
         routes::step::stream_step_logs_api,
         routes::step::get_step_logs_api,
@@ -105,6 +105,7 @@ pub use routes::*;
         (name = "cron", description = "Cron workflows"),
         (name = "storage", description = "Storage and artifacts"),
         (name = "webhook", description = "Webhooks and rules"),
+        (name = "event_rule", description = "Event rules"),
         (name = "step", description = "Step actions"),
         (name = "workflow", description = "Workflow actions")
     ),
@@ -118,27 +119,12 @@ pub struct ApiDoc;
 /// Counter metric for tracking the total number of enqueued workflow runs
 pub static RUNS_ENQUEUED: Lazy<Counter<u64>> = Lazy::new(|| {
     global::meter("stormchaser-api")
-        .u64_counter("stormchaser.runs_enqueued")
+        .u64_counter("stormchaser.v1.runs_enqueued")
         .with_description("Total number of runs enqueued")
         .build()
 });
 
 use tokio::sync::RwLock;
-
-/// Configuration for OIDC authentication
-#[derive(Clone)]
-pub struct OidcConfig {
-    /// OIDC issuer URL
-    pub issuer: String,
-    /// External issuer URL
-    pub external_issuer: String,
-    /// OIDC client ID
-    pub client_id: String,
-    /// OIDC client secret
-    pub client_secret: String,
-    /// URL to fetch JWKS
-    pub jwks_url: String,
-}
 
 /// Application state shared across routes
 #[derive(Clone)]
@@ -150,42 +136,11 @@ pub struct AppState {
     /// OPA authorizer
     pub opa: Arc<dyn OpaAuthorizer>,
     /// Optional OIDC configuration
-    pub oidc_config: Option<OidcConfig>,
+    pub oidc_config: Option<auth::jwks::OidcConfig>,
     /// JWKS cache for token validation
-    pub jwks: Arc<RwLock<HashMap<String, jsonwebtoken::jwk::Jwk>>>,
+    pub jwks: Arc<RwLock<auth::jwks::JwksCache>>,
     /// Optional backend for logging
     pub log_backend: Option<LogBackend>,
-}
-
-/// Fetches JSON Web Key Set (JWKS) from a specified URL
-pub async fn fetch_jwks(jwks_url: &str) -> HashMap<String, jsonwebtoken::jwk::Jwk> {
-    let mut jwks = HashMap::new();
-    let retry_policy =
-        reqwest_retry::policies::ExponentialBackoff::builder().build_with_max_retries(3);
-    let client = reqwest_middleware::ClientBuilder::new(reqwest::Client::new())
-        .with(reqwest_retry::RetryTransientMiddleware::new_with_policy(
-            retry_policy,
-        ))
-        .build();
-
-    match client.get(jwks_url).send().await {
-        Ok(resp) => {
-            if let Ok(jwks_set) = resp.json::<jsonwebtoken::jwk::JwkSet>().await {
-                for jwk in jwks_set.keys {
-                    if let Some(kid) = &jwk.common.key_id {
-                        jwks.insert(kid.clone(), jwk);
-                    }
-                }
-                tracing::info!("Successfully fetched {} keys from JWKS", jwks.len());
-            } else {
-                tracing::error!("Failed to parse JWKS response from {}", jwks_url);
-            }
-        }
-        Err(e) => {
-            tracing::error!("Failed to fetch JWKS from {}: {:?}", jwks_url, e);
-        }
-    }
-    jwks
 }
 
 /// Constructs the Axum application router with all routes and middleware

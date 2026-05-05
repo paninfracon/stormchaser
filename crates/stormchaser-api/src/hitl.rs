@@ -130,9 +130,9 @@ pub async fn approve_step_link(
     };
 
     let subject = if is_approve {
-        "stormchaser.step.completed"
+        "stormchaser.v1.step.completed"
     } else {
-        "stormchaser.step.failed"
+        "stormchaser.v1.step.failed"
     };
 
     match state
@@ -281,17 +281,29 @@ pub async fn approve_step(
     .await;
 
     // 3. Publish to NATS simulating step completion
-    let payload = json!({
-        "run_id": run_id.to_string(),
-        "step_id": step_id.to_string(),
-        "exit_code": 0,
-        "outputs": inputs,
-    });
+    let completion_event = stormchaser_model::events::StepCompletedEvent {
+        run_id,
+        step_id,
+        event_type: "stormchaser.v1.step.completed".to_string(),
+        runner_id: None,
+        exit_code: Some(0),
+        storage_hashes: None,
+        artifacts: None,
+        test_reports: None,
+        outputs: serde_json::from_value(inputs).ok(),
+        timestamp: chrono::Utc::now(),
+    };
 
-    match state
-        .nats
-        .publish("stormchaser.step.completed", payload.to_string().into())
-        .await
+    match stormchaser_model::nats::publish_cloudevent(
+        &async_nats::jetstream::new(state.nats.clone()),
+        "stormchaser.v1.step.completed",
+        "stormchaser.v1.step.completed",
+        "/stormchaser/api",
+        serde_json::to_value(completion_event).unwrap(),
+        Some("1.0"),
+        None,
+    )
+    .await
     {
         Ok(_) => (StatusCode::OK, "Approved").into_response(),
         Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Failed to publish").into_response(),
@@ -338,17 +350,30 @@ pub async fn reject_step(
     )
     .await;
 
-    let payload = json!({
-        "run_id": run_id.to_string(),
-        "step_id": step_id.to_string(),
-        "exit_code": 1,
-        "error": "Rejected by human",
-    });
+    let event = stormchaser_model::events::StepFailedEvent {
+        run_id,
+        step_id,
+        event_type: "stormchaser.v1.step.failed".to_string(),
+        error: "Rejected by human".to_string(),
+        exit_code: Some(1),
+        runner_id: None,
+        storage_hashes: None,
+        artifacts: None,
+        test_reports: None,
+        outputs: None,
+        timestamp: chrono::Utc::now(),
+    };
 
-    match state
-        .nats
-        .publish("stormchaser.step.failed", payload.to_string().into())
-        .await
+    match stormchaser_model::nats::publish_cloudevent(
+        &async_nats::jetstream::new(state.nats.clone()),
+        "stormchaser.v1.step.failed",
+        "stormchaser.v1.step.failed",
+        "/stormchaser/api",
+        serde_json::to_value(event).unwrap(),
+        Some("1.0"),
+        None,
+    )
+    .await
     {
         Ok(_) => (StatusCode::OK, "Rejected").into_response(),
         Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Failed to publish").into_response(),
@@ -375,20 +400,29 @@ pub async fn correlate_event(
     };
 
     // 2. Publish to stormchaser.step.completed
-    let nats_payload = json!({
-        "run_id": corr.run_id.to_string(),
-        "step_id": corr.step_instance_id.to_string(),
-        "exit_code": 0,
-        "outputs": payload,
-    });
+    let completion_event = stormchaser_model::events::StepCompletedEvent {
+        run_id: corr.run_id,
+        step_id: corr.step_instance_id,
+        event_type: "stormchaser.v1.step.completed".to_string(),
+        runner_id: None,
+        exit_code: Some(0),
+        storage_hashes: None,
+        artifacts: None,
+        test_reports: None,
+        outputs: serde_json::from_value(payload.clone()).ok(),
+        timestamp: chrono::Utc::now(),
+    };
 
-    match state
-        .nats
-        .publish(
-            "stormchaser.step.completed",
-            nats_payload.to_string().into(),
-        )
-        .await
+    match stormchaser_model::nats::publish_cloudevent(
+        &async_nats::jetstream::new(state.nats.clone()),
+        "stormchaser.v1.step.completed",
+        "stormchaser.v1.step.completed",
+        "/stormchaser/api",
+        serde_json::to_value(completion_event).unwrap(),
+        Some("1.0"),
+        None,
+    )
+    .await
     {
         Ok(_) => {
             // Delete correlation so it doesn't match again

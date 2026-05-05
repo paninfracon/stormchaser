@@ -14,7 +14,7 @@ mod common {
             format!(
                 "postgres://stormchaser:{}@localhost:5432/stormchaser",
                 std::env::var("STORMCHASER_DEV_PASSWORD")
-                    .unwrap_or_else(|_| "stormchaser".to_string())
+                    .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
             )
         });
         sqlx::PgPool::connect(&db_url).await.unwrap()

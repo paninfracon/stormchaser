@@ -7,6 +7,7 @@ mod task;
 
 use anyhow::{Context, Result};
 use axum::{extract::State, routing::get, Router};
+use cloudevents::EventBuilder;
 use futures::StreamExt;
 use kube::Client;
 use serde_json::{json, Value};
@@ -126,7 +127,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
         .context("Failed to connect to NATS")?;
 
     // 3. Register with the Orchestration Engine
-    let nats_subject = format!("stormchaser.runner.k8s.{}", runner_id);
+    let nats_subject = format!("stormchaser.v1.runner.k8s.{}", runner_id);
 
     // Generate JSON Schemas for our supported step types
     let common_schema = schemars::schema_for!(dsl::CommonContainerSpec);
@@ -154,11 +155,19 @@ pub async fn run_runner(config: Config) -> Result<()> {
         ]
     });
 
+    let ce = cloudevents::EventBuilderV10::new()
+        .id(uuid::Uuid::new_v4().to_string())
+        .ty("stormchaser.v1.runner.register")
+        .source("/stormchaser")
+        .time(chrono::Utc::now())
+        .data("application/json", registration_payload)
+        .build()
+        .context("Failed to build CloudEvent")?;
+
+    let payload_bytes = serde_json::to_vec(&ce).context("Failed to serialize CloudEvent")?;
+
     nats_client
-        .publish(
-            "stormchaser.runner.register",
-            registration_payload.to_string().into(),
-        )
+        .publish("stormchaser.v1.runner.register", payload_bytes.into())
         .await
         .context("Failed to publish registration event")?;
 
@@ -209,7 +218,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
             "k8s-runner",
             async_nats::jetstream::consumer::pull::Config {
                 durable_name: Some("k8s-runner".to_string()),
-                filter_subject: "stormchaser.step.scheduled.>".to_string(),
+                filter_subject: "stormchaser.v1.step.scheduled.>".to_string(),
                 ..Default::default()
             },
         )
@@ -241,12 +250,13 @@ pub async fn run_runner(config: Config) -> Result<()> {
                 break;
             }
             _ = heartbeat_interval.tick() => {
-                let heartbeat_payload = json!({
-                    "runner_id": heartbeat_id,
-                });
+                let heartbeat_payload = stormchaser_model::events::RunnerHeartbeatEvent {
+                    runner_id: heartbeat_id.clone(),
+                    version: env!("CARGO_PKG_VERSION").to_string(),
+                    state: "online".to_string(),
+                };
 
-                if let Err(e) = heartbeat_client
-                    .publish("stormchaser.runner.heartbeat", heartbeat_payload.to_string().into())
+                if let Err(e) = stormchaser_model::nats::publish_cloudevent(&async_nats::jetstream::new(heartbeat_client.clone()), "stormchaser.v1.runner.heartbeat", "stormchaser.v1.runner.heartbeat", "/stormchaser", serde_json::to_value(heartbeat_payload).unwrap(), Some("1.0"), None)
                     .await
                 {
                     error!("Failed to publish heartbeat: {:?}", e);
@@ -290,12 +300,16 @@ pub async fn run_runner(config: Config) -> Result<()> {
         "runner_id": runner_id,
         "event_type": "runner_offline",
     });
-    let _ = nats_client
-        .publish(
-            "stormchaser.runner.offline",
-            deregistration_payload.to_string().into(),
-        )
-        .await;
+    let _ = stormchaser_model::nats::publish_cloudevent(
+        &async_nats::jetstream::new(nats_client.clone()),
+        "stormchaser.v1.runner.offline",
+        "stormchaser.v1.runner.offline",
+        "/stormchaser",
+        deregistration_payload,
+        Some("1.0"),
+        None,
+    )
+    .await;
 
     // Allow time for final messages to be sent
     time::sleep(Duration::from_secs(1)).await;

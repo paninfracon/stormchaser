@@ -57,8 +57,23 @@ pub async fn dispatch_step_instance(
 
     let mut storage_urls = serde_json::Map::new();
 
+    let mut mounted_storage_names = std::collections::HashSet::new();
+    if let Some(mounts) = resolved_spec
+        .get("storage_mounts")
+        .and_then(|m| m.as_array())
+    {
+        for mount in mounts {
+            if let Some(name) = mount.get("name").and_then(|n| n.as_str()) {
+                mounted_storage_names.insert(name.to_string());
+            }
+        }
+    }
+
     if !workflow.storage.is_empty() {
         for storage in workflow.storage {
+            if !mounted_storage_names.contains(&storage.name) {
+                continue;
+            }
             let backend: Option<storage::StorageBackend> =
                 if let Some(ref backend_name) = storage.backend {
                     crate::db::get_storage_backend_by_name(&pool, backend_name).await?
@@ -342,21 +357,31 @@ pub async fn dispatch_step_instance(
         }
     }
 
-    let payload = serde_json::json!({
-        "run_id": run_id,
-        "step_id": step_instance_id,
-        "step_name": step_name,
-        "step_type": step_type,
-        "spec": resolved_spec,
-        "params": resolved_params,
-        "storage": storage_urls,
-        "test_report_urls": test_report_urls,
-        "timestamp": Utc::now(),
-        "step_dsl": dsl_step_val,
-    });
+    let payload = stormchaser_model::events::StepScheduledEvent {
+        run_id,
+        step_id: step_instance_id,
+        step_name: Some(step_name.to_string()),
+        step_type: Some(step_type.clone()),
+        spec: Some(resolved_spec),
+        params: Some(resolved_params.clone()),
+        storage: Some(storage_urls.into_iter().collect()),
+        test_report_urls: Some(test_report_urls.into_iter().collect()),
+        timestamp: Utc::now(),
+        event_type: "stormchaser.v1.step.scheduled".to_string(),
+        step_dsl: dsl_step_val,
+    };
 
     let js = async_nats::jetstream::new(nats_client);
-    let subject = format!("stormchaser.step.scheduled.{}", step_type.to_lowercase());
-    js.publish(subject, payload.to_string().into()).await?;
+    let subject = format!("stormchaser.v1.step.scheduled.{}", step_type.to_lowercase());
+    stormchaser_model::nats::publish_cloudevent(
+        &js,
+        &subject,
+        &subject,
+        "/stormchaser",
+        serde_json::to_value(payload).unwrap(),
+        Some("1.0"),
+        None,
+    )
+    .await?;
     Ok(())
 }

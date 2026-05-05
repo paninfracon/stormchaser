@@ -1,14 +1,43 @@
 use crate::container_machine::{ContainerMetadata, ContainerState, DockerContainerMachine};
 use crate::parsing::{parse_step_from_docker_labels, parse_step_from_nats_payload};
 use anyhow::Result;
+use async_nats::jetstream::message::{AckKind, Message};
 use bollard::container::ListContainersOptions;
 use bollard::Docker;
+use cloudevents::EventBuilder;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{error, info, warn};
 use uuid::Uuid;
+
+/// Terminates a JetStream message that cannot be processed, preventing redelivery loops.
+/// Logs the provided reason before sending the `Term` acknowledgement.
+async fn term_message(msg: &Message, reason: &str) {
+    error!("{}", reason);
+    if let Err(e) = msg.ack_with(AckKind::Term).await {
+        error!("Failed to send Term ack: {:?}", e);
+    }
+}
+
+/// Builds a serialized CloudEvent payload for use with basic NATS `request`.
+fn build_cloudevent_payload(
+    event_type: &str,
+    source: &str,
+    data: Value,
+) -> anyhow::Result<bytes::Bytes> {
+    let event = cloudevents::EventBuilderV10::new()
+        .id(Uuid::new_v4().to_string())
+        .ty(event_type)
+        .source(source)
+        .time(chrono::Utc::now())
+        .data("application/json", data)
+        .build()
+        .map_err(|e| anyhow::anyhow!("Failed to build CloudEvent: {}", e))?;
+    let payload = serde_json::to_string(&event)?;
+    Ok(payload.into())
+}
 
 /// Scans Docker for containers labeled as managed by Stormchaser but not actively tracked.
 /// If a step is no longer relevant to the orchestrator, it is cleaned up.
@@ -55,17 +84,17 @@ pub async fn scan_for_orphans(
             );
 
             let received_at = labels
-                .get("stormchaser.io/received-at")
+                .get("stormchaser.v1.io/received-at")
                 .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok())
                 .map(|dt| dt.with_timezone(&chrono::Utc))
                 .unwrap_or_else(chrono::Utc::now);
 
             let is_encrypted = labels
-                .get("stormchaser.io/state-encrypted")
+                .get("stormchaser.v1.io/state-encrypted")
                 .map(|v| v == "true")
                 .unwrap_or(false);
 
-            let raw_step_dsl = labels.get("stormchaser.io/step-dsl");
+            let raw_step_dsl = labels.get("stormchaser.v1.io/step-dsl");
 
             let step_dsl = match parse_step_from_docker_labels(
                 &container_name,
@@ -90,17 +119,41 @@ pub async fn scan_for_orphans(
 
             tokio::spawn(async move {
                 // Before adopting, query the orchestrator to see if this step is still relevant
-                let query_payload = json!({
-                    "step_id": step_id,
-                });
+                let query_data = json!({ "step_id": step_id });
+                let query_ce_payload = match build_cloudevent_payload(
+                    "stormchaser.v1.step.query",
+                    "/stormchaser",
+                    query_data,
+                ) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        error!("Failed to build step query CloudEvent: {:?}", e);
+                        return;
+                    }
+                };
 
                 match nats
-                    .request("stormchaser.step.query", query_payload.to_string().into())
+                    .request("stormchaser.v1.step.query", query_ce_payload)
                     .await
                 {
                     Ok(reply) => {
-                        let response: Value =
-                            serde_json::from_slice(&reply.payload).unwrap_or_default();
+                        let ce: cloudevents::Event = match serde_json::from_slice(&reply.payload) {
+                            Ok(e) => e,
+                            Err(e) => {
+                                error!(
+                                    "Failed to parse step query response as CloudEvent: {:?}",
+                                    e
+                                );
+                                return;
+                            }
+                        };
+                        let response: Value = match ce.data() {
+                            Some(cloudevents::Data::Json(v)) => v.clone(),
+                            _ => {
+                                error!("Step query response CloudEvent has no JSON data");
+                                return;
+                            }
+                        };
                         let status = response["status"].as_str().unwrap_or_default();
                         let exists = response["exists"].as_bool().unwrap_or(false);
 
@@ -158,9 +211,16 @@ pub async fn scan_for_orphans(
                                     "run latency": format!("{}ms", metrics.latency_ms),
                                 }
                             });
-                            let _ = nats
-                                .publish("stormchaser.step.completed", event.to_string().into())
-                                .await;
+                            let _ = stormchaser_model::nats::publish_cloudevent(
+                                &async_nats::jetstream::new(nats.clone()),
+                                "stormchaser.v1.step.completed",
+                                "stormchaser.v1.step.completed",
+                                "/stormchaser",
+                                serde_json::to_value(event).unwrap(),
+                                Some("1.0"),
+                                None,
+                            )
+                            .await;
                         }
                         ContainerState::Failed(reason, metrics) => {
                             warn!("Adopted step {} failed: {}", step_id, reason);
@@ -177,9 +237,16 @@ pub async fn scan_for_orphans(
                                     "run latency": format!("{}ms", metrics.latency_ms),
                                 }
                             });
-                            let _ = nats
-                                .publish("stormchaser.step.failed", event.to_string().into())
-                                .await;
+                            let _ = stormchaser_model::nats::publish_cloudevent(
+                                &async_nats::jetstream::new(nats.clone()),
+                                "stormchaser.v1.step.failed",
+                                "stormchaser.v1.step.failed",
+                                "/stormchaser",
+                                serde_json::to_value(event).unwrap(),
+                                Some("1.0"),
+                                None,
+                            )
+                            .await;
                         }
                     },
                     Err(e) => error!("Error adopting container {}: {:?}", container_name, e),
@@ -203,16 +270,53 @@ pub async fn handle_task(
     let received_at = chrono::Utc::now();
     info!("Received task message: {:?}", msg.subject);
 
-    let payload: Value = serde_json::from_slice(&msg.payload).unwrap_or_default();
-    let run_id_str = payload["run_id"].as_str().unwrap_or_default();
-    let run_id = Uuid::parse_str(run_id_str).unwrap_or_default();
-    let step_id_str = payload["step_id"].as_str().unwrap_or_default();
-    let step_id = Uuid::parse_str(step_id_str).unwrap_or_default();
+    let ce: cloudevents::Event = match serde_json::from_slice(&msg.payload) {
+        Ok(event) => event,
+        Err(e) => {
+            term_message(
+                &msg,
+                &format!(
+                    "Failed to deserialize CloudEvent from task message: {:?}",
+                    e
+                ),
+            )
+            .await;
+            return;
+        }
+    };
+    let payload: Value = match ce.data() {
+        Some(cloudevents::Data::Json(v)) => v.clone(),
+        _ => {
+            term_message(&msg, "Task message CloudEvent does not contain JSON data").await;
+            return;
+        }
+    };
+
+    let run_id = match payload["run_id"]
+        .as_str()
+        .and_then(|s| Uuid::parse_str(s).ok())
+    {
+        Some(id) => id,
+        None => {
+            term_message(&msg, "Task message missing or invalid run_id").await;
+            return;
+        }
+    };
+    let step_id = match payload["step_id"]
+        .as_str()
+        .and_then(|s| Uuid::parse_str(s).ok())
+    {
+        Some(id) => id,
+        None => {
+            term_message(&msg, "Task message missing or invalid step_id").await;
+            return;
+        }
+    };
 
     let step_dsl = match parse_step_from_nats_payload(&payload) {
         Ok(step) => step,
         Err(e) => {
-            error!("Failed to parse step spec: {:?}", e);
+            term_message(&msg, &format!("Failed to parse step spec: {:?}", e)).await;
             return;
         }
     };
@@ -226,9 +330,7 @@ pub async fn handle_task(
     let in_progress_handle = tokio::spawn(async move {
         loop {
             sleep(Duration::from_secs(15)).await;
-            let _ = in_progress_msg
-                .ack_with(async_nats::jetstream::message::AckKind::Progress)
-                .await;
+            let _ = in_progress_msg.ack_with(AckKind::Progress).await;
         }
     });
 
@@ -239,9 +341,16 @@ pub async fn handle_task(
         "runner_id": runner_id,
         "timestamp": chrono::Utc::now(),
     });
-    let _ = nats_client
-        .publish("stormchaser.step.running", running_event.to_string().into())
-        .await;
+    let _ = stormchaser_model::nats::publish_cloudevent(
+        &async_nats::jetstream::new(nats_client.clone()),
+        "stormchaser.v1.step.running",
+        "stormchaser.v1.step.running",
+        "/stormchaser",
+        serde_json::to_value(running_event).unwrap(),
+        Some("1.0"),
+        None,
+    )
+    .await;
 
     let machine = DockerContainerMachine::new(
         docker,
@@ -273,46 +382,94 @@ pub async fn handle_task(
     match result {
         Ok(ContainerState::Succeeded(metrics)) => {
             info!("Step {} (Run {}) completed successfully", step_id, run_id);
-            let event = json!({
-                "run_id": run_id,
-                "step_id": step_id,
-                "status": "succeeded",
-                "runner_id": runner_id,
-                "exit_code": metrics.exit_code,
-                "storage_hashes": metrics.storage_hashes,
-                "artifacts": metrics.artifacts,
-                "test_reports": metrics.test_reports,
-                "outputs": {
-                    "docker exit code": metrics.exit_code,
-                    "run duration": format!("{}ms", metrics.duration_ms),
-                    "run latency": format!("{}ms", metrics.latency_ms),
-                }
-            });
-            let _ = nats_client
-                .publish("stormchaser.step.completed", event.to_string().into())
-                .await;
+            let mut outputs = std::collections::HashMap::new();
+            outputs.insert(
+                "docker exit code".to_string(),
+                serde_json::json!(metrics.exit_code),
+            );
+            outputs.insert(
+                "run duration".to_string(),
+                serde_json::json!(format!("{}ms", metrics.duration_ms)),
+            );
+            outputs.insert(
+                "run latency".to_string(),
+                serde_json::json!(format!("{}ms", metrics.latency_ms)),
+            );
+
+            let event = stormchaser_model::events::StepCompletedEvent {
+                run_id,
+                step_id,
+                event_type: "stormchaser.v1.step.completed".to_string(),
+                runner_id: Some(runner_id.clone()),
+                exit_code: metrics.exit_code.map(|c| c as i32),
+                storage_hashes: metrics.storage_hashes.map(|h| {
+                    h.into_iter()
+                        .map(|(k, v)| (k, serde_json::json!(v)))
+                        .collect()
+                }),
+                artifacts: metrics.artifacts,
+                test_reports: metrics
+                    .test_reports
+                    .and_then(|v| v.as_object().map(|obj| obj.clone().into_iter().collect())),
+                outputs: Some(outputs),
+                timestamp: chrono::Utc::now(),
+            };
+            let _ = stormchaser_model::nats::publish_cloudevent(
+                &async_nats::jetstream::new(nats_client.clone()),
+                "stormchaser.v1.step.completed",
+                "stormchaser.v1.step.completed",
+                "/stormchaser",
+                serde_json::to_value(event).unwrap(),
+                Some("1.0"),
+                None,
+            )
+            .await;
         }
         Ok(ContainerState::Failed(reason, metrics)) => {
             error!("Step {} (Run {}) failed: {}", step_id, run_id, reason);
-            let event = json!({
-                "run_id": run_id,
-                "step_id": step_id,
-                "status": "failed",
-                "error": reason,
-                "runner_id": runner_id,
-                "exit_code": metrics.exit_code,
-                "storage_hashes": metrics.storage_hashes,
-                "artifacts": metrics.artifacts,
-                "test_reports": metrics.test_reports,
-                "outputs": {
-                    "docker exit code": metrics.exit_code,
-                    "run duration": format!("{}ms", metrics.duration_ms),
-                    "run latency": format!("{}ms", metrics.latency_ms),
-                }
-            });
-            let _ = nats_client
-                .publish("stormchaser.step.failed", event.to_string().into())
-                .await;
+            let mut outputs = std::collections::HashMap::new();
+            outputs.insert(
+                "docker exit code".to_string(),
+                serde_json::json!(metrics.exit_code),
+            );
+            outputs.insert(
+                "run duration".to_string(),
+                serde_json::json!(format!("{}ms", metrics.duration_ms)),
+            );
+            outputs.insert(
+                "run latency".to_string(),
+                serde_json::json!(format!("{}ms", metrics.latency_ms)),
+            );
+
+            let event = stormchaser_model::events::StepFailedEvent {
+                run_id,
+                step_id,
+                event_type: "stormchaser.v1.step.failed".to_string(),
+                error: reason,
+                runner_id: Some(runner_id.clone()),
+                exit_code: metrics.exit_code.map(|c| c as i32),
+                storage_hashes: metrics.storage_hashes.map(|h| {
+                    h.into_iter()
+                        .map(|(k, v)| (k, serde_json::json!(v)))
+                        .collect()
+                }),
+                artifacts: metrics.artifacts,
+                test_reports: metrics
+                    .test_reports
+                    .and_then(|v| v.as_object().map(|obj| obj.clone().into_iter().collect())),
+                outputs: Some(outputs),
+                timestamp: chrono::Utc::now(),
+            };
+            let _ = stormchaser_model::nats::publish_cloudevent(
+                &async_nats::jetstream::new(nats_client.clone()),
+                "stormchaser.v1.step.failed",
+                "stormchaser.v1.step.failed",
+                "/stormchaser",
+                serde_json::to_value(event).unwrap(),
+                Some("1.0"),
+                None,
+            )
+            .await;
         }
         Err(e) => {
             error!("Error running container for step {}: {:?}", step_id, e);
@@ -323,9 +480,16 @@ pub async fn handle_task(
                 "error": format!("{:?}", e),
                 "runner_id": runner_id,
             });
-            let _ = nats_client
-                .publish("stormchaser.step.failed", event.to_string().into())
-                .await;
+            let _ = stormchaser_model::nats::publish_cloudevent(
+                &async_nats::jetstream::new(nats_client.clone()),
+                "stormchaser.v1.step.failed",
+                "stormchaser.v1.step.failed",
+                "/stormchaser",
+                serde_json::to_value(event).unwrap(),
+                Some("1.0"),
+                None,
+            )
+            .await;
         }
     }
 }

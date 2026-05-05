@@ -22,7 +22,8 @@ async fn test_jq_step_execution() {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
+            std::env::var("STORMCHASER_DEV_PASSWORD")
+                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
     let pool = PgPoolOptions::new()
@@ -60,7 +61,7 @@ async fn test_jq_step_execution() {
 
     // Subscribe to completion events before dispatching
     let mut completion_sub = nats_client
-        .subscribe("stormchaser.step.completed")
+        .subscribe("stormchaser.v1.step.completed")
         .await
         .unwrap();
 
@@ -100,10 +101,12 @@ async fn test_jq_step_execution() {
     loop {
         tokio::select! {
             Some(msg) = completion_sub.next() => {
-                if let Ok(payload) = serde_json::from_slice::<Value>(&msg.payload) {
-                    if payload["run_id"].as_str() == Some(&run_id.to_string()) {
-                        step_completed_payload = payload;
-                        break;
+                if let Ok(ce) = serde_json::from_slice::<cloudevents::Event>(&msg.payload) {
+                    if let Some(cloudevents::Data::Json(payload)) = ce.data() {
+                        if payload["run_id"].as_str() == Some(&run_id.to_string()) {
+                            step_completed_payload = payload.clone();
+                            break;
+                        }
                     }
                 }
             }

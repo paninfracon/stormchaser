@@ -11,7 +11,8 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::Once;
-use stormchaser_api::{app, AppState, OidcConfig};
+use stormchaser_api::auth::jwks::OidcConfig;
+use stormchaser_api::{app, AppState};
 use stormchaser_model::auth::OpaClient;
 use tower::ServiceExt;
 use wiremock::{
@@ -99,7 +100,8 @@ async fn setup_app(mock_server_url: String) -> Option<axum::Router> {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
+            std::env::var("STORMCHASER_DEV_PASSWORD")
+                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
     let pool = PgPoolOptions::new().connect(&db_url).await.ok()?;
@@ -314,7 +316,8 @@ async fn test_auth_exchange_network_error() {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
+            std::env::var("STORMCHASER_DEV_PASSWORD")
+                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
     let pool = PgPoolOptions::new().connect(&db_url).await.unwrap();
@@ -624,7 +627,8 @@ async fn test_auth_refresh_network_error() {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD").unwrap_or_else(|_| "stormchaser".to_string())
+            std::env::var("STORMCHASER_DEV_PASSWORD")
+                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
     let pool = PgPoolOptions::new().connect(&db_url).await.unwrap();
