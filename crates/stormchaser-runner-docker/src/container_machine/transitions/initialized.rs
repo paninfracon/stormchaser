@@ -7,6 +7,7 @@ use bollard::image::CreateImageOptions;
 use bollard::service::{HostConfig, Mount, MountTypeEnum};
 use bollard::volume::CreateVolumeOptions;
 use chrono::Utc;
+use cloudevents::EventBuilder;
 use futures::StreamExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -101,12 +102,23 @@ impl DockerContainerMachine<state::Initialized> {
                                         "status": "unpacking_sfs",
                                         "timestamp": chrono::Utc::now(),
                                     });
-                                    let _ = nats
-                                        .publish(
-                                            "stormchaser.v1.step.unpacking_sfs",
-                                            unpacking_event.to_string().into(),
-                                        )
-                                        .await;
+                                    if let Ok(ce) = cloudevents::EventBuilderV10::new()
+                                        .id(uuid::Uuid::new_v4().to_string())
+                                        .ty("stormchaser.v1.step.unpacking_sfs")
+                                        .source("/stormchaser/runner")
+                                        .time(chrono::Utc::now())
+                                        .data("application/json", unpacking_event)
+                                        .build()
+                                    {
+                                        if let Ok(payload_bytes) = serde_json::to_vec(&ce) {
+                                            let _ = nats
+                                                .publish(
+                                                    "stormchaser.v1.step.unpacking_sfs",
+                                                    payload_bytes.into(),
+                                                )
+                                                .await;
+                                        }
+                                    }
                                 }
                                 self.unpark_storage(
                                     &volume_name,
@@ -137,12 +149,23 @@ impl DockerContainerMachine<state::Initialized> {
                                             "status": "unpacking_sfs",
                                             "timestamp": chrono::Utc::now(),
                                         });
-                                        let _ = nats
-                                            .publish(
-                                                "stormchaser.v1.step.unpacking_sfs",
-                                                unpacking_event.to_string().into(),
-                                            )
-                                            .await;
+                                        if let Ok(ce) = cloudevents::EventBuilderV10::new()
+                                            .id(uuid::Uuid::new_v4().to_string())
+                                            .ty("stormchaser.v1.step.unpacking_sfs")
+                                            .source("/stormchaser/runner")
+                                            .time(chrono::Utc::now())
+                                            .data("application/json", unpacking_event)
+                                            .build()
+                                        {
+                                            if let Ok(payload_bytes) = serde_json::to_vec(&ce) {
+                                                let _ = nats
+                                                    .publish(
+                                                        "stormchaser.v1.step.unpacking_sfs",
+                                                        payload_bytes.into(),
+                                                    )
+                                                    .await;
+                                            }
+                                        }
                                     }
                                     let mut full_dest = PathBuf::from(&mount.mount_path);
                                     if dest != "/" && !dest.is_empty() {

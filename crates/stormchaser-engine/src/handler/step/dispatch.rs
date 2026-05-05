@@ -57,8 +57,23 @@ pub async fn dispatch_step_instance(
 
     let mut storage_urls = serde_json::Map::new();
 
+    let mut mounted_storage_names = std::collections::HashSet::new();
+    if let Some(mounts) = resolved_spec
+        .get("storage_mounts")
+        .and_then(|m| m.as_array())
+    {
+        for mount in mounts {
+            if let Some(name) = mount.get("name").and_then(|n| n.as_str()) {
+                mounted_storage_names.insert(name.to_string());
+            }
+        }
+    }
+
     if !workflow.storage.is_empty() {
         for storage in workflow.storage {
+            if !mounted_storage_names.contains(&storage.name) {
+                continue;
+            }
             let backend: Option<storage::StorageBackend> =
                 if let Some(ref backend_name) = storage.backend {
                     crate::db::get_storage_backend_by_name(&pool, backend_name).await?

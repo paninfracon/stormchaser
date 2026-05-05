@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use axum::{extract::State, routing::get, Router};
 use bollard::Docker;
+use cloudevents::EventBuilder;
 use futures::StreamExt;
 use serde_json::json;
 use std::net::SocketAddr;
@@ -174,11 +175,19 @@ pub async fn run_runner(config: Config) -> Result<()> {
         ]
     });
 
+    let ce = cloudevents::EventBuilderV10::new()
+        .id(uuid::Uuid::new_v4().to_string())
+        .ty("stormchaser.v1.runner.register")
+        .source("/stormchaser")
+        .time(chrono::Utc::now())
+        .data("application/json", registration_payload)
+        .build()
+        .context("Failed to build CloudEvent")?;
+
+    let payload_bytes = serde_json::to_vec(&ce).context("Failed to serialize CloudEvent")?;
+
     nats_client
-        .publish(
-            "stormchaser.v1.runner.register",
-            registration_payload.to_string().into(),
-        )
+        .publish("stormchaser.v1.runner.register", payload_bytes.into())
         .await
         .context("Failed to publish registration event")?;
 

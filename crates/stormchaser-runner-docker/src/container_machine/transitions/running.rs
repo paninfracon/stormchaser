@@ -5,6 +5,7 @@ use bollard::container::{
 };
 use bollard::service::HostConfig;
 use chrono::Utc;
+use cloudevents::EventBuilder;
 use futures::StreamExt;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -164,12 +165,20 @@ impl DockerContainerMachine<state::Running> {
                     "status": "packing_sfs",
                     "timestamp": chrono::Utc::now(),
                 });
-                let _ = nats
-                    .publish(
-                        "stormchaser.v1.step.packing_sfs",
-                        packing_event.to_string().into(),
-                    )
-                    .await;
+                if let Ok(ce) = cloudevents::EventBuilderV10::new()
+                    .id(uuid::Uuid::new_v4().to_string())
+                    .ty("stormchaser.v1.step.packing_sfs")
+                    .source("/stormchaser/runner")
+                    .time(chrono::Utc::now())
+                    .data("application/json", packing_event)
+                    .build()
+                {
+                    if let Ok(payload_bytes) = serde_json::to_vec(&ce) {
+                        let _ = nats
+                            .publish("stormchaser.v1.step.packing_sfs", payload_bytes.into())
+                            .await;
+                    }
+                }
             }
 
             self.docker
