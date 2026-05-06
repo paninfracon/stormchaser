@@ -188,6 +188,12 @@ async fn test_resolve_storage_provision() {
         .contains("test-bucket"));
 
     // Cleanup test-specific data inserted by this test
+    sqlx::query("DELETE FROM artifact_registry WHERE backend_id = $1")
+        .bind(backend_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
     sqlx::query("DELETE FROM storage_backends WHERE id = $1")
         .bind(backend_id)
         .execute(&pool)
