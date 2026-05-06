@@ -401,6 +401,7 @@ impl StormchaserParser {
 
                 let mut source = "logs".to_string();
                 let mut marker = None;
+                let mut format = None;
                 let mut regex = None;
                 let mut group = None;
                 let mut sensitive = None;
@@ -412,6 +413,9 @@ impl StormchaserParser {
                         }
                         "marker" => {
                             marker = Some(expr_to_string(attr.expr())?);
+                        }
+                        "format" => {
+                            format = Some(expr_to_string(attr.expr())?);
                         }
                         "regex" => {
                             regex = Some(expr_to_string(attr.expr())?);
@@ -434,7 +438,7 @@ impl StormchaserParser {
                     name,
                     source,
                     marker,
-                    format: None,
+                    format,
                     regex,
                     group,
                     sensitive,
