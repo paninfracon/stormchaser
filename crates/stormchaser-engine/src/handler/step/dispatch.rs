@@ -341,7 +341,7 @@ async fn setup_test_report_urls(
     workflow: &dsl::Workflow,
 ) -> Result<serde_json::Map<String, Value>> {
     let mut test_report_urls = serde_json::Map::new();
-    if let Some(step) = workflow.steps.iter().find(|s| s.name == step_name) {
+    if let Some(step) = find_step(&workflow.steps, step_name) {
         if !step.reports.is_empty() {
             let backend = crate::db::get_default_sfs_backend(pool)
                 .await?
