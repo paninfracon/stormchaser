@@ -4,6 +4,7 @@ use std::sync::Arc;
 use stormchaser_engine::handler;
 use stormchaser_model::auth::OpaClient;
 use uuid::Uuid;
+use cloudevents::Data;
 
 use stormchaser_tls::TlsConfig;
 use stormchaser_tls::TlsReloader;
@@ -28,7 +29,8 @@ async fn test_resolve_storage_provision() {
         .await
         .unwrap();
 
-    // 1. Setup a default SFS backend (S3 is required for provisioning)
+    // 1. Setup a test S3 backend for artifact provisioning (is_default_sfs is FALSE;
+    //    provisioning resolves backends by artifact registry entry, not by default SFS flag)
     let backend_id = Uuid::new_v4();
     let backend_name = format!("test-s3-{}", backend_id);
     sqlx::query(
@@ -153,27 +155,26 @@ async fn test_resolve_storage_provision() {
     use futures::StreamExt;
     let expected_run_id = run_id.to_string();
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-    let event: serde_json::Value = loop {
+    let event_data: serde_json::Value = loop {
         let msg = tokio::time::timeout_at(deadline, sub.next())
             .await
             .expect("Timed out waiting for scheduled event")
             .expect("Subscription closed while waiting for scheduled event");
 
-        let event: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
-        let matches_run_id = event
-            .get("data")
-            .and_then(|data| data.get("run_id"))
-            .and_then(|run_id| run_id.as_str())
-            .map(|run_id| run_id == expected_run_id)
-            .unwrap_or(false);
-
-        if matches_run_id {
-            break event;
+        let ce: cloudevents::Event = serde_json::from_slice(&msg.payload).unwrap();
+        if let Some(Data::Json(payload)) = ce.data() {
+            if payload
+                .get("run_id")
+                .and_then(|v| v.as_str())
+                .map(|id| id == expected_run_id)
+                .unwrap_or(false)
+            {
+                break payload.clone();
+            }
         }
     };
 
-    let data = event.get("data").unwrap();
-    let storage = data.get("storage").unwrap().as_object().unwrap();
+    let storage = event_data.get("storage").unwrap().as_object().unwrap();
     let workspace = storage.get("workspace").unwrap();
     let provision = workspace.get("provision").unwrap().as_array().unwrap();
     assert_eq!(provision.len(), 1);
@@ -185,4 +186,11 @@ async fn test_resolve_storage_provision() {
         .as_str()
         .unwrap()
         .contains("test-bucket"));
+
+    // Cleanup test-specific data inserted by this test
+    sqlx::query("DELETE FROM storage_backends WHERE id = $1")
+        .bind(backend_id)
+        .execute(&pool)
+        .await
+        .unwrap();
 }
