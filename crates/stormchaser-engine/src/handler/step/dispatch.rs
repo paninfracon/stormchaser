@@ -8,10 +8,9 @@ use stormchaser_model::dsl::Step;
 use stormchaser_tls::TlsReloader;
 use uuid::Uuid;
 
-use crate::handler::fetch_run_context;
+use crate::handler::{fetch_run_context, RunContext};
 
 use stormchaser_model::dsl;
-use stormchaser_model::storage;
 use stormchaser_model::storage::BackendType;
 
 /// Recursively searches for a step by name within a list of steps.
@@ -29,32 +28,99 @@ pub fn find_step<'a>(steps: &'a [Step], name: &str) -> Option<&'a Step> {
     None
 }
 
-/// Dispatches a step instance, handling intrinsic types or forwarding to runners via NATS.
-#[allow(clippy::too_many_arguments)]
-pub async fn dispatch_step_instance(
+async fn apply_intrinsic_mutations(
     run_id: Uuid,
-    step_instance_id: Uuid,
-    step_name: &str,
-    step_type: &str,
-    resolved_spec: &Value,
-    resolved_params: &Value,
-    nats_client: async_nats::Client,
-    pool: PgPool,
-    tls_reloader: Arc<TlsReloader>,
+    step_type: &mut String,
+    resolved_spec: &mut Value,
 ) -> Result<()> {
-    let mut step_type = step_type.to_string();
-    let mut resolved_spec = resolved_spec.clone();
+    super::intrinsic::git_checkout::mutate(step_type, resolved_spec);
+    super::intrinsic::jq::mutate_if_has_files(step_type, resolved_spec);
+    super::intrinsic::terraform::mutate_if_terraform(run_id, step_type, resolved_spec).await?;
+    super::intrinsic::terraform::mutate_if_terraform_approval(step_type, resolved_spec);
+    Ok(())
+}
 
-    super::intrinsic::git_checkout::mutate(&mut step_type, &mut resolved_spec);
-    super::intrinsic::jq::mutate_if_has_files(&mut step_type, &mut resolved_spec);
-    super::intrinsic::terraform::mutate_if_terraform(run_id, &mut step_type, &mut resolved_spec)
-        .await?;
-    super::intrinsic::terraform::mutate_if_terraform_approval(&mut step_type, &mut resolved_spec);
+async fn resolve_storage_provision(
+    run_id: Uuid,
+    pool: &PgPool,
+    storage: &dsl::Storage,
+    run_context: &RunContext,
+) -> Result<Vec<dsl::Provision>> {
+    let mut provision_data = Vec::new();
+    for prov in &storage.provision {
+        let mut prov_clone = prov.clone();
+        if prov_clone.resource_type == "artifact" {
+            let (backend_id, remote_path) =
+                crate::db::get_artifact_by_name(pool, run_id, &prov_clone.name)
+                    .await?
+                    .with_context(|| {
+                        format!(
+                            "Artifact '{}' not found for run {}",
+                            prov_clone.name, run_id
+                        )
+                    })?;
 
-    let run_context = fetch_run_context(run_id, &pool).await?;
-    let workflow: dsl::Workflow = serde_json::from_value(run_context.workflow_definition.clone())
-        .context("Failed to parse workflow definition from context")?;
+            let backend_info: stormchaser_model::storage::StorageBackend =
+                crate::db::get_storage_backend_by_id(pool, backend_id)
+                    .await?
+                    .with_context(|| {
+                        format!(
+                            "Storage backend {} not found for artifact '{}'",
+                            backend_id, prov_clone.name
+                        )
+                    })?;
 
+            if backend_info.backend_type != BackendType::S3 {
+                anyhow::bail!(
+                    "Artifact '{}' requires an S3 backend for provisioning; backend '{}' is not S3",
+                    prov_clone.name,
+                    backend_info.name
+                );
+            }
+
+            let bucket = backend_info
+                .config
+                .get("bucket")
+                .and_then(|b| b.as_str())
+                .with_context(|| {
+                    format!(
+                        "Missing 'bucket' in config for backend '{}' (artifact '{}')",
+                        backend_info.name, prov_clone.name
+                    )
+                })?;
+
+            let client = crate::s3::get_s3_client(&backend_info).await?;
+            let expires = std::time::Duration::from_secs(3600);
+            prov_clone.url = Some(
+                crate::s3::generate_presigned_url(&client, bucket, &remote_path, false, expires)
+                    .await?,
+            );
+        } else if let Some(url) = &prov_clone.url {
+            let mut val = Value::String(url.clone());
+            let hcl_ctx = crate::hcl_eval::create_context(
+                run_context.inputs.clone(),
+                run_id,
+                run_context.secrets.clone(),
+            );
+            if crate::hcl_eval::resolve_expressions(&mut val, &hcl_ctx).is_ok() {
+                prov_clone.url = match val {
+                    Value::String(s) => Some(s),
+                    other => Some(other.to_string()),
+                };
+            }
+        }
+        provision_data.push(prov_clone);
+    }
+    Ok(provision_data)
+}
+
+async fn setup_storage_urls(
+    run_id: Uuid,
+    pool: &PgPool,
+    workflow: &dsl::Workflow,
+    resolved_spec: &Value,
+    run_context: &RunContext,
+) -> Result<serde_json::Map<String, Value>> {
     let mut storage_urls = serde_json::Map::new();
 
     let mut mounted_storage_names = std::collections::HashSet::new();
@@ -69,162 +135,114 @@ pub async fn dispatch_step_instance(
         }
     }
 
-    if !workflow.storage.is_empty() {
-        for storage in workflow.storage {
-            if !mounted_storage_names.contains(&storage.name) {
-                continue;
+    if workflow.storage.is_empty() {
+        return Ok(storage_urls);
+    }
+
+    for storage in &workflow.storage {
+        if !mounted_storage_names.contains(&storage.name) {
+            continue;
+        }
+
+        let backend: Option<stormchaser_model::storage::StorageBackend> =
+            if let Some(ref backend_name) = storage.backend {
+                crate::db::get_storage_backend_by_name(pool, backend_name).await?
+            } else {
+                crate::db::get_default_sfs_backend(pool).await?
+            };
+
+        if let Some(backend) = backend {
+            let mut get_url = None;
+            let mut put_url = None;
+
+            if backend.backend_type == BackendType::S3 {
+                let client = crate::s3::get_s3_client(&backend).await?;
+                let bucket = backend.config["bucket"]
+                    .as_str()
+                    .context("Missing bucket in SFS backend config")?;
+
+                let key = format!("{}/{}.tar.gz", run_id, storage.name);
+                let expires = Duration::from_secs(3600);
+
+                get_url = Some(
+                    crate::s3::generate_presigned_url(&client, bucket, &key, false, expires)
+                        .await?,
+                );
+                put_url = Some(
+                    crate::s3::generate_presigned_url(&client, bucket, &key, true, expires).await?,
+                );
             }
-            let backend: Option<storage::StorageBackend> =
-                if let Some(ref backend_name) = storage.backend {
-                    crate::db::get_storage_backend_by_name(&pool, backend_name).await?
-                } else {
-                    crate::db::get_default_sfs_backend(&pool).await?
-                };
 
-            if let Some(backend) = backend {
-                let mut get_url = None;
-                let mut put_url = None;
+            let last_hash: Option<(String,)> =
+                crate::db::get_run_storage_last_hash(pool, run_id, &storage.name).await?;
 
-                if backend.backend_type == BackendType::S3 {
-                    let client = crate::s3::get_s3_client(&backend).await?;
-                    let bucket = backend.config["bucket"]
-                        .as_str()
-                        .context("Missing bucket in SFS backend config")?;
+            let mut artifacts_data = serde_json::Map::new();
+            for artifact in &storage.artifacts {
+                let instructions = crate::artifact::generate_parking_instructions(
+                    &backend,
+                    run_id,
+                    &storage.name,
+                    artifact,
+                )
+                .await?;
+                artifacts_data.insert(artifact.name.clone(), instructions);
+            }
 
-                    let key = format!("{}/{}.tar.gz", run_id, storage.name);
-                    let expires = Duration::from_secs(3600);
+            let provision_data =
+                resolve_storage_provision(run_id, pool, storage, run_context).await?;
 
-                    get_url = Some(
-                        crate::s3::generate_presigned_url(&client, bucket, &key, false, expires)
-                            .await?,
-                    );
-                    put_url = Some(
-                        crate::s3::generate_presigned_url(&client, bucket, &key, true, expires)
-                            .await?,
-                    );
-                }
-
-                let last_hash: Option<(String,)> =
-                    crate::db::get_run_storage_last_hash(&pool, run_id, &storage.name).await?;
-
-                let mut artifacts_data = serde_json::Map::new();
-                for artifact in storage.artifacts {
-                    let instructions = crate::artifact::generate_parking_instructions(
-                        &backend,
-                        run_id,
-                        &storage.name,
-                        &artifact,
-                    )
-                    .await?;
-                    artifacts_data.insert(artifact.name.clone(), instructions);
-                }
-
-                let mut provision_data = Vec::new();
-                for mut prov in storage.provision {
-                    if prov.resource_type == "artifact" {
-                        // For artifacts, the name corresponds to the artifact_name in the DB
-                        let (backend_id, remote_path) =
-                            crate::db::get_artifact_by_name(&pool, run_id, &prov.name)
-                                .await?
-                                .with_context(|| {
-                                    format!("Artifact '{}' not found for run {}", prov.name, run_id)
-                                })?;
-                        let backend_info: stormchaser_model::storage::StorageBackend =
-                            crate::db::get_storage_backend_by_id(&pool, backend_id)
-                                .await?
-                                .with_context(|| {
-                                    format!(
-                                        "Storage backend {} not found for artifact '{}'",
-                                        backend_id, prov.name
-                                    )
-                                })?;
-                        if backend_info.backend_type != stormchaser_model::storage::BackendType::S3
-                        {
-                            anyhow::bail!(
-                                "Artifact '{}' requires an S3 backend for provisioning; \
-                                 backend '{}' is not S3",
-                                prov.name,
-                                backend_info.name
-                            );
-                        }
-                        let bucket = backend_info
-                            .config
-                            .get("bucket")
-                            .and_then(|b: &serde_json::Value| b.as_str())
-                            .with_context(|| {
-                                format!(
-                                    "Missing 'bucket' in config for backend '{}' (artifact '{}')",
-                                    backend_info.name, prov.name
-                                )
-                            })?;
-                        let client = crate::s3::get_s3_client(&backend_info).await?;
-                        let expires = std::time::Duration::from_secs(3600);
-                        prov.url = Some(
-                            crate::s3::generate_presigned_url(
-                                &client,
-                                bucket,
-                                &remote_path,
-                                false,
-                                expires,
-                            )
-                            .await?,
-                        );
-                    } else if let Some(url) = &prov.url {
-                        let mut val = Value::String(url.clone());
-                        let hcl_ctx = crate::hcl_eval::create_context(
-                            run_context.inputs.clone(),
-                            run_id,
-                            run_context.secrets.clone(),
-                        );
-                        if crate::hcl_eval::resolve_expressions(&mut val, &hcl_ctx).is_ok() {
-                            prov.url = match val {
-                                Value::String(s) => Some(s),
-                                other => Some(other.to_string()),
-                            };
-                        }
-                    }
-                    provision_data.push(prov);
-                }
-
-                let mut preserve = storage.preserve.clone();
-                if let Some(mounts) = resolved_spec
-                    .get("storage_mounts")
-                    .and_then(|m| m.as_array())
-                {
-                    for mount in mounts {
-                        if let Some(name) = mount.get("name").and_then(|n| n.as_str()) {
-                            if name == storage.name {
-                                if let Some(p) = mount.get("preserve").and_then(|p| p.as_array()) {
-                                    preserve = p
-                                        .iter()
-                                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                                        .collect();
-                                }
+            let mut preserve = storage.preserve.clone();
+            if let Some(mounts) = resolved_spec
+                .get("storage_mounts")
+                .and_then(|m| m.as_array())
+            {
+                for mount in mounts {
+                    if let Some(name) = mount.get("name").and_then(|n| n.as_str()) {
+                        if name == storage.name {
+                            if let Some(p) = mount.get("preserve").and_then(|p| p.as_array()) {
+                                preserve = p
+                                    .iter()
+                                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                    .collect();
                             }
                         }
                     }
                 }
-
-                storage_urls.insert(
-                    storage.name.clone(),
-                    serde_json::json!({
-                        "get_url": get_url,
-                        "put_url": put_url,
-                        "expected_hash": last_hash.map(|h| h.0),
-                        "artifacts": artifacts_data,
-                        "provision": provision_data,
-                        "preserve": preserve,
-                    }),
-                );
             }
+
+            storage_urls.insert(
+                storage.name.clone(),
+                serde_json::json!({
+                    "get_url": get_url,
+                    "put_url": put_url,
+                    "expected_hash": last_hash.map(|h| h.0),
+                    "artifacts": artifacts_data,
+                    "provision": provision_data,
+                    "preserve": preserve,
+                }),
+            );
         }
     }
 
+    Ok(storage_urls)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn try_dispatch_intrinsic(
+    run_id: Uuid,
+    step_instance_id: Uuid,
+    step_type: &str,
+    resolved_spec: &Value,
+    resolved_params: &Value,
+    pool: PgPool,
+    nats_client: async_nats::Client,
+    tls_reloader: Arc<TlsReloader>,
+) -> Result<bool> {
     if super::intrinsic::wasm::try_dispatch(
         run_id,
         step_instance_id,
-        &step_type,
-        &resolved_spec,
+        step_type,
+        resolved_spec,
         resolved_params,
         pool.clone(),
         nats_client.clone(),
@@ -232,102 +250,100 @@ pub async fn dispatch_step_instance(
     )
     .await?
     {
-        return Ok(());
+        return Ok(true);
     }
-
     if super::intrinsic::lambda::try_dispatch(
         run_id,
         step_instance_id,
-        &step_type,
-        &resolved_spec,
+        step_type,
+        resolved_spec,
         pool.clone(),
         nats_client.clone(),
         tls_reloader.clone(),
     )
     .await?
     {
-        return Ok(());
+        return Ok(true);
     }
-
     if super::intrinsic::webhook::try_dispatch(
         run_id,
         step_instance_id,
-        &step_type,
-        &resolved_spec,
+        step_type,
+        resolved_spec,
         pool.clone(),
         nats_client.clone(),
         tls_reloader.clone(),
     )
     .await?
     {
-        return Ok(());
+        return Ok(true);
     }
-
     if super::intrinsic::jinja::try_dispatch(
         run_id,
         step_instance_id,
-        &step_type,
-        &resolved_spec,
+        step_type,
+        resolved_spec,
         pool.clone(),
         nats_client.clone(),
         tls_reloader.clone(),
     )
     .await?
     {
-        return Ok(());
+        return Ok(true);
     }
-
     if super::intrinsic::email::try_dispatch(
         run_id,
         step_instance_id,
-        &step_type,
-        &resolved_spec,
+        step_type,
+        resolved_spec,
         pool.clone(),
         nats_client.clone(),
         tls_reloader.clone(),
     )
     .await?
     {
-        return Ok(());
+        return Ok(true);
     }
-
     if super::intrinsic::test_report_email::try_dispatch(
         run_id,
         step_instance_id,
-        &step_type,
-        &resolved_spec,
+        step_type,
+        resolved_spec,
         pool.clone(),
         nats_client.clone(),
         tls_reloader.clone(),
     )
     .await?
     {
-        return Ok(());
+        return Ok(true);
     }
-
     if super::intrinsic::jq::try_dispatch(
         run_id,
         step_instance_id,
-        &step_type,
-        &resolved_spec,
+        step_type,
+        resolved_spec,
         pool.clone(),
         nats_client.clone(),
         tls_reloader.clone(),
     )
     .await?
     {
-        return Ok(());
+        return Ok(true);
     }
+    Ok(false)
+}
 
-    let mut dsl_step_val = Value::Null;
-    if let Some(found_step) = find_step(&workflow.steps, step_name) {
-        dsl_step_val = serde_json::to_value(found_step).unwrap_or(Value::Null);
-    }
-
+async fn setup_test_report_urls(
+    run_id: Uuid,
+    step_instance_id: Uuid,
+    step_name: &str,
+    pool: &PgPool,
+    workflow: &dsl::Workflow,
+) -> Result<serde_json::Map<String, Value>> {
     let mut test_report_urls = serde_json::Map::new();
-    if let Some(step) = workflow.steps.iter().find(|s| s.name == step_name) {
+    if let Some(step) = find_step(&workflow.steps, step_name) {
         if !step.reports.is_empty() {
-            let backend = crate::db::get_default_sfs_backend(&pool)
+            let backend = crate::db::get_default_sfs_backend(pool)
                 .await?
                 .context("Default SFS backend required for test reports")?;
             let client = crate::s3::get_s3_client(&backend).await?;
@@ -356,6 +372,56 @@ pub async fn dispatch_step_instance(
             }
         }
     }
+    Ok(test_report_urls)
+}
+
+/// Dispatches a step instance, handling intrinsic types or forwarding to runners via NATS.
+#[allow(clippy::too_many_arguments)]
+pub async fn dispatch_step_instance(
+    run_id: Uuid,
+    step_instance_id: Uuid,
+    step_name: &str,
+    step_type: &str,
+    resolved_spec: &Value,
+    resolved_params: &Value,
+    nats_client: async_nats::Client,
+    pool: PgPool,
+    tls_reloader: Arc<TlsReloader>,
+) -> Result<()> {
+    let mut step_type = step_type.to_string();
+    let mut resolved_spec = resolved_spec.clone();
+
+    apply_intrinsic_mutations(run_id, &mut step_type, &mut resolved_spec).await?;
+
+    let run_context = fetch_run_context(run_id, &pool).await?;
+    let workflow: dsl::Workflow = serde_json::from_value(run_context.workflow_definition.clone())
+        .context("Failed to parse workflow definition from context")?;
+
+    let storage_urls =
+        setup_storage_urls(run_id, &pool, &workflow, &resolved_spec, &run_context).await?;
+
+    if try_dispatch_intrinsic(
+        run_id,
+        step_instance_id,
+        &step_type,
+        &resolved_spec,
+        resolved_params,
+        pool.clone(),
+        nats_client.clone(),
+        tls_reloader.clone(),
+    )
+    .await?
+    {
+        return Ok(());
+    }
+
+    let mut dsl_step_val = Value::Null;
+    if let Some(found_step) = find_step(&workflow.steps, step_name) {
+        dsl_step_val = serde_json::to_value(found_step).unwrap_or(Value::Null);
+    }
+
+    let test_report_urls =
+        setup_test_report_urls(run_id, step_instance_id, step_name, &pool, &workflow).await?;
 
     let payload = stormchaser_model::events::StepScheduledEvent {
         run_id,
@@ -383,5 +449,6 @@ pub async fn dispatch_step_instance(
         None,
     )
     .await?;
+
     Ok(())
 }
