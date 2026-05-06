@@ -90,6 +90,29 @@ pub async fn handle_step_failed(
         .fail(format!("Step {} failed: {}", step_id, error_msg), &mut *tx)
         .await?;
 
+    let js = async_nats::jetstream::new(nats_client.clone());
+    if let Err(e) = stormchaser_model::nats::publish_cloudevent(
+        &js,
+        "stormchaser.v1.run.failed",
+        "workflow_failed",
+        "stormchaser-engine",
+        serde_json::to_value(stormchaser_model::events::WorkflowFailedEvent {
+            run_id,
+            event_type: "workflow_failed".to_string(),
+            timestamp: chrono::Utc::now(),
+        })
+        .unwrap(),
+        None,
+        None,
+    )
+    .await
+    {
+        error!(
+            "Failed to publish workflow failed event for {}: {:?}",
+            run_id, e
+        );
+    }
+
     crate::RUNS_FAILED.add(
         1,
         &[

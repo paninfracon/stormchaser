@@ -1,4 +1,5 @@
 use super::{AuthExchangeRequest, AuthExchangeResponse, AuthRefreshRequest};
+use crate::auth;
 use crate::{AppState, Claims, JWT_SECRET};
 use axum::{
     extract::{Query, State},
@@ -6,7 +7,12 @@ use axum::{
     response::{IntoResponse, Redirect},
     Json,
 };
+use jsonwebtoken::decode;
+use jsonwebtoken::decode_header;
+use jsonwebtoken::DecodingKey;
+use jsonwebtoken::Validation;
 use jsonwebtoken::{encode, EncodingKey, Header};
+use reqwest::Client;
 use serde::Deserialize;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -75,7 +81,7 @@ pub async fn exchange_token(
         .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // 1. Exchange code for tokens
-    let client = reqwest::Client::new();
+    let client = Client::new();
     let token_url = format!("{}/token", oidc_config.issuer.trim_end_matches('/'));
 
     let params = [
@@ -109,7 +115,7 @@ pub async fn exchange_token(
     })?;
 
     // 2. Validate the ID Token
-    let header = match jsonwebtoken::decode_header(&token_res.id_token) {
+    let header = match decode_header(&token_res.id_token) {
         Ok(h) => h,
         Err(e) => {
             tracing::error!("Failed to decode id_token header: {:?}", e);
@@ -130,7 +136,7 @@ pub async fn exchange_token(
         Some(j) => j,
         None => {
             tracing::warn!("kid {} not found in JWKS cache, attempting refresh", kid);
-            let new_jwks = crate::auth::jwks::fetch_jwks(&oidc_config.jwks_url).await;
+            let new_jwks = auth::jwks::fetch_jwks(&oidc_config.jwks_url).await;
             let mut jwks_write = state.jwks.write().await;
             *jwks_write = new_jwks;
 
@@ -144,14 +150,14 @@ pub async fn exchange_token(
         }
     };
 
-    let mut validation = jsonwebtoken::Validation::new(header.alg);
+    let mut validation = Validation::new(header.alg);
     validation.set_audience(std::slice::from_ref(&oidc_config.client_id));
     validation.set_issuer(&[
         oidc_config.issuer.as_str(),
         oidc_config.external_issuer.as_str(),
     ]);
 
-    let decoding_key = match jsonwebtoken::DecodingKey::from_jwk(&jwk) {
+    let decoding_key = match DecodingKey::from_jwk(&jwk) {
         Ok(k) => k,
         Err(e) => {
             tracing::error!("Failed to create decoding key from JWK: {:?}", e);
@@ -159,14 +165,13 @@ pub async fn exchange_token(
         }
     };
 
-    let token_data =
-        match jsonwebtoken::decode::<Claims>(&token_res.id_token, &decoding_key, &validation) {
-            Ok(d) => d,
-            Err(e) => {
-                tracing::error!("Failed to validate id_token: {:?}", e);
-                return Err(StatusCode::UNAUTHORIZED);
-            }
-        };
+    let token_data = match decode::<Claims>(&token_res.id_token, &decoding_key, &validation) {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::error!("Failed to validate id_token: {:?}", e);
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+    };
 
     // 3. Generate Stormchaser Access Token
     let user_id = token_data.claims.sub;
@@ -222,7 +227,7 @@ pub async fn refresh_token(
         .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // Exchange refresh token for new tokens
-    let client = reqwest::Client::new();
+    let client = Client::new();
     let token_url = format!("{}/token", oidc_config.issuer.trim_end_matches('/'));
 
     let params = [
@@ -255,7 +260,7 @@ pub async fn refresh_token(
     })?;
 
     // Validate the new ID Token
-    let header = match jsonwebtoken::decode_header(&token_res.id_token) {
+    let header = match decode_header(&token_res.id_token) {
         Ok(h) => h,
         Err(e) => {
             tracing::error!("Failed to decode id_token header: {:?}", e);
@@ -273,7 +278,7 @@ pub async fn refresh_token(
         Some(j) => j,
         None => {
             tracing::warn!("kid {} not found in JWKS cache, attempting refresh", kid);
-            let new_jwks = crate::auth::jwks::fetch_jwks(&oidc_config.jwks_url).await;
+            let new_jwks = auth::jwks::fetch_jwks(&oidc_config.jwks_url).await;
             let mut jwks_write = state.jwks.write().await;
             *jwks_write = new_jwks;
 
@@ -287,25 +292,23 @@ pub async fn refresh_token(
         }
     };
 
-    let mut validation = jsonwebtoken::Validation::new(header.alg);
+    let mut validation = Validation::new(header.alg);
     validation.set_audience(std::slice::from_ref(&oidc_config.client_id));
     validation.set_issuer(&[
         oidc_config.issuer.as_str(),
         oidc_config.external_issuer.as_str(),
     ]);
 
-    let decoding_key = jsonwebtoken::DecodingKey::from_jwk(&jwk).map_err(|e| {
+    let decoding_key = DecodingKey::from_jwk(&jwk).map_err(|e| {
         tracing::error!("Failed to create decoding key: {:?}", e);
         StatusCode::UNAUTHORIZED
     })?;
 
     let token_data =
-        jsonwebtoken::decode::<Claims>(&token_res.id_token, &decoding_key, &validation).map_err(
-            |e| {
-                tracing::error!("Failed to validate id_token: {:?}", e);
-                StatusCode::UNAUTHORIZED
-            },
-        )?;
+        decode::<Claims>(&token_res.id_token, &decoding_key, &validation).map_err(|e| {
+            tracing::error!("Failed to validate id_token: {:?}", e);
+            StatusCode::UNAUTHORIZED
+        })?;
 
     let user_id = token_data.claims.sub;
     let email = token_data.claims.email;

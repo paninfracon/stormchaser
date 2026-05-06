@@ -1,5 +1,11 @@
+use crate::db;
+use async_nats::jetstream;
+use chrono::Utc;
 use std::collections::HashMap;
+use std::env;
 use stormchaser_model::cron;
+use stormchaser_model::events::WorkflowQueuedEvent;
+use stormchaser_model::nats::publish_cloudevent;
 
 use super::{CreateCronWorkflowRequest, CronWorkflowResponse, EnqueueResponse};
 use crate::{AppState, AuthClaims};
@@ -43,7 +49,7 @@ pub async fn create_cron_workflow(
         register_external_cron(id, &payload.name, &payload.cronspec, &secret_token).await?;
 
     // 2. Save to database
-    crate::db::insert_cron_workflow(
+    db::insert_cron_workflow(
         &state.pool,
         id,
         &payload,
@@ -79,7 +85,7 @@ pub async fn list_cron_workflows(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<cron::CronWorkflow>>, StatusCode> {
-    let workflows = crate::db::list_cron_workflows(&state.pool)
+    let workflows = db::list_cron_workflows(&state.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -105,7 +111,7 @@ pub async fn delete_cron_workflow(
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, StatusCode> {
     // 1. Fetch to get external_job_id
-    let workflow = crate::db::get_cron_workflow(&state.pool, id)
+    let workflow = db::get_cron_workflow(&state.pool, id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -120,7 +126,7 @@ pub async fn delete_cron_workflow(
     }
 
     // 3. Delete from DB
-    crate::db::delete_cron_workflow(&state.pool, id)
+    db::delete_cron_workflow(&state.pool, id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -151,7 +157,7 @@ pub async fn trigger_cron_workflow(
     Path(id): Path<Uuid>,
 ) -> Result<Json<EnqueueResponse>, StatusCode> {
     // 1. Fetch CronWorkflow
-    let cron = crate::db::get_active_cron_workflow(&state.pool, id)
+    let cron = db::get_active_cron_workflow(&state.pool, id)
         .await
         .map_err(|_| StatusCode::NOT_FOUND)?
         .ok_or(StatusCode::NOT_FOUND)?;
@@ -181,7 +187,7 @@ pub async fn trigger_cron_workflow(
     let run_id = Uuid::new_v4();
 
     tracing::info!(run_id = %run_id, "Enqueuing cron workflow: {}", cron.workflow_name);
-    let fencing_token = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+    let fencing_token = Utc::now().timestamp_nanos_opt().unwrap_or(0);
 
     let mut tx = state
         .pool
@@ -189,7 +195,7 @@ pub async fn trigger_cron_workflow(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    crate::db::insert_workflow_run(
+    db::insert_workflow_run(
         &mut tx,
         run_id,
         &cron.workflow_name,
@@ -204,7 +210,7 @@ pub async fn trigger_cron_workflow(
     .inspect_err(|e| tracing::error!(run_id = %run_id, "Database error inserting run: {:?}", e))
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    crate::db::insert_run_context(
+    db::insert_run_context(
         &mut tx,
         run_id,
         "v1",
@@ -215,7 +221,7 @@ pub async fn trigger_cron_workflow(
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    crate::db::insert_run_quotas(&mut tx, run_id, 10, "1", "4Gi", "10Gi", "1h")
+    db::insert_run_quotas(&mut tx, run_id, 10, "1", "4Gi", "10Gi", "1h")
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -224,17 +230,17 @@ pub async fn trigger_cron_workflow(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // Publish to NATS
-    let event = stormchaser_model::events::WorkflowQueuedEvent {
+    let event = WorkflowQueuedEvent {
         run_id,
         event_type: "workflow_queued".to_string(),
-        timestamp: chrono::Utc::now(),
+        timestamp: Utc::now(),
         dsl: None,
         inputs: None,
         initiating_user: None,
     };
 
-    stormchaser_model::nats::publish_cloudevent(
-        &async_nats::jetstream::new(state.nats.clone()),
+    publish_cloudevent(
+        &jetstream::new(state.nats.clone()),
         "stormchaser.v1.run.queued",
         "stormchaser.v1.run.queued",
         "/stormchaser",
@@ -265,8 +271,7 @@ async fn register_ofelia_cron(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let system_url =
-        std::env::var("SYSTEM_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
+    let system_url = env::var("SYSTEM_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
     let trigger_url = format!("{}/api/v1/cron-trigger/{}", system_url, id);
     let container_name = format!("stormchaser-cron-{}", id);
 
@@ -342,7 +347,7 @@ async fn register_external_cron(
     cronspec: &str,
     secret_token: &str,
 ) -> Result<Option<String>, StatusCode> {
-    let engine = std::env::var("CRON_ENGINE").unwrap_or_else(|_| "kubernetes".to_string());
+    let engine = env::var("CRON_ENGINE").unwrap_or_else(|_| "kubernetes".to_string());
 
     if engine == "none" {
         tracing::info!(
@@ -365,10 +370,10 @@ async fn register_external_cron(
         tracing::error!("Failed to initialize K8s client for cron: {:?}", e);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
-    let namespace = std::env::var("KUBERNETES_NAMESPACE").unwrap_or_else(|_| "default".to_string());
+    let namespace = env::var("KUBERNETES_NAMESPACE").unwrap_or_else(|_| "default".to_string());
     let cronjobs: Api<CronJob> = Api::namespaced(client, &namespace);
 
-    let system_url = std::env::var("SYSTEM_URL")
+    let system_url = env::var("SYSTEM_URL")
         .unwrap_or_else(|_| "http://stormchaser-api.default.svc.cluster.local".to_string());
     let trigger_url = format!("{}/api/v1/cron-trigger/{}", system_url, id);
     let auth_header = format!("Authorization: Bearer {}", secret_token);
@@ -433,7 +438,7 @@ async fn register_external_cron(
 }
 
 async fn unregister_external_cron(external_job_id: &str) -> Result<(), StatusCode> {
-    let engine = std::env::var("CRON_ENGINE").unwrap_or_else(|_| "kubernetes".to_string());
+    let engine = env::var("CRON_ENGINE").unwrap_or_else(|_| "kubernetes".to_string());
 
     if engine == "none" {
         return Ok(());
@@ -449,7 +454,7 @@ async fn unregister_external_cron(external_job_id: &str) -> Result<(), StatusCod
     let client = Client::try_default()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let namespace = std::env::var("KUBERNETES_NAMESPACE").unwrap_or_else(|_| "default".to_string());
+    let namespace = env::var("KUBERNETES_NAMESPACE").unwrap_or_else(|_| "default".to_string());
     let cronjobs: Api<CronJob> = Api::namespaced(client, &namespace);
 
     cronjobs

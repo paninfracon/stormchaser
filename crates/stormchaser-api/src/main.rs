@@ -1,7 +1,12 @@
 use anyhow::Context;
+use async_nats::connect_with_options;
+use sqlx::migrate;
+use sqlx::postgres;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::ConnectOptions;
 use std::collections::HashMap;
+use std::env;
+use std::fs;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -12,6 +17,9 @@ use stormchaser_api::{
     AppState,
 };
 use stormchaser_model::auth::OpaClient;
+use tokio::net::TcpListener;
+use tokio::signal;
+use tokio::sync;
 
 use stormchaser_api::auth::jwks::fetch_jwks;
 use stormchaser_api::auth::jwks::OidcConfig;
@@ -146,7 +154,7 @@ async fn main() -> anyhow::Result<()> {
         env!("VERGEN_BUILD_TIMESTAMP")
     );
 
-    let config = Config::from_env(std::env::vars())?;
+    let config = Config::from_env(env::vars())?;
     run_server(config).await
 }
 
@@ -161,18 +169,18 @@ pub async fn run_server(config: Config) -> anyhow::Result<()> {
 
     let tls_reloader = Arc::new(TlsReloader::new(tls_config).await?);
 
-    let mut db_options: sqlx::postgres::PgConnectOptions = config.database_url.parse()?;
+    let mut db_options: postgres::PgConnectOptions = config.database_url.parse()?;
     if config.db_ssl {
         if let Some(ca) = &config.tls_ca_cert_path {
             db_options = db_options
-                .ssl_mode(sqlx::postgres::PgSslMode::VerifyFull)
+                .ssl_mode(postgres::PgSslMode::VerifyFull)
                 .ssl_root_cert(ca.to_string_lossy().to_string());
         }
         db_options = db_options
             .ssl_client_cert(config.tls_cert_path)
             .ssl_client_key(config.tls_key_path);
     } else {
-        db_options = db_options.ssl_mode(sqlx::postgres::PgSslMode::Disable);
+        db_options = db_options.ssl_mode(postgres::PgSslMode::Disable);
     }
 
     db_options = db_options
@@ -185,18 +193,18 @@ pub async fn run_server(config: Config) -> anyhow::Result<()> {
         .await?;
 
     tracing::info!("Running database migrations...");
-    sqlx::migrate!("./migrations").run(&pool).await?;
+    migrate!("./migrations").run(&pool).await?;
 
     let nats_options = async_nats::ConnectOptions::new()
         .tls_client_config((*tls_reloader.client_config()).clone());
 
-    let nats_client = async_nats::connect_with_options(config.nats_url, nats_options).await?;
+    let nats_client = connect_with_options(config.nats_url, nats_options).await?;
 
     let mut opa_client = OpaClient::new(config.opa_url, Some(tls_reloader.client_config()));
 
     if let Some(wasm_path) = config.opa_wasm_path {
         tracing::info!("Loading OPA WASM policy from {}", wasm_path);
-        let wasm_bytes = std::fs::read(&wasm_path).context("Failed to read OPA WASM policy")?;
+        let wasm_bytes = fs::read(&wasm_path).context("Failed to read OPA WASM policy")?;
         let executor = OpaWasmInstance::new(&wasm_bytes)?;
         opa_client = opa_client.with_wasm_executor(Arc::new(executor));
     }
@@ -261,7 +269,7 @@ pub async fn run_server(config: Config) -> anyhow::Result<()> {
         nats: nats_client,
         opa: opa_client,
         oidc_config,
-        jwks: Arc::new(tokio::sync::RwLock::new(jwks)),
+        jwks: Arc::new(sync::RwLock::new(jwks)),
         log_backend,
     };
 
@@ -269,7 +277,7 @@ pub async fn run_server(config: Config) -> anyhow::Result<()> {
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
     tracing::info!("listening on {}", addr);
-    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let listener = TcpListener::bind(addr).await?;
 
     axum::serve(
         listener,
@@ -284,14 +292,14 @@ pub async fn run_server(config: Config) -> anyhow::Result<()> {
 
 async fn shutdown_signal() {
     let ctrl_c = async {
-        tokio::signal::ctrl_c()
+        signal::ctrl_c()
             .await
             .expect("failed to install Ctrl+C handler");
     };
 
     #[cfg(unix)]
     let terminate = async {
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        signal::unix::signal(signal::unix::SignalKind::terminate())
             .expect("failed to install signal handler")
             .recv()
             .await;
