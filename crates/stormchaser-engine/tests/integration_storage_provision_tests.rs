@@ -151,12 +151,27 @@ async fn test_resolve_storage_provision() {
     .unwrap();
 
     use futures::StreamExt;
-    let msg = tokio::time::timeout(std::time::Duration::from_secs(5), sub.next())
-        .await
-        .expect("Timed out waiting for scheduled event")
-        .unwrap();
+    let expected_run_id = run_id.to_string();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    let event: serde_json::Value = loop {
+        let msg = tokio::time::timeout_at(deadline, sub.next())
+            .await
+            .expect("Timed out waiting for scheduled event")
+            .expect("Subscription closed while waiting for scheduled event");
 
-    let event: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+        let event: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+        let matches_run_id = event
+            .get("data")
+            .and_then(|data| data.get("run_id"))
+            .and_then(|run_id| run_id.as_str())
+            .map(|run_id| run_id == expected_run_id)
+            .unwrap_or(false);
+
+        if matches_run_id {
+            break event;
+        }
+    };
+
     let data = event.get("data").unwrap();
     let storage = data.get("storage").unwrap().as_object().unwrap();
     let workspace = storage.get("workspace").unwrap();
