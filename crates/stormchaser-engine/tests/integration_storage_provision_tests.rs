@@ -1,10 +1,10 @@
+use cloudevents::Data;
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
 use stormchaser_engine::handler;
 use stormchaser_model::auth::OpaClient;
 use uuid::Uuid;
-use cloudevents::Data;
 
 use stormchaser_tls::TlsConfig;
 use stormchaser_tls::TlsReloader;
