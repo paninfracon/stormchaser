@@ -1,3 +1,4 @@
+use crate::db;
 use crate::{AppState, AuthClaims};
 use axum::response::sse::Event;
 use axum::{
@@ -53,7 +54,7 @@ pub async fn stream_step_logs_api(
         None => return Err(StatusCode::NOT_IMPLEMENTED),
     };
 
-    let instance = crate::db::get_step_instance_by_id(&state.pool, run_id, step_id)
+    let instance = db::get_step_instance_by_id(&state.pool, run_id, step_id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
@@ -110,7 +111,7 @@ pub async fn get_step_logs_api(
         None => return Err(StatusCode::NOT_IMPLEMENTED),
     };
 
-    let instance = crate::db::get_step_instance_by_id(&state.pool, run_id, step_id)
+    let instance = db::get_step_instance_by_id(&state.pool, run_id, step_id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
@@ -168,7 +169,7 @@ pub async fn stream_run_logs_api(
         tracing::debug!("Started run log stream task for run {}", run_id);
 
         loop {
-            let status = crate::db::get_workflow_run_status(&pool, run_id)
+            let status = db::get_workflow_run_status(&pool, run_id)
                 .await
                 .unwrap_or(None);
 
@@ -177,9 +178,7 @@ pub async fn stream_run_logs_api(
                 Some("succeeded") | Some("failed") | Some("cancelled")
             );
 
-            let steps = crate::db::get_step_names(&pool, run_id)
-                .await
-                .unwrap_or_default();
+            let steps = db::get_step_names(&pool, run_id).await.unwrap_or_default();
 
             if !steps.is_empty() {
                 tracing::trace!("Found {} steps for run {}", steps.len(), run_id);
@@ -304,7 +303,7 @@ pub async fn stream_run_status_api(
 
         loop {
             // Check workflow run status
-            let current_run_status = crate::db::get_combined_run_status(&pool, run_id)
+            let current_run_status = db::get_combined_run_status(&pool, run_id)
                 .await
                 .unwrap_or(None);
 
@@ -325,7 +324,7 @@ pub async fn stream_run_status_api(
             }
 
             // Check step instances statuses
-            let steps = crate::db::get_combined_step_statuses(&pool, run_id)
+            let steps = db::get_combined_step_statuses(&pool, run_id)
                 .await
                 .unwrap_or_default();
 

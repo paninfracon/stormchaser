@@ -1,9 +1,13 @@
 use anyhow::Result;
-use serde_json::Value;
+use reqwest::{Body, Client};
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
+use std::path::Path;
+use std::process::Command;
+use tokio::fs::File as AsyncFile;
 use tracing::{error, info, warn};
 
 async fn upload_to_s3(
@@ -12,18 +16,18 @@ async fn upload_to_s3(
     path: &str,
     file_size: u64,
     hash: String,
-    client: &reqwest::Client,
+    client: &Client,
     metadata_map: &mut HashMap<String, Value>,
 ) {
     if let Some(put_url) = artifact_val.get("put_url").and_then(|u| u.as_str()) {
-        let file_tokio = match tokio::fs::File::open(path).await {
+        let file_tokio = match AsyncFile::open(path).await {
             Ok(f) => f,
             Err(e) => {
                 error!("Failed to open artifact file '{}': {}", name, e);
                 return;
             }
         };
-        let body = reqwest::Body::from(file_tokio);
+        let body = Body::from(file_tokio);
 
         let res = match client
             .put(put_url)
@@ -50,7 +54,7 @@ async fn upload_to_s3(
             info!("Successfully parked artifact '{}' (hash: {})", name, hash);
             metadata_map.insert(
                 name.clone(),
-                serde_json::json!({
+                json!({
                     "hash": hash,
                     "size": file_size,
                     "content_type": "application/octet-stream",
@@ -71,7 +75,7 @@ async fn upload_to_oci(
     metadata_map: &mut HashMap<String, Value>,
 ) {
     if let Some(remote_path) = artifact_val.get("remote_path").and_then(|u| u.as_str()) {
-        let mut cmd = std::process::Command::new("oras");
+        let mut cmd = Command::new("oras");
         cmd.arg("push");
 
         if let (Some(user), Some(pass)) = (
@@ -102,7 +106,7 @@ async fn upload_to_oci(
             );
             metadata_map.insert(
                 name.clone(),
-                serde_json::json!({
+                json!({
                     "hash": hash,
                     "size": file_size,
                     "content_type": "application/vnd.oci.image.layer.v1.tar+gzip",
@@ -116,7 +120,7 @@ async fn upload_to_oci(
 
 /// Uploads artifacts to configured backends and returns metadata maps.
 pub async fn park_artifacts(artifacts: Value) -> Result<HashMap<String, Value>> {
-    let client = reqwest::Client::new();
+    let client = Client::new();
     let mut metadata_map = HashMap::new();
 
     if let Some(artifact_map) = artifacts.as_object() {
@@ -131,7 +135,7 @@ pub async fn park_artifacts(artifacts: Value) -> Result<HashMap<String, Value>> 
                 None => continue,
             };
 
-            if !std::path::Path::new(path).exists() {
+            if !Path::new(path).exists() {
                 warn!("Artifact '{}' path '{}' not found, skipping", name, path);
                 continue;
             }
@@ -179,7 +183,7 @@ pub async fn park_artifacts(artifacts: Value) -> Result<HashMap<String, Value>> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use std::fs;
     use tempfile::tempdir;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -189,7 +193,7 @@ mod tests {
         let mock_server = MockServer::start().await;
         let dir = tempdir().unwrap();
         let artifact_path = dir.path().join("artifact.bin");
-        std::fs::write(&artifact_path, "binary content").unwrap();
+        fs::write(&artifact_path, "binary content").unwrap();
 
         Mock::given(method("PUT"))
             .and(path("/artifacts/artifact.bin"))

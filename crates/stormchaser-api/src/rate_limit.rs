@@ -1,4 +1,6 @@
+use async_nats::jetstream;
 use async_nats::jetstream::kv::Config;
+use async_nats::Client;
 use axum::{
     extract::{ConnectInfo, Request, State},
     http::StatusCode,
@@ -6,6 +8,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use bytes::Bytes;
+use chrono::Utc;
+use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,9 +19,9 @@ use tokio::sync::OnceCell;
 #[derive(Clone)]
 pub struct RateLimitState {
     /// NATS client connection
-    pub nats: async_nats::Client,
+    pub nats: Client,
     /// Lazy initialized Key-Value store for rate limiting
-    pub store: Arc<OnceCell<async_nats::jetstream::kv::Store>>,
+    pub store: Arc<OnceCell<jetstream::kv::Store>>,
     /// Allowed requests per second
     pub per_second: u64,
     /// Maximum burst size for requests
@@ -31,19 +35,19 @@ pub async fn nats_rate_limiter(
     req: Request,
     next: Next,
 ) -> Response {
-    if std::env::var("TEST_BYPASS_RATE_LIMIT").is_ok() {
+    if env::var("TEST_BYPASS_RATE_LIMIT").is_ok() {
         return next.run(req).await;
     }
 
     let ip = addr.ip().to_string();
-    let current_second = chrono::Utc::now().timestamp();
+    let current_second = Utc::now().timestamp();
     let ip_safe = ip.replace(['.', ':'], "_");
     let key = format!("{}_{}", ip_safe, current_second);
 
     let store = match state
         .store
         .get_or_try_init(|| async {
-            let js = async_nats::jetstream::new(state.nats.clone());
+            let js = jetstream::new(state.nats.clone());
             js.create_key_value(Config {
                 bucket: "api_rate_limits".to_string(),
                 max_age: Duration::from_secs(60),

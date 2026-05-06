@@ -188,12 +188,15 @@ impl<'a> App<'a> {
                         while let Some(event) = stream.next().await {
                             if let Ok(event) = event {
                                 if event.event == "workflow_run" {
-                                    if let Ok(run) =
-                                        serde_json::from_str::<crate::app::WorkflowRunDetail>(
-                                            &event.data,
-                                        )
-                                    {
-                                        let _ = tx.send(AppEvent::WorkflowUpdate(run)).await;
+                                    match serde_json::from_str::<crate::app::WorkflowRunDetail>(
+                                        &event.data,
+                                    ) {
+                                        Ok(run) => {
+                                            let _ = tx.send(AppEvent::WorkflowUpdate(run)).await;
+                                        }
+                                        Err(_e) => {
+                                            // Handle error or ignore
+                                        }
                                     }
                                 }
                             }

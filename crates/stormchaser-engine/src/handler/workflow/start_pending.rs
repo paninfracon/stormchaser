@@ -83,6 +83,29 @@ pub async fn handle_workflow_start_pending(
     let machine = WorkflowMachine::<state::StartPending>::new_from_run(run.clone());
     let _ = machine.start(&mut *tx).await?;
 
+    let js = async_nats::jetstream::new(nats_client.clone());
+    if let Err(e) = stormchaser_model::nats::publish_cloudevent(
+        &js,
+        "stormchaser.v1.run.running",
+        "workflow_running",
+        "stormchaser-engine",
+        serde_json::to_value(stormchaser_model::events::WorkflowRunningEvent {
+            run_id,
+            event_type: "workflow_running".to_string(),
+            timestamp: chrono::Utc::now(),
+        })
+        .unwrap(),
+        None,
+        None,
+    )
+    .await
+    {
+        error!(
+            "Failed to publish workflow running event for {}: {:?}",
+            run_id, e
+        );
+    }
+
     crate::RUNS_STARTED.add(
         1,
         &[

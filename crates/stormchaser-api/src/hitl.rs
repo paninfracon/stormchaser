@@ -5,16 +5,26 @@ use aes_gcm::{
 };
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
+    http::{header::AUTHORIZATION, HeaderMap, StatusCode},
     response::IntoResponse,
     Json,
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use serde_json::json;
-use serde_json::Value;
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+use crate::auth::AuthClaims;
+use crate::db::{
+    delete_event_correlation, get_event_correlation, get_run_outputs_for_opa,
+    get_step_instance_for_approval, get_workflow_context_for_opa, insert_approval_registry,
+};
+use async_nats::jetstream::new as new_jetstream;
+use chrono::Utc;
+use stormchaser_model::auth::ApprovalOpaContext;
+use stormchaser_model::dsl::{Step, Workflow};
+use stormchaser_model::events::{StepCompletedEvent, StepFailedEvent};
+use stormchaser_model::nats::publish_cloudevent;
 use stormchaser_model::step::StepStatus;
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -84,10 +94,9 @@ pub async fn approve_step_link(
     };
 
     // 5. Verify step exists and is WaitingForEvent
-    let step =
-        crate::db::get_step_instance_for_approval(&state.pool, payload.step_id, payload.run_id)
-            .await
-            .unwrap_or(None);
+    let step = get_step_instance_for_approval(&state.pool, payload.step_id, payload.run_id)
+        .await
+        .unwrap_or(None);
 
     let step = match step {
         Some(s) => s,
@@ -102,7 +111,7 @@ pub async fn approve_step_link(
     let status_str = if is_approve { "approved" } else { "rejected" };
 
     // 6. Insert into approval_registry
-    let _ = crate::db::insert_approval_registry(
+    let _ = insert_approval_registry(
         &state.pool,
         Uuid::new_v4(),
         payload.step_id,
@@ -155,7 +164,7 @@ async fn check_approval_opa(
         return Ok(());
     }
 
-    let context_row = match crate::db::get_workflow_context_for_opa(&state.pool, run_id).await {
+    let context_row = match get_workflow_context_for_opa(&state.pool, run_id).await {
         Ok(context_row) => context_row,
         Err(err) => {
             eprintln!(
@@ -170,16 +179,14 @@ async fn check_approval_opa(
     };
 
     if let Some(context_data) = context_row {
-        let mut step_ast = serde_json::json!({});
-        if let Ok(workflow) = serde_json::from_value::<stormchaser_model::dsl::Workflow>(
-            context_data.workflow_definition,
-        ) {
+        let mut step_ast = json!({});
+        if let Ok(workflow) = serde_json::from_value::<Workflow>(context_data.workflow_definition) {
             if let Some(s) = find_step(&workflow.steps, step_name) {
-                step_ast = serde_json::to_value(s).unwrap_or(serde_json::json!({}));
+                step_ast = serde_json::to_value(s).unwrap_or(json!({}));
             }
         }
 
-        let run_outputs_map = match crate::db::get_run_outputs_for_opa(&state.pool, run_id).await {
+        let run_outputs_map = match get_run_outputs_for_opa(&state.pool, run_id).await {
             Ok(map) => map,
             Err(err) => {
                 tracing::error!(
@@ -194,12 +201,12 @@ async fn check_approval_opa(
             }
         };
 
-        let opa_context = stormchaser_model::auth::ApprovalOpaContext {
+        let opa_context = ApprovalOpaContext {
             run_id,
             initiating_user: context_data.initiating_user,
             step_ast,
             inputs: context_data.run_inputs,
-            run_outputs: serde_json::Value::Object(run_outputs_map),
+            run_outputs: Value::Object(run_outputs_map),
             token,
         };
 
@@ -220,10 +227,7 @@ async fn check_approval_opa(
 }
 
 // Recursively find the step AST
-fn find_step(
-    steps: &[stormchaser_model::dsl::Step],
-    name: &str,
-) -> Option<stormchaser_model::dsl::Step> {
+fn find_step(steps: &[Step], name: &str) -> Option<Step> {
     for s in steps {
         if s.name == name {
             return Some(s.clone());
@@ -240,18 +244,18 @@ fn find_step(
 /// Approves a step.
 pub async fn approve_step(
     State(state): State<AppState>,
-    crate::auth::AuthClaims(claims): crate::auth::AuthClaims,
-    headers: axum::http::HeaderMap,
+    AuthClaims(claims): AuthClaims,
+    headers: HeaderMap,
     Path((run_id, step_id)): Path<(Uuid, Uuid)>,
     Json(inputs): Json<Value>,
 ) -> impl IntoResponse {
     let token = headers
-        .get(axum::http::header::AUTHORIZATION)
+        .get(AUTHORIZATION)
         .and_then(|h| h.to_str().ok())
         .and_then(|s| s.strip_prefix("Bearer "));
 
     // 1. Verify step exists and is WaitingForEvent
-    let step = crate::db::get_step_instance_for_approval(&state.pool, step_id, run_id)
+    let step = get_step_instance_for_approval(&state.pool, step_id, run_id)
         .await
         .unwrap_or(None);
 
@@ -270,7 +274,7 @@ pub async fn approve_step(
     }
 
     // 2. Insert into approval_registry
-    let _ = crate::db::insert_approval_registry(
+    let _ = insert_approval_registry(
         &state.pool,
         Uuid::new_v4(),
         step_id,
@@ -281,7 +285,7 @@ pub async fn approve_step(
     .await;
 
     // 3. Publish to NATS simulating step completion
-    let completion_event = stormchaser_model::events::StepCompletedEvent {
+    let completion_event = StepCompletedEvent {
         run_id,
         step_id,
         event_type: "stormchaser.v1.step.completed".to_string(),
@@ -291,11 +295,11 @@ pub async fn approve_step(
         artifacts: None,
         test_reports: None,
         outputs: serde_json::from_value(inputs).ok(),
-        timestamp: chrono::Utc::now(),
+        timestamp: Utc::now(),
     };
 
-    match stormchaser_model::nats::publish_cloudevent(
-        &async_nats::jetstream::new(state.nats.clone()),
+    match publish_cloudevent(
+        &new_jetstream(state.nats.clone()),
         "stormchaser.v1.step.completed",
         "stormchaser.v1.step.completed",
         "/stormchaser/api",
@@ -313,16 +317,16 @@ pub async fn approve_step(
 /// Rejects a step.
 pub async fn reject_step(
     State(state): State<AppState>,
-    crate::auth::AuthClaims(claims): crate::auth::AuthClaims,
-    headers: axum::http::HeaderMap,
+    AuthClaims(claims): AuthClaims,
+    headers: HeaderMap,
     Path((run_id, step_id)): Path<(Uuid, Uuid)>,
 ) -> impl IntoResponse {
     let token = headers
-        .get(axum::http::header::AUTHORIZATION)
+        .get(AUTHORIZATION)
         .and_then(|h| h.to_str().ok())
         .and_then(|s| s.strip_prefix("Bearer "));
 
-    let step = crate::db::get_step_instance_for_approval(&state.pool, step_id, run_id)
+    let step = get_step_instance_for_approval(&state.pool, step_id, run_id)
         .await
         .unwrap_or(None);
 
@@ -340,17 +344,17 @@ pub async fn reject_step(
         return (status, msg).into_response();
     }
 
-    let _ = crate::db::insert_approval_registry(
+    let _ = insert_approval_registry(
         &state.pool,
         Uuid::new_v4(),
         step_id,
         &claims.sub,
         "rejected",
-        &serde_json::json!({}),
+        &json!({}),
     )
     .await;
 
-    let event = stormchaser_model::events::StepFailedEvent {
+    let event = StepFailedEvent {
         run_id,
         step_id,
         event_type: "stormchaser.v1.step.failed".to_string(),
@@ -361,11 +365,11 @@ pub async fn reject_step(
         artifacts: None,
         test_reports: None,
         outputs: None,
-        timestamp: chrono::Utc::now(),
+        timestamp: Utc::now(),
     };
 
-    match stormchaser_model::nats::publish_cloudevent(
-        &async_nats::jetstream::new(state.nats.clone()),
+    match publish_cloudevent(
+        &new_jetstream(state.nats.clone()),
         "stormchaser.v1.step.failed",
         "stormchaser.v1.step.failed",
         "/stormchaser/api",
@@ -390,7 +394,7 @@ pub async fn correlate_event(
     let key = payload.get("key").and_then(|v| v.as_str()).unwrap_or("");
     let value = payload.get("value").and_then(|v| v.as_str()).unwrap_or("");
 
-    let correlation = crate::db::get_event_correlation(&state.pool, key, value)
+    let correlation = get_event_correlation(&state.pool, key, value)
         .await
         .unwrap_or(None);
 
@@ -400,7 +404,7 @@ pub async fn correlate_event(
     };
 
     // 2. Publish to stormchaser.step.completed
-    let completion_event = stormchaser_model::events::StepCompletedEvent {
+    let completion_event = StepCompletedEvent {
         run_id: corr.run_id,
         step_id: corr.step_instance_id,
         event_type: "stormchaser.v1.step.completed".to_string(),
@@ -410,11 +414,11 @@ pub async fn correlate_event(
         artifacts: None,
         test_reports: None,
         outputs: serde_json::from_value(payload.clone()).ok(),
-        timestamp: chrono::Utc::now(),
+        timestamp: Utc::now(),
     };
 
-    match stormchaser_model::nats::publish_cloudevent(
-        &async_nats::jetstream::new(state.nats.clone()),
+    match publish_cloudevent(
+        &new_jetstream(state.nats.clone()),
         "stormchaser.v1.step.completed",
         "stormchaser.v1.step.completed",
         "/stormchaser/api",
@@ -426,7 +430,7 @@ pub async fn correlate_event(
     {
         Ok(_) => {
             // Delete correlation so it doesn't match again
-            let _ = crate::db::delete_event_correlation(&state.pool, corr.id).await;
+            let _ = delete_event_correlation(&state.pool, corr.id).await;
             (StatusCode::OK, "Event Correlated").into_response()
         }
         Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Failed to publish").into_response(),

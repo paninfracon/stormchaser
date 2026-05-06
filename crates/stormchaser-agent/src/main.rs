@@ -3,7 +3,8 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use serde_json::Value;
-use std::process::Command;
+use std::fs;
+use std::process::{exit, Command};
 use tracing::info;
 
 mod storage;
@@ -137,7 +138,7 @@ pub async fn run_agent(cli: Cli) -> Result<()> {
                     info!("Collected test reports: {:?}", collected_reports.keys());
                     let reports_out = serde_json::to_string(&collected_reports)?;
                     info!("Collected test reports JSON: {}", reports_out);
-                    std::fs::write("/tmp/stormchaser_test_reports.json", reports_out)?;
+                    fs::write("/tmp/stormchaser_test_reports.json", reports_out)?;
                 }
             }
 
@@ -148,7 +149,7 @@ pub async fn run_agent(cli: Cli) -> Result<()> {
                     // Write hashes to a known file for the runner to read
                     let hashes_json = serde_json::to_string(&hashes)?;
                     info!("Parked storage hashes: {}", hashes_json);
-                    std::fs::write("/tmp/stormchaser_storage_hashes.json", hashes_json)?;
+                    fs::write("/tmp/stormchaser_storage_hashes.json", hashes_json)?;
                 }
 
                 if let Some(artifacts_json) = artifact_urls {
@@ -157,14 +158,14 @@ pub async fn run_agent(cli: Cli) -> Result<()> {
                     if !artifact_meta.is_empty() {
                         let meta_json = serde_json::to_string(&artifact_meta)?;
                         info!("Parked artifacts: {}", meta_json);
-                        std::fs::write("/tmp/stormchaser_artifact_meta.json", meta_json)?;
+                        fs::write("/tmp/stormchaser_artifact_meta.json", meta_json)?;
                     }
                 }
             } else {
                 info!("User command failed, skipping storage and artifact parking");
             }
 
-            std::process::exit(status.code().unwrap_or(1));
+            exit(status.code().unwrap_or(1));
         }
     }
 }

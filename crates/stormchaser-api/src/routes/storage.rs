@@ -1,4 +1,5 @@
 use super::{CreateStorageBackendRequest, UpdateStorageBackendRequest};
+use crate::db;
 use crate::{AppState, AuthClaims};
 use axum::{
     extract::{Path, State},
@@ -6,6 +7,7 @@ use axum::{
     response::IntoResponse,
     Json,
 };
+use stormchaser_model::storage::ArtifactRegistry;
 use uuid::Uuid;
 
 /// Creates a storage backend.
@@ -35,12 +37,12 @@ pub async fn create_storage_backend(
 
     // If setting as default SFS, unset existing default
     if payload.is_default_sfs {
-        crate::db::unset_default_sfs(&mut tx)
+        db::unset_default_sfs(&mut tx)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }
 
-    crate::db::create_storage_backend(
+    db::create_storage_backend(
         &mut tx,
         id,
         &payload.name,
@@ -79,7 +81,7 @@ pub async fn list_storage_backends(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let backends = crate::db::list_storage_backends(&state.pool)
+    let backends = db::list_storage_backends(&state.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -104,7 +106,7 @@ pub async fn get_storage_backend(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let backend = crate::db::get_storage_backend(&state.pool, id)
+    let backend = db::get_storage_backend(&state.pool, id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
@@ -138,12 +140,12 @@ pub async fn update_storage_backend(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     if let Some(true) = payload.is_default_sfs {
-        crate::db::unset_default_sfs(&mut tx)
+        db::unset_default_sfs(&mut tx)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }
 
-    crate::db::update_storage_backend(&mut tx, id, &payload)
+    db::update_storage_backend(&mut tx, id, &payload)
         .await
         .map_err(|e| {
             tracing::error!("Failed to update storage backend: {:?}", e);
@@ -175,7 +177,7 @@ pub async fn delete_storage_backend(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    crate::db::delete_storage_backend(&state.pool, id)
+    db::delete_storage_backend(&state.pool, id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -189,7 +191,7 @@ pub async fn delete_storage_backend(
         ("id" = Uuid, Path, description = "Run ID")
     ),
     responses(
-        (status = 200, description = "List of artifacts", body = [stormchaser_model::storage::ArtifactRegistry]),
+        (status = 200, description = "List of artifacts", body = [ArtifactRegistry]),
         (status = 500, description = "Internal Server Error")
     ),
     security(
@@ -203,7 +205,7 @@ pub async fn list_run_artifacts(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let artifacts = crate::db::list_run_artifacts(&state.pool, id)
+    let artifacts = db::list_run_artifacts(&state.pool, id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -228,7 +230,7 @@ pub async fn list_run_test_reports(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let reports = crate::db::list_run_test_reports(&state.pool, id)
+    let reports = db::list_run_test_reports(&state.pool, id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -253,7 +255,7 @@ pub async fn list_run_test_summaries(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let summaries = crate::db::list_run_test_summaries(&state.pool, id)
+    let summaries = db::list_run_test_summaries(&state.pool, id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -283,7 +285,7 @@ pub async fn get_test_report(
     State(state): State<AppState>,
     Path((_run_id, report_id)): Path<(Uuid, Uuid)>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let report = crate::db::get_test_report(&state.pool, report_id)
+    let report = db::get_test_report(&state.pool, report_id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)

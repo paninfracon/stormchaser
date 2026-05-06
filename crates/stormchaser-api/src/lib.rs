@@ -12,8 +12,10 @@ pub mod routes;
 /// Telemetry and metrics module
 pub mod telemetry;
 
+use async_nats::Client;
 use auth::opa::opa_middleware;
 pub use auth::{AuthClaims, Claims, JWT_SECRET};
+use axum::extract;
 use axum::{
     http::StatusCode,
     middleware,
@@ -23,9 +25,22 @@ use axum::{
 use once_cell::sync::Lazy;
 use opentelemetry::{global, metrics::Counter};
 use sqlx::PgPool;
+use std::env;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use stormchaser_model::auth::OpaAuthorizer;
+use stormchaser_model::cron::CronWorkflow;
+use stormchaser_model::event_rules::EventRule;
+use stormchaser_model::event_rules::WebhookConfig;
+use stormchaser_model::storage::ArtifactRegistry;
+use stormchaser_model::storage::BackendType;
+use stormchaser_model::storage::StorageBackend;
+use stormchaser_model::test_report::TestCase;
+use stormchaser_model::test_report::TestCaseStatus;
+use stormchaser_model::test_report::TestReport;
+use stormchaser_model::test_report::TestSummary;
 use stormchaser_model::LogBackend;
+use tokio::sync;
 /// Rate limiting middleware and configuration
 pub mod rate_limit;
 
@@ -88,14 +103,14 @@ pub use routes::*;
             ListRunsQuery, WorkflowRunDetail,
             WorkflowRunFullDetail, StepDetail,
             CreateCronWorkflowRequest, CronWorkflowResponse,
-            stormchaser_model::cron::CronWorkflow,
+            CronWorkflow,
             CreateStorageBackendRequest, UpdateStorageBackendRequest,
-            stormchaser_model::storage::StorageBackend, stormchaser_model::storage::BackendType,
-            stormchaser_model::storage::ArtifactRegistry,
-            stormchaser_model::test_report::TestCase, stormchaser_model::test_report::TestCaseStatus,
-            stormchaser_model::test_report::TestSummary, stormchaser_model::test_report::TestReport,
+            StorageBackend, BackendType,
+            ArtifactRegistry,
+            TestCase, TestCaseStatus,
+            TestSummary, TestReport,
             CreateWebhookRequest, CreateEventRuleRequest,
-            stormchaser_model::event_rules::WebhookConfig, stormchaser_model::event_rules::EventRule,
+            WebhookConfig, EventRule,
             DirectRunRequest
         )
     ),
@@ -132,7 +147,7 @@ pub struct AppState {
     /// Database connection pool
     pub pool: PgPool,
     /// NATS client connection
-    pub nats: async_nats::Client,
+    pub nats: Client,
     /// OPA authorizer
     pub opa: Arc<dyn OpaAuthorizer>,
     /// Optional OIDC configuration
@@ -145,18 +160,18 @@ pub struct AppState {
 
 /// Constructs the Axum application router with all routes and middleware
 pub fn app(state: AppState) -> Router {
-    let per_second = std::env::var("API_RATE_LIMIT_PER_SECOND")
+    let per_second = env::var("API_RATE_LIMIT_PER_SECOND")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(5);
-    let burst_size = std::env::var("API_RATE_LIMIT_BURST_SIZE")
+    let burst_size = env::var("API_RATE_LIMIT_BURST_SIZE")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(10);
 
     let rate_limit_state = Arc::new(rate_limit::RateLimitState {
         nats: state.nats.clone(),
-        store: Arc::new(tokio::sync::OnceCell::new()),
+        store: Arc::new(sync::OnceCell::new()),
         per_second,
         burst_size,
     });
@@ -226,15 +241,14 @@ pub fn app(state: AppState) -> Router {
             rate_limit::nats_rate_limiter,
         ))
         .layer(middleware::from_fn(
-            |mut req: axum::extract::Request, next: middleware::Next| async move {
+            |mut req: extract::Request, next: middleware::Next| async move {
                 if req
                     .extensions()
-                    .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+                    .get::<extract::ConnectInfo<SocketAddr>>()
                     .is_none()
                 {
-                    req.extensions_mut().insert(axum::extract::ConnectInfo(
-                        std::net::SocketAddr::from(([127, 0, 0, 1], 0)),
-                    ));
+                    req.extensions_mut()
+                        .insert(extract::ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 0))));
                 }
                 Ok::<_, StatusCode>(next.run(req).await)
             },

@@ -2,7 +2,10 @@ use super::{
     DirectRunRequest, EnqueueRequest, EnqueueResponse, ListRunsQuery, StepDetail,
     WorkflowRunDetail, WorkflowRunFullDetail,
 };
+use crate::db;
 use crate::{AppState, AuthClaims, RUNS_ENQUEUED};
+use async_nats::jetstream;
+use async_nats::HeaderMap;
 use axum::response::sse::Event;
 use axum::{
     extract::{Path, Query, State},
@@ -10,8 +13,11 @@ use axum::{
     response::IntoResponse,
     Json,
 };
+use chrono::Utc;
 use futures::StreamExt;
 use serde_json::Value;
+use stormchaser_model::events::WorkflowQueuedEvent;
+use stormchaser_model::nats::publish_cloudevent;
 use stormchaser_model::workflow::RunStatus;
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -44,7 +50,7 @@ pub async fn enqueue_workflow(
     span.record("initiating_user", tracing::field::display(&user_id));
 
     tracing::info!("Enqueuing workflow: {:?}", payload.workflow_name);
-    let fencing_token = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+    let fencing_token = Utc::now().timestamp_nanos_opt().unwrap_or(0);
 
     let mut tx = state
         .pool
@@ -53,7 +59,7 @@ pub async fn enqueue_workflow(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // Create WorkflowRun with initiating_user
-    crate::db::insert_workflow_run(
+    db::insert_workflow_run(
         &mut tx,
         run_id,
         &payload.workflow_name,
@@ -69,7 +75,7 @@ pub async fn enqueue_workflow(
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // Create RunContext (placeholder for dsl_version and workflow_definition)
-    crate::db::insert_run_context(
+    db::insert_run_context(
         &mut tx,
         run_id,
         "v1",
@@ -87,7 +93,7 @@ pub async fn enqueue_workflow(
         .and_then(|o| o.timeout.clone())
         .unwrap_or_else(|| "1h".to_string());
 
-    crate::db::insert_run_quotas(&mut tx, run_id, 10, "1", "4Gi", "10Gi", &timeout)
+    db::insert_run_quotas(&mut tx, run_id, 10, "1", "4Gi", "10Gi", &timeout)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -96,17 +102,17 @@ pub async fn enqueue_workflow(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // Publish to NATS
-    let event = stormchaser_model::events::WorkflowQueuedEvent {
+    let event = WorkflowQueuedEvent {
         run_id,
         event_type: "workflow_queued".to_string(),
-        timestamp: chrono::Utc::now(),
+        timestamp: Utc::now(),
         dsl: None,
         inputs: None,
         initiating_user: None,
     };
 
-    stormchaser_model::nats::publish_cloudevent(
-        &async_nats::jetstream::new(state.nats.clone()),
+    publish_cloudevent(
+        &jetstream::new(state.nats.clone()),
         "stormchaser.v1.run.queued",
         "stormchaser.v1.run.queued",
         "/stormchaser/api",
@@ -155,7 +161,7 @@ pub async fn list_workflow_runs(
     let limit = params.limit.unwrap_or(20).min(100);
     let offset = params.offset.unwrap_or(0);
 
-    let runs = crate::db::list_workflow_runs(&state.pool, &params, limit as i64, offset as i64)
+    let runs = db::list_workflow_runs(&state.pool, &params, limit as i64, offset as i64)
         .await
         .map_err(|e| {
             tracing::error!("Failed to fetch workflow runs: {:?}", e);
@@ -188,7 +194,7 @@ pub async fn get_workflow_run(
     Path(run_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, StatusCode> {
     // 1. Fetch the workflow run detail
-    let detail: WorkflowRunDetail = crate::db::get_workflow_run_detail(&state.pool, run_id)
+    let detail: WorkflowRunDetail = db::get_workflow_run_detail(&state.pool, run_id)
         .await
         .map_err(|e| {
             tracing::error!(
@@ -201,7 +207,7 @@ pub async fn get_workflow_run(
         .ok_or(StatusCode::NOT_FOUND)?;
 
     // 2. Fetch all step instances for this run (active or archived)
-    let instances = crate::db::get_step_instances(&state.pool, run_id)
+    let instances = db::get_step_instances(&state.pool, run_id)
         .await
         .map_err(|e| {
             tracing::error!("Failed to fetch step instances for {}: {:?}", run_id, e);
@@ -211,12 +217,12 @@ pub async fn get_workflow_run(
     let mut steps = Vec::new();
     for instance in instances {
         // Fetch outputs for this step (active or archived)
-        let outputs = crate::db::get_step_outputs(&state.pool, instance.id)
+        let outputs = db::get_step_outputs(&state.pool, instance.id)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
         // Fetch status history
-        let history = crate::db::get_step_status_history(&state.pool, instance.id)
+        let history = db::get_step_status_history(&state.pool, instance.id)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -250,21 +256,21 @@ pub async fn get_workflow_run(
         });
     }
 
-    let artifacts = crate::db::list_run_artifacts(&state.pool, run_id)
+    let artifacts = db::list_run_artifacts(&state.pool, run_id)
         .await
         .map_err(|e| {
             tracing::error!("Failed to fetch run artifacts for {}: {:?}", run_id, e);
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    let test_summaries = crate::db::list_run_test_summaries(&state.pool, run_id)
+    let test_summaries = db::list_run_test_summaries(&state.pool, run_id)
         .await
         .map_err(|e| {
             tracing::error!("Failed to fetch test summaries for {}: {:?}", run_id, e);
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    let test_cases = crate::db::list_run_test_cases(&state.pool, run_id)
+    let test_cases = db::list_run_test_cases(&state.pool, run_id)
         .await
         .map_err(|e| {
             tracing::error!("Failed to fetch test cases for {}: {:?}", run_id, e);
@@ -298,7 +304,7 @@ pub async fn delete_workflow_run_api(
     State(state): State<AppState>,
     Path(run_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    crate::db::delete_workflow_run(&state.pool, run_id)
+    db::delete_workflow_run(&state.pool, run_id)
         .await
         .map_err(|e| {
             tracing::error!("Failed to delete workflow run {}: {:?}", run_id, e);
@@ -348,7 +354,7 @@ pub async fn direct_run(
         .id(uuid::Uuid::new_v4().to_string())
         .ty("stormchaser.v1.run.direct")
         .source("/stormchaser/api")
-        .time(chrono::Utc::now())
+        .time(Utc::now())
         .data("application/json", payload_json)
         .build()
         .map_err(|e| {
@@ -357,7 +363,7 @@ pub async fn direct_run(
         })?;
 
     let event_str = serde_json::to_string(&event).unwrap_or_default();
-    let mut headers = async_nats::HeaderMap::new();
+    let mut headers = HeaderMap::new();
     headers.insert("Content-Type", "application/cloudevents+json");
 
     state
@@ -424,7 +430,7 @@ pub async fn stream_workflow_runs_api(
             if let Some(run_id_str) = payload.get("run_id").and_then(|id| id.as_str()) {
                 if let Ok(run_id) = Uuid::parse_str(run_id_str) {
                     // Fetch full detail for the run
-                    let detail = crate::db::get_workflow_run_detail(&pool, run_id)
+                    let detail = db::get_workflow_run_detail(&pool, run_id)
                         .await
                         .unwrap_or(None);
 

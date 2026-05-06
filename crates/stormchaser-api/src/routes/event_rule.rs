@@ -1,4 +1,5 @@
 use super::CreateEventRuleRequest;
+use crate::db;
 use crate::{AppState, AuthClaims};
 use axum::{
     extract::{Path, State},
@@ -26,7 +27,7 @@ pub async fn create_event_rule(
     Json(payload): Json<CreateEventRuleRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let id = Uuid::new_v4();
-    crate::db::create_event_rule(
+    db::create_event_rule(
         &state.pool,
         id,
         &payload.name,
@@ -65,7 +66,7 @@ pub async fn list_event_rules(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let rules = crate::db::list_event_rules(&state.pool)
+    let rules = db::list_event_rules(&state.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -93,7 +94,7 @@ pub async fn delete_event_rule(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    crate::db::delete_event_rule(&state.pool, id)
+    db::delete_event_rule(&state.pool, id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 

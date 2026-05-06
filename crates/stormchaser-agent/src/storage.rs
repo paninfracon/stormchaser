@@ -1,13 +1,23 @@
 use anyhow::{Context, Result};
+use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
+use reqwest::{Body, Client};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{Read, Write};
+use std::path::Path;
+use tar::{Archive, Builder};
+use tokio::fs::File as AsyncFile;
 use tracing::{error, info, warn};
 use uuid::Uuid;
+
+#[cfg(unix)]
+use std::fs::Permissions;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 /// Downloads and extracts an SFS storage tarball to the specified destination.
 pub async fn unpark_storage(
@@ -18,7 +28,7 @@ pub async fn unpark_storage(
     mode: Option<&str>,
 ) -> Result<()> {
     info!("Unparking storage from {} to {}...", url, destination);
-    let client = reqwest::Client::new();
+    let client = Client::new();
     let mut response = client.get(url).send().await?;
 
     if !response.status().is_success() {
@@ -40,7 +50,7 @@ pub async fn unpark_storage(
     let actual_hash = hex::encode(hasher.finalize());
     if let Some(expected) = expected_hash {
         if actual_hash != expected {
-            let _ = std::fs::remove_file(&tar_path);
+            let _ = fs::remove_file(&tar_path);
             anyhow::bail!(
                 "Hash verification failed! Expected: {}, Actual: {}",
                 expected,
@@ -57,27 +67,27 @@ pub async fn unpark_storage(
 
     if no_extract {
         info!("Moving raw file to destination...");
-        if let Some(parent) = std::path::Path::new(destination).parent() {
-            std::fs::create_dir_all(parent)?;
+        if let Some(parent) = Path::new(destination).parent() {
+            fs::create_dir_all(parent)?;
         }
-        if let Err(e) = std::fs::rename(&tar_path, destination) {
+        if let Err(e) = fs::rename(&tar_path, destination) {
             warn!("Rename failed ({}), falling back to copy...", e);
-            std::fs::copy(&tar_path, destination)?;
-            let _ = std::fs::remove_file(&tar_path);
+            fs::copy(&tar_path, destination)?;
+            let _ = fs::remove_file(&tar_path);
         }
         if let Some(mode_str) = mode {
             apply_file_mode(destination, mode_str)?;
         }
     } else {
         info!("Extracting tarball...");
-        std::fs::create_dir_all(destination)?;
+        fs::create_dir_all(destination)?;
         // Use tar crate properly for extraction
         let tar_gz = File::open(&tar_path)?;
-        let decoder = flate2::read::GzDecoder::new(tar_gz);
-        let mut archive = tar::Archive::new(decoder);
+        let decoder = GzDecoder::new(tar_gz);
+        let mut archive = Archive::new(decoder);
         archive.unpack(destination)?;
 
-        let _ = std::fs::remove_file(tar_path);
+        let _ = fs::remove_file(tar_path);
     }
 
     info!("Successfully unparked storage");
@@ -86,7 +96,7 @@ pub async fn unpark_storage(
 
 /// Park storage.
 pub async fn park_storage(urls: Value, paths: Value) -> Result<HashMap<String, String>> {
-    let client = reqwest::Client::new();
+    let client = Client::new();
     let mut hashes = HashMap::new();
 
     if let Some(url_map) = urls.as_object() {
@@ -100,15 +110,14 @@ pub async fn park_storage(urls: Value, paths: Value) -> Result<HashMap<String, S
                     {
                         let tar_gz = File::create(&tar_path)?;
                         let enc = GzEncoder::new(tar_gz, Compression::default());
-                        let mut tar = tar::Builder::new(enc);
+                        let mut tar = Builder::new(enc);
 
                         let preserve = url_val.get("preserve").and_then(|p| p.as_array());
                         if let Some(paths) = preserve {
                             if !paths.is_empty() {
                                 for path_val in paths {
                                     if let Some(path_str) = path_val.as_str() {
-                                        let src_path =
-                                            std::path::Path::new(mount_path).join(path_str);
+                                        let src_path = Path::new(mount_path).join(path_str);
                                         if src_path.exists() {
                                             if src_path.is_dir() {
                                                 tar.append_dir_all(path_str, &src_path)?;
@@ -148,8 +157,8 @@ pub async fn park_storage(urls: Value, paths: Value) -> Result<HashMap<String, S
                     info!("Uploading tarball to {}", put_url);
                     let file = File::open(&tar_path)?;
                     let file_size = file.metadata()?.len();
-                    let file_tokio = tokio::fs::File::open(&tar_path).await?;
-                    let body = reqwest::Body::from(file_tokio);
+                    let file_tokio = AsyncFile::open(&tar_path).await?;
+                    let body = Body::from(file_tokio);
 
                     let res = client
                         .put(put_url)
@@ -169,7 +178,7 @@ pub async fn park_storage(urls: Value, paths: Value) -> Result<HashMap<String, S
                         );
                     }
 
-                    let _ = std::fs::remove_file(tar_path);
+                    let _ = fs::remove_file(tar_path);
                 }
             }
         }
@@ -183,7 +192,6 @@ pub async fn park_storage(urls: Value, paths: Value) -> Result<HashMap<String, S
 /// On non-Unix targets this is a no-op.
 #[cfg(unix)]
 fn apply_file_mode(path: &str, mode_str: &str) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
     let octal = mode_str.strip_prefix("0o").unwrap_or(mode_str);
     let bits = u32::from_str_radix(octal, 8).with_context(|| {
         format!(
@@ -191,8 +199,8 @@ fn apply_file_mode(path: &str, mode_str: &str) -> Result<()> {
             mode_str
         )
     })?;
-    let perms = std::fs::Permissions::from_mode(bits);
-    std::fs::set_permissions(path, perms)
+    let perms = Permissions::from_mode(bits);
+    fs::set_permissions(path, perms)
         .with_context(|| format!("Failed to set mode {:#o} on '{}'", bits, path))?;
     Ok(())
 }
@@ -219,18 +227,18 @@ mod tests {
         // Create a dummy tar.gz
         let tar_dir = tempdir().unwrap();
         let file_path = tar_dir.path().join("test.txt");
-        std::fs::write(&file_path, "hello").unwrap();
+        fs::write(&file_path, "hello").unwrap();
 
         let tar_path = tar_dir.path().join("test.tar.gz");
         {
             let tar_gz = File::create(&tar_path).unwrap();
             let enc = GzEncoder::new(tar_gz, Compression::default());
-            let mut tar = tar::Builder::new(enc);
+            let mut tar = Builder::new(enc);
             tar.append_path_with_name(&file_path, "test.txt").unwrap();
             tar.finish().unwrap();
         }
 
-        let tar_bytes = std::fs::read(&tar_path).unwrap();
+        let tar_bytes = fs::read(&tar_path).unwrap();
         let mut hasher = Sha256::new();
         hasher.update(&tar_bytes);
         let expected_hash = hex::encode(hasher.finalize());
@@ -253,7 +261,7 @@ mod tests {
         .unwrap();
 
         assert!(dest.join("test.txt").exists());
-        let content = std::fs::read_to_string(dest.join("test.txt")).unwrap();
+        let content = fs::read_to_string(dest.join("test.txt")).unwrap();
         assert_eq!(content, "hello");
     }
 
@@ -262,8 +270,8 @@ mod tests {
         let mock_server = MockServer::start().await;
         let dir = tempdir().unwrap();
         let mount_path = dir.path().join("storage1");
-        std::fs::create_dir_all(&mount_path).unwrap();
-        std::fs::write(mount_path.join("file.txt"), "data").unwrap();
+        fs::create_dir_all(&mount_path).unwrap();
+        fs::write(mount_path.join("file.txt"), "data").unwrap();
 
         Mock::given(method("PUT"))
             .and(path("/upload/storage1.tar.gz"))

@@ -406,6 +406,29 @@ pub async fn handle_step_completed(
         let machine = WorkflowMachine::<state::Running>::new_from_run(run.clone());
         let _ = machine.succeed(&mut *tx).await?;
 
+        let js = async_nats::jetstream::new(nats_client.clone());
+        if let Err(e) = stormchaser_model::nats::publish_cloudevent(
+            &js,
+            "stormchaser.v1.run.completed",
+            "workflow_completed",
+            "stormchaser-engine",
+            serde_json::to_value(stormchaser_model::events::WorkflowCompletedEvent {
+                run_id,
+                event_type: "workflow_completed".to_string(),
+                timestamp: chrono::Utc::now(),
+            })
+            .unwrap(),
+            None,
+            None,
+        )
+        .await
+        {
+            error!(
+                "Failed to publish workflow completed event for {}: {:?}",
+                run_id, e
+            );
+        }
+
         crate::RUNS_COMPLETED.add(
             1,
             &[

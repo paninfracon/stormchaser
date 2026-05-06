@@ -1,10 +1,15 @@
 use anyhow::Result;
-use serde_json::Value;
+use flate2::{write::GzEncoder, Compression};
+use glob::glob;
+use reqwest::{Body, Client};
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::Read;
+use std::fs::{self, File};
+use std::io::{copy, Read};
 use std::path::PathBuf;
+use tar::Builder;
+use tokio::fs::File as AsyncFile;
 use tracing::error;
 use uuid::Uuid;
 
@@ -15,7 +20,7 @@ struct UploadReportParams<'a> {
     url: &'a str,
     remote_path: Option<&'a str>,
     backend_id: Option<&'a str>,
-    client: &'a reqwest::Client,
+    client: &'a Client,
 }
 
 async fn upload_report(
@@ -25,8 +30,8 @@ async fn upload_report(
     // Zip the files
     let tar_path = format!("/tmp/report_{}_{}.tar.gz", params.name, Uuid::new_v4());
     let file = File::create(&tar_path)?;
-    let enc = flate2::write::GzEncoder::new(file, flate2::Compression::default());
-    let mut tar = tar::Builder::new(enc);
+    let enc = GzEncoder::new(file, Compression::default());
+    let mut tar = Builder::new(enc);
 
     for p in params.matched_files {
         let file_name = p.file_name().and_then(|n| n.to_str()).unwrap_or("unknown");
@@ -36,9 +41,9 @@ async fn upload_report(
     drop(tar);
 
     // Upload
-    let file_size = std::fs::metadata(&tar_path)?.len();
-    let file_tokio = tokio::fs::File::open(&tar_path).await?;
-    let body = reqwest::Body::from(file_tokio);
+    let file_size = fs::metadata(&tar_path)?.len();
+    let file_tokio = AsyncFile::open(&tar_path).await?;
+    let body = Body::from(file_tokio);
 
     let res = params
         .client
@@ -51,12 +56,12 @@ async fn upload_report(
     if res.status().is_success() {
         let mut hasher = Sha256::new();
         let mut f = File::open(&tar_path)?;
-        std::io::copy(&mut f, &mut hasher)?;
+        copy(&mut f, &mut hasher)?;
         let hash = hex::encode(hasher.finalize());
 
         collected.insert(
             params.name.to_string(),
-            serde_json::json!({
+            json!({
                 "name": params.name,
                 "file_name": format!("{}.tar.gz", params.name),
                 "format": params.format,
@@ -100,7 +105,7 @@ fn fallback_to_memory(
 
         collected.insert(
             format!("{}_{}", name, file_name),
-            serde_json::json!({
+            json!({
                 "name": name,
                 "file_name": file_name,
                 "format": format,
@@ -118,7 +123,7 @@ pub async fn collect_test_reports(
     urls: Option<Value>,
 ) -> Result<HashMap<String, Value>> {
     let mut collected = HashMap::new();
-    let client = reqwest::Client::new();
+    let client = Client::new();
 
     if let Some(report_list) = reports.as_array() {
         for report in report_list {
@@ -128,7 +133,7 @@ pub async fn collect_test_reports(
                 report.get("format").and_then(|v| v.as_str()),
             ) {
                 // Support globbing
-                let entries = glob::glob(path)?;
+                let entries = glob(path)?;
                 let mut matched_files = Vec::new();
                 for p in entries.flatten() {
                     if p.is_file() {
@@ -185,7 +190,6 @@ pub async fn collect_test_reports(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
     use tempfile::tempdir;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -194,7 +198,7 @@ mod tests {
     async fn test_collect_test_reports() {
         let dir = tempdir().unwrap();
         let report_file = dir.path().join("test-report.xml");
-        std::fs::write(&report_file, "<testsuite></testsuite>").unwrap();
+        fs::write(&report_file, "<testsuite></testsuite>").unwrap();
 
         let reports = json!([
             {
@@ -220,7 +224,7 @@ mod tests {
         let mock_server = MockServer::start().await;
         let dir = tempdir().unwrap();
         let report_file = dir.path().join("test-report.xml");
-        std::fs::write(&report_file, "<testsuite></testsuite>").unwrap();
+        fs::write(&report_file, "<testsuite></testsuite>").unwrap();
 
         Mock::given(method("PUT"))
             .and(path("/upload/report.tar.gz"))
