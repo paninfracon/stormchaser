@@ -64,7 +64,7 @@ pub async fn create_cron_workflow(
     })?;
 
     Ok(Json(CronWorkflowResponse {
-        id: id.into_inner(),
+        id,
         secret_token,
         external_job_id,
     }))
@@ -253,7 +253,7 @@ pub async fn trigger_cron_workflow(
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(EnqueueResponse {
-        run_id: run_id.into_inner(),
+        run_id,
         status: "queued".to_string(),
     }))
 }

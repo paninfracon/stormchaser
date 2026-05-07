@@ -4,7 +4,6 @@ use stormchaser_model::event_rules::EventRule;
 use stormchaser_model::EventId;
 use stormchaser_model::RuleId;
 use stormchaser_model::WebhookId;
-use uuid::Uuid;
 
 use stormchaser_model::event;
 
@@ -16,7 +15,7 @@ pub async fn create_event_rule(
     id: RuleId,
     name: &str,
     description: &Option<String>,
-    webhook_id: Option<Uuid>,
+    webhook_id: Option<stormchaser_model::WebhookId>,
     event_type_pattern: &str,
     condition_expr: &Option<String>,
     workflow_name: &str,

@@ -142,7 +142,7 @@ pub async fn enqueue_workflow(
     );
 
     Ok(Json(EnqueueResponse {
-        run_id,
+        run_id: stormchaser_model::RunId::new(run_id),
         status: "queued".to_string(),
     }))
 }
@@ -386,7 +386,7 @@ pub async fn direct_run(
         })?;
 
     Ok(Json(EnqueueResponse {
-        run_id,
+        run_id: stormchaser_model::RunId::new(run_id),
         status: "started".to_string(),
     }))
 }

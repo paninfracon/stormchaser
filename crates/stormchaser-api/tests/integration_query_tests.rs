@@ -2,7 +2,6 @@ use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use stormchaser_api::WorkflowRunDetail;
 use stormchaser_model::workflow::RunStatus;
-use uuid::Uuid;
 
 #[tokio::test]
 async fn test_workflow_run_detail_query() {
@@ -21,7 +20,7 @@ async fn test_workflow_run_detail_query() {
         .unwrap();
 
     // 1. Setup test data
-    let run_id = Uuid::new_v4();
+    let run_id = stormchaser_model::RunId::new_v4();
     let workflow_name = format!("test-query-workflow-{}", run_id);
 
     // Clean up any previous runs with this ID (unlikely but safe)

@@ -21,7 +21,6 @@ pub mod workflow;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
-use uuid::Uuid;
 
 use stormchaser_model::step::{StepInstance, StepOutput, StepStatusHistory};
 use stormchaser_model::storage::{ArtifactRegistry, BackendType};
@@ -85,7 +84,7 @@ pub struct RunOverrides {
 /// Enqueueresponse.
 pub struct EnqueueResponse {
     /// The run id.
-    pub run_id: Uuid,
+    pub run_id: stormchaser_model::RunId,
     /// The status.
     pub status: String,
 }
@@ -120,7 +119,7 @@ pub struct ListRunsQuery {
 /// Workflowrundetail.
 pub struct WorkflowRunDetail {
     /// The id.
-    pub id: Uuid,
+    pub id: stormchaser_model::RunId,
     /// The workflow name.
     pub workflow_name: String,
     /// The initiating user.
@@ -234,7 +233,7 @@ pub struct CreateEventRuleRequest {
     /// The description.
     pub description: Option<String>,
     /// The webhook id.
-    pub webhook_id: Uuid,
+    pub webhook_id: stormchaser_model::WebhookId,
     /// The event type pattern.
     pub event_type_pattern: String,
     /// The condition expr.
@@ -277,7 +276,7 @@ pub struct CreateCronWorkflowRequest {
 /// Cronworkflowresponse.
 pub struct CronWorkflowResponse {
     /// The id.
-    pub id: Uuid,
+    pub id: stormchaser_model::CronWorkflowId,
     /// The secret token.
     pub secret_token: String,
     /// The external job id.
@@ -324,7 +323,7 @@ pub struct UpdateStorageBackendRequest {
 /// Testreportsummary.
 pub struct TestReportSummary {
     /// The id.
-    pub id: Uuid,
+    pub id: stormchaser_model::TestReportId,
     /// The report name.
     pub report_name: String,
     /// The file name.
@@ -334,7 +333,7 @@ pub struct TestReportSummary {
     /// The checksum.
     pub checksum: String,
     /// The backend id.
-    pub backend_id: Option<Uuid>,
+    pub backend_id: Option<stormchaser_model::BackendId>,
     /// The remote path.
     pub remote_path: Option<String>,
     /// The created at.
@@ -345,11 +344,11 @@ pub struct TestReportSummary {
 /// Testsummaryresponse.
 pub struct TestSummaryResponse {
     /// The id.
-    pub id: Uuid,
+    pub id: stormchaser_model::TestReportId,
     /// The run id.
-    pub run_id: Uuid,
+    pub run_id: stormchaser_model::RunId,
     /// The step instance id.
-    pub step_instance_id: Uuid,
+    pub step_instance_id: stormchaser_model::StepInstanceId,
     /// The report name.
     pub report_name: String,
     /// The total tests.
