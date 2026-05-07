@@ -48,7 +48,11 @@ async fn test_storage_backend_crud() {
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
-    let pool = match PgPoolOptions::new().connect(&db_url).await {
+    let pool = match PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&db_url)
+        .await
+    {
         Ok(p) => p,
         Err(_) => return,
     };
@@ -178,7 +182,11 @@ async fn test_artifact_listing() {
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
-    let pool = match PgPoolOptions::new().connect(&db_url).await {
+    let pool = match PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&db_url)
+        .await
+    {
         Ok(p) => p,
         Err(_) => return,
     };

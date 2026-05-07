@@ -104,7 +104,11 @@ async fn setup_app(mock_server_url: String) -> Option<axum::Router> {
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
-    let pool = PgPoolOptions::new().connect(&db_url).await.ok()?;
+    let pool = PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&db_url)
+        .await
+        .ok()?;
 
     Some(app(AppState {
         pool,
@@ -320,7 +324,11 @@ async fn test_auth_exchange_network_error() {
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
-    let pool = PgPoolOptions::new().connect(&db_url).await.unwrap();
+    let pool = PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&db_url)
+        .await
+        .unwrap();
     let app = stormchaser_api::app(AppState {
         pool,
         nats: nats_client,
@@ -631,7 +639,11 @@ async fn test_auth_refresh_network_error() {
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
-    let pool = PgPoolOptions::new().connect(&db_url).await.unwrap();
+    let pool = PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&db_url)
+        .await
+        .unwrap();
     let app = stormchaser_api::app(AppState {
         pool,
         nats: nats_client,
