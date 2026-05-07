@@ -1,16 +1,16 @@
 //! Cron scheduling models for recurring workflow execution.
 
+use crate::id::CronWorkflowId;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
-use uuid::Uuid;
 
 /// Represents a scheduled cron workflow configuration.
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow, ToSchema)]
 pub struct CronWorkflow {
     /// Unique identifier for the cron workflow.
-    pub id: Uuid,
+    pub id: CronWorkflowId,
     /// Name of the schedule.
     pub name: String,
     /// Optional description of the schedule's purpose.

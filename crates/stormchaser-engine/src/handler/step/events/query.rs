@@ -1,8 +1,10 @@
 use anyhow::{Context, Result};
 use serde_json::Value;
 use sqlx::PgPool;
-use stormchaser_model::step::StepInstance;
-use uuid::Uuid;
+use stormchaser_model::events::StepQueryResponseEvent;
+use stormchaser_model::StepId;
+use stormchaser_model::StepInstance;
+use stormchaser_model::StepInstanceId;
 
 /// Handles incoming queries for step status or output data over NATS.
 pub async fn handle_step_query(
@@ -12,7 +14,7 @@ pub async fn handle_step_query(
     reply: Option<String>,
 ) -> Result<()> {
     let step_id_str = payload["step_id"].as_str().context("Missing step_id")?;
-    let step_id = Uuid::parse_str(step_id_str)?;
+    let step_id = uuid::Uuid::parse_str(step_id_str).map(StepInstanceId::new)?;
 
     let step: Option<StepInstance> = crate::db::get_step_instance_by_id(&pool, step_id)
         .await
@@ -23,14 +25,14 @@ pub async fn handle_step_query(
             let status_str = serde_json::to_value(&s.status)
                 .ok()
                 .and_then(|v| v.as_str().map(str::to_string));
-            stormchaser_model::events::StepQueryResponseEvent {
-                step_id,
+            StepQueryResponseEvent {
+                step_id: StepId::new(step_id.into_inner()),
                 status: status_str,
                 exists: true,
             }
         } else {
-            stormchaser_model::events::StepQueryResponseEvent {
-                step_id,
+            StepQueryResponseEvent {
+                step_id: StepId::new(step_id.into_inner()),
                 status: None,
                 exists: false,
             }

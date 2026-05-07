@@ -1,6 +1,6 @@
 use serde_json::Value;
 use sqlx::{Executor, Postgres};
-use stormchaser_model::TestSummary;
+use stormchaser_model::{BackendId, RunId, StepInstanceId, TestSummary};
 use uuid::Uuid;
 
 use stormchaser_model::test_report;
@@ -66,10 +66,10 @@ where
 /// Insert artifact registry.
 pub async fn insert_artifact_registry<'a, E>(
     executor: E,
-    run_id: Uuid,
-    step_instance_id: Uuid,
+    run_id: RunId,
+    step_instance_id: StepInstanceId,
     artifact_name: &str,
-    backend_id: Uuid,
+    backend_id: BackendId,
     remote_path: String,
     metadata: Value,
 ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>

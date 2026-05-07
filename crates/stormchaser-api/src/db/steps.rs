@@ -1,4 +1,6 @@
 use sqlx::PgPool;
+use stormchaser_model::RunId;
+use stormchaser_model::StepInstanceId;
 use uuid::Uuid;
 
 use stormchaser_model::step;
@@ -7,7 +9,7 @@ use stormchaser_model::step;
 /// Get step instances.
 pub async fn get_step_instances(
     pool: &PgPool,
-    run_id: Uuid,
+    run_id: RunId,
 ) -> Result<Vec<step::StepInstance>, sqlx::Error> {
     sqlx::query_as(
         "SELECT * FROM combined_step_instances WHERE run_id = $1 ORDER BY created_at ASC",
@@ -20,8 +22,8 @@ pub async fn get_step_instances(
 /// Retrieves a single step instance by its UUID and run ID.
 pub async fn get_step_instance_by_id(
     pool: &PgPool,
-    run_id: Uuid,
-    step_id: Uuid,
+    run_id: RunId,
+    step_id: StepInstanceId,
 ) -> Result<Option<step::StepInstance>, sqlx::Error> {
     sqlx::query_as("SELECT * FROM combined_step_instances WHERE run_id = $1 AND id = $2")
         .bind(run_id)
@@ -34,7 +36,7 @@ pub async fn get_step_instance_by_id(
 /// Get step outputs.
 pub async fn get_step_outputs(
     pool: &PgPool,
-    step_instance_id: Uuid,
+    step_instance_id: StepInstanceId,
 ) -> Result<Vec<step::StepOutput>, sqlx::Error> {
     sqlx::query_as("SELECT * FROM combined_step_outputs WHERE step_instance_id = $1")
         .bind(step_instance_id)
@@ -46,7 +48,7 @@ pub async fn get_step_outputs(
 /// Get step status history.
 pub async fn get_step_status_history(
     pool: &PgPool,
-    step_instance_id: Uuid,
+    step_instance_id: StepInstanceId,
 ) -> Result<Vec<step::StepStatusHistory>, sqlx::Error> {
     sqlx::query_as("SELECT * FROM combined_step_status_history WHERE step_instance_id = $1 ORDER BY created_at ASC")
         .bind(step_instance_id)
@@ -58,7 +60,7 @@ pub async fn get_step_status_history(
 /// Get step id by name.
 pub async fn get_step_id_by_name(
     pool: &PgPool,
-    run_id: Uuid,
+    run_id: RunId,
     step_name: &str,
 ) -> Result<Option<Uuid>, sqlx::Error> {
     sqlx::query_scalar("SELECT id FROM step_instances WHERE run_id = $1 AND step_name = $2 LIMIT 1")
@@ -72,7 +74,7 @@ pub async fn get_step_id_by_name(
 /// Get step names.
 pub async fn get_step_names(
     pool: &PgPool,
-    run_id: Uuid,
+    run_id: RunId,
 ) -> Result<Vec<(Uuid, String)>, sqlx::Error> {
     sqlx::query_as("SELECT id, step_name FROM combined_step_instances WHERE run_id = $1")
         .bind(run_id)
@@ -84,7 +86,7 @@ pub async fn get_step_names(
 /// Get combined step statuses.
 pub async fn get_combined_step_statuses(
     pool: &PgPool,
-    run_id: Uuid,
+    run_id: RunId,
 ) -> Result<Vec<(Uuid, String, String)>, sqlx::Error> {
     sqlx::query_as(
         "SELECT id, step_name, status::text FROM combined_step_instances WHERE run_id = $1",
@@ -98,8 +100,8 @@ pub async fn get_combined_step_statuses(
 /// Get step instance for approval.
 pub async fn get_step_instance_for_approval(
     pool: &PgPool,
-    step_id: Uuid,
-    run_id: Uuid,
+    step_id: StepInstanceId,
+    run_id: RunId,
 ) -> Result<Option<step::StepInstance>, sqlx::Error> {
     sqlx::query_as(
         r#"SELECT id, run_id, step_name, step_type, status as "status", iteration_index, runner_id, affinity_context, started_at, finished_at, exit_code, error, spec, params, created_at FROM step_instances WHERE id = $1 AND run_id = $2"#,

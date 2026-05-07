@@ -2,7 +2,8 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::{Executor, Postgres};
 use stormchaser_model::step::StepStatus;
-use uuid::Uuid;
+use stormchaser_model::RunId;
+use stormchaser_model::StepInstanceId;
 
 #[allow(clippy::too_many_arguments)]
 /// Complete step instance.
@@ -11,7 +12,7 @@ pub async fn complete_step_instance<'a, E>(
     status: &StepStatus,
     exit_code: Option<i32>,
     runner_id: Option<&str>,
-    id: Uuid,
+    id: StepInstanceId,
 ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
@@ -35,7 +36,7 @@ where
 /// Get step instances by run id.
 pub async fn get_step_instances_by_run_id<'a, E, O>(
     executor: E,
-    run_id: Uuid,
+    run_id: RunId,
 ) -> Result<Vec<O>, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
@@ -54,7 +55,7 @@ where
 pub async fn update_step_instance_status<'a, E>(
     executor: E,
     status: &StepStatus,
-    id: Uuid,
+    id: StepInstanceId,
 ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
@@ -68,7 +69,10 @@ where
 
 #[allow(clippy::too_many_arguments)]
 /// Get step spec and params.
-pub async fn get_step_spec_and_params<'a, E, O>(executor: E, id: Uuid) -> Result<O, sqlx::Error>
+pub async fn get_step_spec_and_params<'a, E, O>(
+    executor: E,
+    id: StepInstanceId,
+) -> Result<O, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
     O: Send + Unpin + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,
@@ -86,7 +90,7 @@ pub async fn fail_step_instance_with_error<'a, E>(
     status: StepStatus,
     error: &str,
     exit_code: Option<i32>,
-    id: Uuid,
+    id: StepInstanceId,
 ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
@@ -109,7 +113,7 @@ where
 /// Record step status history.
 pub async fn record_step_status_history<'a, E>(
     executor: E,
-    step_instance_id: Uuid,
+    step_instance_id: StepInstanceId,
     status: &StepStatus,
 ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
 where
@@ -126,8 +130,8 @@ where
 /// Insert step instance.
 pub async fn insert_step_instance<'a, E>(
     executor: E,
-    id: Uuid,
-    run_id: Uuid,
+    id: StepInstanceId,
+    run_id: RunId,
     step_name: &str,
     step_type: &str,
     status: StepStatus,
@@ -162,7 +166,7 @@ where
 /// Count running steps for run.
 pub async fn count_running_steps_for_run<'a, E, O>(
     executor: E,
-    run_id: Uuid,
+    run_id: RunId,
 ) -> Result<O, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
@@ -181,8 +185,8 @@ where
 /// Insert step instance with spec.
 pub async fn insert_step_instance_with_spec<'a, E>(
     executor: E,
-    id: Uuid,
-    run_id: Uuid,
+    id: StepInstanceId,
+    run_id: RunId,
     step_name: &str,
     step_type: &str,
     status: StepStatus,
@@ -222,8 +226,8 @@ where
 /// Insert step instance with spec on conflict do nothing.
 pub async fn insert_step_instance_with_spec_on_conflict_do_nothing<'a, E>(
     executor: E,
-    id: Uuid,
-    run_id: Uuid,
+    id: StepInstanceId,
+    run_id: RunId,
     step_name: &str,
     step_type: &str,
     status: StepStatus,
@@ -264,7 +268,7 @@ where
 /// Get pending step instances for run.
 pub async fn get_pending_step_instances_for_run<'a, E, O>(
     executor: E,
-    run_id: Uuid,
+    run_id: RunId,
     limit: i64,
 ) -> Result<Vec<O>, sqlx::Error>
 where
@@ -290,7 +294,7 @@ where
 /// Get step instance by id.
 pub async fn get_step_instance_by_id<'a, E, O>(
     executor: E,
-    id: Uuid,
+    id: StepInstanceId,
 ) -> Result<Option<O>, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
@@ -308,7 +312,7 @@ where
 /// Fail pending steps for run on timeout.
 pub async fn fail_pending_steps_for_run_on_timeout<'a, E>(
     executor: E,
-    run_id: Uuid,
+    run_id: RunId,
 ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
@@ -331,7 +335,7 @@ pub async fn update_step_instance_running<'a, E>(
     executor: E,
     status: &StepStatus,
     runner_id: Option<&str>,
-    id: Uuid,
+    id: StepInstanceId,
 ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
@@ -351,7 +355,7 @@ where
 pub async fn update_step_instance_terminal<'a, E>(
     executor: E,
     status: &StepStatus,
-    id: Uuid,
+    id: StepInstanceId,
 ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
@@ -364,7 +368,10 @@ where
 }
 
 /// Get step type and spec.
-pub async fn get_step_type_and_spec<'a, E, O>(executor: E, id: Uuid) -> Result<O, sqlx::Error>
+pub async fn get_step_type_and_spec<'a, E, O>(
+    executor: E,
+    id: StepInstanceId,
+) -> Result<O, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
     O: Send + Unpin + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,

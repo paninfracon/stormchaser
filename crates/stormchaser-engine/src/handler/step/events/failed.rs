@@ -5,10 +5,12 @@ use chrono::Utc;
 use serde_json::Value;
 use sqlx::PgPool;
 use std::sync::Arc;
+use stormchaser_model::events::WorkflowFailedEvent;
 use stormchaser_model::step::StepStatus;
+use stormchaser_model::RunId;
+use stormchaser_model::StepInstanceId;
 use stormchaser_tls::TlsReloader;
 use tracing::{error, info};
-use uuid::Uuid;
 
 use crate::handler::step::quota::release_step_quota_for_instance;
 
@@ -23,9 +25,9 @@ pub async fn handle_step_failed(
     tls_reloader: Arc<TlsReloader>,
 ) -> Result<()> {
     let run_id_str = payload["run_id"].as_str().context("Missing run_id")?;
-    let run_id = Uuid::parse_str(run_id_str)?;
+    let run_id = uuid::Uuid::parse_str(run_id_str).map(RunId::new)?;
     let step_id_str = payload["step_id"].as_str().context("Missing step_id")?;
-    let step_id = Uuid::parse_str(step_id_str)?;
+    let step_id = uuid::Uuid::parse_str(step_id_str).map(StepInstanceId::new)?;
 
     let span = tracing::Span::current();
     span.record("run_id", tracing::field::display(run_id));
@@ -51,7 +53,8 @@ pub async fn handle_step_failed(
         return Ok(());
     }
 
-    let _ = release_step_quota_for_instance(&mut *tx, run_id, step_id).await;
+    let _ =
+        release_step_quota_for_instance(&mut *tx, run_id.into_inner(), step_id.into_inner()).await;
 
     let machine =
         crate::step_machine::StepMachine::<crate::step_machine::state::Running>::from_instance(
@@ -82,7 +85,14 @@ pub async fn handle_step_failed(
     }
 
     // Persist test reports even on failure
-    persist_step_test_reports(&payload, &mut tx, run_id, step_id, &pool).await?;
+    persist_step_test_reports(
+        &payload,
+        &mut tx,
+        run_id.into_inner(),
+        step_id.into_inner(),
+        &pool,
+    )
+    .await?;
 
     let run = fetch_run(run_id, &mut *tx).await?;
     let run_machine = WorkflowMachine::<state::Running>::new_from_run(run.clone());
@@ -96,7 +106,7 @@ pub async fn handle_step_failed(
         "stormchaser.v1.run.failed",
         "workflow_failed",
         "stormchaser-engine",
-        serde_json::to_value(stormchaser_model::events::WorkflowFailedEvent {
+        serde_json::to_value(WorkflowFailedEvent {
             run_id,
             event_type: "workflow_failed".to_string(),
             timestamp: chrono::Utc::now(),

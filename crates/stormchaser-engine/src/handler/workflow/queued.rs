@@ -7,14 +7,15 @@ use std::fs;
 use std::sync::Arc;
 use stormchaser_dsl::StormchaserParser;
 use stormchaser_model::auth::{EngineOpaContext, OpaClient};
+use stormchaser_model::events::WorkflowStartPendingEvent;
+use stormchaser_model::RunId;
 use stormchaser_tls::TlsReloader;
 use tracing::{debug, error, info};
-use uuid::Uuid;
 
 #[tracing::instrument(skip(pool, git_cache, opa_client, nats_client, _tls_reloader), fields(run_id = %run_id))]
 /// Handles the event when a workflow is queued and ready for resolution.
 pub async fn handle_workflow_queued(
-    run_id: Uuid,
+    run_id: RunId,
     pool: PgPool,
     git_cache: Arc<GitCache>,
     opa_client: Arc<OpaClient>,
@@ -191,7 +192,7 @@ pub async fn handle_workflow_queued(
     let machine = machine.start_pending(&mut *pool.acquire().await?).await?;
 
     // Emit event for transition to StartPending
-    let event = stormchaser_model::events::WorkflowStartPendingEvent {
+    let event = WorkflowStartPendingEvent {
         run_id,
         event_type: "workflow_start_pending".to_string(),
         timestamp: chrono::Utc::now(),

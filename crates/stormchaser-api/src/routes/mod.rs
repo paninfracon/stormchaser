@@ -1,5 +1,6 @@
 use serde_json::Value;
 use std::collections::HashMap;
+use stormchaser_model::workflow::RunStatus;
 /// Module for auth.
 pub mod auth;
 /// Module for cron.
@@ -19,7 +20,6 @@ pub mod workflow;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use stormchaser_model::workflow::RunStatus;
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 

@@ -5,7 +5,7 @@ use hcl::Value as HclValue;
 use once_cell::sync::Lazy;
 use parking_lot::RwLock;
 use serde_json::Value;
-use uuid::Uuid;
+use stormchaser_model::RunId;
 
 pub use stormchaser_model::hcl_eval::{
     evaluate_raw_expr, evaluate_string, hcl_to_json, json_to_hcl, resolve_expressions,
@@ -67,7 +67,7 @@ fn secret_lookup(args: hcl::eval::FuncArgs) -> Result<HclValue, String> {
 }
 
 /// Create context.
-pub fn create_context(inputs: Value, run_id: Uuid, steps: Value) -> HclContext<'static> {
+pub fn create_context(inputs: Value, run_id: RunId, steps: Value) -> HclContext<'static> {
     let mut ctx = HclContext::new();
     ctx.declare_var("inputs", json_to_hcl(inputs));
     ctx.declare_var(
@@ -96,7 +96,11 @@ mod tests {
         let backend = Arc::new(MockBackend::new(secrets)) as SharedSecretBackend;
         set_secrets_backend(backend);
 
-        let ctx = create_context(serde_json::json!({}), Uuid::new_v4(), serde_json::json!({}));
+        let ctx = create_context(
+            serde_json::json!({}),
+            RunId::new_v4(),
+            serde_json::json!({}),
+        );
 
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()

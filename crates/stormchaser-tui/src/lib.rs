@@ -8,7 +8,7 @@ mod tests;
 pub mod ui;
 
 use ratatui::crossterm::event::Event;
-use uuid::Uuid;
+use stormchaser_model::RunId;
 
 /// Events that can trigger state changes in the TUI application.
 pub enum AppEvent {
@@ -17,19 +17,19 @@ pub enum AppEvent {
     /// A regular tick event for background processing or UI updates.
     Tick,
     /// A status update for a specific workflow run.
-    StatusUpdate(Uuid, String), // run_id, status
+    StatusUpdate(RunId, String), // run_id, status
     /// A status update for a specific step within a workflow run.
-    StepUpdate(Uuid, String, String), // run_id, step_name, status
+    StepUpdate(RunId, String, String), // run_id, step_name, status
     /// A new log line received for a specific workflow run.
-    LogLine(Uuid, String), // run_id, line
+    LogLine(RunId, String), // run_id, line
     /// Fetched historical logs for a specific step.
-    StepLogsFetched(Uuid, usize, Vec<String>), // run_id, step_index, logs
+    StepLogsFetched(RunId, usize, Vec<String>), // run_id, step_index, logs
     /// An update with partial details for a workflow run, typically from the run list.
     WorkflowUpdate(app::WorkflowRunDetail),
     /// An update with full details for a workflow run, including steps and artifacts.
     FullRunUpdate(app::WorkflowRunFullDetail),
     /// Request to start watching a specific workflow run.
-    StartWatching(Uuid),
+    StartWatching(RunId),
     /// Successful login event with token and optional refresh token.
     LoginSuccessful(String, Option<String>), // token, refresh_token
     /// Login failure event with an error message.

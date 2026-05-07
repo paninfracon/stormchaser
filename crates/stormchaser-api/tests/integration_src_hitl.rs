@@ -4,6 +4,7 @@ use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
 use std::collections::HashMap;
 use std::sync::Arc;
+use stormchaser_model::auth::Claims;
 use stormchaser_model::auth::OpaClient;
 use uuid::Uuid;
 
@@ -20,7 +21,6 @@ use stormchaser_api::auth::AuthClaims;
 use stormchaser_api::hitl::*;
 use stormchaser_api::AppState;
 use stormchaser_api::JWT_SECRET;
-use stormchaser_model::auth::Claims;
 
 #[derive(serde::Deserialize, serde::Serialize)]
 struct ApprovalLinkPayload {

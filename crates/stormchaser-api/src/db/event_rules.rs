@@ -1,6 +1,9 @@
 use serde_json::Value;
 use sqlx::PgPool;
 use stormchaser_model::event_rules::EventRule;
+use stormchaser_model::EventId;
+use stormchaser_model::RuleId;
+use stormchaser_model::WebhookId;
 use uuid::Uuid;
 
 use stormchaser_model::event;
@@ -10,7 +13,7 @@ use stormchaser_model::event;
 /// Create event rule.
 pub async fn create_event_rule(
     pool: &PgPool,
-    id: Uuid,
+    id: RuleId,
     name: &str,
     description: &Option<String>,
     webhook_id: Option<Uuid>,
@@ -58,7 +61,7 @@ pub async fn list_event_rules(pool: &PgPool) -> Result<Vec<EventRule>, sqlx::Err
 /// Get active event rules by webhook.
 pub async fn get_active_event_rules_by_webhook(
     pool: &PgPool,
-    webhook_id: Uuid,
+    webhook_id: WebhookId,
 ) -> Result<Vec<EventRule>, sqlx::Error> {
     sqlx::query_as("SELECT * FROM event_rules WHERE webhook_id = $1 AND is_active = TRUE")
         .bind(webhook_id)
@@ -68,7 +71,7 @@ pub async fn get_active_event_rules_by_webhook(
 
 /// Deletes an event rule from the database.
 /// Delete event rule.
-pub async fn delete_event_rule(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
+pub async fn delete_event_rule(pool: &PgPool, id: RuleId) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM event_rules WHERE id = $1")
         .bind(id)
         .execute(pool)
@@ -93,10 +96,7 @@ pub async fn get_event_correlation(
 }
 
 /// Deletes an event correlation record
-pub async fn delete_event_correlation(
-    pool: &sqlx::PgPool,
-    id: uuid::Uuid,
-) -> Result<(), sqlx::Error> {
+pub async fn delete_event_correlation(pool: &sqlx::PgPool, id: EventId) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM event_correlations WHERE id = $1")
         .bind(id)
         .execute(pool)

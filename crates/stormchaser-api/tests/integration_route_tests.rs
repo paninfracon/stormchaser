@@ -12,10 +12,10 @@ use std::sync::Arc;
 use std::sync::Once;
 use stormchaser_api::{app, AppState, Claims, JWT_SECRET};
 use stormchaser_model::auth::OpaClient;
+use stormchaser_model::LogBackend;
+use stormchaser_model::RunId;
 use tower::ServiceExt;
 use uuid::Uuid;
-
-use stormchaser_model::LogBackend;
 
 static INIT: Once = Once::new();
 
@@ -778,7 +778,7 @@ async fn test_run_from_git() {
     let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
 
-    let opa_client = std::sync::Arc::new(stormchaser_model::auth::OpaClient::new(None, None));
+    let opa_client = std::sync::Arc::new(OpaClient::new(None, None));
     let tls_reloader = std::sync::Arc::new(
         stormchaser_tls::TlsReloader::new(stormchaser_tls::TlsConfig::default())
             .await
@@ -787,7 +787,7 @@ async fn test_run_from_git() {
 
     // Advance Queued -> StartPending
     stormchaser_engine::handler::workflow::handle_workflow_queued(
-        uuid::Uuid::parse_str(run_id).unwrap(),
+        uuid::Uuid::parse_str(run_id).map(RunId::new).unwrap(),
         pool.clone(),
         std::sync::Arc::new(git_cache),
         opa_client,
@@ -799,7 +799,7 @@ async fn test_run_from_git() {
 
     // Advance StartPending -> Running
     stormchaser_engine::handler::workflow::handle_workflow_start_pending(
-        uuid::Uuid::parse_str(run_id).unwrap(),
+        uuid::Uuid::parse_str(run_id).map(RunId::new).unwrap(),
         pool.clone(),
         nats_client.clone(),
         tls_reloader.clone(),

@@ -1,9 +1,9 @@
 //! Workflow step execution models and state.
 
+use crate::id::*;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use uuid::Uuid;
 
 use utoipa::ToSchema;
 
@@ -38,9 +38,9 @@ pub enum StepStatus {
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow, ToSchema)]
 pub struct StepInstance {
     /// Unique identifier for this execution of the step.
-    pub id: Uuid,
+    pub id: StepInstanceId,
     /// Associated workflow run ID.
-    pub run_id: Uuid,
+    pub run_id: RunId,
     /// The name assigned to the step in the workflow definition.
     pub step_name: String,
     /// The type of step (e.g., 'docker', 'wasm', 'approval').
@@ -73,7 +73,7 @@ pub struct StepInstance {
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow, ToSchema)]
 pub struct StepOutput {
     /// Associated step instance ID that generated the output.
-    pub step_instance_id: Uuid,
+    pub step_instance_id: StepInstanceId,
     /// The name of the output key.
     pub key: String,
     /// The JSON value of the output.
@@ -88,7 +88,7 @@ pub struct StepStatusHistory {
     /// Unique identifier for the history record.
     pub id: i64,
     /// Associated step instance ID.
-    pub step_instance_id: Uuid,
+    pub step_instance_id: StepInstanceId,
     /// The status the step transitioned into.
     pub status: StepStatus,
     /// Timestamp when the status transition occurred.

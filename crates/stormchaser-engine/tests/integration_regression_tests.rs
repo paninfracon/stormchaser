@@ -3,6 +3,7 @@ use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
 use stormchaser_engine::handler;
 use stormchaser_model::auth::OpaClient;
+use stormchaser_model::RunId;
 use uuid::Uuid;
 
 async fn setup_db() -> sqlx::PgPool {
@@ -31,7 +32,7 @@ async fn test_direct_run_inserts_quotas() {
     let nats_client = async_nats::connect(nats_url).await.unwrap();
     let opa_client = Arc::new(OpaClient::new(None, None));
 
-    let run_id = Uuid::new_v4();
+    let run_id = RunId::new_v4();
     let workflow_name = format!("test-direct-run-{}", run_id);
     let dsl = format!(
         r#"
@@ -102,7 +103,7 @@ async fn test_dispatch_pending_steps_column_created_at() {
     let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
 
-    let run_id = Uuid::new_v4();
+    let run_id = RunId::new_v4();
     let workflow_name = format!("test-dispatch-{}", run_id);
 
     // 1. Setup minimal run and quotas

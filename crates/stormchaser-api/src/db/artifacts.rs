@@ -1,12 +1,12 @@
 use sqlx::PgPool;
-use uuid::Uuid;
+use stormchaser_model::RunId;
 
 use stormchaser_model::storage;
 
 /// Retrieves a list of artifacts associated with a given workflow run.
 pub async fn list_run_artifacts(
     pool: &PgPool,
-    run_id: Uuid,
+    run_id: RunId,
 ) -> Result<Vec<storage::ArtifactRegistry>, sqlx::Error> {
     sqlx::query_as(
         r#"

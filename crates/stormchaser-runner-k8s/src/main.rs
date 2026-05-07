@@ -14,6 +14,7 @@ use serde_json::{json, Value};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
+use stormchaser_model::events::RunnerHeartbeatEvent;
 use tokio::sync::watch;
 use tokio::time;
 use tracing::{error, info, warn};
@@ -250,7 +251,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
                 break;
             }
             _ = heartbeat_interval.tick() => {
-                let heartbeat_payload = stormchaser_model::events::RunnerHeartbeatEvent {
+                let heartbeat_payload = RunnerHeartbeatEvent {
                     runner_id: heartbeat_id.clone(),
                     version: env!("CARGO_PKG_VERSION").to_string(),
                     state: "online".to_string(),

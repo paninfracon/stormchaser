@@ -1,5 +1,7 @@
 use anyhow::Result;
 use serde_json::Value;
+use stormchaser_model::RunId;
+use stormchaser_model::StepInstanceId;
 use uuid::Uuid;
 
 /// Releases the quota acquired for a specific step instance, marking it as completed or failed in the quota system.
@@ -9,14 +11,15 @@ pub async fn release_step_quota_for_instance(
     step_id: Uuid,
 ) -> Result<()> {
     let row: Option<(String, Value)> =
-        crate::db::steps::get_step_type_and_spec(&mut *executor, step_id)
+        crate::db::steps::get_step_type_and_spec(&mut *executor, StepInstanceId::new(step_id))
             .await
             .ok();
 
     if let Some((step_type, spec)) = row {
         let (cpu, mem) = crate::resource_utils::get_step_resource_requirements(&step_type, &spec);
         if cpu > 0.0 || mem > 0 {
-            let _ = crate::db::release_step_quota(&mut *executor, run_id, cpu, mem).await;
+            let _ =
+                crate::db::release_step_quota(&mut *executor, RunId::new(run_id), cpu, mem).await;
         }
     }
 

@@ -6,6 +6,9 @@ use std::env;
 use stormchaser_model::cron;
 use stormchaser_model::events::WorkflowQueuedEvent;
 use stormchaser_model::nats::publish_cloudevent;
+use stormchaser_model::workflow::RunStatus;
+use stormchaser_model::CronWorkflowId;
+use stormchaser_model::RunId;
 
 use super::{CreateCronWorkflowRequest, CronWorkflowResponse, EnqueueResponse};
 use crate::{AppState, AuthClaims};
@@ -21,8 +24,6 @@ use kube::{
     api::{DeleteParams, PostParams},
     Api, Client,
 };
-use stormchaser_model::workflow::RunStatus;
-use uuid::Uuid;
 
 /// Create cron workflow.
 #[utoipa::path(
@@ -41,8 +42,8 @@ pub async fn create_cron_workflow(
     State(state): State<AppState>,
     Json(payload): Json<CreateCronWorkflowRequest>,
 ) -> Result<Json<CronWorkflowResponse>, StatusCode> {
-    let id = Uuid::new_v4();
-    let secret_token = Uuid::new_v4().to_string();
+    let id = CronWorkflowId::new_v4();
+    let secret_token = CronWorkflowId::new_v4().to_string();
 
     // 1. Register with external cron engine
     let external_job_id =
@@ -63,7 +64,7 @@ pub async fn create_cron_workflow(
     })?;
 
     Ok(Json(CronWorkflowResponse {
-        id,
+        id: id.into_inner(),
         secret_token,
         external_job_id,
     }))
@@ -108,7 +109,7 @@ pub async fn list_cron_workflows(
 pub async fn delete_cron_workflow(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path(id): Path<Uuid>,
+    Path(id): Path<CronWorkflowId>,
 ) -> Result<StatusCode, StatusCode> {
     // 1. Fetch to get external_job_id
     let workflow = db::get_cron_workflow(&state.pool, id)
@@ -154,7 +155,7 @@ pub async fn delete_cron_workflow(
 pub async fn trigger_cron_workflow(
     headers: HeaderMap,
     State(state): State<AppState>,
-    Path(id): Path<Uuid>,
+    Path(id): Path<CronWorkflowId>,
 ) -> Result<Json<EnqueueResponse>, StatusCode> {
     // 1. Fetch CronWorkflow
     let cron = db::get_active_cron_workflow(&state.pool, id)
@@ -184,9 +185,9 @@ pub async fn trigger_cron_workflow(
     }
 
     // 3. Enqueue a new run
-    let run_id = Uuid::new_v4();
+    let run_id = RunId::new_v4();
 
-    tracing::info!(run_id = %run_id, "Enqueuing cron workflow: {}", cron.workflow_name);
+    tracing::info!(%run_id, "Enqueuing cron workflow: {}", cron.workflow_name);
     let fencing_token = Utc::now().timestamp_nanos_opt().unwrap_or(0);
 
     let mut tx = state
@@ -252,13 +253,13 @@ pub async fn trigger_cron_workflow(
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(EnqueueResponse {
-        run_id,
+        run_id: run_id.into_inner(),
         status: "queued".to_string(),
     }))
 }
 
 async fn register_ofelia_cron(
-    id: Uuid,
+    id: CronWorkflowId,
     name: &str,
     cronspec: &str,
     secret_token: &str,
@@ -342,7 +343,7 @@ async fn unregister_ofelia_cron(container_name: &str) -> Result<(), StatusCode> 
 }
 
 async fn register_external_cron(
-    id: Uuid,
+    id: CronWorkflowId,
     name: &str,
     cronspec: &str,
     secret_token: &str,

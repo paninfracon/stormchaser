@@ -4,19 +4,19 @@ use chrono::Utc;
 use serde_json::Value;
 use sqlx::PgPool;
 use std::time::Duration;
+use stormchaser_model::dsl::WebhookInvokeSpec;
+use stormchaser_model::RunId;
+use stormchaser_model::StepInstanceId;
 use tracing::info;
-use uuid::Uuid;
 
 /// Handle webhook invoke.
 pub async fn handle_webhook_invoke(
-    run_id: Uuid,
-    step_id: Uuid,
+    run_id: RunId,
+    step_id: StepInstanceId,
     spec: Value,
     pool: PgPool,
     nats_client: async_nats::Client,
 ) -> Result<()> {
-    use stormchaser_model::dsl::WebhookInvokeSpec;
-
     let spec: WebhookInvokeSpec = serde_json::from_value(spec)?;
 
     info!("Invoking webhook {} for run {}", spec.url, run_id);
@@ -68,8 +68,8 @@ fn render_webhook_body(
 }
 
 async fn execute_webhook_request(
-    run_id: Uuid,
-    step_id: Uuid,
+    run_id: RunId,
+    step_id: StepInstanceId,
     spec: &dsl::WebhookInvokeSpec,
     rendered_body: Option<String>,
     pool: PgPool,
@@ -149,7 +149,6 @@ async fn execute_webhook_request(
 mod tests {
     use super::*;
     use serde_json::json;
-    use stormchaser_model::dsl::WebhookInvokeSpec;
 
     #[test]
     fn test_render_webhook_body_happy_path() {

@@ -10,6 +10,9 @@ use futures::StreamExt;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::time::Duration;
+use stormchaser_model::RunId;
+use stormchaser_model::StepId;
+use stormchaser_model::StepInstanceId;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
 use utoipa::ToSchema;
@@ -42,7 +45,7 @@ pub fn format_log_event(line: &str) -> Event {
 pub async fn stream_step_logs_api(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path((run_id, step_id)): Path<(Uuid, Uuid)>,
+    Path((run_id, step_id)): Path<(RunId, StepInstanceId)>,
 ) -> Result<
     axum::response::sse::Sse<
         impl futures::stream::Stream<Item = Result<Event, std::convert::Infallible>>,
@@ -60,7 +63,7 @@ pub async fn stream_step_logs_api(
         .ok_or(StatusCode::NOT_FOUND)?;
 
     let rx = log_backend
-        .stream_step_logs(&instance.step_name, step_id)
+        .stream_step_logs(&instance.step_name, StepId::new(step_id.into_inner()))
         .await
         .map_err(|e| {
             tracing::error!("Failed to stream logs: {}", e);
@@ -103,7 +106,7 @@ pub async fn stream_step_logs_api(
 pub async fn get_step_logs_api(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path((run_id, step_id)): Path<(Uuid, Uuid)>,
+    Path((run_id, step_id)): Path<(RunId, StepInstanceId)>,
     Query(query): Query<LogsQuery>,
 ) -> Result<Json<Vec<String>>, StatusCode> {
     let log_backend = match &state.log_backend {
@@ -119,7 +122,7 @@ pub async fn get_step_logs_api(
     let logs = log_backend
         .fetch_step_logs(
             &instance.step_name,
-            step_id,
+            StepId::new(step_id.into_inner()),
             instance.started_at,
             instance.finished_at,
             query.limit,
@@ -149,7 +152,7 @@ pub async fn get_step_logs_api(
 pub async fn stream_run_logs_api(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path(run_id): Path<Uuid>,
+    Path(run_id): Path<RunId>,
 ) -> Result<
     axum::response::sse::Sse<
         impl futures::stream::Stream<Item = Result<Event, std::convert::Infallible>>,
@@ -202,7 +205,7 @@ pub async fn stream_run_logs_api(
                             step_name_clone
                         );
                         if let Ok(mut step_rx) = log_backend
-                            .stream_step_logs(&step_name_clone, step_id)
+                            .stream_step_logs(&step_name_clone, StepId::new(step_id))
                             .await
                         {
                             tracing::debug!(
@@ -287,7 +290,7 @@ pub async fn stream_run_logs_api(
 pub async fn stream_run_status_api(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path(run_id): Path<Uuid>,
+    Path(run_id): Path<RunId>,
 ) -> Result<
     axum::response::sse::Sse<
         impl futures::stream::Stream<Item = Result<Event, std::convert::Infallible>>,

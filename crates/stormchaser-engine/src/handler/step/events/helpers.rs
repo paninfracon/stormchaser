@@ -3,6 +3,9 @@ use flate2::read::GzDecoder;
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 use std::io::Read;
+use stormchaser_model::BackendId;
+use stormchaser_model::RunId;
+use stormchaser_model::StepInstanceId;
 use stormchaser_model::StorageBackend;
 use tar::Archive;
 use uuid::Uuid;
@@ -41,7 +44,7 @@ pub async fn persist_step_test_reports(
                 let remote_path = report_val.get("remote_path").and_then(|v| v.as_str());
                 let backend_id = report_val.get("backend_id").and_then(|v| {
                     if let Some(s) = v.as_str() {
-                        Uuid::parse_str(s).ok()
+                        uuid::Uuid::parse_str(s).ok().map(BackendId::new)
                     } else {
                         None
                     }
@@ -50,7 +53,7 @@ pub async fn persist_step_test_reports(
                 if let (Some(path), Some(bid)) = (remote_path, backend_id) {
                     // Download and parse
                     let backend: StorageBackend =
-                        crate::db::storage::get_storage_backend_by_id(pool, bid)
+                        crate::db::storage::get_storage_backend_by_id(pool, bid.into_inner())
                             .await?
                             .ok_or_else(|| anyhow::anyhow!("Storage backend not found"))?;
 
@@ -76,9 +79,12 @@ pub async fn persist_step_test_reports(
                             entry.read_to_string(&mut content)?;
 
                             if format == "junit" {
-                                if let Ok((summary, cases)) =
-                                    crate::junit::parse_junit(&content, name, run_id, step_id)
-                                {
+                                if let Ok((summary, cases)) = crate::junit::parse_junit(
+                                    &content,
+                                    name,
+                                    RunId::new(run_id),
+                                    StepInstanceId::new(step_id),
+                                ) {
                                     summaries.push(summary);
                                     test_cases.extend(cases);
                                 }
@@ -114,7 +120,7 @@ pub async fn persist_step_test_reports(
                         format,
                         Some(&combined_raw),
                         hash,
-                        Some(bid),
+                        Some(bid.into_inner()),
                         Some(path),
                     )
                     .await?;
@@ -122,9 +128,12 @@ pub async fn persist_step_test_reports(
             } else if let Some(content) = report_val.get("content").and_then(|v| v.as_str()) {
                 // Legacy in-memory report
                 if format == "junit" {
-                    if let Ok((summary, cases)) =
-                        crate::junit::parse_junit(content, name, run_id, step_id)
-                    {
+                    if let Ok((summary, cases)) = crate::junit::parse_junit(
+                        content,
+                        name,
+                        RunId::new(run_id),
+                        StepInstanceId::new(step_id),
+                    ) {
                         crate::db::insert_step_test_summary(
                             &mut **tx, run_id, step_id, name, &summary,
                         )

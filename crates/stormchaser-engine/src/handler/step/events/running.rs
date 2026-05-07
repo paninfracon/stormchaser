@@ -2,16 +2,17 @@ use crate::handler::fetch_step_instance;
 use anyhow::{Context, Result};
 use serde_json::Value;
 use sqlx::PgPool;
+use stormchaser_model::RunId;
+use stormchaser_model::StepInstanceId;
 use tracing::info;
-use uuid::Uuid;
 
 #[tracing::instrument(skip(payload, pool), fields(run_id = tracing::field::Empty, step_id = tracing::field::Empty))]
 /// Handle step running.
 pub async fn handle_step_running(payload: Value, pool: PgPool) -> Result<()> {
     let run_id_str = payload["run_id"].as_str().context("Missing run_id")?;
-    let run_id = Uuid::parse_str(run_id_str)?;
+    let run_id = uuid::Uuid::parse_str(run_id_str).map(RunId::new)?;
     let step_id_str = payload["step_id"].as_str().context("Missing step_id")?;
-    let step_id = Uuid::parse_str(step_id_str)?;
+    let step_id = uuid::Uuid::parse_str(step_id_str).map(StepInstanceId::new)?;
 
     let span = tracing::Span::current();
     span.record("run_id", tracing::field::display(run_id));

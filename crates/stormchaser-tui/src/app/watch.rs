@@ -3,7 +3,8 @@ use crate::AppEvent;
 use eventsource_stream::Eventsource;
 use futures::StreamExt;
 use serde_json::Value;
-use uuid::Uuid;
+use stormchaser_model::RunId;
+use stormchaser_model::StepInstanceId;
 
 impl<'a> App<'a> {
     /// Re-populates the log view buffer from the currently selected step's logs and fetches full logs.
@@ -23,7 +24,7 @@ impl<'a> App<'a> {
                     .instance
                     .get("id")
                     .and_then(|v| v.as_str())
-                    .and_then(|s| uuid::Uuid::parse_str(s).ok());
+                    .and_then(|s| uuid::Uuid::parse_str(s).ok().map(StepInstanceId::new));
 
                 let Some(id) = step_id else {
                     // Without a stable UUID we cannot dedupe or fetch logs reliably.
@@ -75,7 +76,7 @@ impl<'a> App<'a> {
     }
 
     /// Spawns background tasks to listen for real-time SSE updates for a specific workflow run.
-    pub async fn start_watching(&mut self, id: Uuid) {
+    pub async fn start_watching(&mut self, id: RunId) {
         if let Some(handle) = self.watcher_handle.take() {
             handle.abort();
         }
@@ -197,7 +198,7 @@ mod tests {
         let (tx, _rx) = mpsc::channel(100);
         let mut app = App::new("http://localhost".to_string(), None, tx);
 
-        let id = Uuid::new_v4();
+        let id = RunId::new_v4();
 
         // This will spawn two tokio tasks and set the handles.
         // It won't actually do anything without a server since it's just a handle to a sleeping future waiting for a response or failing fast.
@@ -218,14 +219,14 @@ mod tests {
         let (tx, _rx) = mpsc::channel(100);
         let mut app = App::new("http://localhost".to_string(), None, tx);
 
-        let id = Uuid::new_v4();
+        let id = RunId::new_v4();
         // Insert a dummy into cached runs
         let dummy_run = WorkflowRunFullDetail {
             detail: crate::app::WorkflowRunDetail {
                 id,
                 workflow_name: "test".to_string(),
                 initiating_user: "u".to_string(),
-                status: stormchaser_model::workflow::RunStatus::Succeeded,
+                status: RunStatus::Succeeded,
                 created_at: chrono::Utc::now(),
                 finished_at: None,
             },
@@ -249,7 +250,7 @@ mod tests {
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let server = MockServer::start().await;
-        let id = Uuid::new_v4();
+        let id = RunId::new_v4();
 
         let sse_status_body = "event: run_status\ndata: {\"status\": \"running\"}\n\n";
         let sse_log_body = "event: log\ndata: [test] Log message\n\n";

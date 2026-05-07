@@ -1,5 +1,10 @@
 use serde_json::Value;
+use stormchaser_model::dsl::ApprovalSpec;
 use stormchaser_model::dsl::CommonContainerSpec;
+use stormchaser_model::dsl::EmailSpec;
+use stormchaser_model::dsl::EnvVar;
+use stormchaser_model::dsl::Input;
+use stormchaser_model::dsl::StorageMount;
 
 #[cfg(feature = "aws-sdk-sts")]
 async fn assume_aws_role(
@@ -7,7 +12,7 @@ async fn assume_aws_role(
     region: Option<&str>,
     assume_role_arn: &str,
     role_session_name: Option<&str>,
-) -> anyhow::Result<Vec<stormchaser_model::dsl::EnvVar>> {
+) -> anyhow::Result<Vec<EnvVar>> {
     let mut config_loader = aws_config::defaults(aws_config::BehaviorVersion::v2026_01_12());
     if let Some(r) = region {
         config_loader = config_loader.region(aws_config::Region::new(r.to_string()));
@@ -28,15 +33,15 @@ async fn assume_aws_role(
 
     if let Some(credentials) = assume_role_res.credentials() {
         let envs = vec![
-            stormchaser_model::dsl::EnvVar {
+            EnvVar {
                 name: "AWS_ACCESS_KEY_ID".to_string(),
                 value: credentials.access_key_id().to_string(),
             },
-            stormchaser_model::dsl::EnvVar {
+            EnvVar {
                 name: "AWS_SECRET_ACCESS_KEY".to_string(),
                 value: credentials.secret_access_key().to_string(),
             },
-            stormchaser_model::dsl::EnvVar {
+            EnvVar {
                 name: "AWS_SESSION_TOKEN".to_string(),
                 value: credentials.session_token().to_string(),
             },
@@ -167,12 +172,12 @@ pub async fn mutate_if_terraform(
 
         let mut envs = Vec::new();
         if let Some(r) = region {
-            envs.push(stormchaser_model::dsl::EnvVar {
+            envs.push(EnvVar {
                 name: "AWS_REGION".to_string(),
                 value: r.to_string(),
             });
         }
-        envs.push(stormchaser_model::dsl::EnvVar {
+        envs.push(EnvVar {
             name: "TF_PLUGIN_CACHE_DIR".to_string(),
             value: "/tmp/.terraform_plugin_cache".to_string(),
         });
@@ -183,21 +188,20 @@ pub async fn mutate_if_terraform(
             envs.append(&mut sts_envs);
         }
 
-        let storage_mounts: Option<Vec<stormchaser_model::dsl::StorageMount>> =
-            match actual_spec.get("storage_mounts") {
-                Some(v) => match serde_json::from_value(v.clone()) {
-                    Ok(mounts) => Some(mounts),
-                    Err(err) => {
-                        tracing::warn!(
-                            "Failed to deserialize storage_mounts for Terraform step, \
+        let storage_mounts: Option<Vec<StorageMount>> = match actual_spec.get("storage_mounts") {
+            Some(v) => match serde_json::from_value(v.clone()) {
+                Ok(mounts) => Some(mounts),
+                Err(err) => {
+                    tracing::warn!(
+                        "Failed to deserialize storage_mounts for Terraform step, \
                              mounts will not be applied: {}",
-                            err
-                        );
-                        None
-                    }
-                },
-                None => None,
-            };
+                        err
+                    );
+                    None
+                }
+            },
+            None => None,
+        };
         let cpu = actual_spec
             .get("cpu")
             .and_then(|v| v.as_str())
@@ -247,7 +251,7 @@ pub fn mutate_if_terraform_approval(step_type: &mut String, resolved_spec: &mut 
             );
         }
 
-        let input = stormchaser_model::dsl::Input {
+        let input = Input {
             name: "approval_decision".to_string(),
             r#type: "string".to_string(),
             description: Some(plan_description),
@@ -257,7 +261,7 @@ pub fn mutate_if_terraform_approval(step_type: &mut String, resolved_spec: &mut 
             query: None,
         };
 
-        let mut notify_spec: Option<stormchaser_model::dsl::EmailSpec> = actual_spec
+        let mut notify_spec: Option<EmailSpec> = actual_spec
             .get("notify")
             .cloned()
             .and_then(|n| serde_json::from_value(n).ok());
@@ -277,7 +281,7 @@ pub fn mutate_if_terraform_approval(step_type: &mut String, resolved_spec: &mut 
             }
         }
 
-        let approval_spec = stormchaser_model::dsl::ApprovalSpec {
+        let approval_spec = ApprovalSpec {
             approvers: approvers.and_then(|a| serde_json::from_value(a).ok()),
             inputs: Some(vec![input]),
             notify: notify_spec,

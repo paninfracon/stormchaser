@@ -4,6 +4,7 @@ use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
 use stormchaser_engine::handler;
 use stormchaser_model::auth::OpaClient;
+use stormchaser_model::RunId;
 use uuid::Uuid;
 
 use stormchaser_tls::TlsConfig;
@@ -52,7 +53,7 @@ async fn test_resolve_storage_provision() {
     .await
     .unwrap();
 
-    let run_id = Uuid::new_v4();
+    let run_id = RunId::new_v4();
 
     let artifact_name = "test-artifact";
 

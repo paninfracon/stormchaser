@@ -3,6 +3,9 @@
 //! This crate provides the foundational types representing workflows, steps,
 //! executions, and other entities that make up the domain model.
 
+pub mod id;
+pub use id::*;
+
 /// Authentication and authorization models.
 pub mod auth;
 /// Cron scheduling definitions.

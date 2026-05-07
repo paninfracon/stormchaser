@@ -10,8 +10,8 @@ use uuid::Uuid;
 
 /// Generates an HMAC-based token for Human-In-The-Loop (HITL) step approval or rejection.
 pub fn generate_approval_token(
-    run_id: Uuid,
-    step_id: Uuid,
+    run_id: stormchaser_model::RunId,
+    step_id: stormchaser_model::StepInstanceId,
     action: &str,
     secret: &str,
 ) -> Result<String> {
@@ -61,8 +61,8 @@ mod tests {
 
     #[test]
     fn test_generate_approval_token() {
-        let run_id = Uuid::new_v4();
-        let step_id = Uuid::new_v4();
+        let run_id = stormchaser_model::RunId::new_v4();
+        let step_id = stormchaser_model::StepInstanceId::new_v4();
         let secret = "test-secret";
 
         let token = generate_approval_token(run_id, step_id, "approve", secret).unwrap();

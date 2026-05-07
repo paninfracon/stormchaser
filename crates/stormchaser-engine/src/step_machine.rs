@@ -443,12 +443,13 @@ impl StepMachine<state::Aborted> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use stormchaser_model::{RunId, StepInstanceId};
     use uuid::Uuid;
 
     fn dummy_instance() -> StepInstance {
         StepInstance {
-            id: Uuid::new_v4(),
-            run_id: Uuid::new_v4(),
+            id: StepInstanceId::new(Uuid::new_v4()),
+            run_id: RunId::new(Uuid::new_v4()),
             step_name: "test".to_string(),
             step_type: "docker".to_string(),
             status: StepStatus::Running, // Start with something else

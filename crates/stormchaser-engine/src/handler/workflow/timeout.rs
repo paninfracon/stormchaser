@@ -4,15 +4,17 @@ use anyhow::Result;
 use chrono::Utc;
 use sqlx::PgPool;
 use std::sync::Arc;
+use stormchaser_model::events::WorkflowAbortedEvent;
+use stormchaser_model::step::{StepInstance, StepStatus};
 use stormchaser_model::workflow::RunStatus;
+use stormchaser_model::RunId;
 use stormchaser_tls::TlsReloader;
 use tracing::info;
-use uuid::Uuid;
 
 #[tracing::instrument(skip(pool, nats_client, _tls_reloader), fields(run_id = %run_id))]
 /// Handle workflow timeout.
 pub async fn handle_workflow_timeout(
-    run_id: Uuid,
+    run_id: RunId,
     pool: PgPool,
     nats_client: async_nats::Client,
     _tls_reloader: Arc<TlsReloader>,
@@ -56,33 +58,32 @@ pub async fn handle_workflow_timeout(
     };
 
     // 2. Mark all non-terminal steps as failed
-    let steps: Vec<stormchaser_model::step::StepInstance> =
-        crate::db::get_step_instances_by_run_id(&pool, run_id).await?;
+    let steps: Vec<StepInstance> = crate::db::get_step_instances_by_run_id(&pool, run_id).await?;
 
     let mut tx = pool.begin().await?;
     for step in steps {
         match step.status {
-            stormchaser_model::step::StepStatus::Pending => {
+            StepStatus::Pending => {
                 crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::from_instance(step)
                     .fail("Workflow timed out".to_string(), None, &mut *tx)
                     .await?;
             }
-            stormchaser_model::step::StepStatus::UnpackingSfs => {
+            StepStatus::UnpackingSfs => {
                 crate::step_machine::StepMachine::<crate::step_machine::state::UnpackingSfs>::from_instance(step)
                     .fail("Workflow timed out".to_string(), None, &mut *tx)
                     .await?;
             }
-            stormchaser_model::step::StepStatus::Running => {
+            StepStatus::Running => {
                 crate::step_machine::StepMachine::<crate::step_machine::state::Running>::from_instance(step)
                     .fail("Workflow timed out".to_string(), None, &mut *tx)
                     .await?;
             }
-            stormchaser_model::step::StepStatus::PackingSfs => {
+            StepStatus::PackingSfs => {
                 crate::step_machine::StepMachine::<crate::step_machine::state::PackingSfs>::from_instance(step)
                     .fail("Workflow timed out".to_string(), None, &mut *tx)
                     .await?;
             }
-            stormchaser_model::step::StepStatus::WaitingForEvent => {
+            StepStatus::WaitingForEvent => {
                 crate::step_machine::StepMachine::<crate::step_machine::state::WaitingForEvent>::from_instance(step)
                     .fail("Workflow timed out".to_string(), None, &mut *tx)
                     .await?;
@@ -93,7 +94,7 @@ pub async fn handle_workflow_timeout(
     tx.commit().await?;
 
     // 3. Publish abort event
-    let event = stormchaser_model::events::WorkflowAbortedEvent {
+    let event = WorkflowAbortedEvent {
         run_id,
         event_type: "workflow_aborted".to_string(),
         timestamp: Utc::now(),

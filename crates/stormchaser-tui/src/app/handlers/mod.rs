@@ -245,7 +245,7 @@ mod tests {
         App::new("http://test".to_string(), Some("token".to_string()), tx)
     }
 
-    fn mock_run_detail(id: Uuid, status: RunStatus) -> crate::app::WorkflowRunDetail {
+    fn mock_run_detail(id: RunId, status: RunStatus) -> crate::app::WorkflowRunDetail {
         crate::app::WorkflowRunDetail {
             id,
             workflow_name: "test".to_string(),
@@ -269,7 +269,7 @@ mod tests {
     }
 
     fn mock_full_detail(
-        id: Uuid,
+        id: RunId,
         status: RunStatus,
         steps: Vec<crate::app::StepDetail>,
     ) -> WorkflowRunFullDetail {
@@ -285,7 +285,7 @@ mod tests {
     #[test]
     fn test_handle_status_update_basic() {
         let mut app = setup_app();
-        let run_id = Uuid::new_v4();
+        let run_id = RunId::new_v4();
 
         // 1. Initial state empty
         app.handle_status_update(run_id, "running".to_string());
@@ -308,7 +308,7 @@ mod tests {
     #[test]
     fn test_handle_workflow_update() {
         let mut app = setup_app();
-        let run_id = Uuid::new_v4();
+        let run_id = RunId::new_v4();
         let detail = mock_run_detail(run_id, RunStatus::Queued);
 
         // 1. Insert new
@@ -325,7 +325,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_step_update() {
         let mut app = setup_app();
-        let run_id = Uuid::new_v4();
+        let run_id = RunId::new_v4();
 
         let step = mock_step_detail("test_step", "pending");
         let detail = mock_full_detail(run_id, RunStatus::Running, vec![step]);
@@ -348,7 +348,7 @@ mod tests {
     #[test]
     fn test_handle_step_logs_fetched_merge_with_live() {
         let mut app = setup_app();
-        let run_id = Uuid::new_v4();
+        let run_id = RunId::new_v4();
 
         let mut step = mock_step_detail("test_step", "running");
         step.logs = vec!["live log 1".to_string(), "live log 2".to_string()];
@@ -379,7 +379,7 @@ mod tests {
     #[test]
     fn test_handle_log_line() {
         let mut app = setup_app();
-        let run_id = Uuid::new_v4();
+        let run_id = RunId::new_v4();
 
         let step = mock_step_detail("test_step", "running");
         let detail = mock_full_detail(run_id, RunStatus::Running, vec![step]);

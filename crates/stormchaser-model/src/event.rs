@@ -1,19 +1,19 @@
 //! System event and correlation models for async execution.
 
+use crate::id::*;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use uuid::Uuid;
 
 /// Maps a correlation key and value to a specific step instance waiting for an event.
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
 pub struct EventCorrelation {
     /// Unique identifier for the correlation record.
-    pub id: Uuid,
+    pub id: EventId,
     /// Associated step instance ID waiting for the event.
-    pub step_instance_id: Uuid,
+    pub step_instance_id: StepInstanceId,
     /// Associated workflow run ID.
-    pub run_id: Uuid,
+    pub run_id: RunId,
     /// The key used for correlation (e.g., a specific payload field).
     pub correlation_key: String,
     /// The expected value for the correlation key.
@@ -26,9 +26,9 @@ pub struct EventCorrelation {
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
 pub struct ApprovalRegistry {
     /// Unique identifier for the approval record.
-    pub id: Uuid,
+    pub id: EventId,
     /// Associated step instance ID that requires approval.
-    pub step_instance_id: Uuid,
+    pub step_instance_id: StepInstanceId,
     /// Identifier of the user who provided the approval or rejection.
     pub user_id: String,
     /// Status of the approval request (e.g., 'approved', 'rejected').

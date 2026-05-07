@@ -5,13 +5,17 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
 use stormchaser_model::dsl::Step;
+use stormchaser_model::events::StepScheduledEvent;
+use stormchaser_model::storage::BackendType;
+use stormchaser_model::storage::StorageBackend;
+use stormchaser_model::RunId;
+use stormchaser_model::StepId;
+use stormchaser_model::StepInstanceId;
 use stormchaser_tls::TlsReloader;
-use uuid::Uuid;
 
 use crate::handler::{fetch_run_context, RunContext};
 
 use stormchaser_model::dsl;
-use stormchaser_model::storage::BackendType;
 
 /// Recursively searches for a step by name within a list of steps.
 pub fn find_step<'a>(steps: &'a [Step], name: &str) -> Option<&'a Step> {
@@ -29,19 +33,20 @@ pub fn find_step<'a>(steps: &'a [Step], name: &str) -> Option<&'a Step> {
 }
 
 async fn apply_intrinsic_mutations(
-    run_id: Uuid,
+    run_id: RunId,
     step_type: &mut String,
     resolved_spec: &mut Value,
 ) -> Result<()> {
     super::intrinsic::git_checkout::mutate(step_type, resolved_spec);
     super::intrinsic::jq::mutate_if_has_files(step_type, resolved_spec);
-    super::intrinsic::terraform::mutate_if_terraform(run_id, step_type, resolved_spec).await?;
+    super::intrinsic::terraform::mutate_if_terraform(run_id.into_inner(), step_type, resolved_spec)
+        .await?;
     super::intrinsic::terraform::mutate_if_terraform_approval(step_type, resolved_spec);
     Ok(())
 }
 
 async fn resolve_storage_provision(
-    run_id: Uuid,
+    run_id: RunId,
     pool: &PgPool,
     storage: &dsl::Storage,
     run_context: &RunContext,
@@ -51,7 +56,7 @@ async fn resolve_storage_provision(
         let mut prov_clone = prov.clone();
         if prov_clone.resource_type == "artifact" {
             let (backend_id, remote_path) =
-                crate::db::get_artifact_by_name(pool, run_id, &prov_clone.name)
+                crate::db::get_artifact_by_name(pool, run_id.into_inner(), &prov_clone.name)
                     .await?
                     .with_context(|| {
                         format!(
@@ -60,7 +65,7 @@ async fn resolve_storage_provision(
                         )
                     })?;
 
-            let backend_info: stormchaser_model::storage::StorageBackend =
+            let backend_info: StorageBackend =
                 crate::db::get_storage_backend_by_id(pool, backend_id)
                     .await?
                     .with_context(|| {
@@ -115,7 +120,7 @@ async fn resolve_storage_provision(
 }
 
 async fn setup_storage_urls(
-    run_id: Uuid,
+    run_id: RunId,
     pool: &PgPool,
     workflow: &dsl::Workflow,
     resolved_spec: &Value,
@@ -144,12 +149,11 @@ async fn setup_storage_urls(
             continue;
         }
 
-        let backend: Option<stormchaser_model::storage::StorageBackend> =
-            if let Some(ref backend_name) = storage.backend {
-                crate::db::get_storage_backend_by_name(pool, backend_name).await?
-            } else {
-                crate::db::get_default_sfs_backend(pool).await?
-            };
+        let backend: Option<StorageBackend> = if let Some(ref backend_name) = storage.backend {
+            crate::db::get_storage_backend_by_name(pool, backend_name).await?
+        } else {
+            crate::db::get_default_sfs_backend(pool).await?
+        };
 
         if let Some(backend) = backend {
             let mut get_url = None;
@@ -174,13 +178,14 @@ async fn setup_storage_urls(
             }
 
             let last_hash: Option<(String,)> =
-                crate::db::get_run_storage_last_hash(pool, run_id, &storage.name).await?;
+                crate::db::get_run_storage_last_hash(pool, run_id.into_inner(), &storage.name)
+                    .await?;
 
             let mut artifacts_data = serde_json::Map::new();
             for artifact in &storage.artifacts {
                 let instructions = crate::artifact::generate_parking_instructions(
                     &backend,
-                    run_id,
+                    run_id.into_inner(),
                     &storage.name,
                     artifact,
                 )
@@ -229,8 +234,8 @@ async fn setup_storage_urls(
 
 #[allow(clippy::too_many_arguments)]
 async fn try_dispatch_intrinsic(
-    run_id: Uuid,
-    step_instance_id: Uuid,
+    run_id: RunId,
+    step_instance_id: StepInstanceId,
     step_type: &str,
     resolved_spec: &Value,
     resolved_params: &Value,
@@ -334,8 +339,8 @@ async fn try_dispatch_intrinsic(
 }
 
 async fn setup_test_report_urls(
-    run_id: Uuid,
-    step_instance_id: Uuid,
+    run_id: RunId,
+    step_instance_id: StepInstanceId,
     step_name: &str,
     pool: &PgPool,
     workflow: &dsl::Workflow,
@@ -378,8 +383,8 @@ async fn setup_test_report_urls(
 /// Dispatches a step instance, handling intrinsic types or forwarding to runners via NATS.
 #[allow(clippy::too_many_arguments)]
 pub async fn dispatch_step_instance(
-    run_id: Uuid,
-    step_instance_id: Uuid,
+    run_id: RunId,
+    step_instance_id: StepInstanceId,
     step_name: &str,
     step_type: &str,
     resolved_spec: &Value,
@@ -423,9 +428,9 @@ pub async fn dispatch_step_instance(
     let test_report_urls =
         setup_test_report_urls(run_id, step_instance_id, step_name, &pool, &workflow).await?;
 
-    let payload = stormchaser_model::events::StepScheduledEvent {
+    let payload = StepScheduledEvent {
         run_id,
-        step_id: step_instance_id,
+        step_id: StepId::new(step_instance_id.into_inner()),
         step_name: Some(step_name.to_string()),
         step_type: Some(step_type.clone()),
         spec: Some(resolved_spec),

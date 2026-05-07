@@ -11,12 +11,11 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use stormchaser_api::{app, AppState, Claims, JWT_SECRET};
+use stormchaser_model::step::StepStatus;
+use stormchaser_model::workflow::RunStatus;
 use stormchaser_model::OpaClient;
 use tower::ServiceExt;
 use uuid::Uuid;
-
-use stormchaser_model::step::StepStatus;
-use stormchaser_model::workflow::RunStatus;
 
 fn get_token() -> String {
     let claims = Claims {

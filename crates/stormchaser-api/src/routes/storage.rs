@@ -8,6 +8,9 @@ use axum::{
     Json,
 };
 use stormchaser_model::storage::ArtifactRegistry;
+use stormchaser_model::BackendId;
+use stormchaser_model::RunId;
+use stormchaser_model::TestReportId;
 use uuid::Uuid;
 
 /// Creates a storage backend.
@@ -44,7 +47,7 @@ pub async fn create_storage_backend(
 
     db::create_storage_backend(
         &mut tx,
-        id,
+        BackendId::new(id),
         &payload.name,
         &payload.description,
         &payload.backend_type,
@@ -104,7 +107,7 @@ pub async fn list_storage_backends(
 pub async fn get_storage_backend(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path(id): Path<Uuid>,
+    Path(id): Path<BackendId>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let backend = db::get_storage_backend(&state.pool, id)
         .await
@@ -130,7 +133,7 @@ pub async fn get_storage_backend(
 pub async fn update_storage_backend(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path(id): Path<Uuid>,
+    Path(id): Path<BackendId>,
     Json(payload): Json<UpdateStorageBackendRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let mut tx = state
@@ -175,7 +178,7 @@ pub async fn update_storage_backend(
 pub async fn delete_storage_backend(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path(id): Path<Uuid>,
+    Path(id): Path<BackendId>,
 ) -> Result<impl IntoResponse, StatusCode> {
     db::delete_storage_backend(&state.pool, id)
         .await
@@ -203,9 +206,9 @@ pub async fn delete_storage_backend(
 pub async fn list_run_artifacts(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path(id): Path<Uuid>,
+    Path(id): Path<BackendId>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let artifacts = db::list_run_artifacts(&state.pool, id)
+    let artifacts = db::list_run_artifacts(&state.pool, RunId::new(id.into_inner()))
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -228,9 +231,9 @@ pub async fn list_run_artifacts(
 pub async fn list_run_test_reports(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path(id): Path<Uuid>,
+    Path(id): Path<BackendId>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let reports = db::list_run_test_reports(&state.pool, id)
+    let reports = db::list_run_test_reports(&state.pool, RunId::new(id.into_inner()))
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -253,9 +256,9 @@ pub async fn list_run_test_reports(
 pub async fn list_run_test_summaries(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path(id): Path<Uuid>,
+    Path(id): Path<BackendId>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let summaries = db::list_run_test_summaries(&state.pool, id)
+    let summaries = db::list_run_test_summaries(&state.pool, RunId::new(id.into_inner()))
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -283,7 +286,7 @@ pub async fn list_run_test_summaries(
 pub async fn get_test_report(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path((_run_id, report_id)): Path<(Uuid, Uuid)>,
+    Path((_run_id, report_id)): Path<(RunId, TestReportId)>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let report = db::get_test_report(&state.pool, report_id)
         .await

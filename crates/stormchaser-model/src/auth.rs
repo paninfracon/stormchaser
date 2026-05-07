@@ -1,5 +1,6 @@
 //! Authentication and authorization models and OPA client.
 
+use crate::id::RunId;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
@@ -8,7 +9,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
 use tracing::debug;
-use uuid::Uuid;
 
 /// Extracted claims from a JWT token.
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -178,7 +178,7 @@ pub struct ApiOpaContext<'a> {
 #[derive(Debug, Serialize)]
 pub struct EngineOpaContext {
     /// Associated workflow run ID.
-    pub run_id: Uuid,
+    pub run_id: RunId,
     /// Identifier of the user who initiated the run.
     pub initiating_user: String,
     /// Full parsed abstract syntax tree of the workflow.
@@ -191,7 +191,7 @@ pub struct EngineOpaContext {
 #[derive(Debug, Serialize)]
 pub struct ApprovalOpaContext<'a> {
     /// Associated workflow run ID.
-    pub run_id: Uuid,
+    pub run_id: RunId,
     /// Identifier of the user who initiated the run.
     pub initiating_user: String,
     /// The parsed abstract syntax tree of the approval step.

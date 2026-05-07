@@ -7,7 +7,7 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use uuid::Uuid;
+use stormchaser_model::RuleId;
 
 /// Creates an event rule.
 #[utoipa::path(
@@ -26,7 +26,7 @@ pub async fn create_event_rule(
     State(state): State<AppState>,
     Json(payload): Json<CreateEventRuleRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let id = Uuid::new_v4();
+    let id = RuleId::new_v4();
     db::create_event_rule(
         &state.pool,
         id,
@@ -92,7 +92,7 @@ pub async fn list_event_rules(
 pub async fn delete_event_rule(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path(id): Path<Uuid>,
+    Path(id): Path<RuleId>,
 ) -> Result<impl IntoResponse, StatusCode> {
     db::delete_event_rule(&state.pool, id)
         .await

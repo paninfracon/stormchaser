@@ -2,16 +2,17 @@ use anyhow::Result;
 use serde_json::Value;
 use sqlx::PgPool;
 use std::sync::Arc;
+use stormchaser_model::RunId;
+use stormchaser_model::StepInstanceId;
 use stormchaser_tls::TlsReloader;
-use uuid::Uuid;
 
 use crate::handler::fetch_step_instance;
 use crate::handler::handle_test_report_email;
 
 /// Attempts to dispatch a test report email step instance.
 pub async fn try_dispatch(
-    run_id: Uuid,
-    step_instance_id: Uuid,
+    run_id: RunId,
+    step_instance_id: StepInstanceId,
     step_type: &str,
     resolved_spec: &Value,
     pool: PgPool,

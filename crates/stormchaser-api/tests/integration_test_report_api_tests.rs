@@ -1,5 +1,6 @@
 use sqlx::PgPool;
 use stormchaser_model::test_report::{TestCaseStatus, TestSummary};
+use stormchaser_model::RunId;
 use uuid::Uuid;
 
 use stormchaser_api::db;
@@ -73,12 +74,16 @@ async fn test_report_api_integration() {
         .unwrap();
 
     // 3. Test API functions (we test the DB layer in API crate)
-    let summaries = db::list_run_test_summaries(&pool, run_id).await.unwrap();
+    let summaries = db::list_run_test_summaries(&pool, RunId::new(run_id))
+        .await
+        .unwrap();
     assert_eq!(summaries.len(), 1);
     assert_eq!(summaries[0].report_name, "api-tests");
     assert_eq!(summaries[0].total_tests, 10);
 
-    let cases = db::list_run_test_cases(&pool, run_id).await.unwrap();
+    let cases = db::list_run_test_cases(&pool, RunId::new(run_id))
+        .await
+        .unwrap();
     assert_eq!(cases.len(), 1);
     assert_eq!(cases[0].test_case, "test1");
     assert_eq!(cases[0].status, TestCaseStatus::Passed);

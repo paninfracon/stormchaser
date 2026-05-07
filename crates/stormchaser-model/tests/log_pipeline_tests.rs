@@ -1,6 +1,5 @@
 use serde_json::json;
-use stormchaser_model::logging::LogBackend;
-use uuid::Uuid;
+use stormchaser_model::{logging::LogBackend, StepId};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -25,7 +24,7 @@ async fn test_log_pipeline_no_logs() {
     let backend = LogBackend::Loki {
         url: mock_server.uri(),
     };
-    let step_id = Uuid::new_v4();
+    let step_id = StepId::new_v4();
 
     let logs = backend
         .fetch_step_logs("test", step_id, None, None, None)
@@ -60,7 +59,7 @@ async fn test_log_pipeline_one_line() {
     let backend = LogBackend::Loki {
         url: mock_server.uri(),
     };
-    let step_id = Uuid::new_v4();
+    let step_id = StepId::new_v4();
 
     let logs = backend
         .fetch_step_logs("test", step_id, None, None, None)
@@ -103,7 +102,7 @@ async fn test_log_pipeline_exactly_page_boundary() {
     let backend = LogBackend::Loki {
         url: mock_server.uri(),
     };
-    let step_id = Uuid::new_v4();
+    let step_id = StepId::new_v4();
 
     let logs = backend
         .fetch_step_logs("test", step_id, None, None, Some(10))
@@ -192,7 +191,7 @@ async fn test_log_pipeline_several_pages() {
     let backend = LogBackend::Loki {
         url: mock_server.uri(),
     };
-    let step_id = Uuid::new_v4();
+    let step_id = StepId::new_v4();
 
     // We pass None for limit here, because we want to test fetching ALL logs (which might be >5000 internally).
     // Or we can pass limit=25. But wait, if we pass limit=10 to the function, it implies we only WANT 10 logs.
@@ -242,7 +241,7 @@ async fn test_log_pipeline_embedded_newlines() {
     let backend = LogBackend::Loki {
         url: mock_server.uri(),
     };
-    let step_id = Uuid::new_v4();
+    let step_id = StepId::new_v4();
 
     let logs = backend
         .fetch_step_logs("test", step_id, None, None, None)

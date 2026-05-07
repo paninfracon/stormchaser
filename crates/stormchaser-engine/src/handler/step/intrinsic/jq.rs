@@ -4,8 +4,11 @@ use chrono::Utc;
 use serde_json::Value;
 use sqlx::PgPool;
 use std::sync::Arc;
+use stormchaser_model::events::StepFailedEvent;
+use stormchaser_model::RunId;
+use stormchaser_model::StepId;
+use stormchaser_model::StepInstanceId;
 use stormchaser_tls::TlsReloader;
-use uuid::Uuid;
 
 use stormchaser_model::dsl;
 
@@ -54,8 +57,8 @@ pub fn mutate_if_has_files(step_type: &mut String, resolved_spec: &mut Value) {
 
 /// Attempts to dispatch a jq step instance directly if it operates on strings (instead of files).
 pub async fn try_dispatch(
-    run_id: Uuid,
-    step_instance_id: Uuid,
+    run_id: RunId,
+    step_instance_id: StepInstanceId,
     step_type: &str,
     resolved_spec: &Value,
     pool: PgPool,
@@ -169,9 +172,9 @@ pub async fn try_dispatch(
                     .await;
                 }
                 Err(e) => {
-                    let event = stormchaser_model::events::StepFailedEvent {
+                    let event = StepFailedEvent {
                         run_id,
-                        step_id: step_instance_id,
+                        step_id: StepId::new(step_instance_id.into_inner()),
                         event_type: "stormchaser.v1.step.failed".to_string(),
                         error: format!("JQ execution failed: {:?}", e),
                         runner_id: None,

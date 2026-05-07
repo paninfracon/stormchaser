@@ -5,8 +5,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use stormchaser_model::workflow::RunStatus;
+use stormchaser_model::BackendId;
+use stormchaser_model::CronWorkflowId;
+use stormchaser_model::RuleId;
+use stormchaser_model::RunId;
+use stormchaser_model::StepInstanceId;
+use stormchaser_model::WebhookId;
 use tokio::sync::mpsc;
-use uuid::Uuid;
 
 use stormchaser_model::cron;
 use stormchaser_model::event_rules;
@@ -17,7 +22,7 @@ use stormchaser_model::test_report;
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WorkflowRunDetail {
     /// Unique identifier for the run.
-    pub id: Uuid,
+    pub id: RunId,
     /// Name of the workflow.
     pub workflow_name: String,
     /// The user who initiated the run.
@@ -221,7 +226,7 @@ pub struct App<'a> {
     /// Whether the backend is the default SFS.
     pub storage_backend_is_default: bool,
     /// The ID of the storage backend being edited, or None for creating a new one.
-    pub storage_backend_edit_id: Option<Uuid>,
+    pub storage_backend_edit_id: Option<BackendId>,
     /// Whether the webhook dialog is active.
     pub webhook_dialog_active: bool,
     /// The index of the focused input in the webhook dialog.
@@ -233,7 +238,7 @@ pub struct App<'a> {
     /// Whether the webhook is active.
     pub webhook_is_active: bool,
     /// The ID of the webhook being edited, or None for creating a new one.
-    pub webhook_edit_id: Option<Uuid>,
+    pub webhook_edit_id: Option<WebhookId>,
     /// Whether the event rule dialog is active.
     pub event_rule_dialog_active: bool,
     /// The index of the focused input in the event rule dialog.
@@ -243,7 +248,7 @@ pub struct App<'a> {
     /// Whether the event rule is active.
     pub event_rule_is_active: bool,
     /// The ID of the event rule being edited, or None for creating a new one.
-    pub event_rule_edit_id: Option<Uuid>,
+    pub event_rule_edit_id: Option<RuleId>,
     /// Whether the cron workflow dialog is active.
     pub cron_dialog_active: bool,
     /// The index of the focused input in the cron dialog.
@@ -253,7 +258,7 @@ pub struct App<'a> {
     /// Whether the cron workflow is active.
     pub cron_is_active: bool,
     /// The ID of the cron workflow being edited, or None for creating a new one.
-    pub cron_edit_id: Option<Uuid>,
+    pub cron_edit_id: Option<CronWorkflowId>,
     /// Whether the approval dialog is active.
     pub approval_dialog_active: bool,
     /// Text area for JSON inputs for step approval.
@@ -271,9 +276,9 @@ pub struct App<'a> {
     /// Index of the selected auto-login credential
     pub auto_login_index: usize,
     /// A cache of recently loaded full workflow run details.
-    pub cached_runs: HashMap<Uuid, WorkflowRunFullDetail>,
+    pub cached_runs: std::collections::HashMap<RunId, WorkflowRunFullDetail>,
     /// A set of step instance IDs for which full logs have been fetched.
-    pub fetched_steps: std::collections::HashSet<Uuid>,
+    pub fetched_steps: std::collections::HashSet<StepInstanceId>,
     /// Marker to satisfy lifetime requirements for the struct.
     pub _marker: std::marker::PhantomData<&'a ()>,
 }

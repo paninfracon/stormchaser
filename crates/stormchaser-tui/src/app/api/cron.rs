@@ -1,4 +1,5 @@
 use super::*;
+use stormchaser_model::cron::CronWorkflow;
 
 impl<'a> App<'a> {
     /// Fetches the latest list of cron workflows from the API.
@@ -12,9 +13,7 @@ impl<'a> App<'a> {
             .await?;
 
         if res.status().is_success() {
-            self.cron_workflows = res
-                .json::<Vec<stormchaser_model::cron::CronWorkflow>>()
-                .await?;
+            self.cron_workflows = res.json::<Vec<CronWorkflow>>().await?;
             if !self.cron_workflows.is_empty() {
                 if self.cron_workflows_state.selected().is_none() {
                     self.cron_workflows_state.select(Some(0));
@@ -132,13 +131,11 @@ impl<'a> App<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stormchaser_model::cron::CronWorkflow;
     use tokio::sync::mpsc;
-    use uuid::Uuid;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    fn make_cron_workflow(id: Uuid) -> CronWorkflow {
+    fn make_cron_workflow(id: CronWorkflowId) -> CronWorkflow {
         CronWorkflow {
             id,
             name: "test-cron".to_string(),
@@ -160,7 +157,7 @@ mod tests {
     #[tokio::test]
     async fn test_refresh_cron_workflows_uses_correct_path() {
         let server = MockServer::start().await;
-        let id = Uuid::new_v4();
+        let id = CronWorkflowId::new_v4();
 
         Mock::given(method("GET"))
             .and(path("/api/v1/cron-workflows"))
@@ -181,7 +178,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_cron_workflow_uses_correct_path() {
         let server = MockServer::start().await;
-        let id = Uuid::new_v4();
+        let id = CronWorkflowId::new_v4();
 
         Mock::given(method("DELETE"))
             .and(path(format!("/api/v1/cron-workflows/{}", id)))

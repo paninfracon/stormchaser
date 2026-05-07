@@ -1,12 +1,12 @@
 pub mod elasticsearch;
 pub mod loki;
 
+use crate::id::*;
 use anyhow::Result;
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
-use uuid::Uuid;
 
 /// Represents the supported logging backends for step execution logs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,7 +37,7 @@ impl LogBackend {
     pub async fn fetch_step_logs(
         &self,
         step_name: &str,
-        step_id: Uuid,
+        step_id: StepId,
         started_at: Option<chrono::DateTime<chrono::Utc>>,
         finished_at: Option<chrono::DateTime<chrono::Utc>>,
         limit: Option<usize>,
@@ -71,7 +71,7 @@ impl LogBackend {
     pub async fn stream_step_logs(
         &self,
         step_name: &str,
-        step_id: Uuid,
+        step_id: StepId,
     ) -> Result<mpsc::Receiver<Result<String>>> {
         let job_name = format!(
             "storm-{}-{}",
@@ -93,7 +93,7 @@ impl LogBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uuid::Uuid;
+    use crate::StepId;
 
     #[tokio::test]
     async fn test_stream_step_logs_elasticsearch_unsupported() {
@@ -101,7 +101,7 @@ mod tests {
             url: "http://localhost:9200".to_string(),
             index: "my-index".to_string(),
         };
-        let step_id = Uuid::new_v4();
+        let step_id = StepId::new_v4();
 
         let result = backend.stream_step_logs("test-step", step_id).await;
         assert!(result.is_err());

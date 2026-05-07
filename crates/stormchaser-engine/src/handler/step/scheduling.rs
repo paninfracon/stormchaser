@@ -1,10 +1,12 @@
 use serde_json::Value;
 use stormchaser_dsl::ast;
 use stormchaser_model::dsl;
+use stormchaser_model::step::StepStatus;
+use stormchaser_model::RunId;
+use stormchaser_model::StepInstanceId;
 
 use anyhow::Result;
 use sqlx::PgPool;
-use stormchaser_model::step::StepStatus;
 use uuid::Uuid;
 
 use crate::handler::{
@@ -13,7 +15,7 @@ use crate::handler::{
 
 /// Schedules a step for execution, creating a new instance and managing its initial state transitions based on dependencies and quotas.
 pub async fn schedule_step(
-    run_id: Uuid,
+    run_id: RunId,
     step_dsl: &ast::Step,
     executor: &mut sqlx::PgConnection,
     nats_client: async_nats::Client,
@@ -65,7 +67,7 @@ pub async fn schedule_step(
             Ok(Value::Bool(false)) => {
                 crate::db::insert_step_instance(
                     executor,
-                    Uuid::new_v4(),
+                    StepInstanceId::new_v4(),
                     run_id,
                     &step_dsl.name,
                     &step_dsl.r#type,
@@ -90,7 +92,7 @@ pub async fn schedule_step(
         if items.is_empty() {
             crate::db::insert_step_instance(
                 executor,
-                Uuid::new_v4(),
+                StepInstanceId::new_v4(),
                 run_id,
                 &step_dsl.name,
                 &step_dsl.r#type,
@@ -144,7 +146,7 @@ pub async fn schedule_step(
 
             crate::db::insert_step_instance_with_spec(
                 &mut *executor,
-                step_instance_id,
+                StepInstanceId::new(step_instance_id),
                 run_id,
                 &step_dsl.name,
                 &resolved_type,
@@ -188,7 +190,7 @@ pub async fn schedule_step(
         );
         let insert_result = crate::db::insert_step_instance_with_spec_on_conflict_do_nothing(
             &mut *executor,
-            step_instance_id,
+            StepInstanceId::new(step_instance_id),
             run_id,
             &step_dsl.name,
             &resolved_type,
@@ -226,7 +228,7 @@ pub async fn schedule_step(
                         tokio::spawn(async move {
                             let _ = handle_approval_notification(
                                 run_id,
-                                step_instance_id,
+                                stormchaser_model::StepInstanceId::new(step_instance_id),
                                 spec_val,
                                 pool,
                                 nats_client,

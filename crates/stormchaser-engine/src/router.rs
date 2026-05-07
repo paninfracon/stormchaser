@@ -4,6 +4,7 @@ use stormchaser_engine::git_cache;
 use stormchaser_engine::handler;
 use stormchaser_model::auth;
 use stormchaser_model::LogBackend;
+use stormchaser_model::RunId;
 use stormchaser_tls::TlsReloader;
 use uuid::Uuid;
 
@@ -38,7 +39,7 @@ pub async fn handle_message(
 
             tokio::spawn(async move {
                 if let Err(e) = handler::handle_workflow_queued(
-                    run_id,
+                    RunId::new(run_id),
                     pool,
                     git_cache,
                     opa_client,
@@ -102,9 +103,13 @@ pub async fn handle_message(
             };
 
             tokio::spawn(async move {
-                if let Err(e) =
-                    handler::handle_workflow_start_pending(run_id, pool, nats_client, tls_reloader)
-                        .await
+                if let Err(e) = handler::handle_workflow_start_pending(
+                    RunId::new(run_id),
+                    pool,
+                    nats_client,
+                    tls_reloader,
+                )
+                .await
                 {
                     tracing::error!(
                         "Failed to handle workflow start_pending event for {}: {:?}",

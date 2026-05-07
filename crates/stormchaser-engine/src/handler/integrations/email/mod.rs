@@ -9,7 +9,6 @@ use serde_json::Value;
 use sqlx::PgPool;
 use std::sync::Arc;
 use stormchaser_tls::TlsReloader;
-use uuid::Uuid;
 
 #[cfg(feature = "email")]
 use crate::handler::{fetch_outputs, fetch_run_context, fetch_step_instance};
@@ -25,16 +24,14 @@ use tracing::{error, info};
 #[cfg(feature = "email")]
 /// Handle email send.
 pub async fn handle_email_send(
-    run_id: Uuid,
-    step_id: Uuid,
+    run_id: stormchaser_model::RunId,
+    step_id: stormchaser_model::StepInstanceId,
     spec: Value,
     pool: PgPool,
     nats_client: async_nats::Client,
     tls_reloader: Arc<TlsReloader>,
 ) -> Result<()> {
-    use stormchaser_model::dsl::EmailSpec;
-
-    let spec: EmailSpec = serde_json::from_value(spec)?;
+    let spec: stormchaser_model::dsl::EmailSpec = serde_json::from_value(spec)?;
 
     info!(
         "Sending email '{}' from {} for run {}",
@@ -103,8 +100,8 @@ pub async fn handle_email_send(
 
 #[cfg(feature = "email")]
 async fn send_via_ses(
-    run_id: Uuid,
-    step_id: Uuid,
+    run_id: stormchaser_model::RunId,
+    step_id: stormchaser_model::StepInstanceId,
     spec: &dsl::EmailSpec,
     rendered_body: String,
     is_html: bool,
@@ -156,8 +153,8 @@ async fn send_via_ses(
 #[cfg(feature = "email")]
 #[allow(clippy::too_many_arguments)]
 async fn send_via_smtp(
-    run_id: Uuid,
-    step_id: Uuid,
+    run_id: stormchaser_model::RunId,
+    step_id: stormchaser_model::StepInstanceId,
     spec: &dsl::EmailSpec,
     rendered_body: String,
     is_html: bool,
@@ -239,8 +236,8 @@ async fn send_via_smtp(
 
 #[cfg(feature = "email")]
 pub(crate) async fn complete_email_step(
-    run_id: Uuid,
-    step_id: Uuid,
+    run_id: stormchaser_model::RunId,
+    step_id: stormchaser_model::StepInstanceId,
     pool: PgPool,
     nats_client: async_nats::Client,
 ) -> Result<()> {
@@ -265,8 +262,8 @@ pub(crate) async fn complete_email_step(
 
 #[cfg(feature = "email")]
 pub(crate) async fn fail_email_step(
-    run_id: Uuid,
-    step_id: Uuid,
+    run_id: stormchaser_model::RunId,
+    step_id: stormchaser_model::StepInstanceId,
     error_msg: String,
     pool: PgPool,
     nats_client: async_nats::Client,
@@ -297,8 +294,8 @@ pub(crate) async fn fail_email_step(
 #[cfg(not(feature = "email"))]
 /// Handle email send.
 pub async fn handle_email_send(
-    _run_id: Uuid,
-    _step_id: Uuid,
+    _run_id: stormchaser_model::RunId,
+    _step_id: stormchaser_model::StepInstanceId,
     _spec: Value,
     _pool: PgPool,
     _nats_client: async_nats::Client,

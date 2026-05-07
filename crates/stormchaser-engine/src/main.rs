@@ -13,6 +13,8 @@ use stormchaser_engine::{
 use stormchaser_model::auth::OpaClient;
 use stormchaser_model::runner::RunnerStatus;
 use stormchaser_model::workflow::RunStatus;
+use stormchaser_model::LogBackend;
+use stormchaser_model::RunId;
 use tokio::time::sleep;
 use tracing::info;
 use uuid::Uuid;
@@ -22,7 +24,6 @@ use stormchaser_engine::hcl_eval;
 use stormchaser_engine::parse_duration;
 use stormchaser_engine::secrets;
 use stormchaser_engine::secrets::VaultBackend;
-use stormchaser_model::LogBackend;
 use stormchaser_opa::OpaWasmInstance;
 use stormchaser_tls::TlsConfig;
 use stormchaser_tls::TlsReloader;
@@ -216,7 +217,7 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
                                 .unwrap_or_else(|_| chrono::Duration::zero())
                         {
                             if let Err(e) = handler::handle_workflow_timeout(
-                                run.id,
+                                RunId::new(run.id),
                                 timeout_pool.clone(),
                                 timeout_nats.clone(),
                                 timeout_tls_reloader.clone(),

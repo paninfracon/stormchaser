@@ -2,14 +2,14 @@ use crate::{ListRunsQuery, WorkflowRunDetail};
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 use stormchaser_model::workflow::RunStatus;
-use uuid::Uuid;
+use stormchaser_model::RunId;
 
 /// Inserts a new workflow run into the database.
 #[allow(clippy::too_many_arguments)]
 /// Insert workflow run.
 pub async fn insert_workflow_run(
     tx: &mut Transaction<'_, Postgres>,
-    run_id: Uuid,
+    run_id: RunId,
     workflow_name: &str,
     initiating_user: &str,
     repo_url: &str,
@@ -41,7 +41,7 @@ pub async fn insert_workflow_run(
 /// Insert run context.
 pub async fn insert_run_context(
     tx: &mut Transaction<'_, Postgres>,
-    run_id: Uuid,
+    run_id: RunId,
     dsl_version: &str,
     workflow_definition: Value,
     source_code: &str,
@@ -67,7 +67,7 @@ pub async fn insert_run_context(
 /// Insert run quotas.
 pub async fn insert_run_quotas(
     tx: &mut Transaction<'_, Postgres>,
-    run_id: Uuid,
+    run_id: RunId,
     max_concurrency: i32,
     max_cpu: &str,
     max_memory: &str,
@@ -166,7 +166,7 @@ pub async fn list_workflow_runs(
 /// Get workflow run detail.
 pub async fn get_workflow_run_detail(
     pool: &PgPool,
-    run_id: Uuid,
+    run_id: RunId,
 ) -> Result<Option<WorkflowRunDetail>, sqlx::Error> {
     sqlx::query_as("SELECT * FROM combined_run_details WHERE id = $1")
         .bind(run_id)
@@ -178,7 +178,7 @@ pub async fn get_workflow_run_detail(
 /// Get workflow run status.
 pub async fn get_workflow_run_status(
     pool: &PgPool,
-    run_id: Uuid,
+    run_id: RunId,
 ) -> Result<Option<String>, sqlx::Error> {
     sqlx::query_scalar("SELECT status::text FROM combined_workflow_runs WHERE id = $1")
         .bind(run_id)
@@ -190,7 +190,7 @@ pub async fn get_workflow_run_status(
 /// Get combined run status.
 pub async fn get_combined_run_status(
     pool: &PgPool,
-    run_id: Uuid,
+    run_id: RunId,
 ) -> Result<Option<String>, sqlx::Error> {
     sqlx::query_scalar("SELECT status::text FROM combined_workflow_runs WHERE id = $1")
         .bind(run_id)
@@ -199,7 +199,7 @@ pub async fn get_combined_run_status(
 }
 
 /// Deletes a workflow run completely from the system (active and archived).
-pub async fn delete_workflow_run(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
+pub async fn delete_workflow_run(pool: &PgPool, id: RunId) -> Result<(), sqlx::Error> {
     // Delete from active table
     sqlx::query("DELETE FROM workflow_runs WHERE id = $1")
         .bind(id)

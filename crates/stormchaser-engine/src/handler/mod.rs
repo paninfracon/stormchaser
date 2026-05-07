@@ -1,5 +1,9 @@
 #![allow(clippy::explicit_auto_deref)]
 use serde_json::Value;
+use stormchaser_model::workflow::RunStatus;
+use stormchaser_model::RunId;
+use stormchaser_model::StepInstance;
+use stormchaser_model::StepInstanceId;
 /// Module for integrations.
 pub mod integrations;
 /// Module for runner.
@@ -17,16 +21,14 @@ pub use workflow::*;
 use anyhow::{Context, Result};
 use sqlx::PgPool;
 use std::sync::Arc;
-use stormchaser_model::step::StepInstance;
 use stormchaser_model::workflow::{RunContext, RunQuotas, WorkflowRun};
 use stormchaser_tls::TlsReloader;
 use tracing::{debug, error, info};
-use uuid::Uuid;
 
 #[tracing::instrument(skip(executor), fields(run_id = %run_id))]
 /// Fetch outputs.
 pub async fn fetch_outputs(
-    run_id: Uuid,
+    run_id: RunId,
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
 ) -> Result<Value> {
     let rows: Vec<(String, String, Value)> =
@@ -51,7 +53,7 @@ pub async fn fetch_outputs(
 
 #[tracing::instrument(skip(executor), fields(run_id = %run_id))]
 /// Fetch run.
-pub async fn fetch_run<'a, E>(run_id: Uuid, executor: E) -> Result<WorkflowRun>
+pub async fn fetch_run<'a, E>(run_id: RunId, executor: E) -> Result<WorkflowRun>
 where
     E: sqlx::Executor<'a, Database = sqlx::Postgres>,
 {
@@ -63,7 +65,7 @@ where
 
 #[tracing::instrument(skip(executor), fields(run_id = %run_id))]
 /// Fetch run context.
-pub async fn fetch_run_context<'a, E>(run_id: Uuid, executor: E) -> Result<RunContext>
+pub async fn fetch_run_context<'a, E>(run_id: RunId, executor: E) -> Result<RunContext>
 where
     E: sqlx::Executor<'a, Database = sqlx::Postgres>,
 {
@@ -75,7 +77,7 @@ where
 
 #[tracing::instrument(skip(executor), fields(run_id = %run_id))]
 /// Fetch quotas.
-pub async fn fetch_quotas<'a, E>(run_id: Uuid, executor: E) -> Result<RunQuotas>
+pub async fn fetch_quotas<'a, E>(run_id: RunId, executor: E) -> Result<RunQuotas>
 where
     E: sqlx::Executor<'a, Database = sqlx::Postgres>,
 {
@@ -87,7 +89,7 @@ where
 
 #[tracing::instrument(skip(executor), fields(run_id = %run_id))]
 /// Fetch inputs.
-pub async fn fetch_inputs<'a, E>(run_id: Uuid, executor: E) -> Result<Value>
+pub async fn fetch_inputs<'a, E>(run_id: RunId, executor: E) -> Result<Value>
 where
     E: sqlx::Executor<'a, Database = sqlx::Postgres>,
 {
@@ -99,7 +101,10 @@ where
 
 #[tracing::instrument(skip(executor), fields(step_id = %step_id))]
 /// Fetch step instance.
-pub async fn fetch_step_instance<'a, E>(step_id: Uuid, executor: E) -> Result<StepInstance>
+pub async fn fetch_step_instance<'a, E>(
+    step_id: StepInstanceId,
+    executor: E,
+) -> Result<StepInstance>
 where
     E: sqlx::Executor<'a, Database = sqlx::Postgres>,
 {
@@ -111,7 +116,7 @@ where
 #[tracing::instrument(skip(pool, nats_client, tls_reloader), fields(run_id = %run_id))]
 /// Dispatch pending steps.
 pub async fn dispatch_pending_steps(
-    run_id: Uuid,
+    run_id: RunId,
     pool: PgPool,
     nats_client: async_nats::Client,
     tls_reloader: Arc<TlsReloader>,
@@ -197,8 +202,7 @@ pub async fn dispatch_pending_steps(
 
 #[tracing::instrument(skip(pool), fields(run_id = %run_id))]
 /// Archive workflow.
-pub async fn archive_workflow(run_id: Uuid, pool: PgPool) -> Result<()> {
-    use stormchaser_model::workflow::RunStatus;
+pub async fn archive_workflow(run_id: RunId, pool: PgPool) -> Result<()> {
     let mut tx = pool.begin().await?;
 
     // Lock the workflow run to serialize archiving

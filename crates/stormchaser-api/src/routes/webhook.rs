@@ -18,6 +18,8 @@ use stormchaser_model::event_rules::WebhookConfig;
 use stormchaser_model::events::WorkflowQueuedEvent;
 use stormchaser_model::nats::publish_cloudevent;
 use stormchaser_model::workflow::RunStatus;
+use stormchaser_model::RunId;
+use stormchaser_model::WebhookId;
 use uuid::Uuid;
 
 /// Create webhook.
@@ -40,7 +42,7 @@ pub async fn create_webhook(
     let id = Uuid::new_v4();
     db::insert_webhook(
         &state.pool,
-        id,
+        WebhookId::new(id),
         &payload.name,
         &payload.description,
         &payload.source_type,
@@ -94,7 +96,7 @@ pub async fn list_webhooks(
 pub async fn get_webhook(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path(id): Path<Uuid>,
+    Path(id): Path<WebhookId>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let webhook = db::get_webhook(&state.pool, id)
         .await
@@ -121,7 +123,7 @@ pub async fn get_webhook(
 pub async fn update_webhook(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path(id): Path<Uuid>,
+    Path(id): Path<WebhookId>,
     Json(payload): Json<UpdateWebhookRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let description = match payload.description {
@@ -166,7 +168,7 @@ pub async fn update_webhook(
 pub async fn delete_webhook(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path(id): Path<Uuid>,
+    Path(id): Path<WebhookId>,
 ) -> Result<impl IntoResponse, StatusCode> {
     db::delete_webhook(&state.pool, id)
         .await
@@ -192,7 +194,7 @@ pub async fn delete_webhook(
 )]
 /// Handle webhook.
 pub async fn handle_webhook(
-    Path(webhook_id): Path<Uuid>,
+    Path(webhook_id): Path<WebhookId>,
     headers: HeaderMap,
     State(state): State<AppState>,
     body: Bytes,
@@ -229,12 +231,13 @@ pub async fn handle_webhook(
     );
 
     // 3. Find matching EventRules
-    let rules = db::get_active_event_rules_by_webhook(&state.pool, webhook_id)
-        .await
-        .map_err(|e| {
-            tracing::error!("Failed to fetch rules: {:?}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let rules =
+        db::get_active_event_rules_by_webhook(&state.pool, WebhookId::new(webhook_id.into_inner()))
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to fetch rules: {:?}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
 
     let mut triggered_count = 0;
     let mut hcl_ctx = hcl::eval::Context::default();
@@ -311,7 +314,7 @@ pub async fn handle_webhook(
 
         db::insert_workflow_run(
             &mut tx,
-            run_id,
+            RunId::new(run_id),
             &rule.workflow_name,
             &format!("webhook:{}", webhook.name),
             &rule.repo_url,
@@ -328,7 +331,7 @@ pub async fn handle_webhook(
 
         db::insert_run_context(
             &mut tx,
-            run_id,
+            RunId::new(run_id),
             "v1",
             serde_json::json!({}),
             "",
@@ -340,7 +343,7 @@ pub async fn handle_webhook(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-        db::insert_run_quotas(&mut tx, run_id, 10, "1", "4Gi", "10Gi", "1h")
+        db::insert_run_quotas(&mut tx, RunId::new(run_id), 10, "1", "4Gi", "10Gi", "1h")
             .await
             .map_err(|e| {
                 tracing::error!(run_id = %run_id, "Failed to insert run quotas: {:?}", e);
@@ -352,7 +355,7 @@ pub async fn handle_webhook(
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
         let event = WorkflowQueuedEvent {
-            run_id,
+            run_id: RunId::new(run_id),
             event_type: "workflow_queued".to_string(),
             timestamp: Utc::now(),
             dsl: None,

@@ -1,11 +1,11 @@
 use sqlx::PgPool;
 use stormchaser_model::event_rules::WebhookConfig;
-use uuid::Uuid;
+use stormchaser_model::WebhookId;
 
 /// Creates a new webhook configuration.
 pub async fn create_webhook(
     pool: &PgPool,
-    id: Uuid,
+    id: WebhookId,
     name: &str,
     description: &Option<String>,
     source_type: &str,
@@ -33,7 +33,10 @@ pub async fn list_webhooks(pool: &PgPool) -> Result<Vec<WebhookConfig>, sqlx::Er
 
 /// Retrieves a specific webhook by ID.
 /// Get webhook.
-pub async fn get_webhook(pool: &PgPool, id: Uuid) -> Result<Option<WebhookConfig>, sqlx::Error> {
+pub async fn get_webhook(
+    pool: &PgPool,
+    id: WebhookId,
+) -> Result<Option<WebhookConfig>, sqlx::Error> {
     sqlx::query_as("SELECT * FROM webhooks WHERE id = $1")
         .bind(id)
         .fetch_optional(pool)
@@ -44,7 +47,7 @@ pub async fn get_webhook(pool: &PgPool, id: Uuid) -> Result<Option<WebhookConfig
 /// Get active webhook.
 pub async fn get_active_webhook(
     pool: &PgPool,
-    id: Uuid,
+    id: WebhookId,
 ) -> Result<Option<WebhookConfig>, sqlx::Error> {
     sqlx::query_as("SELECT * FROM webhooks WHERE id = $1 AND is_active = TRUE")
         .bind(id)
@@ -55,7 +58,7 @@ pub async fn get_active_webhook(
 /// Updates an existing webhook configuration.
 pub async fn update_webhook(
     pool: &PgPool,
-    id: Uuid,
+    id: WebhookId,
     name: Option<String>,
     description: Option<Option<String>>,
     source_type: Option<String>,
@@ -108,7 +111,7 @@ pub async fn update_webhook(
 
 /// Deletes a webhook from the database.
 /// Delete webhook.
-pub async fn delete_webhook(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
+pub async fn delete_webhook(pool: &PgPool, id: WebhookId) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM webhooks WHERE id = $1")
         .bind(id)
         .execute(pool)
@@ -119,7 +122,7 @@ pub async fn delete_webhook(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> 
 /// Inserts a new webhook.
 pub async fn insert_webhook(
     pool: &PgPool,
-    id: Uuid,
+    id: WebhookId,
     name: &str,
     description: &Option<String>,
     source_type: &str,

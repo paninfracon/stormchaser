@@ -1,17 +1,15 @@
 use anyhow::Result;
 use serde_json::Value;
 use sqlx::PgPool;
-use uuid::Uuid;
 
 #[cfg(feature = "email")]
-use stormchaser_model::dsl::EmailSpec;
 #[cfg(feature = "email")]
 use stormchaser_model::workflow;
 
 /// Handle approval notification.
 pub async fn handle_approval_notification(
-    run_id: Uuid,
-    step_id: Uuid,
+    run_id: stormchaser_model::RunId,
+    step_id: stormchaser_model::StepInstanceId,
     spec: Value,
     pool: PgPool,
     _nats_client: async_nats::Client,
@@ -23,7 +21,7 @@ pub async fn handle_approval_notification(
         use minijinja::Environment;
         use tracing::info;
 
-        let spec: EmailSpec = serde_json::from_value(spec)?;
+        let spec: stormchaser_model::dsl::EmailSpec = serde_json::from_value(spec)?;
         let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "test-secret".to_string());
         let base_url =
             std::env::var("SYSTEM_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
@@ -91,8 +89,8 @@ pub async fn handle_approval_notification(
 
 #[cfg(feature = "email")]
 fn generate_approval_links(
-    run_id: Uuid,
-    step_id: Uuid,
+    run_id: stormchaser_model::RunId,
+    step_id: stormchaser_model::StepInstanceId,
     secret: &str,
     base_url: &str,
 ) -> Result<(String, String)> {
@@ -105,7 +103,7 @@ fn generate_approval_links(
 }
 
 #[cfg(feature = "email")]
-fn build_approval_mailer(spec: &EmailSpec) -> lettre::SmtpTransport {
+fn build_approval_mailer(spec: &stormchaser_model::dsl::EmailSpec) -> lettre::SmtpTransport {
     use lettre::SmtpTransport;
     let smtp_server = spec.smtp_server.clone().unwrap_or_else(|| {
         std::env::var("SMTP_SERVER").unwrap_or_else(|_| "localhost".to_string())
@@ -148,7 +146,13 @@ mod tests {
         let secret = "test-secret";
         let base_url = "https://paninfracon.net";
 
-        let (approve, reject) = generate_approval_links(run_id, step_id, secret, base_url).unwrap();
+        let (approve, reject) = generate_approval_links(
+            stormchaser_model::RunId::new(run_id),
+            stormchaser_model::StepInstanceId::new(step_id),
+            secret,
+            base_url,
+        )
+        .unwrap();
 
         assert!(approve.starts_with(base_url));
         assert!(reject.starts_with(base_url));

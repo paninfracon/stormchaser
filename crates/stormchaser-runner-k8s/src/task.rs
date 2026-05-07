@@ -2,6 +2,10 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+use stormchaser_model::dsl::Step;
+use stormchaser_model::events::StepFailedEvent;
+use stormchaser_model::RunId;
+use stormchaser_model::StepId;
 use tokio::time::sleep;
 use uuid::Uuid;
 
@@ -10,8 +14,8 @@ use stormchaser_model::dsl;
 use crate::cluster::ClusterPool;
 use crate::job_machine;
 
-pub fn fallback_step(payload: &Value, spec: serde_json::Value) -> stormchaser_model::dsl::Step {
-    stormchaser_model::dsl::Step {
+pub fn fallback_step(payload: &Value, spec: serde_json::Value) -> Step {
+    Step {
         name: payload["step_name"]
             .as_str()
             .unwrap_or_default()
@@ -260,9 +264,9 @@ pub async fn handle_task(
         Err(e) => {
             in_progress_handle.abort();
             tracing::error!("Failed to acquire K8s client: {:?}", e);
-            let fail_event = stormchaser_model::events::StepFailedEvent {
-                run_id,
-                step_id,
+            let fail_event = StepFailedEvent {
+                run_id: RunId::new(run_id),
+                step_id: StepId::new(step_id),
                 event_type: "stormchaser.v1.step.failed".to_string(),
                 error: format!("Failed to acquire K8s client: {:?}", e),
                 runner_id: Some(runner_id.clone()),

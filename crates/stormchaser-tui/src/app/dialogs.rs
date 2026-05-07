@@ -1,5 +1,6 @@
 use super::*;
 use anyhow::Result;
+use stormchaser_model::storage::BackendType;
 
 use stormchaser_dsl::StormchaserParser;
 
@@ -84,11 +85,11 @@ impl<'a> App<'a> {
                         .unwrap_or_default()]),
                 ];
                 let type_str = match backend.backend_type {
-                    stormchaser_model::storage::BackendType::S3 => "S3",
-                    stormchaser_model::storage::BackendType::Oci => "Oci",
-                    stormchaser_model::storage::BackendType::Jfrog => "Jfrog",
-                    stormchaser_model::storage::BackendType::Gcs => "Gcs",
-                    stormchaser_model::storage::BackendType::Azure => "Azure",
+                    BackendType::S3 => "S3",
+                    BackendType::Oci => "Oci",
+                    BackendType::Jfrog => "Jfrog",
+                    BackendType::Gcs => "Gcs",
+                    BackendType::Azure => "Azure",
                 };
                 self.storage_backend_type_index = crate::app::BACKEND_TYPE_OPTIONS
                     .iter()
@@ -433,7 +434,6 @@ mod tests {
     use stormchaser_model::cron::CronWorkflow;
     use stormchaser_model::event_rules::{EventRule, WebhookConfig};
     use stormchaser_model::storage::StorageBackend;
-    use uuid::Uuid;
 
     fn setup_app() -> App<'static> {
         let (tx, _) = tokio::sync::mpsc::channel(1);
@@ -484,10 +484,10 @@ mod tests {
     fn test_open_storage_backend_dialog_edit() {
         let mut app = setup_app();
         let backend = StorageBackend {
-            id: Uuid::new_v4(),
+            id: BackendId::new_v4(),
             name: "test_backend".to_string(),
             description: Some("desc".to_string()),
-            backend_type: stormchaser_model::storage::BackendType::S3,
+            backend_type: BackendType::S3,
             is_default_sfs: true,
             config: serde_json::json!({"region": "us-east-1"}),
             aws_assume_role_arn: None,
@@ -520,7 +520,7 @@ mod tests {
     fn test_open_webhook_dialog_edit() {
         let mut app = setup_app();
         let webhook = WebhookConfig {
-            id: Uuid::new_v4(),
+            id: WebhookId::new_v4(),
             name: "hook".to_string(),
             description: Some("desc".to_string()),
             source_type: "github".to_string(),
@@ -555,7 +555,7 @@ mod tests {
     fn test_open_event_rule_dialog_edit() {
         let mut app = setup_app();
         let rule = EventRule {
-            id: Uuid::new_v4(),
+            id: RuleId::new_v4(),
             name: "rule1".to_string(),
             description: None,
             webhook_id: None,
@@ -592,7 +592,7 @@ mod tests {
     fn test_open_cron_dialog_edit() {
         let mut app = setup_app();
         let cron = CronWorkflow {
-            id: Uuid::new_v4(),
+            id: CronWorkflowId::new_v4(),
             name: "cron1".to_string(),
             description: None,
             cronspec: "* * * * *".to_string(),

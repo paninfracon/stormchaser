@@ -1,4 +1,5 @@
 use super::*;
+use stormchaser_model::event_rules::WebhookConfig;
 
 impl<'a> App<'a> {
     /// Fetches the latest list of webhooks from the API.
@@ -12,9 +13,7 @@ impl<'a> App<'a> {
             .await?;
 
         if res.status().is_success() {
-            self.webhooks = res
-                .json::<Vec<stormchaser_model::event_rules::WebhookConfig>>()
-                .await?;
+            self.webhooks = res.json::<Vec<WebhookConfig>>().await?;
             if !self.webhooks.is_empty() {
                 if self.webhooks_state.selected().is_none() {
                     self.webhooks_state.select(Some(0));
@@ -107,9 +106,8 @@ mod tests {
     use super::*;
     use chrono::Utc;
     use ratatui_textarea::TextArea;
-    use stormchaser_model::event_rules::WebhookConfig;
     use tokio::sync::mpsc;
-    use uuid::Uuid;
+
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -118,7 +116,7 @@ mod tests {
         let server = MockServer::start().await;
 
         let webhook = WebhookConfig {
-            id: Uuid::new_v4(),
+            id: WebhookId::new_v4(),
             name: "test-webhook".to_string(),
             description: None,
             source_type: "github".to_string(),
@@ -181,7 +179,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_selected_webhook() {
         let server = MockServer::start().await;
-        let webhook_id = Uuid::new_v4();
+        let webhook_id = WebhookId::new_v4();
 
         Mock::given(method("DELETE"))
             .and(path(format!("/api/v1/webhooks/{}", webhook_id)))

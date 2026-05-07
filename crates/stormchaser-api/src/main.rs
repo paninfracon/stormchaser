@@ -17,13 +17,13 @@ use stormchaser_api::{
     AppState,
 };
 use stormchaser_model::auth::OpaClient;
+use stormchaser_model::LogBackend;
 use tokio::net::TcpListener;
 use tokio::signal;
 use tokio::sync;
 
 use stormchaser_api::auth::jwks::fetch_jwks;
 use stormchaser_api::auth::jwks::OidcConfig;
-use stormchaser_model::LogBackend;
 use stormchaser_opa::OpaWasmInstance;
 use stormchaser_tls::TlsConfig;
 use stormchaser_tls::TlsReloader;

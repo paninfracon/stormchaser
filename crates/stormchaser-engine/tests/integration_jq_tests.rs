@@ -6,8 +6,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use stormchaser_engine::handler;
 use stormchaser_model::auth::OpaClient;
+use stormchaser_model::RunId;
 use tokio::time::sleep;
-use uuid::Uuid;
 
 use stormchaser_tls::TlsConfig;
 use stormchaser_tls::TlsReloader;
@@ -32,7 +32,7 @@ async fn test_jq_step_execution() {
         .await
         .unwrap();
 
-    let run_id = Uuid::new_v4();
+    let run_id = RunId::new_v4();
     let dsl = r#"
         stormchaser_dsl_version = "v1"
         workflow "jq-test" {

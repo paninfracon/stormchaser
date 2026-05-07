@@ -7,11 +7,11 @@ use serde_json::json;
 use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
 use std::collections::HashMap;
+use stormchaser_model::OpaClient;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 use stormchaser_api::{app, AppState};
-use stormchaser_model::OpaClient;
 use tower::ServiceExt;
 use uuid::Uuid;
 

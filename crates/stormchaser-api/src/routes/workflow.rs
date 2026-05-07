@@ -19,6 +19,8 @@ use serde_json::Value;
 use stormchaser_model::events::WorkflowQueuedEvent;
 use stormchaser_model::nats::publish_cloudevent;
 use stormchaser_model::workflow::RunStatus;
+use stormchaser_model::RunId;
+use stormchaser_model::StepId;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -61,7 +63,7 @@ pub async fn enqueue_workflow(
     // Create WorkflowRun with initiating_user
     db::insert_workflow_run(
         &mut tx,
-        run_id,
+        RunId::new(run_id),
         &payload.workflow_name,
         &user_id,
         &payload.repo_url,
@@ -77,7 +79,7 @@ pub async fn enqueue_workflow(
     // Create RunContext (placeholder for dsl_version and workflow_definition)
     db::insert_run_context(
         &mut tx,
-        run_id,
+        RunId::new(run_id),
         "v1",
         serde_json::json!({}),
         "",
@@ -93,9 +95,17 @@ pub async fn enqueue_workflow(
         .and_then(|o| o.timeout.clone())
         .unwrap_or_else(|| "1h".to_string());
 
-    db::insert_run_quotas(&mut tx, run_id, 10, "1", "4Gi", "10Gi", &timeout)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db::insert_run_quotas(
+        &mut tx,
+        RunId::new(run_id),
+        10,
+        "1",
+        "4Gi",
+        "10Gi",
+        &timeout,
+    )
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     tx.commit()
         .await
@@ -103,7 +113,7 @@ pub async fn enqueue_workflow(
 
     // Publish to NATS
     let event = WorkflowQueuedEvent {
-        run_id,
+        run_id: RunId::new(run_id),
         event_type: "workflow_queued".to_string(),
         timestamp: Utc::now(),
         dsl: None,
@@ -191,7 +201,7 @@ pub async fn list_workflow_runs(
 pub async fn get_workflow_run(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path(run_id): Path<Uuid>,
+    Path(run_id): Path<RunId>,
 ) -> Result<impl IntoResponse, StatusCode> {
     // 1. Fetch the workflow run detail
     let detail: WorkflowRunDetail = db::get_workflow_run_detail(&state.pool, run_id)
@@ -230,7 +240,7 @@ pub async fn get_workflow_run(
             backend
                 .fetch_step_logs(
                     &instance.step_name,
-                    instance.id,
+                    StepId::new(instance.id.into_inner()),
                     instance.started_at,
                     instance.finished_at,
                     Some(100), // Reduce payload size for full detail, TUI will fetch on demand
@@ -302,7 +312,7 @@ pub async fn get_workflow_run(
 pub async fn delete_workflow_run_api(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path(run_id): Path<Uuid>,
+    Path(run_id): Path<RunId>,
 ) -> Result<impl IntoResponse, StatusCode> {
     db::delete_workflow_run(&state.pool, run_id)
         .await
@@ -430,7 +440,7 @@ pub async fn stream_workflow_runs_api(
             if let Some(run_id_str) = payload.get("run_id").and_then(|id| id.as_str()) {
                 if let Ok(run_id) = Uuid::parse_str(run_id_str) {
                     // Fetch full detail for the run
-                    let detail = db::get_workflow_run_detail(&pool, run_id)
+                    let detail = db::get_workflow_run_detail(&pool, RunId::new(run_id))
                         .await
                         .unwrap_or(None);
 

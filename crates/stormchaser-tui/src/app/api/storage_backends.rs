@@ -1,4 +1,6 @@
 use super::*;
+use stormchaser_model::storage::BackendType;
+use stormchaser_model::storage::StorageBackend;
 
 impl<'a> App<'a> {
     /// Fetches the latest list of storage backends from the API.
@@ -12,9 +14,7 @@ impl<'a> App<'a> {
             .await?;
 
         if res.status().is_success() {
-            self.storage_backends = res
-                .json::<Vec<stormchaser_model::storage::StorageBackend>>()
-                .await?;
+            self.storage_backends = res.json::<Vec<StorageBackend>>().await?;
             if !self.storage_backends.is_empty() {
                 if self.storage_backends_state.selected().is_none() {
                     self.storage_backends_state.select(Some(0));
@@ -64,12 +64,12 @@ impl<'a> App<'a> {
 
         let backend_type_str = crate::app::BACKEND_TYPE_OPTIONS[self.storage_backend_type_index];
         let backend_type = match backend_type_str {
-            "S3" => stormchaser_model::storage::BackendType::S3,
-            "Oci" => stormchaser_model::storage::BackendType::Oci,
-            "Jfrog" => stormchaser_model::storage::BackendType::Jfrog,
-            "Gcs" => stormchaser_model::storage::BackendType::Gcs,
-            "Azure" => stormchaser_model::storage::BackendType::Azure,
-            _ => stormchaser_model::storage::BackendType::S3, // Fallback
+            "S3" => BackendType::S3,
+            "Oci" => BackendType::Oci,
+            "Jfrog" => BackendType::Jfrog,
+            "Gcs" => BackendType::Gcs,
+            "Azure" => BackendType::Azure,
+            _ => BackendType::S3, // Fallback
         };
 
         let (method, path) = if let Some(id) = self.storage_backend_edit_id {
@@ -145,7 +145,7 @@ mod tests {
     use serde_json::json;
     use stormchaser_model::storage::{BackendType, StorageBackend};
     use tokio::sync::mpsc;
-    use uuid::Uuid;
+
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -154,7 +154,7 @@ mod tests {
         let server = MockServer::start().await;
 
         let backend = StorageBackend {
-            id: Uuid::new_v4(),
+            id: BackendId::new_v4(),
             name: "test-backend".to_string(),
             description: None,
             backend_type: BackendType::S3,
@@ -240,7 +240,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_selected_storage_backend() {
         let server = MockServer::start().await;
-        let backend_id = Uuid::new_v4();
+        let backend_id = BackendId::new_v4();
 
         Mock::given(method("DELETE"))
             .and(path(format!("/api/v1/storage-backends/{}", backend_id)))
