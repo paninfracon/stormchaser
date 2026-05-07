@@ -2,7 +2,6 @@ use crate::utils::{handle_response, parse_key_val_list, require_token};
 use anyhow::Result;
 use clap::Subcommand;
 use serde_json::json;
-use uuid::Uuid;
 
 #[derive(Subcommand)]
 pub enum RuleCommands {
@@ -12,7 +11,7 @@ pub enum RuleCommands {
     Create {
         name: String,
         #[arg(long)]
-        webhook_id: Uuid,
+        webhook_id: stormchaser_model::WebhookId,
         #[arg(long)]
         event_pattern: String,
         #[arg(long)]
@@ -30,7 +29,7 @@ pub enum RuleCommands {
         mapping: Vec<String>,
     },
     /// Delete an event rule
-    Delete { id: Uuid },
+    Delete { id: stormchaser_model::RuleId },
 }
 
 pub async fn handle(
@@ -130,7 +129,7 @@ mod tests {
         let client = ClientBuilder::new(reqwest::Client::new()).build();
         let cmd = RuleCommands::Create {
             name: "test-rule".to_string(),
-            webhook_id: Uuid::new_v4(),
+            webhook_id: stormchaser_model::WebhookId::new_v4(),
             event_pattern: "push".to_string(),
             workflow: "my-wf".to_string(),
             repo: "https://github.com/a/b".to_string(),
@@ -147,7 +146,7 @@ mod tests {
     #[tokio::test]
     async fn test_rules_delete() {
         let server = MockServer::start().await;
-        let id = Uuid::new_v4();
+        let id = stormchaser_model::RuleId::new_v4();
         Mock::given(method("DELETE"))
             .and(path(format!("/api/v1/rules/{}", id)))
             .and(header("Authorization", "Bearer test-token"))

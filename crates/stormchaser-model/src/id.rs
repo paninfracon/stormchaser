@@ -82,7 +82,8 @@ macro_rules! impl_id_traits {
     Hash,
     Serialize,
     Deserialize,
-    Display
+    Display,
+    FromStr
 ))]
 pub struct RunId(Uuid);
 impl_id_traits!(RunId);
@@ -96,7 +97,8 @@ impl_id_traits!(RunId);
     Hash,
     Serialize,
     Deserialize,
-    Display
+    Display,
+    FromStr
 ))]
 pub struct StepId(Uuid);
 impl_id_traits!(StepId);
@@ -110,7 +112,8 @@ impl_id_traits!(StepId);
     Hash,
     Serialize,
     Deserialize,
-    Display
+    Display,
+    FromStr
 ))]
 pub struct StepInstanceId(Uuid);
 impl_id_traits!(StepInstanceId);
@@ -124,7 +127,8 @@ impl_id_traits!(StepInstanceId);
     Hash,
     Serialize,
     Deserialize,
-    Display
+    Display,
+    FromStr
 ))]
 pub struct EventId(Uuid);
 impl_id_traits!(EventId);
@@ -138,7 +142,8 @@ impl_id_traits!(EventId);
     Hash,
     Serialize,
     Deserialize,
-    Display
+    Display,
+    FromStr
 ))]
 pub struct RuleId(Uuid);
 impl_id_traits!(RuleId);
@@ -152,7 +157,8 @@ impl_id_traits!(RuleId);
     Hash,
     Serialize,
     Deserialize,
-    Display
+    Display,
+    FromStr
 ))]
 pub struct WebhookId(Uuid);
 impl_id_traits!(WebhookId);
@@ -166,7 +172,8 @@ impl_id_traits!(WebhookId);
     Hash,
     Serialize,
     Deserialize,
-    Display
+    Display,
+    FromStr
 ))]
 pub struct BackendId(Uuid);
 impl_id_traits!(BackendId);
@@ -180,7 +187,8 @@ impl_id_traits!(BackendId);
     Hash,
     Serialize,
     Deserialize,
-    Display
+    Display,
+    FromStr
 ))]
 pub struct TestReportId(Uuid);
 impl_id_traits!(TestReportId);
@@ -194,7 +202,8 @@ impl_id_traits!(TestReportId);
     Hash,
     Serialize,
     Deserialize,
-    Display
+    Display,
+    FromStr
 ))]
 pub struct CronWorkflowId(Uuid);
 impl_id_traits!(CronWorkflowId);
@@ -208,7 +217,8 @@ impl_id_traits!(CronWorkflowId);
     Hash,
     Serialize,
     Deserialize,
-    Display
+    Display,
+    FromStr
 ))]
 pub struct StepDefinitionId(Uuid);
 impl_id_traits!(StepDefinitionId);

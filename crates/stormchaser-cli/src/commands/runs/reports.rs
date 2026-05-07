@@ -1,12 +1,11 @@
 use crate::utils::{handle_response, require_token};
 use anyhow::Result;
-use uuid::Uuid;
 
 pub async fn list_reports(
     url: &str,
     token: Option<&str>,
     http_client: &reqwest_middleware::ClientWithMiddleware,
-    id: Uuid,
+    id: stormchaser_model::RunId,
 ) -> Result<()> {
     let token = require_token(token)?;
     let res = http_client
@@ -21,8 +20,8 @@ pub async fn get_report(
     url: &str,
     token: Option<&str>,
     http_client: &reqwest_middleware::ClientWithMiddleware,
-    id: Uuid,
-    report_id: Uuid,
+    id: stormchaser_model::RunId,
+    report_id: stormchaser_model::TestReportId,
 ) -> Result<()> {
     let token = require_token(token)?;
     let res = http_client
@@ -51,7 +50,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_reports() {
         let mock_server = MockServer::start().await;
-        let id = Uuid::new_v4();
+        let id = stormchaser_model::RunId::new_v4();
 
         Mock::given(method("GET"))
             .and(path(format!("/api/v1/runs/{}/reports", id)))
@@ -68,7 +67,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_reports_no_token() {
         let mock_server = MockServer::start().await;
-        let id = Uuid::new_v4();
+        let id = stormchaser_model::RunId::new_v4();
         let client = build_client();
         let res = list_reports(&mock_server.uri(), None, &client, id).await;
         assert!(res.is_err());
@@ -77,8 +76,8 @@ mod tests {
     #[tokio::test]
     async fn test_get_report() {
         let mock_server = MockServer::start().await;
-        let id = Uuid::new_v4();
-        let report_id = Uuid::new_v4();
+        let id = stormchaser_model::RunId::new_v4();
+        let report_id = stormchaser_model::TestReportId::new_v4();
 
         Mock::given(method("GET"))
             .and(path(format!("/api/v1/runs/{}/reports/{}", id, report_id)))
@@ -102,8 +101,8 @@ mod tests {
     #[tokio::test]
     async fn test_get_report_no_token() {
         let mock_server = MockServer::start().await;
-        let id = Uuid::new_v4();
-        let report_id = Uuid::new_v4();
+        let id = stormchaser_model::RunId::new_v4();
+        let report_id = stormchaser_model::TestReportId::new_v4();
         let client = build_client();
         let res = get_report(&mock_server.uri(), None, &client, id, report_id).await;
         assert!(res.is_err());

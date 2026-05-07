@@ -1,12 +1,11 @@
 use crate::utils::{handle_response, require_token};
 use anyhow::Result;
-use uuid::Uuid;
 
 pub async fn watch_run(
     url: &str,
     token: Option<&str>,
     http_client: &reqwest_middleware::ClientWithMiddleware,
-    id: Uuid,
+    id: stormchaser_model::RunId,
 ) -> Result<()> {
     let token = require_token(token)?;
     let res = http_client
@@ -51,7 +50,7 @@ mod tests {
     #[tokio::test]
     async fn test_watch_run_success() {
         let server = MockServer::start().await;
-        let id = Uuid::new_v4();
+        let id = stormchaser_model::RunId::new_v4();
 
         let sse_body = "event: status\ndata: running\n\n\
                         event: error\ndata: stream ended\n\n";

@@ -1,12 +1,11 @@
 use crate::utils::{handle_response, require_token};
 use anyhow::Result;
-use uuid::Uuid;
 
 pub async fn stream_logs(
     url: &str,
     token: Option<&str>,
     http_client: &reqwest_middleware::ClientWithMiddleware,
-    id: Uuid,
+    id: stormchaser_model::RunId,
     step_name: String,
 ) -> Result<()> {
     let token = require_token(token)?;
@@ -57,7 +56,7 @@ mod tests {
     #[tokio::test]
     async fn test_stream_logs_success() {
         let server = MockServer::start().await;
-        let id = Uuid::new_v4();
+        let id = stormchaser_model::RunId::new_v4();
         let step_name = "test_step";
 
         let sse_body = "event: message\ndata: Hello from logs\n\n\

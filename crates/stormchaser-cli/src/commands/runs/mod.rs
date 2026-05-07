@@ -1,6 +1,5 @@
 use anyhow::Result;
 use clap::Subcommand;
-use uuid::Uuid;
 
 pub mod approve;
 pub mod artifacts;
@@ -31,25 +30,25 @@ pub enum RunCommands {
         status: Option<String>,
     },
     /// Get run details
-    Get { id: Uuid },
+    Get { id: stormchaser_model::RunId },
     /// List artifacts for a run
-    Artifacts { id: Uuid },
+    Artifacts { id: stormchaser_model::RunId },
     /// List test reports for a run
-    Reports { id: Uuid },
+    Reports { id: stormchaser_model::RunId },
     /// Get a specific test report content
     Report {
-        id: Uuid,
+        id: stormchaser_model::RunId,
         #[arg(long)]
-        report_id: Uuid,
+        report_id: stormchaser_model::TestReportId,
     },
     /// Stream logs for a specific step in a run
     Logs {
-        id: Uuid,
+        id: stormchaser_model::RunId,
         #[arg(long)]
         step_name: String,
     },
     /// Stream real-time state transition events for a run
-    Watch { id: Uuid },
+    Watch { id: stormchaser_model::RunId },
     /// Enqueue a workflow from a git repository
     Enqueue {
         workflow_name: String,
@@ -73,14 +72,17 @@ pub enum RunCommands {
     Pending,
     /// Approve a waiting step
     Approve {
-        run_id: Uuid,
-        step_id: Uuid,
+        run_id: stormchaser_model::RunId,
+        step_id: stormchaser_model::StepInstanceId,
         /// Input parameters in key=value format
         #[arg(short, long)]
         input: Vec<String>,
     },
     /// Reject a waiting step
-    Reject { run_id: Uuid, step_id: Uuid },
+    Reject {
+        run_id: stormchaser_model::RunId,
+        step_id: stormchaser_model::StepInstanceId,
+    },
     /// Approve or reject a step using an encrypted token link
     ApproveLink { token: String },
 }
@@ -182,7 +184,7 @@ mod tests {
         let client = build_dummy_client();
         let url = "http://127.0.0.1:1"; // Invalid dummy URL to force connection refused
         let token = Some("test_token");
-        let id = Uuid::new_v4();
+        let id = stormchaser_model::RunId::new_v4();
 
         let commands = vec![
             RunCommands::List {
@@ -199,7 +201,7 @@ mod tests {
             RunCommands::Reports { id },
             RunCommands::Report {
                 id,
-                report_id: Uuid::new_v4(),
+                report_id: stormchaser_model::TestReportId::new_v4(),
             },
             RunCommands::Logs {
                 id,
@@ -217,12 +219,12 @@ mod tests {
             },
             RunCommands::Approve {
                 run_id: id,
-                step_id: Uuid::new_v4(),
+                step_id: stormchaser_model::StepInstanceId::new_v4(),
                 input: vec![],
             },
             RunCommands::Reject {
                 run_id: id,
-                step_id: Uuid::new_v4(),
+                step_id: stormchaser_model::StepInstanceId::new_v4(),
             },
             RunCommands::ApproveLink {
                 token: "dummy".to_string(),
