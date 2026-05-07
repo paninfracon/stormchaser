@@ -426,3 +426,193 @@ impl<'a> App<'a> {
         self.refresh_runs().await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use stormchaser_model::cron::CronWorkflow;
+    use stormchaser_model::event_rules::{EventRule, WebhookConfig};
+    use stormchaser_model::storage::StorageBackend;
+    use uuid::Uuid;
+
+    fn setup_app() -> App<'static> {
+        let (tx, _) = tokio::sync::mpsc::channel(1);
+        App::new("http://test".to_string(), Some("token".to_string()), tx)
+    }
+
+    #[test]
+    fn test_open_filter_dialog() {
+        let mut app = setup_app();
+        app.filter_owner = Some("owner".to_string());
+        app.filter_status = Some("failed".to_string());
+
+        app.open_filter_dialog();
+
+        assert!(app.filter_dialog_active);
+        assert_eq!(app.filter_focus, 0);
+        assert_eq!(app.filter_inputs.len(), 6);
+        assert_eq!(app.filter_inputs[0].lines()[0], "owner");
+        assert_eq!(app.filter_status_index, 5); // Failed is index 5 in FILTER_STATUS_OPTIONS
+    }
+
+    #[test]
+    fn test_open_file_browser() {
+        let mut app = setup_app();
+        app.open_file_browser();
+        assert!(app.file_browser_active);
+    }
+
+    #[test]
+    fn test_open_schedule_git_dialog() {
+        let mut app = setup_app();
+        app.open_schedule_git_dialog();
+        assert!(app.schedule_git_dialog_active);
+        assert_eq!(app.schedule_git_focus, 0);
+        assert_eq!(app.schedule_git_inputs.len(), 3);
+    }
+
+    #[test]
+    fn test_open_storage_backend_dialog_new() {
+        let mut app = setup_app();
+        app.open_storage_backend_dialog(false);
+        assert!(app.storage_backend_dialog_active);
+        assert_eq!(app.storage_backend_edit_id, None);
+        assert_eq!(app.storage_backend_inputs.len(), 4);
+    }
+
+    #[test]
+    fn test_open_storage_backend_dialog_edit() {
+        let mut app = setup_app();
+        let backend = StorageBackend {
+            id: Uuid::new_v4(),
+            name: "test_backend".to_string(),
+            description: Some("desc".to_string()),
+            backend_type: stormchaser_model::storage::BackendType::S3,
+            is_default_sfs: true,
+            config: serde_json::json!({"region": "us-east-1"}),
+            aws_assume_role_arn: None,
+            ca_cert: None,
+            client_cert: None,
+            client_key: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        app.selected_storage_backend = Some(backend.clone());
+
+        app.open_storage_backend_dialog(true);
+        assert!(app.storage_backend_dialog_active);
+        assert_eq!(app.storage_backend_edit_id, Some(backend.id));
+        assert_eq!(app.storage_backend_inputs[0].lines()[0], "test_backend");
+        assert_eq!(app.storage_backend_type_index, 0);
+        assert!(app.storage_backend_is_default);
+    }
+
+    #[test]
+    fn test_open_webhook_dialog_new() {
+        let mut app = setup_app();
+        app.open_webhook_dialog(false);
+        assert!(app.webhook_dialog_active);
+        assert_eq!(app.webhook_edit_id, None);
+        assert_eq!(app.webhook_inputs.len(), 3);
+    }
+
+    #[test]
+    fn test_open_webhook_dialog_edit() {
+        let mut app = setup_app();
+        let webhook = WebhookConfig {
+            id: Uuid::new_v4(),
+            name: "hook".to_string(),
+            description: Some("desc".to_string()),
+            source_type: "github".to_string(),
+            is_active: false,
+            secret_token: None,
+            ca_cert: None,
+            client_cert: None,
+            client_key: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        app.selected_webhook = Some(webhook.clone());
+
+        app.open_webhook_dialog(true);
+        assert!(app.webhook_dialog_active);
+        assert_eq!(app.webhook_edit_id, Some(webhook.id));
+        assert_eq!(app.webhook_inputs[0].lines()[0], "hook");
+        assert_eq!(app.webhook_source_type_index, 0); // github
+        assert!(!app.webhook_is_active);
+    }
+
+    #[test]
+    fn test_open_event_rule_dialog_new() {
+        let mut app = setup_app();
+        app.open_event_rule_dialog(false);
+        assert!(app.event_rule_dialog_active);
+        assert_eq!(app.event_rule_edit_id, None);
+        assert_eq!(app.event_rule_inputs.len(), 10);
+    }
+
+    #[test]
+    fn test_open_event_rule_dialog_edit() {
+        let mut app = setup_app();
+        let rule = EventRule {
+            id: Uuid::new_v4(),
+            name: "rule1".to_string(),
+            description: None,
+            webhook_id: None,
+            event_type_pattern: "push".to_string(),
+            condition_expr: None,
+            workflow_name: "wf1".to_string(),
+            repo_url: "http".to_string(),
+            workflow_path: "wf.storm".to_string(),
+            git_ref: "main".to_string(),
+            input_mappings: serde_json::json!({}),
+            is_active: true,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        app.selected_event_rule = Some(rule.clone());
+
+        app.open_event_rule_dialog(true);
+        assert!(app.event_rule_dialog_active);
+        assert_eq!(app.event_rule_edit_id, Some(rule.id));
+        assert_eq!(app.event_rule_inputs[0].lines()[0], "rule1");
+        assert!(app.event_rule_is_active);
+    }
+
+    #[test]
+    fn test_open_cron_dialog_new() {
+        let mut app = setup_app();
+        app.open_cron_dialog(false);
+        assert!(app.cron_dialog_active);
+        assert_eq!(app.cron_edit_id, None);
+        assert_eq!(app.cron_inputs.len(), 8);
+    }
+
+    #[test]
+    fn test_open_cron_dialog_edit() {
+        let mut app = setup_app();
+        let cron = CronWorkflow {
+            id: Uuid::new_v4(),
+            name: "cron1".to_string(),
+            description: None,
+            cronspec: "* * * * *".to_string(),
+            workflow_name: "wf1".to_string(),
+            repo_url: "http".to_string(),
+            workflow_path: "wf.storm".to_string(),
+            git_ref: "main".to_string(),
+            inputs: serde_json::json!({}),
+            secret_token: "".to_string(),
+            is_active: false,
+            external_job_id: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        app.selected_cron_workflow = Some(cron.clone());
+
+        app.open_cron_dialog(true);
+        assert!(app.cron_dialog_active);
+        assert_eq!(app.cron_edit_id, Some(cron.id));
+        assert_eq!(app.cron_inputs[0].lines()[0], "cron1");
+        assert!(!app.cron_is_active);
+    }
+}

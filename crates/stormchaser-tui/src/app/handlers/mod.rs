@@ -401,16 +401,141 @@ mod tests {
     async fn test_handle_filter_dialog_key() {
         let mut app = setup_app();
         app.filter_dialog_active = true;
+        app.filter_inputs = vec![
+            ratatui_textarea::TextArea::default(),
+            ratatui_textarea::TextArea::default(),
+            ratatui_textarea::TextArea::default(),
+            ratatui_textarea::TextArea::default(),
+            ratatui_textarea::TextArea::default(),
+            ratatui_textarea::TextArea::default(),
+        ];
+        app.filter_focus = 0;
 
+        // Test Character Input
+        app.handle_filter_dialog_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))
+            .await;
+        assert_eq!(app.filter_inputs[0].lines()[0], "a");
+
+        // Test Tab
+        app.handle_filter_dialog_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+            .await;
+        assert_eq!(app.filter_focus, 1);
+
+        // Test BackTab
+        app.handle_filter_dialog_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT))
+            .await;
+        assert_eq!(app.filter_focus, 0);
+
+        // Test Tab wrapping around (0 to 6)
+        app.filter_focus = 6; // Status Focus
+        app.handle_filter_dialog_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+            .await;
+        assert_eq!(app.filter_focus, 0);
+
+        // Test BackTab wrapping around (0 to 6)
+        app.handle_filter_dialog_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT))
+            .await;
+        assert_eq!(app.filter_focus, 6);
+
+        // Test Left/Right on Status Focus
+        app.filter_status_index = 0;
+        app.handle_filter_dialog_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE))
+            .await;
+        assert_eq!(app.filter_status_index, 1);
+        app.handle_filter_dialog_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE))
+            .await;
+        assert_eq!(app.filter_status_index, 0);
+        // Wrap Left
+        app.handle_filter_dialog_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE))
+            .await;
+        assert_eq!(
+            app.filter_status_index,
+            crate::app::FILTER_STATUS_OPTIONS.len() - 1
+        );
+
+        // Test Esc
         app.handle_filter_dialog_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
             .await;
         assert!(!app.filter_dialog_active);
     }
 
     #[tokio::test]
+    async fn test_handle_schedule_git_dialog_key() {
+        let mut app = setup_app();
+        app.schedule_git_dialog_active = true;
+        app.schedule_git_inputs = vec![
+            ratatui_textarea::TextArea::default(),
+            ratatui_textarea::TextArea::default(),
+            ratatui_textarea::TextArea::default(),
+        ];
+        app.schedule_git_focus = 0;
+
+        app.handle_schedule_git_dialog_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE))
+            .await;
+        assert_eq!(app.schedule_git_inputs[0].lines()[0], "x");
+
+        app.handle_schedule_git_dialog_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+            .await;
+        assert_eq!(app.schedule_git_focus, 1);
+
+        app.handle_schedule_git_dialog_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT))
+            .await;
+        assert_eq!(app.schedule_git_focus, 0);
+
+        app.handle_schedule_git_dialog_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .await;
+        assert!(!app.schedule_git_dialog_active);
+    }
+
+    #[tokio::test]
     async fn test_handle_storage_backend_dialog_key() {
         let mut app = setup_app();
         app.storage_backend_dialog_active = true;
+        app.storage_backend_inputs = vec![
+            ratatui_textarea::TextArea::default(),
+            ratatui_textarea::TextArea::default(),
+            ratatui_textarea::TextArea::default(),
+            ratatui_textarea::TextArea::default(),
+        ];
+        app.storage_backend_focus = 0;
+
+        app.handle_storage_backend_dialog_key(KeyEvent::new(
+            KeyCode::Char('y'),
+            KeyModifiers::NONE,
+        ))
+        .await;
+        assert_eq!(app.storage_backend_inputs[0].lines()[0], "y");
+
+        app.handle_storage_backend_dialog_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+            .await;
+        assert_eq!(app.storage_backend_focus, 1);
+
+        app.handle_storage_backend_dialog_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT))
+            .await;
+        assert_eq!(app.storage_backend_focus, 0);
+
+        // Focus 4: Type Options
+        app.storage_backend_focus = 4;
+        app.storage_backend_type_index = 0;
+        app.handle_storage_backend_dialog_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE))
+            .await;
+        assert_eq!(app.storage_backend_type_index, 1);
+        app.handle_storage_backend_dialog_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE))
+            .await;
+        assert_eq!(app.storage_backend_type_index, 0);
+
+        // Focus 5: Is Default
+        app.storage_backend_focus = 5;
+        app.storage_backend_is_default = false;
+        app.handle_storage_backend_dialog_key(KeyEvent::new(
+            KeyCode::Char(' '),
+            KeyModifiers::NONE,
+        ))
+        .await;
+        assert!(app.storage_backend_is_default);
+        app.handle_storage_backend_dialog_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .await;
+        assert!(!app.storage_backend_is_default);
 
         app.handle_storage_backend_dialog_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
             .await;
@@ -418,9 +543,120 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_handle_webhook_dialog_key() {
+        let mut app = setup_app();
+        app.webhook_dialog_active = true;
+        app.webhook_inputs = vec![
+            ratatui_textarea::TextArea::default(),
+            ratatui_textarea::TextArea::default(),
+            ratatui_textarea::TextArea::default(),
+        ];
+        app.webhook_focus = 0;
+
+        app.handle_webhook_dialog_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE))
+            .await;
+        assert_eq!(app.webhook_inputs[0].lines()[0], "z");
+
+        app.handle_webhook_dialog_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+            .await;
+        assert_eq!(app.webhook_focus, 1);
+
+        app.handle_webhook_dialog_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT))
+            .await;
+        assert_eq!(app.webhook_focus, 0);
+
+        // Focus 3: Source Type
+        app.webhook_focus = 3;
+        app.webhook_source_type_index = 0;
+        app.handle_webhook_dialog_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE))
+            .await;
+        assert_eq!(app.webhook_source_type_index, 1);
+        app.handle_webhook_dialog_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE))
+            .await;
+        assert_eq!(app.webhook_source_type_index, 0);
+
+        // Focus 4: Is Active
+        app.webhook_focus = 4;
+        app.webhook_is_active = false;
+        app.handle_webhook_dialog_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+            .await;
+        assert!(app.webhook_is_active);
+
+        app.handle_webhook_dialog_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .await;
+        assert!(!app.webhook_dialog_active);
+    }
+
+    #[tokio::test]
+    async fn test_handle_event_rule_dialog_key() {
+        let mut app = setup_app();
+        app.event_rule_dialog_active = true;
+        app.event_rule_inputs = vec![ratatui_textarea::TextArea::default()];
+        app.event_rule_focus = 0;
+
+        app.handle_event_rule_dialog_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE))
+            .await;
+        assert_eq!(app.event_rule_inputs[0].lines()[0], "w");
+
+        app.handle_event_rule_dialog_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+            .await;
+        assert_eq!(app.event_rule_focus, 1);
+
+        // Focus 1: Is Active (length of inputs)
+        app.event_rule_is_active = false;
+        app.handle_event_rule_dialog_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+            .await;
+        assert!(app.event_rule_is_active);
+
+        app.handle_event_rule_dialog_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .await;
+        assert!(!app.event_rule_dialog_active);
+    }
+
+    #[tokio::test]
+    async fn test_handle_cron_dialog_key() {
+        let mut app = setup_app();
+        app.cron_dialog_active = true;
+        app.cron_inputs = vec![ratatui_textarea::TextArea::default()];
+        app.cron_focus = 0;
+
+        app.handle_cron_dialog_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE))
+            .await;
+        assert_eq!(app.cron_inputs[0].lines()[0], "v");
+
+        app.handle_cron_dialog_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+            .await;
+        assert_eq!(app.cron_focus, 1);
+
+        // Focus 1: Is Active
+        app.cron_is_active = false;
+        app.handle_cron_dialog_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+            .await;
+        assert!(app.cron_is_active);
+
+        app.handle_cron_dialog_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .await;
+        assert!(!app.cron_dialog_active);
+    }
+
+    #[tokio::test]
+    async fn test_handle_file_browser_key() {
+        let mut app = setup_app();
+        app.file_browser_active = true;
+
+        app.handle_file_browser_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .await;
+        assert!(!app.file_browser_active);
+    }
+
+    #[tokio::test]
     async fn test_handle_approval_dialog_key() {
         let mut app = setup_app();
         app.approval_dialog_active = true;
+
+        app.handle_approval_dialog_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE))
+            .await;
+        assert_eq!(app.approval_inputs.lines()[0], "b");
 
         app.handle_approval_dialog_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
             .await;
