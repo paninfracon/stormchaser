@@ -390,3 +390,116 @@ fn render_file_browser() {
     terminal.draw(|f| ui(f, &mut app)).unwrap();
     assert_debug_snapshot!(terminal.backend());
 }
+
+#[test]
+fn render_test_results_pane() {
+    let mut app = create_test_app();
+    app.active_pane = Pane::TestResults;
+
+    let created_at = Utc.timestamp_opt(1609459200, 0).unwrap();
+
+    let detail = crate::app::WorkflowRunFullDetail {
+        detail: crate::app::WorkflowRunDetail {
+            id: uuid::Uuid::nil(),
+            workflow_name: "test-workflow".to_string(),
+            initiating_user: "jacrisp".to_string(),
+            status: stormchaser_model::workflow::RunStatus::Succeeded,
+            created_at,
+            finished_at: None,
+        },
+        steps: vec![],
+        artifacts: vec![],
+        test_summaries: vec![stormchaser_model::test_report::TestSummary {
+            id: uuid::Uuid::nil(),
+            run_id: uuid::Uuid::nil(),
+            step_instance_id: uuid::Uuid::nil(),
+            report_name: "test_step".to_string(),
+            total_tests: 10,
+            passed: 9,
+            failed: 1,
+            skipped: 0,
+            errors: 0,
+            duration_ms: 1500,
+            created_at,
+        }],
+        test_cases: vec![
+            stormchaser_model::test_report::TestCase {
+                id: uuid::Uuid::nil(),
+                run_id: uuid::Uuid::nil(),
+                step_instance_id: uuid::Uuid::nil(),
+                report_name: "test_step".to_string(),
+                test_suite: Some("MySuite".to_string()),
+                test_case: "test_success".to_string(),
+                status: stormchaser_model::test_report::TestCaseStatus::Passed,
+                duration_ms: Some(100),
+                message: None,
+                created_at,
+            },
+            stormchaser_model::test_report::TestCase {
+                id: uuid::Uuid::nil(),
+                run_id: uuid::Uuid::nil(),
+                step_instance_id: uuid::Uuid::nil(),
+                report_name: "test_step".to_string(),
+                test_suite: Some("MySuite".to_string()),
+                test_case: "test_failure".to_string(),
+                status: stormchaser_model::test_report::TestCaseStatus::Failed,
+                duration_ms: Some(100),
+                message: Some("assertion failed".to_string()),
+                created_at,
+            },
+        ],
+    };
+    app.selected_run = Some(detail);
+    app.runs_state.select(Some(0));
+
+    let backend = TestBackend::new(100, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    terminal.draw(|f| ui(f, &mut app)).unwrap();
+    assert_debug_snapshot!(terminal.backend());
+}
+
+#[test]
+fn render_run_detail_with_artifacts() {
+    let mut app = create_test_app();
+    app.active_pane = Pane::RunDetail;
+
+    let created_at = Utc.timestamp_opt(1609459200, 0).unwrap();
+
+    let detail = crate::app::WorkflowRunFullDetail {
+        detail: crate::app::WorkflowRunDetail {
+            id: uuid::Uuid::nil(),
+            workflow_name: "test-workflow".to_string(),
+            initiating_user: "jacrisp".to_string(),
+            status: stormchaser_model::workflow::RunStatus::Succeeded,
+            created_at,
+            finished_at: None,
+        },
+        steps: vec![crate::app::StepDetail {
+            instance: serde_json::json!({"step_name": "build", "status": "succeeded"}),
+            outputs: vec![],
+            history: vec![],
+            logs: vec![],
+        }],
+        artifacts: vec![stormchaser_model::storage::ArtifactRegistry {
+            id: uuid::Uuid::nil(),
+            run_id: uuid::Uuid::nil(),
+            step_instance_id: uuid::Uuid::nil(),
+            artifact_name: "binary".to_string(),
+            backend_id: uuid::Uuid::nil(),
+            remote_path: "path/to/bin".to_string(),
+            metadata: serde_json::json!({"size": 1024}),
+            created_at,
+        }],
+        test_summaries: vec![],
+        test_cases: vec![],
+    };
+    app.selected_run = Some(detail);
+    app.runs_state.select(Some(0));
+
+    let backend = TestBackend::new(100, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    terminal.draw(|f| ui(f, &mut app)).unwrap();
+    assert_debug_snapshot!(terminal.backend());
+}
