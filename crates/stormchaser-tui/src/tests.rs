@@ -449,6 +449,7 @@ fn render_test_results_pane() {
             },
         ],
     };
+    app.runs = vec![detail.detail.clone()];
     app.selected_run = Some(detail);
     app.runs_state.select(Some(0));
 
@@ -465,6 +466,7 @@ fn render_run_detail_with_artifacts() {
     app.active_pane = Pane::RunDetail;
 
     let created_at = Utc.timestamp_opt(1609459200, 0).unwrap();
+    let step_instance_id = uuid::Uuid::new_v4();
 
     let detail = crate::app::WorkflowRunFullDetail {
         detail: crate::app::WorkflowRunDetail {
@@ -476,7 +478,11 @@ fn render_run_detail_with_artifacts() {
             finished_at: None,
         },
         steps: vec![crate::app::StepDetail {
-            instance: serde_json::json!({"step_name": "build", "status": "succeeded"}),
+            instance: serde_json::json!({
+                "id": step_instance_id.to_string(),
+                "step_name": "build",
+                "status": "succeeded"
+            }),
             outputs: vec![],
             history: vec![],
             logs: vec![],
@@ -484,7 +490,7 @@ fn render_run_detail_with_artifacts() {
         artifacts: vec![stormchaser_model::storage::ArtifactRegistry {
             id: uuid::Uuid::nil(),
             run_id: uuid::Uuid::nil(),
-            step_instance_id: uuid::Uuid::nil(),
+            step_instance_id,
             artifact_name: "binary".to_string(),
             backend_id: uuid::Uuid::nil(),
             remote_path: "path/to/bin".to_string(),
@@ -494,8 +500,10 @@ fn render_run_detail_with_artifacts() {
         test_summaries: vec![],
         test_cases: vec![],
     };
+    app.runs = vec![detail.detail.clone()];
     app.selected_run = Some(detail);
     app.runs_state.select(Some(0));
+    app.overview_scroll = 4;
 
     let backend = TestBackend::new(100, 30);
     let mut terminal = Terminal::new(backend).unwrap();
