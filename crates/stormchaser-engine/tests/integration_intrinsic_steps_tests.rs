@@ -1,8 +1,9 @@
 use sqlx::PgPool;
 use std::sync::Arc;
 use stormchaser_engine::handler::step::intrinsic::{jinja, test_report_email, wasm, webhook};
+use stormchaser_model::RunId;
+use stormchaser_model::StepInstanceId;
 use stormchaser_tls::{TlsConfig, TlsReloader};
-use uuid::Uuid;
 
 async fn setup() -> (PgPool, async_nats::Client, Arc<TlsReloader>) {
     let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
@@ -23,8 +24,8 @@ async fn setup() -> (PgPool, async_nats::Client, Arc<TlsReloader>) {
 #[tokio::test]
 async fn test_intrinsic_steps_dispatch() {
     let (pool, nats_client, tls_reloader) = setup().await;
-    let run_id = Uuid::new_v4();
-    let step_id = Uuid::new_v4();
+    let run_id = RunId::new_v4();
+    let step_id = StepInstanceId::new_v4();
     let spec = serde_json::json!({});
 
     // Test Jinja

@@ -119,12 +119,12 @@ mod tests {
     use super::*;
     use serde_json::json;
     use stormchaser_model::storage::BackendType;
-    use uuid::Uuid;
+    use stormchaser_model::BackendId;
 
     #[tokio::test]
     async fn test_get_s3_client_config_parsing() {
         let backend = StorageBackend {
-            id: Uuid::new_v4(),
+            id: BackendId::new_v4(),
             name: "test-s3".to_string(),
             description: None,
             backend_type: BackendType::S3,

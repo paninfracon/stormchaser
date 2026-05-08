@@ -1,12 +1,11 @@
 use crate::utils::{handle_response, require_token};
 use anyhow::Result;
-use uuid::Uuid;
 
 pub async fn list_artifacts(
     url: &str,
     token: Option<&str>,
     http_client: &reqwest_middleware::ClientWithMiddleware,
-    id: Uuid,
+    id: stormchaser_model::RunId,
 ) -> Result<()> {
     let token = require_token(token)?;
     let res = http_client
@@ -28,7 +27,7 @@ mod tests {
     #[tokio::test]
     async fn test_runs_artifacts() {
         let server = MockServer::start().await;
-        let id = Uuid::new_v4();
+        let id = stormchaser_model::RunId::new_v4();
         Mock::given(method("GET"))
             .and(path(format!("/api/v1/runs/{}/artifacts", id)))
             .and(header("Authorization", "Bearer test-token"))

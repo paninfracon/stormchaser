@@ -2,7 +2,6 @@ use crate::utils::{handle_response, require_token};
 use anyhow::Result;
 use clap::Subcommand;
 use serde_json::json;
-use uuid::Uuid;
 
 #[derive(Subcommand)]
 pub enum WebhookCommands {
@@ -19,10 +18,10 @@ pub enum WebhookCommands {
         description: Option<String>,
     },
     /// Get webhook details
-    Get { id: Uuid },
+    Get { id: stormchaser_model::WebhookId },
     /// Update a webhook
     Update {
-        id: Uuid,
+        id: stormchaser_model::WebhookId,
         #[arg(long)]
         name: Option<String>,
         #[arg(long)]
@@ -35,7 +34,7 @@ pub enum WebhookCommands {
         is_active: Option<bool>,
     },
     /// Delete a webhook
-    Delete { id: Uuid },
+    Delete { id: stormchaser_model::WebhookId },
 }
 
 pub async fn handle(
@@ -179,7 +178,7 @@ mod tests {
     #[tokio::test]
     async fn test_webhook_get() {
         let server = MockServer::start().await;
-        let id = Uuid::new_v4();
+        let id = stormchaser_model::WebhookId::new_v4();
         Mock::given(method("GET"))
             .and(path(format!("/api/v1/webhooks/{}", id)))
             .and(header("Authorization", "Bearer test-token"))
@@ -197,7 +196,7 @@ mod tests {
     #[tokio::test]
     async fn test_webhook_update() {
         let server = MockServer::start().await;
-        let id = Uuid::new_v4();
+        let id = stormchaser_model::WebhookId::new_v4();
         Mock::given(method("PATCH"))
             .and(path(format!("/api/v1/webhooks/{}", id)))
             .and(header("Authorization", "Bearer test-token"))
@@ -222,7 +221,7 @@ mod tests {
     #[tokio::test]
     async fn test_webhook_delete() {
         let server = MockServer::start().await;
-        let id = Uuid::new_v4();
+        let id = stormchaser_model::WebhookId::new_v4();
         Mock::given(method("DELETE"))
             .and(path(format!("/api/v1/webhooks/{}", id)))
             .and(header("Authorization", "Bearer test-token"))

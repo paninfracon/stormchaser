@@ -2,8 +2,9 @@ use super::*;
 use eventsource_stream::Eventsource;
 use futures::StreamExt;
 use std::time::Duration;
+use stormchaser_model::RunId;
+use stormchaser_model::StepInstanceId;
 use tokio::time::sleep;
-use uuid::Uuid;
 
 impl<'a> App<'a> {
     /// Fetches the latest list of workflow runs from the API based on active filters.
@@ -69,7 +70,7 @@ impl<'a> App<'a> {
     }
 
     /// Fetches the full details for a specific workflow run.
-    pub async fn fetch_run_detail(&mut self, run_id: Uuid) -> Result<()> {
+    pub async fn fetch_run_detail(&mut self, run_id: RunId) -> Result<()> {
         if self.token.is_none() {
             return Ok(());
         }
@@ -106,7 +107,7 @@ impl<'a> App<'a> {
                     .get("id")
                     .and_then(|v| v.as_str())
                     .unwrap_or_default();
-                if let Ok(step_id) = Uuid::parse_str(step_id_str) {
+                if let Ok(step_id) = uuid::Uuid::parse_str(step_id_str).map(StepInstanceId::new) {
                     let res = self
                         .api_request(
                             reqwest::Method::POST,
@@ -138,7 +139,7 @@ impl<'a> App<'a> {
                     .get("id")
                     .and_then(|v| v.as_str())
                     .unwrap_or_default();
-                if let Ok(step_id) = Uuid::parse_str(step_id_str) {
+                if let Ok(step_id) = uuid::Uuid::parse_str(step_id_str).map(StepInstanceId::new) {
                     let res = self
                         .api_request(
                             reqwest::Method::POST,
@@ -214,7 +215,6 @@ impl<'a> App<'a> {
 mod tests {
     use super::*;
     use chrono::Utc;
-    use stormchaser_model::workflow::RunStatus;
     use tokio::sync::mpsc;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -224,7 +224,7 @@ mod tests {
         let server = MockServer::start().await;
 
         let run_detail = crate::app::WorkflowRunDetail {
-            id: Uuid::new_v4(),
+            id: RunId::new_v4(),
             workflow_name: "test".to_string(),
             initiating_user: "user".to_string(),
             status: RunStatus::Succeeded,
@@ -282,7 +282,7 @@ mod tests {
     #[tokio::test]
     async fn test_fetch_run_detail_success() {
         let server = MockServer::start().await;
-        let run_id = Uuid::new_v4();
+        let run_id = RunId::new_v4();
 
         let full_detail = crate::app::WorkflowRunFullDetail {
             detail: crate::app::WorkflowRunDetail {
@@ -321,7 +321,7 @@ mod tests {
         let server = MockServer::start().await;
 
         let run_detail = crate::app::WorkflowRunDetail {
-            id: Uuid::new_v4(),
+            id: RunId::new_v4(),
             workflow_name: "test-workflow".to_string(),
             initiating_user: "user".to_string(),
             status: RunStatus::Running,

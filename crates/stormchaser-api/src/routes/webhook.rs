@@ -18,7 +18,7 @@ use stormchaser_model::event_rules::WebhookConfig;
 use stormchaser_model::events::WorkflowQueuedEvent;
 use stormchaser_model::nats::publish_cloudevent;
 use stormchaser_model::workflow::RunStatus;
-use uuid::Uuid;
+use stormchaser_model::WebhookId;
 
 /// Create webhook.
 #[utoipa::path(
@@ -37,7 +37,7 @@ pub async fn create_webhook(
     State(state): State<AppState>,
     Json(payload): Json<CreateWebhookRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let id = Uuid::new_v4();
+    let id = stormchaser_model::WebhookId::new_v4();
     db::insert_webhook(
         &state.pool,
         id,
@@ -82,7 +82,7 @@ pub async fn list_webhooks(
 #[utoipa::path(
     get,
     path = "/api/v1/webhooks/{id}",
-    params(("id" = Uuid, Path, description="Webhook ID")),
+    params(("id" = stormchaser_model::WebhookId, Path, description="Webhook ID")),
     responses(
         (status = 200, description = "Success"),
         (status = 400, description = "Bad Request"),
@@ -94,7 +94,7 @@ pub async fn list_webhooks(
 pub async fn get_webhook(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path(id): Path<Uuid>,
+    Path(id): Path<WebhookId>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let webhook = db::get_webhook(&state.pool, id)
         .await
@@ -109,7 +109,7 @@ pub async fn get_webhook(
     patch,
     path = "/api/v1/webhooks/{id}",
     request_body = UpdateWebhookRequest,
-    params(("id" = Uuid, Path, description="Webhook ID")),
+    params(("id" = stormchaser_model::WebhookId, Path, description="Webhook ID")),
     responses(
         (status = 200, description = "Success"),
         (status = 400, description = "Bad Request"),
@@ -121,7 +121,7 @@ pub async fn get_webhook(
 pub async fn update_webhook(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path(id): Path<Uuid>,
+    Path(id): Path<WebhookId>,
     Json(payload): Json<UpdateWebhookRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let description = match payload.description {
@@ -154,7 +154,7 @@ pub async fn update_webhook(
 #[utoipa::path(
     delete,
     path = "/api/v1/webhooks/{id}",
-    params(("id" = Uuid, Path, description="Webhook ID")),
+    params(("id" = stormchaser_model::WebhookId, Path, description="Webhook ID")),
     responses(
         (status = 200, description = "Success"),
         (status = 400, description = "Bad Request"),
@@ -166,7 +166,7 @@ pub async fn update_webhook(
 pub async fn delete_webhook(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path(id): Path<Uuid>,
+    Path(id): Path<WebhookId>,
 ) -> Result<impl IntoResponse, StatusCode> {
     db::delete_webhook(&state.pool, id)
         .await
@@ -179,7 +179,7 @@ pub async fn delete_webhook(
     post,
     path = "/api/v1/webhooks/{id}",
     params(
-        ("id" = Uuid, Path, description = "Webhook ID")
+        ("id" = stormchaser_model::WebhookId, Path, description = "Webhook ID")
     ),
     request_body = String,
     responses(
@@ -192,7 +192,7 @@ pub async fn delete_webhook(
 )]
 /// Handle webhook.
 pub async fn handle_webhook(
-    Path(webhook_id): Path<Uuid>,
+    Path(webhook_id): Path<WebhookId>,
     headers: HeaderMap,
     State(state): State<AppState>,
     body: Bytes,
@@ -298,7 +298,7 @@ pub async fn handle_webhook(
         }
 
         // 4. Trigger Workflow
-        let run_id = Uuid::new_v4();
+        let run_id = stormchaser_model::RunId::new_v4();
 
         tracing::info!(run_id = %run_id, "Enqueuing webhook workflow: {}", rule.workflow_name);
         let fencing_token = Utc::now().timestamp_nanos_opt().unwrap_or(0);

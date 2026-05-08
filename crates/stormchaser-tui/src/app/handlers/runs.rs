@@ -3,12 +3,12 @@ use crate::AppEvent;
 use chrono::Utc;
 use serde_json::Value;
 use stormchaser_model::workflow::RunStatus;
-use uuid::Uuid;
+use stormchaser_model::RunId;
 
 impl<'a> App<'a> {
     /// Handles an incoming status update for a specific workflow run.
     /// Supports special "refresh" strings to trigger a full refetch.
-    pub fn handle_status_update(&mut self, run_id: Uuid, status: String) {
+    pub fn handle_status_update(&mut self, run_id: RunId, status: String) {
         if status == "refresh" || status == "force_refresh" {
             if let Some(cached) = self.cached_runs.get(&run_id).cloned() {
                 let tx = self.status_tx.clone();
@@ -178,7 +178,7 @@ impl<'a> App<'a> {
     }
 
     /// Handles a status update for a specific step within a workflow run.
-    pub fn handle_step_update(&mut self, run_id: Uuid, step_name: String, status: String) {
+    pub fn handle_step_update(&mut self, run_id: RunId, step_name: String, status: String) {
         if let Some(run) = &mut self.selected_run {
             if run.detail.id == run_id {
                 let mut updated_step_index = None;
@@ -216,7 +216,12 @@ impl<'a> App<'a> {
     }
 
     /// Appends a new log line to the appropriate step within the selected run.
-    pub fn handle_step_logs_fetched(&mut self, run_id: Uuid, step_index: usize, logs: Vec<String>) {
+    pub fn handle_step_logs_fetched(
+        &mut self,
+        run_id: RunId,
+        step_index: usize,
+        logs: Vec<String>,
+    ) {
         if let Some(run) = &mut self.selected_run {
             if run.detail.id == run_id {
                 if let Some(step) = run.steps.get_mut(step_index) {
@@ -243,7 +248,7 @@ impl<'a> App<'a> {
         }
     }
     /// Appends a new log line to the appropriate step within the selected run.
-    pub fn handle_log_line(&mut self, run_id: Uuid, line: String) {
+    pub fn handle_log_line(&mut self, run_id: RunId, line: String) {
         if let Some(run) = &mut self.selected_run {
             if run.detail.id == run_id {
                 let mut step_name_and_clean_line = None;

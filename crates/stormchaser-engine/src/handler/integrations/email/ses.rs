@@ -1,13 +1,11 @@
 #[cfg(feature = "aws-ses")]
 use anyhow::{Context, Result};
-#[cfg(feature = "aws-ses")]
-use uuid::Uuid;
 
 #[cfg(feature = "aws-ses")]
 pub async fn build_ses_client(
     region: Option<String>,
     role_arn: Option<String>,
-    run_id: Uuid,
+    run_id: stormchaser_model::RunId,
 ) -> Result<aws_sdk_ses::Client> {
     let mut config_loader = aws_config::defaults(aws_config::BehaviorVersion::v2026_01_12());
     if let Some(r) = region {
@@ -62,7 +60,7 @@ pub async fn send_email_ses(
     region: Option<String>,
     role_arn: Option<String>,
     configuration_set_name: Option<String>,
-    run_id: Uuid,
+    run_id: stormchaser_model::RunId,
 ) -> Result<()> {
     use aws_sdk_ses::types::{Body, Content, Destination, Message};
 

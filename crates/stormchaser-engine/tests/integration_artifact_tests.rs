@@ -4,6 +4,7 @@ use std::sync::Arc;
 use stormchaser_engine::handler;
 use stormchaser_model::auth::OpaClient;
 use stormchaser_model::step::StepInstance;
+use stormchaser_model::RunId;
 use uuid::Uuid;
 
 use stormchaser_tls::TlsConfig;
@@ -41,7 +42,7 @@ async fn test_artifact_persistence_on_completion() {
     .await
     .unwrap();
 
-    let run_id = Uuid::new_v4();
+    let run_id = RunId::new_v4();
     let dsl = format!(
         r#"
         stormchaser_dsl_version = "v1"
@@ -176,7 +177,7 @@ async fn test_test_report_persistence_on_completion() {
         .await
         .unwrap();
 
-    let run_id = Uuid::new_v4();
+    let run_id = RunId::new_v4();
     let dsl = r#"
         stormchaser_dsl_version = "v1"
         workflow "report-test" {

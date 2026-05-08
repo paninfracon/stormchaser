@@ -6,8 +6,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use stormchaser_engine::handler;
 use stormchaser_model::auth::OpaClient;
+use stormchaser_model::RunId;
 use tokio::time::sleep;
-use uuid::Uuid;
 
 use stormchaser_tls::TlsConfig;
 use stormchaser_tls::TlsReloader;
@@ -32,7 +32,7 @@ async fn test_jq_step_execution() {
         .await
         .unwrap();
 
-    let run_id = Uuid::new_v4();
+    let run_id = RunId::new_v4();
     let dsl = r#"
         stormchaser_dsl_version = "v1"
         workflow "jq-test" {
@@ -135,14 +135,22 @@ async fn test_jq_step_execution() {
     .unwrap();
 
     // 4. Verify outputs are in the database (or archived outputs since step completes and archives)
-    let output_exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM archived_step_outputs so JOIN archived_step_instances si ON so.step_instance_id = si.id WHERE si.run_id = $1 AND so.key = $2)"
-    )
-    .bind(run_id)
-    .bind("result")
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let mut output_exists: bool = false;
+    for _ in 0..10 {
+        output_exists = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM archived_step_outputs so JOIN archived_step_instances si ON so.step_instance_id = si.id WHERE si.run_id = $1 AND so.key = $2)"
+        )
+        .bind(run_id)
+        .bind("result")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        if output_exists {
+            break;
+        }
+        sleep(Duration::from_millis(500)).await;
+    }
 
     assert!(
         output_exists,

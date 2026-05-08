@@ -10,8 +10,12 @@ use serde_json::Value;
 use sqlx::PgPool;
 use std::sync::Arc;
 use stormchaser_dsl::ast::{self, Workflow};
+use stormchaser_model::dsl::OutputExtraction;
+use stormchaser_model::events::WorkflowCompletedEvent;
 use stormchaser_model::step::{StepInstance, StepStatus};
 use stormchaser_model::LogBackend;
+use stormchaser_model::RunId;
+use stormchaser_model::StepInstanceId;
 use stormchaser_tls::TlsReloader;
 use tracing::{debug, error, info};
 use uuid::Uuid;
@@ -32,9 +36,9 @@ pub async fn handle_step_completed(
     tls_reloader: Arc<TlsReloader>,
 ) -> Result<()> {
     let run_id_str = payload["run_id"].as_str().context("Missing run_id")?;
-    let run_id = Uuid::parse_str(run_id_str)?;
+    let run_id = uuid::Uuid::parse_str(run_id_str).map(RunId::new)?;
     let step_id_str = payload["step_id"].as_str().context("Missing step_id")?;
-    let step_id = Uuid::parse_str(step_id_str)?;
+    let step_id = uuid::Uuid::parse_str(step_id_str).map(StepInstanceId::new)?;
 
     let span = tracing::Span::current();
     span.record("run_id", tracing::field::display(run_id));
@@ -100,7 +104,8 @@ pub async fn handle_step_completed(
     if let Some(storage_hashes) = payload["storage_hashes"].as_object() {
         for (name, hash_val) in storage_hashes {
             if let Some(hash) = hash_val.as_str() {
-                crate::db::upsert_run_storage_state(&mut *tx, run_id, name, hash).await?;
+                crate::db::upsert_run_storage_state(&mut *tx, run_id.into_inner(), name, hash)
+                    .await?;
             }
         }
     }
@@ -131,7 +136,7 @@ pub async fn handle_step_completed(
                         run_id,
                         step_id,
                         name,
-                        bid,
+                        stormchaser_model::BackendId::new(bid),
                         remote_path,
                         meta.clone(),
                     )
@@ -154,14 +159,14 @@ pub async fn handle_step_completed(
 
     let current_step_instance = all_steps_initial
         .iter()
-        .find(|s| s.id == step_id)
+        .find(|s| s.id.into_inner() == step_id.into_inner())
         .context("Completed step not found in DB")?;
 
     let mut dsl_step = find_step(&workflow.steps, &current_step_instance.step_name).cloned();
 
     if let Some(step) = &mut dsl_step {
         if step.r#type == "TerraformApply" {
-            step.outputs.push(stormchaser_model::dsl::OutputExtraction {
+            step.outputs.push(OutputExtraction {
                 name: "terraform".to_string(),
                 source: "stdout".to_string(),
                 marker: Some("--- TF OUTPUTS ---".to_string()),
@@ -171,7 +176,7 @@ pub async fn handle_step_completed(
                 sensitive: Some(false),
             });
         } else if step.r#type == "TerraformPlan" {
-            step.outputs.push(stormchaser_model::dsl::OutputExtraction {
+            step.outputs.push(OutputExtraction {
                 name: "plan_summary".to_string(),
                 source: "stdout".to_string(),
                 marker: Some("--- TF PLAN SUMMARY ---".to_string()),
@@ -180,7 +185,7 @@ pub async fn handle_step_completed(
                 group: Some(1),
                 sensitive: Some(false),
             });
-            step.outputs.push(stormchaser_model::dsl::OutputExtraction {
+            step.outputs.push(OutputExtraction {
                 name: "plan_json".to_string(),
                 source: "stdout".to_string(),
                 marker: Some("--- TF PLAN JSON ---".to_string()),
@@ -412,7 +417,7 @@ pub async fn handle_step_completed(
             "stormchaser.v1.run.completed",
             "workflow_completed",
             "stormchaser-engine",
-            serde_json::to_value(stormchaser_model::events::WorkflowCompletedEvent {
+            serde_json::to_value(WorkflowCompletedEvent {
                 run_id,
                 event_type: "workflow_completed".to_string(),
                 timestamp: chrono::Utc::now(),

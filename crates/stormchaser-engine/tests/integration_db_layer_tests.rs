@@ -5,7 +5,10 @@ use stormchaser_model::runner::RunnerStatus;
 use stormchaser_model::step::{StepInstance, StepStatus};
 use stormchaser_model::test_report::{TestCase, TestCaseStatus, TestSummary};
 use stormchaser_model::workflow::RunStatus;
-use uuid::Uuid;
+use stormchaser_model::EventId;
+use stormchaser_model::RunId;
+use stormchaser_model::StepInstanceId;
+use stormchaser_model::TestReportId;
 
 async fn setup_db() -> sqlx::PgPool {
     let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
@@ -31,7 +34,7 @@ async fn test_db_layer_functions() {
     let pool = setup_db().await;
 
     // Create a new runner to test
-    let runner_id = format!("test-runner-{}", Uuid::new_v4());
+    let runner_id = format!("test-runner-{}", RunId::new_v4());
     db::runners::upsert_runner(
         &pool,
         &runner_id,
@@ -63,7 +66,7 @@ async fn test_db_layer_functions() {
     assert_eq!(runner.as_ref().unwrap().status, RunnerStatus::Offline);
 
     // Test creating a workflow run
-    let run_id = Uuid::new_v4();
+    let run_id = RunId::new_v4();
     let mut tx = pool.begin().await.unwrap();
 
     db::runs::insert_workflow_run(
@@ -104,7 +107,7 @@ async fn test_db_layer_functions() {
     .unwrap();
 
     // Create a step
-    let step_id = Uuid::new_v4();
+    let step_id = StepInstanceId::new_v4();
     db::steps::insert_step_instance_with_spec(
         &mut *tx,
         step_id,
@@ -161,7 +164,7 @@ async fn test_db_layer_functions() {
     assert_eq!(steps[0].exit_code, Some(1));
 
     // Event correlation
-    let corr_id = Uuid::new_v4();
+    let corr_id = EventId::new_v4();
     db::events::insert_event_correlation(&pool, corr_id, step_id, run_id, "test-key", "test-val")
         .await
         .unwrap();
@@ -169,8 +172,8 @@ async fn test_db_layer_functions() {
     // Storage
     db::storage::insert_step_test_report(
         &pool,
-        run_id,
-        step_id,
+        run_id.into_inner(),
+        step_id.into_inner(),
         "report",
         "report.xml",
         "junit",
@@ -183,7 +186,7 @@ async fn test_db_layer_functions() {
     .unwrap();
 
     let summary = TestSummary {
-        id: Uuid::new_v4(),
+        id: TestReportId::new_v4(),
         run_id,
         step_instance_id: step_id,
         report_name: "report".to_string(),
@@ -195,12 +198,18 @@ async fn test_db_layer_functions() {
         duration_ms: 500,
         created_at: Utc::now(),
     };
-    db::storage::insert_step_test_summary(&pool, run_id, step_id, "report", &summary)
-        .await
-        .unwrap();
+    db::storage::insert_step_test_summary(
+        &pool,
+        run_id.into_inner(),
+        step_id.into_inner(),
+        "report",
+        &summary,
+    )
+    .await
+    .unwrap();
 
     let tc = TestCase {
-        id: Uuid::new_v4(),
+        id: TestReportId::new_v4(),
         run_id,
         step_instance_id: step_id,
         report_name: "report".to_string(),
@@ -211,18 +220,24 @@ async fn test_db_layer_functions() {
         message: None,
         created_at: Utc::now(),
     };
-    db::storage::insert_step_test_case(&pool, run_id, step_id, "report", &tc)
-        .await
-        .unwrap();
+    db::storage::insert_step_test_case(
+        &pool,
+        run_id.into_inner(),
+        step_id.into_inner(),
+        "report",
+        &tc,
+    )
+    .await
+    .unwrap();
 
     let summaries: Vec<test_report::TestSummary> =
-        db::steps::get_test_summaries_for_run(&pool, run_id)
+        db::steps::get_test_summaries_for_run(&pool, run_id.into_inner())
             .await
             .unwrap();
     assert_eq!(summaries.len(), 1);
 
     let cases: Vec<test_report::TestCase> =
-        db::steps::get_test_cases_for_report(&pool, run_id, "report")
+        db::steps::get_test_cases_for_report(&pool, run_id.into_inner(), "report")
             .await
             .unwrap();
     assert_eq!(cases.len(), 1);

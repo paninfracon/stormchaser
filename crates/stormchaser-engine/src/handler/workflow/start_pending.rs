@@ -6,14 +6,15 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use stormchaser_dsl::ast;
 use stormchaser_dsl::ast::Workflow;
+use stormchaser_model::events::WorkflowRunningEvent;
+use stormchaser_model::RunId;
 use stormchaser_tls::TlsReloader;
 use tracing::{debug, error, info};
-use uuid::Uuid;
 
 #[tracing::instrument(skip(pool, nats_client, tls_reloader), fields(run_id = %run_id))]
 /// Handle workflow start pending.
 pub async fn handle_workflow_start_pending(
-    run_id: Uuid,
+    run_id: RunId,
     pool: PgPool,
     nats_client: async_nats::Client,
     tls_reloader: Arc<TlsReloader>,
@@ -89,7 +90,7 @@ pub async fn handle_workflow_start_pending(
         "stormchaser.v1.run.running",
         "workflow_running",
         "stormchaser-engine",
-        serde_json::to_value(stormchaser_model::events::WorkflowRunningEvent {
+        serde_json::to_value(WorkflowRunningEvent {
             run_id,
             event_type: "workflow_running".to_string(),
             timestamp: chrono::Utc::now(),

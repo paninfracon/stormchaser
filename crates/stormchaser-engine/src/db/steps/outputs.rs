@@ -1,12 +1,12 @@
 use serde_json::Value;
 use sqlx::{Executor, Postgres};
-use uuid::Uuid;
+use stormchaser_model::{RunId, StepInstanceId};
 
 #[allow(clippy::too_many_arguments)]
 /// Upsert step output.
 pub async fn upsert_step_output<'a, E>(
     executor: E,
-    step_instance_id: Uuid,
+    step_instance_id: StepInstanceId,
     key: &str,
     value: &Value,
 ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
@@ -31,7 +31,7 @@ where
 /// Upsert step output with sensitivity.
 pub async fn upsert_step_output_with_sensitivity<'a, E>(
     executor: E,
-    step_instance_id: Uuid,
+    step_instance_id: StepInstanceId,
     key: &str,
     value: &Value,
     is_sensitive: bool,
@@ -58,7 +58,7 @@ where
 /// Get step outputs for run.
 pub async fn get_step_outputs_for_run<'a, E, O>(
     executor: E,
-    run_id: Uuid,
+    run_id: RunId,
 ) -> Result<Vec<O>, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,

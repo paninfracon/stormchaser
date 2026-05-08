@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::{Executor, Postgres};
 use stormchaser_model::workflow::{RunStatus, WorkflowRun};
-use uuid::Uuid;
+use stormchaser_model::RunId;
 
 #[allow(clippy::too_many_arguments)]
 /// Get active workflow runs with quotas.
@@ -96,7 +96,7 @@ pub async fn insert_full_workflow_run(
 /// Insert workflow run.
 pub async fn insert_workflow_run<'a, E>(
     executor: E,
-    id: Uuid,
+    id: RunId,
     workflow_name: &str,
     initiating_user: Option<&str>,
     repo_url: Option<&str>,
@@ -136,7 +136,7 @@ where
 /// Insert run context.
 pub async fn insert_run_context<'a, E>(
     executor: E,
-    run_id: Uuid,
+    run_id: RunId,
     dsl_version: &str,
     workflow_definition: Value,
     source_code: Option<&str>,
@@ -167,7 +167,7 @@ pub async fn update_run_context<'a, E>(
     workflow_definition: Value,
     source_code: Option<&str>,
     dsl_version: &str,
-    run_id: Uuid,
+    run_id: RunId,
 ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
@@ -187,7 +187,7 @@ where
 /// Lock workflow run.
 pub async fn lock_workflow_run<'a, E>(
     executor: E,
-    id: Uuid,
+    id: RunId,
 ) -> Result<Option<sqlx::postgres::PgRow>, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
@@ -203,7 +203,7 @@ where
 pub async fn update_workflow_run_status<'a, E>(
     executor: E,
     status: RunStatus,
-    id: Uuid,
+    id: RunId,
 ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
@@ -227,7 +227,7 @@ pub async fn fail_workflow_run<'a, E>(
     executor: E,
     status: RunStatus,
     error: &str,
-    id: Uuid,
+    id: RunId,
 ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
@@ -248,7 +248,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 /// Get workflow run by id.
-pub async fn get_workflow_run_by_id<'a, E, O>(executor: E, id: Uuid) -> Result<O, sqlx::Error>
+pub async fn get_workflow_run_by_id<'a, E, O>(executor: E, id: RunId) -> Result<O, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
     O: Send + Unpin + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,
@@ -263,7 +263,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 /// Get run context by id.
-pub async fn get_run_context_by_id<'a, E, O>(executor: E, run_id: Uuid) -> Result<O, sqlx::Error>
+pub async fn get_run_context_by_id<'a, E, O>(executor: E, run_id: RunId) -> Result<O, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
     O: Send + Unpin + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,
@@ -278,7 +278,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 /// Get run inputs by id.
-pub async fn get_run_inputs_by_id<'a, E, O>(executor: E, run_id: Uuid) -> Result<O, sqlx::Error>
+pub async fn get_run_inputs_by_id<'a, E, O>(executor: E, run_id: RunId) -> Result<O, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
     O: Send + Unpin + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,
@@ -299,7 +299,7 @@ pub async fn update_workflow_run_status_full<'a, E>(
     started_at: Option<DateTime<Utc>>,
     finished_at: Option<DateTime<Utc>>,
     error: Option<&str>,
-    id: Uuid,
+    id: RunId,
     version: i32,
 ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
 where
@@ -328,7 +328,7 @@ where
 /// Get workflow run status.
 pub async fn get_workflow_run_status<'a, E, O>(
     executor: E,
-    id: Uuid,
+    id: RunId,
 ) -> Result<Option<O>, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,

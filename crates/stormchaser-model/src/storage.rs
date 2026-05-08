@@ -1,9 +1,9 @@
 //! Storage backend and artifact registry models.
 
+use crate::id::{ArtifactId, BackendId, RunId, StepInstanceId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
-use uuid::Uuid;
 
 /// Supported storage backend types for artifacts and engine data.
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::Type, PartialEq, Eq, ToSchema)]
@@ -26,7 +26,7 @@ pub enum BackendType {
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow, ToSchema)]
 pub struct StorageBackend {
     /// Unique identifier for the storage backend.
-    pub id: Uuid,
+    pub id: BackendId,
     /// Logical name of the backend.
     pub name: String,
     /// Optional description of the backend's purpose.
@@ -55,15 +55,15 @@ pub struct StorageBackend {
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow, ToSchema)]
 pub struct ArtifactRegistry {
     /// Unique identifier for the artifact record.
-    pub id: Uuid,
+    pub id: ArtifactId,
     /// Associated workflow run ID.
-    pub run_id: Uuid,
+    pub run_id: RunId,
     /// Associated step instance ID that produced the artifact.
-    pub step_instance_id: Uuid,
+    pub step_instance_id: StepInstanceId,
     /// Logical name of the artifact.
     pub artifact_name: String,
     /// Identifier of the storage backend where the artifact is located.
-    pub backend_id: Uuid,
+    pub backend_id: BackendId,
     /// Path or locator within the storage backend.
     pub remote_path: String,
     /// Additional metadata about the artifact.

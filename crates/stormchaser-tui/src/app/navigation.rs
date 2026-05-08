@@ -341,7 +341,7 @@ mod tests {
 
         app.runs = vec![
             WorkflowRunDetail {
-                id: Uuid::new_v4(),
+                id: RunId::new_v4(),
                 workflow_name: "1".to_string(),
                 initiating_user: "u".to_string(),
                 status: RunStatus::Succeeded,
@@ -349,7 +349,7 @@ mod tests {
                 finished_at: None,
             },
             WorkflowRunDetail {
-                id: Uuid::new_v4(),
+                id: RunId::new_v4(),
                 workflow_name: "2".to_string(),
                 initiating_user: "u".to_string(),
                 status: RunStatus::Succeeded,

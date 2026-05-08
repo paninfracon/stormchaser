@@ -1,10 +1,10 @@
 use sqlx::PgConnection;
-use uuid::Uuid;
+use stormchaser_model::RunId;
 
 /// Archive and delete workflow run.
 pub async fn archive_and_delete_workflow_run(
     conn: &mut PgConnection,
-    run_id: Uuid,
+    run_id: RunId,
 ) -> Result<(), sqlx::Error> {
     // 1. Move to archived_workflow_runs
     sqlx::query(

@@ -6,7 +6,8 @@ use stormchaser_engine::step_machine::StepMachine;
 use stormchaser_engine::workflow_machine::WorkflowMachine;
 use stormchaser_model::step::{StepInstance, StepStatus};
 use stormchaser_model::workflow::{RunStatus, WorkflowRun};
-use uuid::Uuid;
+use stormchaser_model::RunId;
+use stormchaser_model::StepInstanceId;
 
 async fn get_pool() -> sqlx::PgPool {
     let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
@@ -25,7 +26,7 @@ async fn get_pool() -> sqlx::PgPool {
 }
 
 fn create_test_run() -> WorkflowRun {
-    let id = Uuid::new_v4();
+    let id = RunId::new_v4();
     WorkflowRun {
         id,
         workflow_name: format!("test-workflow-{}", id),
@@ -66,9 +67,9 @@ async fn insert_test_run(pool: &sqlx::PgPool, run: &WorkflowRun) {
     .unwrap();
 }
 
-fn create_test_step(run_id: Uuid, name: &str) -> StepInstance {
+fn create_test_step(run_id: RunId, name: &str) -> StepInstance {
     StepInstance {
-        id: Uuid::new_v4(),
+        id: StepInstanceId::new_v4(),
         run_id,
         step_name: name.to_string(),
         step_type: "RunContainer".to_string(),
@@ -109,6 +110,7 @@ async fn test_workflow_step_success_interaction() {
     let pool = get_pool().await;
     let run = create_test_run();
     let run_id = run.id;
+    let run_id_uuid = run_id;
     insert_test_run(&pool, &run).await;
 
     let mut conn = pool.acquire().await.unwrap();
@@ -125,8 +127,8 @@ async fn test_workflow_step_success_interaction() {
         .unwrap();
 
     // Now workflow is Running. Let's create steps.
-    let step1 = create_test_step(run_id, "step1");
-    let step2 = create_test_step(run_id, "step2");
+    let step1 = create_test_step(run_id_uuid, "step1");
+    let step2 = create_test_step(run_id_uuid, "step2");
     insert_test_step(&pool, &step1).await;
     insert_test_step(&pool, &step2).await;
 
@@ -166,6 +168,7 @@ async fn test_workflow_step_failure_interaction() {
     let pool = get_pool().await;
     let run = create_test_run();
     let run_id = run.id;
+    let run_id_uuid = run_id;
     insert_test_run(&pool, &run).await;
 
     let mut conn = pool.acquire().await.unwrap();
@@ -181,7 +184,7 @@ async fn test_workflow_step_failure_interaction() {
         .await
         .unwrap();
 
-    let step1 = create_test_step(run_id, "step1");
+    let step1 = create_test_step(run_id_uuid, "step1");
     insert_test_step(&pool, &step1).await;
 
     let step_machine1 = StepMachine::new(step1)
@@ -214,6 +217,7 @@ async fn test_workflow_abort_cascades_to_step() {
     let pool = get_pool().await;
     let run = create_test_run();
     let run_id = run.id;
+    let run_id_uuid = run_id;
     insert_test_run(&pool, &run).await;
 
     let mut conn = pool.acquire().await.unwrap();
@@ -229,7 +233,7 @@ async fn test_workflow_abort_cascades_to_step() {
         .await
         .unwrap();
 
-    let step1 = create_test_step(run_id, "step1");
+    let step1 = create_test_step(run_id_uuid, "step1");
     insert_test_step(&pool, &step1).await;
     let step_machine1 = StepMachine::new(step1)
         .start("runner-1".to_string(), &mut conn)

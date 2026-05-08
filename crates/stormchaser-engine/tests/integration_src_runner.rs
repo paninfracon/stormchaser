@@ -1,11 +1,11 @@
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
+use stormchaser_model::runner::RunnerStatus;
 use uuid::Uuid;
 
 use sqlx::PgPool;
 use stormchaser_engine::db;
 use stormchaser_engine::handler::runner::*;
-use stormchaser_model::runner::RunnerStatus;
 
 async fn mock_pool() -> PgPool {
     let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {

@@ -3,7 +3,7 @@ use std::net::TcpListener;
 use std::process::Command;
 use std::time::Duration;
 use stormchaser_model::auth::{EngineOpaContext, OpaClient};
-use uuid::Uuid;
+use stormchaser_model::RunId;
 
 /// Pinned OPA image used by integration tests.  Update this constant (and re-run
 /// the tests locally) when upgrading OPA to ensure CI remains reproducible.
@@ -36,7 +36,7 @@ impl Drop for ContainerGuard {
 #[tokio::test]
 async fn test_enterprise_opa_abac_integration() {
     let port = get_free_port();
-    let container_name = format!("opa-engine-test-{}", Uuid::new_v4());
+    let container_name = format!("opa-engine-test-{}", RunId::new_v4());
 
     // 1. Start OPA Container with Enterprise Policies
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -99,7 +99,7 @@ async fn test_enterprise_opa_abac_integration() {
 
     // --- ABAC Example 1: Deployment to Production ---
     let prod_ctx = EngineOpaContext {
-        run_id: Uuid::new_v4(),
+        run_id: RunId::new_v4(),
         initiating_user: "ops@paninfracon.net".to_string(), // Operator role
         workflow_ast: json!({ "step_type": "Log" }),
         inputs: json!({ "env": "production" }),
@@ -110,7 +110,7 @@ async fn test_enterprise_opa_abac_integration() {
     );
 
     let dev_prod_ctx = EngineOpaContext {
-        run_id: Uuid::new_v4(),
+        run_id: RunId::new_v4(),
         initiating_user: "dev@paninfracon.net".to_string(), // Developer role
         workflow_ast: json!({ "step_type": "Log" }),
         inputs: json!({ "env": "production" }),
@@ -121,7 +121,7 @@ async fn test_enterprise_opa_abac_integration() {
     );
 
     let dev_staging_ctx = EngineOpaContext {
-        run_id: Uuid::new_v4(),
+        run_id: RunId::new_v4(),
         initiating_user: "dev@paninfracon.net".to_string(), // Developer role
         workflow_ast: json!({ "step_type": "Log" }),
         inputs: json!({ "env": "staging" }),
@@ -133,7 +133,7 @@ async fn test_enterprise_opa_abac_integration() {
 
     // --- ABAC Example 2: Privileged Containers ---
     let privileged_container_ctx = EngineOpaContext {
-        run_id: Uuid::new_v4(),
+        run_id: RunId::new_v4(),
         initiating_user: "admin@paninfracon.net".to_string(), // Admin role
         workflow_ast: json!({
             "step_type": "RunContainer",
@@ -152,7 +152,7 @@ async fn test_enterprise_opa_abac_integration() {
     );
 
     let dev_privileged_ctx = EngineOpaContext {
-        run_id: Uuid::new_v4(),
+        run_id: RunId::new_v4(),
         initiating_user: "dev@paninfracon.net".to_string(), // Developer role
         workflow_ast: json!({
             "step_type": "RunContainer",
@@ -168,7 +168,7 @@ async fn test_enterprise_opa_abac_integration() {
     );
 
     let dev_unprivileged_ctx = EngineOpaContext {
-        run_id: Uuid::new_v4(),
+        run_id: RunId::new_v4(),
         initiating_user: "dev@paninfracon.net".to_string(), // Developer role
         workflow_ast: json!({
             "step_type": "RunContainer",

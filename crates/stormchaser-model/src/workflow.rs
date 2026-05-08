@@ -1,9 +1,9 @@
 //! Core workflow run and state management types.
 
+use crate::id::*;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use uuid::Uuid;
 
 use utoipa::ToSchema;
 
@@ -60,7 +60,7 @@ impl From<RunStatus> for String {
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
 pub struct WorkflowRun {
     /// Unique identifier for the workflow run.
-    pub id: Uuid,
+    pub id: RunId,
     /// The name of the workflow.
     pub workflow_name: String,
     /// Identifier of the user or system that initiated the run.
@@ -95,7 +95,7 @@ pub struct WorkflowRun {
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
 pub struct RunContext {
     /// Associated workflow run ID.
-    pub run_id: Uuid,
+    pub run_id: RunId,
     /// Version of the DSL the workflow was written in.
     pub dsl_version: String,
     /// Full parsed abstract syntax tree of the workflow definition.
@@ -114,7 +114,7 @@ pub struct RunContext {
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
 pub struct RunQuotas {
     /// Associated workflow run ID.
-    pub run_id: Uuid,
+    pub run_id: RunId,
     /// Maximum number of concurrent steps allowed.
     pub max_concurrency: i32,
     /// Maximum CPU limit for the overall run.
@@ -137,7 +137,7 @@ pub struct AuditLog {
     /// Unique identifier for the audit log entry.
     pub id: i64,
     /// Associated workflow run ID.
-    pub run_id: Uuid,
+    pub run_id: RunId,
     /// The type of event that occurred (e.g., 'workflow_started', 'step_failed').
     pub event_type: String, // e.g., "workflow_started", "step_failed", "approval_granted"
     /// The identifier of the user or system process that caused the event.

@@ -2,7 +2,6 @@ use crate::utils::{handle_response, parse_key_val_list, require_token};
 use anyhow::Result;
 use clap::Subcommand;
 use serde_json::json;
-use uuid::Uuid;
 
 #[derive(Subcommand)]
 pub enum CronCommands {
@@ -28,7 +27,9 @@ pub enum CronCommands {
         input: Vec<String>,
     },
     /// Delete a scheduled cron workflow
-    Delete { id: Uuid },
+    Delete {
+        id: stormchaser_model::CronWorkflowId,
+    },
 }
 
 pub async fn handle(
@@ -142,7 +143,7 @@ mod tests {
     #[tokio::test]
     async fn test_cron_delete() {
         let server = MockServer::start().await;
-        let id = Uuid::new_v4();
+        let id = stormchaser_model::CronWorkflowId::new_v4();
         Mock::given(method("DELETE"))
             .and(path(format!("/api/v1/cron-workflows/{}", id)))
             .and(header("Authorization", "Bearer test-token"))

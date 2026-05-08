@@ -4,6 +4,7 @@ use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
 use std::collections::HashMap;
 use std::sync::Arc;
+use stormchaser_model::auth::Claims;
 use stormchaser_model::auth::OpaClient;
 use uuid::Uuid;
 
@@ -20,12 +21,11 @@ use stormchaser_api::auth::AuthClaims;
 use stormchaser_api::hitl::*;
 use stormchaser_api::AppState;
 use stormchaser_api::JWT_SECRET;
-use stormchaser_model::auth::Claims;
 
 #[derive(serde::Deserialize, serde::Serialize)]
 struct ApprovalLinkPayload {
-    run_id: Uuid,
-    step_id: Uuid,
+    run_id: stormchaser_model::RunId,
+    step_id: stormchaser_model::StepInstanceId,
     action: String,
     #[serde(default)]
     inputs: Value,
@@ -88,8 +88,8 @@ async fn test_approve_step_link_invalid_token() {
 async fn test_approve_step_not_found() {
     let state = mock_state().await;
     let payload = ApprovalLinkPayload {
-        run_id: Uuid::new_v4(),
-        step_id: Uuid::new_v4(),
+        run_id: stormchaser_model::RunId::new_v4(),
+        step_id: stormchaser_model::StepInstanceId::new_v4(),
         action: "approve".into(),
         inputs: json!({}),
     };
@@ -101,8 +101,8 @@ async fn test_approve_step_not_found() {
 #[tokio::test]
 async fn test_approve_step_link_success() {
     let state = mock_state().await;
-    let run_id = Uuid::new_v4();
-    let step_id = Uuid::new_v4();
+    let run_id = stormchaser_model::RunId::new_v4();
+    let step_id = stormchaser_model::StepInstanceId::new_v4();
 
     // Setup DB data
     sqlx::query(
@@ -147,8 +147,8 @@ async fn test_approve_step_link_success() {
 #[tokio::test]
 async fn test_approve_step_success() {
     let state = mock_state().await;
-    let run_id = Uuid::new_v4();
-    let step_id = Uuid::new_v4();
+    let run_id = stormchaser_model::RunId::new_v4();
+    let step_id = stormchaser_model::StepInstanceId::new_v4();
 
     sqlx::query("INSERT INTO workflow_runs (id, workflow_name, initiating_user, repo_url, workflow_path, git_ref, status, fencing_token) VALUES ($1, 'wf', 'user', 'url', 'path', 'ref', 'running'::run_status, 1)").bind(run_id).execute(&state.pool).await.unwrap();
     sqlx::query("INSERT INTO step_instances (id, run_id, step_name, step_type, status, created_at) VALUES ($1, $2, 'step', 'approval', 'waiting_for_event'::step_status, now())").bind(step_id).bind(run_id).execute(&state.pool).await.unwrap();
@@ -171,8 +171,8 @@ async fn test_approve_step_success() {
 #[tokio::test]
 async fn test_reject_step_success() {
     let state = mock_state().await;
-    let run_id = Uuid::new_v4();
-    let step_id = Uuid::new_v4();
+    let run_id = stormchaser_model::RunId::new_v4();
+    let step_id = stormchaser_model::StepInstanceId::new_v4();
 
     sqlx::query("INSERT INTO workflow_runs (id, workflow_name, initiating_user, repo_url, workflow_path, git_ref, status, fencing_token) VALUES ($1, 'wf', 'user', 'url', 'path', 'ref', 'running'::run_status, 1)").bind(run_id).execute(&state.pool).await.unwrap();
     sqlx::query("INSERT INTO step_instances (id, run_id, step_name, step_type, status, created_at) VALUES ($1, $2, 'step', 'approval', 'waiting_for_event'::step_status, now())").bind(step_id).bind(run_id).execute(&state.pool).await.unwrap();
@@ -194,8 +194,8 @@ async fn test_reject_step_success() {
 #[tokio::test]
 async fn test_correlate_event_success() {
     let state = mock_state().await;
-    let run_id = Uuid::new_v4();
-    let step_id = Uuid::new_v4();
+    let run_id = stormchaser_model::RunId::new_v4();
+    let step_id = stormchaser_model::StepInstanceId::new_v4();
     let corr_id = Uuid::new_v4();
 
     sqlx::query("INSERT INTO workflow_runs (id, workflow_name, initiating_user, repo_url, workflow_path, git_ref, status, fencing_token) VALUES ($1, 'wf', 'user', 'url', 'path', 'ref', 'running'::run_status, 1)").bind(run_id).execute(&state.pool).await.unwrap();

@@ -1,7 +1,7 @@
 use crate::UpdateStorageBackendRequest;
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
-use uuid::Uuid;
+use stormchaser_model::BackendId;
 
 use stormchaser_model::storage;
 
@@ -19,7 +19,7 @@ pub async fn unset_default_sfs(tx: &mut Transaction<'_, Postgres>) -> Result<(),
 #[allow(clippy::too_many_arguments)]
 pub async fn create_storage_backend(
     tx: &mut Transaction<'_, Postgres>,
-    id: Uuid,
+    id: BackendId,
     name: &str,
     description: &Option<String>,
     backend_type: &storage::BackendType,
@@ -59,7 +59,7 @@ pub async fn list_storage_backends(
 /// Get storage backend.
 pub async fn get_storage_backend(
     pool: &PgPool,
-    id: Uuid,
+    id: BackendId,
 ) -> Result<Option<storage::StorageBackend>, sqlx::Error> {
     sqlx::query_as("SELECT * FROM storage_backends WHERE id = $1")
         .bind(id)
@@ -71,7 +71,7 @@ pub async fn get_storage_backend(
 /// Update storage backend.
 pub async fn update_storage_backend(
     tx: &mut Transaction<'_, Postgres>,
-    id: Uuid,
+    id: BackendId,
     payload: &UpdateStorageBackendRequest,
 ) -> Result<(), sqlx::Error> {
     let mut query = sqlx::QueryBuilder::new("UPDATE storage_backends SET ");
@@ -114,7 +114,7 @@ pub async fn update_storage_backend(
 
 /// Deletes a storage backend from the database.
 /// Delete storage backend.
-pub async fn delete_storage_backend(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
+pub async fn delete_storage_backend(pool: &PgPool, id: BackendId) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM storage_backends WHERE id = $1")
         .bind(id)
         .execute(pool)

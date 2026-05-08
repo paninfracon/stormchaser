@@ -1,9 +1,9 @@
 //! Outbox pattern models for reliable event publishing.
 
+use crate::id::*;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use uuid::Uuid;
 
 /// Represents a message scheduled for reliable delivery via the outbox pattern.
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
@@ -11,7 +11,7 @@ pub struct OutboxMessage {
     /// Unique identifier for the outbox message.
     pub id: i64,
     /// Associated workflow run ID.
-    pub run_id: Uuid,
+    pub run_id: RunId,
     /// Event subject or topic.
     pub subject: String,
     /// JSON-encoded message payload.

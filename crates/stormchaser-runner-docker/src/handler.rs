@@ -8,6 +8,8 @@ use cloudevents::EventBuilder;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::time::Duration;
+use stormchaser_model::events::StepCompletedEvent;
+use stormchaser_model::events::StepFailedEvent;
 use tokio::time::sleep;
 use tracing::{error, info, warn};
 use uuid::Uuid;
@@ -396,9 +398,9 @@ pub async fn handle_task(
                 serde_json::json!(format!("{}ms", metrics.latency_ms)),
             );
 
-            let event = stormchaser_model::events::StepCompletedEvent {
-                run_id,
-                step_id,
+            let event = StepCompletedEvent {
+                run_id: stormchaser_model::RunId::new(run_id),
+                step_id: stormchaser_model::StepInstanceId::new(step_id),
                 event_type: "stormchaser.v1.step.completed".to_string(),
                 runner_id: Some(runner_id.clone()),
                 exit_code: metrics.exit_code.map(|c| c as i32),
@@ -441,9 +443,9 @@ pub async fn handle_task(
                 serde_json::json!(format!("{}ms", metrics.latency_ms)),
             );
 
-            let event = stormchaser_model::events::StepFailedEvent {
-                run_id,
-                step_id,
+            let event = StepFailedEvent {
+                run_id: stormchaser_model::RunId::new(run_id),
+                step_id: stormchaser_model::StepInstanceId::new(step_id),
                 event_type: "stormchaser.v1.step.failed".to_string(),
                 error: reason,
                 runner_id: Some(runner_id.clone()),

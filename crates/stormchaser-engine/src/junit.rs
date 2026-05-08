@@ -2,8 +2,10 @@ use anyhow::Result;
 use quick_xml::de::from_str;
 use serde::Deserialize;
 use serde_json::Value;
+use stormchaser_model::RunId;
+use stormchaser_model::StepInstanceId;
+use stormchaser_model::TestReportId;
 use stormchaser_model::{TestCase, TestCaseStatus, TestSummary};
-use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
@@ -66,11 +68,11 @@ struct TestSuites {
 pub fn parse_junit(
     content: &str,
     report_name: &str,
-    run_id: Uuid,
-    step_id: Uuid,
+    run_id: RunId,
+    step_id: StepInstanceId,
 ) -> Result<(TestSummary, Vec<TestCase>)> {
     let mut summary = TestSummary {
-        id: Uuid::new_v4(),
+        id: TestReportId::new_v4(),
         run_id,
         step_instance_id: step_id,
         report_name: report_name.to_string(),
@@ -113,7 +115,7 @@ pub fn parse_junit(
                     .and_then(|f| f.message.clone().or_else(|| f.content.clone()));
 
                 test_cases.push(TestCase {
-                    id: Uuid::new_v4(),
+                    id: TestReportId::new_v4(),
                     run_id,
                     step_instance_id: step_id,
                     report_name: report_name.to_string(),
@@ -153,7 +155,6 @@ pub fn aggregate_summaries(summaries: &[TestSummary]) -> Option<TestSummary> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uuid::Uuid;
 
     #[test]
     fn test_parse_junit_suites() {
@@ -171,8 +172,8 @@ mod tests {
         </testcase>
     </testsuite>
 </testsuites>"#;
-        let run_id = Uuid::new_v4();
-        let step_id = Uuid::new_v4();
+        let run_id = RunId::new_v4();
+        let step_id = StepInstanceId::new_v4();
         let (summary, cases) = parse_junit(xml, "test-report", run_id, step_id).unwrap();
 
         assert_eq!(summary.total_tests, 3);
@@ -195,8 +196,8 @@ mod tests {
         <skipped/>
     </testcase>
 </testsuite>"#;
-        let run_id = Uuid::new_v4();
-        let step_id = Uuid::new_v4();
+        let run_id = RunId::new_v4();
+        let step_id = StepInstanceId::new_v4();
         let (summary, cases) = parse_junit(xml, "test-report", run_id, step_id).unwrap();
 
         assert_eq!(summary.total_tests, 2);

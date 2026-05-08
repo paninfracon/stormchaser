@@ -3,7 +3,6 @@ use serde_json::Value;
 use sqlx::PgPool;
 use std::sync::Arc;
 use stormchaser_tls::TlsReloader;
-use uuid::Uuid;
 
 #[cfg(feature = "email")]
 use crate::handler::{fetch_outputs, fetch_run_context, fetch_step_instance};
@@ -20,16 +19,14 @@ use super::{complete_email_step, fail_email_step, ses, smtp};
 #[cfg(feature = "email")]
 /// Handle test report email.
 pub async fn handle_test_report_email(
-    run_id: Uuid,
-    step_id: Uuid,
+    run_id: stormchaser_model::RunId,
+    step_id: stormchaser_model::StepInstanceId,
     spec: Value,
     pool: PgPool,
     nats_client: async_nats::Client,
     tls_reloader: Arc<TlsReloader>,
 ) -> Result<()> {
-    use stormchaser_model::dsl::TestReportEmailSpec;
-
-    let spec: TestReportEmailSpec = serde_json::from_value(spec)?;
+    let spec: stormchaser_model::dsl::TestReportEmailSpec = serde_json::from_value(spec)?;
 
     info!("Sending test report email for run {}", run_id);
 
@@ -85,11 +82,11 @@ pub async fn handle_test_report_email(
 
 #[cfg(feature = "email")]
 async fn fetch_test_reports(
-    run_id: Uuid,
+    run_id: stormchaser_model::RunId,
     spec: &dsl::TestReportEmailSpec,
     pool: &PgPool,
 ) -> Result<Vec<Value>> {
-    let all_summaries = crate::db::get_test_summaries_for_run(pool, run_id).await?;
+    let all_summaries = crate::db::get_test_summaries_for_run(pool, run_id.into_inner()).await?;
     let filtered_summaries = if let Some(name) = &spec.report_name {
         all_summaries
             .into_iter()
@@ -102,7 +99,8 @@ async fn fetch_test_reports(
     let mut reports = Vec::new();
     for summary in filtered_summaries {
         let cases =
-            crate::db::get_test_cases_for_report(pool, run_id, &summary.report_name).await?;
+            crate::db::get_test_cases_for_report(pool, run_id.into_inner(), &summary.report_name)
+                .await?;
         reports.push(serde_json::json!({
             "summary": summary,
             "cases": cases
@@ -185,8 +183,8 @@ fn render_test_report_body(
 
 #[cfg(feature = "email")]
 async fn send_test_report_via_ses(
-    run_id: Uuid,
-    step_id: Uuid,
+    run_id: stormchaser_model::RunId,
+    step_id: stormchaser_model::StepInstanceId,
     spec: &dsl::TestReportEmailSpec,
     rendered_body: String,
     pool: PgPool,
@@ -231,8 +229,8 @@ async fn send_test_report_via_ses(
 
 #[cfg(feature = "email")]
 async fn send_test_report_via_smtp(
-    run_id: Uuid,
-    step_id: Uuid,
+    run_id: stormchaser_model::RunId,
+    step_id: stormchaser_model::StepInstanceId,
     spec: &dsl::TestReportEmailSpec,
     rendered_body: String,
     pool: PgPool,
@@ -296,8 +294,8 @@ async fn send_test_report_via_smtp(
 #[cfg(not(feature = "email"))]
 /// Handle test report email.
 pub async fn handle_test_report_email(
-    _run_id: Uuid,
-    _step_id: Uuid,
+    _run_id: stormchaser_model::RunId,
+    _step_id: stormchaser_model::StepInstanceId,
     _spec: Value,
     _pool: PgPool,
     _nats_client: async_nats::Client,

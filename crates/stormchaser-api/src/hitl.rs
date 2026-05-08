@@ -12,7 +12,8 @@ use axum::{
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use uuid::Uuid;
+use stormchaser_model::auth::ApprovalOpaContext;
+use stormchaser_model::step::StepStatus;
 
 use crate::auth::AuthClaims;
 use crate::db::{
@@ -21,16 +22,14 @@ use crate::db::{
 };
 use async_nats::jetstream::new as new_jetstream;
 use chrono::Utc;
-use stormchaser_model::auth::ApprovalOpaContext;
 use stormchaser_model::dsl::{Step, Workflow};
 use stormchaser_model::events::{StepCompletedEvent, StepFailedEvent};
 use stormchaser_model::nats::publish_cloudevent;
-use stormchaser_model::step::StepStatus;
 
 #[derive(serde::Deserialize, serde::Serialize)]
 struct ApprovalLinkPayload {
-    run_id: Uuid,
-    step_id: Uuid,
+    run_id: stormchaser_model::RunId,
+    step_id: stormchaser_model::StepInstanceId,
     action: String,
     #[serde(default)]
     inputs: Value,
@@ -113,7 +112,7 @@ pub async fn approve_step_link(
     // 6. Insert into approval_registry
     let _ = insert_approval_registry(
         &state.pool,
-        Uuid::new_v4(),
+        stormchaser_model::EventId::new_v4(),
         payload.step_id,
         "system-link",
         status_str,
@@ -156,7 +155,7 @@ pub async fn approve_step_link(
 
 async fn check_approval_opa(
     state: &AppState,
-    run_id: Uuid,
+    run_id: stormchaser_model::RunId,
     step_name: &str,
     token: Option<&str>,
 ) -> Result<(), (StatusCode, String)> {
@@ -246,7 +245,7 @@ pub async fn approve_step(
     State(state): State<AppState>,
     AuthClaims(claims): AuthClaims,
     headers: HeaderMap,
-    Path((run_id, step_id)): Path<(Uuid, Uuid)>,
+    Path((run_id, step_id)): Path<(stormchaser_model::RunId, stormchaser_model::StepInstanceId)>,
     Json(inputs): Json<Value>,
 ) -> impl IntoResponse {
     let token = headers
@@ -276,7 +275,7 @@ pub async fn approve_step(
     // 2. Insert into approval_registry
     let _ = insert_approval_registry(
         &state.pool,
-        Uuid::new_v4(),
+        stormchaser_model::EventId::new_v4(),
         step_id,
         &claims.sub,
         "approved",
@@ -319,7 +318,7 @@ pub async fn reject_step(
     State(state): State<AppState>,
     AuthClaims(claims): AuthClaims,
     headers: HeaderMap,
-    Path((run_id, step_id)): Path<(Uuid, Uuid)>,
+    Path((run_id, step_id)): Path<(stormchaser_model::RunId, stormchaser_model::StepInstanceId)>,
 ) -> impl IntoResponse {
     let token = headers
         .get(AUTHORIZATION)
@@ -346,7 +345,7 @@ pub async fn reject_step(
 
     let _ = insert_approval_registry(
         &state.pool,
-        Uuid::new_v4(),
+        stormchaser_model::EventId::new_v4(),
         step_id,
         &claims.sub,
         "rejected",

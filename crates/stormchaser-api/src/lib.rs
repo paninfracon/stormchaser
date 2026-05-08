@@ -234,7 +234,10 @@ pub fn app(state: AppState) -> Router {
         .route("/auth/exchange", post(exchange_token))
         .route("/auth/refresh", post(refresh_token))
         .route("/approve-link/:token", get(hitl::approve_step_link))
-        .route("/cron-trigger/:id", post(trigger_cron_workflow))
+        .route(
+            "/cron-trigger/:id",
+            post(routes::cron::trigger_cron_workflow),
+        )
         .route("/schema", get(routes::schema::get_schema))
         .layer(middleware::from_fn_with_state(
             rate_limit_state,

@@ -1,7 +1,6 @@
 use anyhow::Result;
 use serde_json::Value;
 use sqlx::PgPool;
-use uuid::Uuid;
 
 #[cfg(feature = "aws-lambda")]
 use crate::handler::fetch_step_instance;
@@ -22,15 +21,13 @@ use aws_sdk_lambda::types::InvocationType;
 #[cfg(feature = "aws-lambda")]
 /// Handle lambda invoke.
 pub async fn handle_lambda_invoke(
-    run_id: Uuid,
-    step_id: Uuid,
+    run_id: stormchaser_model::RunId,
+    step_id: stormchaser_model::StepInstanceId,
     spec: Value,
     pool: PgPool,
     nats_client: async_nats::Client,
 ) -> Result<()> {
-    use stormchaser_model::dsl::LambdaInvokeSpec;
-
-    let spec: LambdaInvokeSpec = serde_json::from_value(spec)?;
+    let spec: stormchaser_model::dsl::LambdaInvokeSpec = serde_json::from_value(spec)?;
 
     info!(
         "Invoking Lambda function {} for run {}",
@@ -84,7 +81,7 @@ pub async fn handle_lambda_invoke(
 #[cfg(feature = "aws-lambda")]
 async fn build_lambda_client(
     spec: &dsl::LambdaInvokeSpec,
-    run_id: Uuid,
+    run_id: stormchaser_model::RunId,
 ) -> Result<aws_sdk_lambda::Client> {
     let mut config_loader = aws_config::defaults(aws_config::BehaviorVersion::v2026_01_12());
     if let Some(region) = &spec.region {
@@ -132,8 +129,8 @@ async fn build_lambda_client(
 
 #[cfg(feature = "aws-lambda")]
 async fn handle_lambda_response(
-    run_id: Uuid,
-    step_id: Uuid,
+    run_id: stormchaser_model::RunId,
+    step_id: stormchaser_model::StepInstanceId,
     response: aws_sdk_lambda::operation::invoke::InvokeOutput,
     pool: PgPool,
     nats_client: async_nats::Client,
@@ -226,8 +223,8 @@ async fn handle_lambda_response(
 #[cfg(not(feature = "aws-lambda"))]
 /// Handle lambda invoke.
 pub async fn handle_lambda_invoke(
-    _run_id: Uuid,
-    _step_id: Uuid,
+    _run_id: stormchaser_model::RunId,
+    _step_id: stormchaser_model::StepInstanceId,
     _spec: Value,
     _pool: PgPool,
     _nats_client: async_nats::Client,

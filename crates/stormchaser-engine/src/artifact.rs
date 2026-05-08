@@ -71,11 +71,12 @@ pub async fn generate_parking_instructions(
 mod tests {
     use super::*;
     use serde_json::json;
+    use stormchaser_model::BackendId;
 
     #[tokio::test]
     async fn test_generate_parking_instructions_oci() {
         let backend = StorageBackend {
-            id: Uuid::new_v4(),
+            id: BackendId::new_v4(),
             name: "oci-registry".into(),
             description: None,
             backend_type: BackendType::Oci,
@@ -117,7 +118,7 @@ mod tests {
     #[tokio::test]
     async fn test_generate_parking_instructions_unsupported() {
         let backend = StorageBackend {
-            id: Uuid::new_v4(),
+            id: BackendId::new_v4(),
             name: "fs-backend".into(),
             description: None,
             backend_type: BackendType::Jfrog,

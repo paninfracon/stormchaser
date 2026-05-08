@@ -12,6 +12,7 @@ use futures::StreamExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use stormchaser_model::dsl::CommonContainerSpec;
+use stormchaser_model::events::StepRunningEvent;
 use tokio::time::sleep;
 use tracing::{error, info};
 use uuid::Uuid;
@@ -246,9 +247,9 @@ impl DockerContainerMachine<state::Initialized> {
             .await?;
 
         if let Some(nats) = &self.nats {
-            let running_event = stormchaser_model::events::StepRunningEvent {
-                run_id: self.metadata.run_id,
-                step_id: self.metadata.step_id,
+            let running_event = StepRunningEvent {
+                run_id: stormchaser_model::RunId::new(self.metadata.run_id),
+                step_id: stormchaser_model::StepInstanceId::new(self.metadata.step_id),
                 event_type: "stormchaser.v1.step.running".to_string(),
                 timestamp: chrono::Utc::now(),
             };

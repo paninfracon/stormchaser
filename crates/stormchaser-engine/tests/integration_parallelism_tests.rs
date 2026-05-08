@@ -4,7 +4,7 @@ use std::sync::Arc;
 use stormchaser_engine::handler;
 use stormchaser_model::auth::OpaClient;
 use stormchaser_model::step::{StepInstance, StepStatus};
-use uuid::Uuid;
+use stormchaser_model::RunId;
 
 use stormchaser_tls::TlsConfig;
 use stormchaser_tls::TlsReloader;
@@ -29,7 +29,7 @@ async fn test_dynamic_parallelism_with_batching() {
     let nats_client = async_nats::connect(nats_url).await.unwrap();
     let opa_client = Arc::new(OpaClient::new(None, None));
 
-    let run_id = Uuid::new_v4();
+    let run_id = RunId::new_v4();
     let dsl = r#"
         stormchaser_dsl_version = "v1"
         workflow "parallel-test" {

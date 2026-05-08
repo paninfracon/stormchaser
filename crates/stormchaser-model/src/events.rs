@@ -1,13 +1,13 @@
+use crate::id::{RunId, StepInstanceId};
 use chrono::{DateTime, Utc};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkflowQueuedEvent {
-    pub run_id: Uuid,
+    pub run_id: RunId,
     pub event_type: String,
     pub timestamp: DateTime<Utc>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -20,43 +20,43 @@ pub struct WorkflowQueuedEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkflowStartPendingEvent {
-    pub run_id: Uuid,
+    pub run_id: RunId,
     pub event_type: String,
     pub timestamp: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkflowRunningEvent {
-    pub run_id: Uuid,
+    pub run_id: RunId,
     pub event_type: String,
     pub timestamp: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkflowCompletedEvent {
-    pub run_id: Uuid,
+    pub run_id: RunId,
     pub event_type: String,
     pub timestamp: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkflowFailedEvent {
-    pub run_id: Uuid,
+    pub run_id: RunId,
     pub event_type: String,
     pub timestamp: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkflowAbortedEvent {
-    pub run_id: Uuid,
+    pub run_id: RunId,
     pub event_type: String,
     pub timestamp: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct StepScheduledEvent {
-    pub run_id: Uuid,
-    pub step_id: Uuid,
+    pub run_id: RunId,
+    pub step_id: StepInstanceId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub step_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -76,16 +76,16 @@ pub struct StepScheduledEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct StepRunningEvent {
-    pub run_id: Uuid,
-    pub step_id: Uuid,
+    pub run_id: RunId,
+    pub step_id: StepInstanceId,
     pub event_type: String,
     pub timestamp: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct StepCompletedEvent {
-    pub run_id: Uuid,
-    pub step_id: Uuid,
+    pub run_id: RunId,
+    pub step_id: StepInstanceId,
     pub event_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runner_id: Option<String>,
@@ -104,8 +104,8 @@ pub struct StepCompletedEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct StepFailedEvent {
-    pub run_id: Uuid,
-    pub step_id: Uuid,
+    pub run_id: RunId,
+    pub step_id: StepInstanceId,
     pub event_type: String,
     pub error: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -125,12 +125,12 @@ pub struct StepFailedEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct StepQueryEvent {
-    pub step_id: Uuid,
+    pub step_id: StepInstanceId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct StepQueryResponseEvent {
-    pub step_id: Uuid,
+    pub step_id: StepInstanceId,
     pub exists: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
@@ -172,6 +172,7 @@ pub struct RunnerOfflineEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::Uuid;
 
     #[test]
     fn test_runner_register_event_deserializes_from_wire_format() {
@@ -230,7 +231,7 @@ mod tests {
     #[test]
     fn test_step_query_event_has_only_step_id() {
         let event = StepQueryEvent {
-            step_id: Uuid::nil(),
+            step_id: StepInstanceId::new(Uuid::nil()),
         };
         let json = serde_json::to_value(&event).unwrap();
         assert!(json.get("step_id").is_some());

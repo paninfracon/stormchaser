@@ -19,6 +19,7 @@ use serde_json::Value;
 use stormchaser_model::events::WorkflowQueuedEvent;
 use stormchaser_model::nats::publish_cloudevent;
 use stormchaser_model::workflow::RunStatus;
+use stormchaser_model::RunId;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -42,7 +43,7 @@ pub async fn enqueue_workflow(
     State(state): State<AppState>,
     Json(payload): Json<EnqueueRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let run_id = Uuid::new_v4();
+    let run_id = stormchaser_model::RunId::new_v4();
     let user_id = claims.email.clone().unwrap_or(claims.sub.clone());
 
     let span = tracing::Span::current();
@@ -176,7 +177,7 @@ pub async fn list_workflow_runs(
     get,
     path = "/api/v1/runs/{id}",
     params(
-        ("id" = Uuid, Path, description = "Run ID")
+        ("id" = stormchaser_model::RunId, Path, description = "Run ID")
     ),
     responses(
         (status = 200, description = "Workflow run details", body = WorkflowRunFullDetail),
@@ -191,7 +192,7 @@ pub async fn list_workflow_runs(
 pub async fn get_workflow_run(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path(run_id): Path<Uuid>,
+    Path(run_id): Path<RunId>,
 ) -> Result<impl IntoResponse, StatusCode> {
     // 1. Fetch the workflow run detail
     let detail: WorkflowRunDetail = db::get_workflow_run_detail(&state.pool, run_id)
@@ -290,7 +291,7 @@ pub async fn get_workflow_run(
 #[utoipa::path(
     delete,
     path = "/api/v1/runs/{run_id}",
-    params(("run_id" = Uuid, Path, description="Run ID")),
+    params(("run_id" = stormchaser_model::RunId, Path, description="Run ID")),
     responses(
         (status = 200, description = "Success"),
         (status = 400, description = "Bad Request"),
@@ -302,7 +303,7 @@ pub async fn get_workflow_run(
 pub async fn delete_workflow_run_api(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path(run_id): Path<Uuid>,
+    Path(run_id): Path<RunId>,
 ) -> Result<impl IntoResponse, StatusCode> {
     db::delete_workflow_run(&state.pool, run_id)
         .await
@@ -334,7 +335,7 @@ pub async fn direct_run(
     State(state): State<AppState>,
     Json(payload): Json<DirectRunRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let run_id = Uuid::new_v4();
+    let run_id = stormchaser_model::RunId::new_v4();
     let user_id = claims.email.clone().unwrap_or(claims.sub.clone());
 
     let span = tracing::Span::current();
@@ -430,9 +431,10 @@ pub async fn stream_workflow_runs_api(
             if let Some(run_id_str) = payload.get("run_id").and_then(|id| id.as_str()) {
                 if let Ok(run_id) = Uuid::parse_str(run_id_str) {
                     // Fetch full detail for the run
-                    let detail = db::get_workflow_run_detail(&pool, run_id)
-                        .await
-                        .unwrap_or(None);
+                    let detail =
+                        db::get_workflow_run_detail(&pool, stormchaser_model::RunId::new(run_id))
+                            .await
+                            .unwrap_or(None);
 
                     if let Some(run) = detail {
                         let data = serde_json::to_string(&run).unwrap_or_default();

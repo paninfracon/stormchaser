@@ -4,7 +4,8 @@ use sqlx::PgPool;
 use stormchaser_engine::step_machine::{state, StepMachine};
 use stormchaser_model::step::StepStatus;
 use stormchaser_model::workflow::RunStatus;
-use uuid::Uuid;
+use stormchaser_model::RunId;
+use stormchaser_model::StepInstanceId;
 
 // Helper to setup database test environment. Assuming a setup script handles standard test env setup.
 async fn setup_db() -> Result<PgPool> {
@@ -30,7 +31,7 @@ async fn test_step_machine_pending_fail() -> Result<()> {
 
     let mut tx = pool.begin().await?;
 
-    let run_id = Uuid::new_v4();
+    let run_id = RunId::new_v4();
     stormchaser_engine::db::insert_workflow_run(
         &mut *tx,
         run_id,
@@ -47,7 +48,7 @@ async fn test_step_machine_pending_fail() -> Result<()> {
     )
     .await?;
 
-    let step_id = Uuid::new_v4();
+    let step_id = StepInstanceId::new_v4();
     stormchaser_engine::db::insert_step_instance_with_spec(
         &mut *tx,
         step_id,
@@ -92,7 +93,7 @@ async fn test_step_machine_waiting_for_event_fail() -> Result<()> {
 
     let mut tx = pool.begin().await?;
 
-    let run_id = Uuid::new_v4();
+    let run_id = RunId::new_v4();
     stormchaser_engine::db::insert_workflow_run(
         &mut *tx,
         run_id,
@@ -109,7 +110,7 @@ async fn test_step_machine_waiting_for_event_fail() -> Result<()> {
     )
     .await?;
 
-    let step_id = Uuid::new_v4();
+    let step_id = StepInstanceId::new_v4();
     stormchaser_engine::db::insert_step_instance_with_spec(
         &mut *tx,
         step_id,

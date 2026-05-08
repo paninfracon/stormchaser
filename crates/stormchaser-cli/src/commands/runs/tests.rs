@@ -76,7 +76,7 @@ mod tests {
     #[tokio::test]
     async fn test_runs_get() {
         let server = MockServer::start().await;
-        let id = Uuid::new_v4();
+        let id = stormchaser_model::RunId::new_v4();
         Mock::given(method("GET"))
             .and(path(format!("/api/v1/runs/{}", id)))
             .and(header("Authorization", "Bearer test-token"))
@@ -94,7 +94,7 @@ mod tests {
     #[tokio::test]
     async fn test_runs_artifacts() {
         let server = MockServer::start().await;
-        let id = Uuid::new_v4();
+        let id = stormchaser_model::RunId::new_v4();
         Mock::given(method("GET"))
             .and(path(format!("/api/v1/runs/{}/artifacts", id)))
             .and(header("Authorization", "Bearer test-token"))
@@ -112,8 +112,8 @@ mod tests {
     #[tokio::test]
     async fn test_runs_approve() {
         let server = MockServer::start().await;
-        let run_id = Uuid::new_v4();
-        let step_id = Uuid::new_v4();
+        let run_id = stormchaser_model::RunId::new_v4();
+        let step_id = stormchaser_model::StepInstanceId::new_v4();
         Mock::given(method("POST"))
             .and(path(format!(
                 "/api/v1/runs/{}/steps/{}/approve",
@@ -138,8 +138,8 @@ mod tests {
     #[tokio::test]
     async fn test_runs_reject() {
         let server = MockServer::start().await;
-        let run_id = Uuid::new_v4();
-        let step_id = Uuid::new_v4();
+        let run_id = stormchaser_model::RunId::new_v4();
+        let step_id = stormchaser_model::StepInstanceId::new_v4();
         Mock::given(method("POST"))
             .and(path(format!(
                 "/api/v1/runs/{}/steps/{}/reject",

@@ -5,9 +5,10 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use stormchaser_dsl::StormchaserParser;
 use stormchaser_model::auth::{EngineOpaContext, OpaClient};
+use stormchaser_model::events::WorkflowStartPendingEvent;
 use stormchaser_model::workflow::{RunStatus, WorkflowRun};
+use stormchaser_model::RunId;
 use tracing::{debug, error, info};
-use uuid::Uuid;
 
 #[tracing::instrument(skip(payload, pool, opa_client, nats_client), fields(run_id = tracing::field::Empty))]
 /// Handle workflow direct.
@@ -18,7 +19,7 @@ pub async fn handle_workflow_direct(
     nats_client: async_nats::Client,
 ) -> Result<()> {
     let run_id_str = payload["run_id"].as_str().context("Missing run_id")?;
-    let run_id = Uuid::parse_str(run_id_str)?;
+    let run_id = uuid::Uuid::parse_str(run_id_str).map(RunId::new)?;
     tracing::Span::current().record("run_id", tracing::field::display(run_id));
     let workflow_content = payload["dsl"].as_str().context("Missing dsl content")?;
     let initiating_user = payload["initiating_user"]
@@ -101,7 +102,7 @@ pub async fn handle_workflow_direct(
     tx.commit().await?;
 
     // 4. Emit event for transition to StartPending
-    let event = stormchaser_model::events::WorkflowStartPendingEvent {
+    let event = WorkflowStartPendingEvent {
         run_id,
         event_type: "workflow_start_pending".to_string(),
         timestamp: Utc::now(),

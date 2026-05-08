@@ -9,6 +9,7 @@ use kube::{
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
+use stormchaser_model::events::StepFailedEvent;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -280,9 +281,9 @@ pub async fn scan_for_orphans(
                                     serde_json::json!(format!("{}ms", metrics.latency_ms)),
                                 );
 
-                                let event = stormchaser_model::events::StepFailedEvent {
-                                    run_id,
-                                    step_id,
+                                let event = StepFailedEvent {
+                                    run_id: stormchaser_model::RunId::new(run_id),
+                                    step_id: stormchaser_model::StepInstanceId::new(step_id),
                                     event_type: "stormchaser.v1.step.failed".to_string(),
                                     error: reason,
                                     runner_id: Some(r_id.clone()),

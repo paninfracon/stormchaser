@@ -1,14 +1,14 @@
 use crate::{TestReportSummary, TestSummaryResponse};
 use sqlx::PgPool;
-use uuid::Uuid;
-
+use stormchaser_model::RunId;
 use stormchaser_model::TestCase;
+use stormchaser_model::TestReportId;
 
 /// Retrieves test reports for a specific workflow run.
 /// List run test reports.
 pub async fn list_run_test_reports(
     pool: &PgPool,
-    run_id: Uuid,
+    run_id: RunId,
 ) -> Result<Vec<TestReportSummary>, sqlx::Error> {
     sqlx::query_as(
         r#"
@@ -29,7 +29,7 @@ pub async fn list_run_test_reports(
 /// List run test summaries.
 pub async fn list_run_test_summaries(
     pool: &PgPool,
-    run_id: Uuid,
+    run_id: RunId,
 ) -> Result<Vec<TestSummaryResponse>, sqlx::Error> {
     sqlx::query_as(
         r#"
@@ -50,7 +50,7 @@ pub async fn list_run_test_summaries(
 /// List run test cases.
 pub async fn list_run_test_cases(
     pool: &PgPool,
-    run_id: Uuid,
+    run_id: RunId,
 ) -> Result<Vec<TestCase>, sqlx::Error> {
     sqlx::query_as(
         r#"
@@ -71,7 +71,7 @@ pub async fn list_run_test_cases(
 /// Get test report.
 pub async fn get_test_report(
     pool: &PgPool,
-    report_id: Uuid,
+    report_id: TestReportId,
 ) -> Result<Option<String>, sqlx::Error> {
     sqlx::query_scalar(
         r#"

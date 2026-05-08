@@ -3,7 +3,6 @@ use eventsource_stream::Eventsource;
 use futures::stream::StreamExt;
 use serde_json::json;
 use serde_json::Value;
-use uuid::Uuid;
 
 pub fn parse_key_val_list(list: Vec<String>) -> serde_json::Map<String, Value> {
     let mut map = serde_json::Map::new();
@@ -42,7 +41,7 @@ pub async fn stream_run_logs(
     http_client: &reqwest_middleware::ClientWithMiddleware,
     cli_url: &str,
     token: &str,
-    run_id: Uuid,
+    run_id: stormchaser_model::RunId,
 ) -> Result<()> {
     let res = http_client
         .get(format!("{}/api/v1/runs/{}/logs/stream", cli_url, run_id))
@@ -78,7 +77,7 @@ pub async fn stream_run_status(
     http_client: &reqwest_middleware::ClientWithMiddleware,
     cli_url: &str,
     token: &str,
-    run_id: Uuid,
+    run_id: stormchaser_model::RunId,
 ) -> Result<()> {
     let res = http_client
         .get(format!("{}/api/v1/runs/{}/status/stream", cli_url, run_id))
@@ -129,14 +128,14 @@ pub async fn handle_run_response(
             println!("{}", serde_json::to_string_pretty(&val)?);
             if tail {
                 if let Some(id_str) = val.get("run_id").and_then(|i| i.as_str()) {
-                    if let Ok(run_id) = Uuid::parse_str(id_str) {
+                    if let Ok(run_id) = id_str.parse::<stormchaser_model::RunId>() {
                         println!("Streaming logs for run {}...", run_id);
                         stream_run_logs(http_client, url, token, run_id).await?;
                     }
                 }
             } else if watch {
                 if let Some(id_str) = val.get("run_id").and_then(|i| i.as_str()) {
-                    if let Ok(run_id) = Uuid::parse_str(id_str) {
+                    if let Ok(run_id) = id_str.parse::<stormchaser_model::RunId>() {
                         println!("Watching status for run {}...", run_id);
                         stream_run_status(http_client, url, token, run_id).await?;
                     }

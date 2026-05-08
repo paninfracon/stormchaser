@@ -1,3 +1,4 @@
+use crate::id::EventId;
 use anyhow::Result;
 use async_nats::jetstream;
 use async_nats::HeaderMap;
@@ -75,7 +76,7 @@ pub async fn publish_cloudevent(
     schema_id: Option<&str>,
 ) -> Result<()> {
     let event = EventBuilderV10::new()
-        .id(uuid::Uuid::new_v4().to_string())
+        .id(EventId::new_v4().into_inner().to_string())
         .ty(event_type)
         .source(source)
         .time(chrono::Utc::now())

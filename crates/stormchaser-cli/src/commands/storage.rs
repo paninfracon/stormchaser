@@ -5,7 +5,6 @@ use serde_json::json;
 use serde_json::Value;
 use std::fs;
 use std::path::PathBuf;
-use uuid::Uuid;
 
 #[derive(Subcommand)]
 pub enum StorageCommands {
@@ -29,10 +28,10 @@ pub enum StorageCommands {
         aws_assume_role_arn: Option<String>,
     },
     /// Get storage backend details
-    Get { id: Uuid },
+    Get { id: stormchaser_model::BackendId },
     /// Update a storage backend
     Update {
-        id: Uuid,
+        id: stormchaser_model::BackendId,
         #[arg(long)]
         name: Option<String>,
         /// Path to JSON configuration file
@@ -47,7 +46,7 @@ pub enum StorageCommands {
         aws_assume_role_arn: Option<String>,
     },
     /// Delete a storage backend
-    Delete { id: Uuid },
+    Delete { id: stormchaser_model::BackendId },
 }
 
 pub async fn handle(
@@ -203,7 +202,7 @@ mod tests {
     #[tokio::test]
     async fn test_storage_delete() {
         let server = MockServer::start().await;
-        let id = Uuid::new_v4();
+        let id = stormchaser_model::BackendId::new_v4();
         Mock::given(method("DELETE"))
             .and(path(format!("/api/v1/storage-backends/{}", id)))
             .and(header("Authorization", "Bearer test-token"))

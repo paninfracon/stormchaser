@@ -1,9 +1,9 @@
 use sqlx::{Executor, Postgres};
-use uuid::Uuid;
+use stormchaser_model::RunId;
 
 #[allow(clippy::too_many_arguments)]
 /// Get run quota by id.
-pub async fn get_run_quota_by_id<'a, E, O>(executor: E, run_id: Uuid) -> Result<O, sqlx::Error>
+pub async fn get_run_quota_by_id<'a, E, O>(executor: E, run_id: RunId) -> Result<O, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
     O: Send + Unpin + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,
@@ -19,7 +19,7 @@ where
 /// Claim step quota.
 pub async fn claim_step_quota(
     executor: &mut sqlx::PgConnection,
-    run_id: Uuid,
+    run_id: RunId,
     cpu_req: f64,
     mem_req: i64,
     max_cpu: f64,
@@ -59,7 +59,7 @@ pub async fn claim_step_quota(
 /// Release step quota.
 pub async fn release_step_quota(
     executor: &mut sqlx::PgConnection,
-    run_id: Uuid,
+    run_id: RunId,
     cpu_req: f64,
     mem_req: i64,
 ) -> Result<(), sqlx::Error> {

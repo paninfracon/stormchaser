@@ -1,10 +1,11 @@
 use serde_json::Value;
 use stormchaser_dsl::ast;
 use stormchaser_model::dsl;
+use stormchaser_model::step::StepStatus;
+use stormchaser_model::{EventId, RunId, StepInstanceId};
 
 use anyhow::Result;
 use sqlx::PgPool;
-use stormchaser_model::step::StepStatus;
 use uuid::Uuid;
 
 use crate::handler::{
@@ -13,7 +14,7 @@ use crate::handler::{
 
 /// Schedules a step for execution, creating a new instance and managing its initial state transitions based on dependencies and quotas.
 pub async fn schedule_step(
-    run_id: Uuid,
+    run_id: RunId,
     step_dsl: &ast::Step,
     executor: &mut sqlx::PgConnection,
     nats_client: async_nats::Client,
@@ -65,7 +66,7 @@ pub async fn schedule_step(
             Ok(Value::Bool(false)) => {
                 crate::db::insert_step_instance(
                     executor,
-                    Uuid::new_v4(),
+                    StepInstanceId::new_v4(),
                     run_id,
                     &step_dsl.name,
                     &step_dsl.r#type,
@@ -90,7 +91,7 @@ pub async fn schedule_step(
         if items.is_empty() {
             crate::db::insert_step_instance(
                 executor,
-                Uuid::new_v4(),
+                StepInstanceId::new_v4(),
                 run_id,
                 &step_dsl.name,
                 &step_dsl.r#type,
@@ -114,7 +115,7 @@ pub async fn schedule_step(
             crate::db::count_running_steps_for_run(&mut *executor, run_id).await?;
 
         for (idx, item) in items.into_iter().enumerate() {
-            let step_instance_id = Uuid::new_v4();
+            let step_instance_id = StepInstanceId::new(Uuid::new_v4());
             let status = match step_dsl.r#type.as_str() {
                 "Approval" | "Wait" => StepStatus::WaitingForEvent,
                 _ => {
@@ -162,7 +163,7 @@ pub async fn schedule_step(
                 {
                     let _ = crate::db::insert_event_correlation(
                         &mut *executor,
-                        Uuid::new_v4(),
+                        EventId::new_v4(),
                         step_instance_id,
                         run_id,
                         &wait_spec.correlation_key,
@@ -176,7 +177,7 @@ pub async fn schedule_step(
         let _ = crate::hcl_eval::resolve_expressions(&mut resolved_spec, hcl_ctx);
         let _ = crate::hcl_eval::resolve_expressions(&mut resolved_params, hcl_ctx);
 
-        let step_instance_id = Uuid::new_v4();
+        let step_instance_id = StepInstanceId::new(Uuid::new_v4());
         let initial_status = match resolved_type.as_str() {
             "Approval" | "Wait" => StepStatus::WaitingForEvent,
             _ => StepStatus::Pending,
@@ -207,7 +208,7 @@ pub async fn schedule_step(
                 {
                     let _ = crate::db::insert_event_correlation(
                         &mut *executor,
-                        Uuid::new_v4(),
+                        EventId::new_v4(),
                         step_instance_id,
                         run_id,
                         &wait_spec.correlation_key,

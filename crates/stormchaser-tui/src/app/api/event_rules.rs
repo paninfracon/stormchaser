@@ -1,4 +1,6 @@
 use super::*;
+use stormchaser_model::event_rules::EventRule;
+use stormchaser_model::WebhookId;
 
 impl<'a> App<'a> {
     /// Fetches the latest list of event rules from the API.
@@ -12,9 +14,7 @@ impl<'a> App<'a> {
             .await?;
 
         if res.status().is_success() {
-            self.event_rules = res
-                .json::<Vec<stormchaser_model::event_rules::EventRule>>()
-                .await?;
+            self.event_rules = res.json::<Vec<EventRule>>().await?;
             if !self.event_rules.is_empty() {
                 if self.event_rules_state.selected().is_none() {
                     self.event_rules_state.select(Some(0));
@@ -75,10 +75,10 @@ impl<'a> App<'a> {
             }
         };
 
-        let webhook_uuid = if webhook_id.trim().is_empty() {
+        let webhook_id_typed = if webhook_id.trim().is_empty() {
             None
         } else {
-            match uuid::Uuid::parse_str(&webhook_id) {
+            match uuid::Uuid::parse_str(&webhook_id).map(WebhookId::new) {
                 Ok(id) => Some(id),
                 Err(_) => {
                     self.error = Some("Invalid Webhook ID format".to_string());
@@ -96,7 +96,7 @@ impl<'a> App<'a> {
         let payload = serde_json::json!({
             "name": name,
             "description": if description.trim().is_empty() { None::<String> } else { Some(description) },
-            "webhook_id": webhook_uuid,
+            "webhook_id": webhook_id_typed.map(|i| i.into_inner()),
             "event_type_pattern": event_type_pattern,
             "condition_expr": if condition_expr.trim().is_empty() { None::<String> } else { Some(condition_expr) },
             "workflow_name": workflow_name,
@@ -145,13 +145,11 @@ impl<'a> App<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stormchaser_model::event_rules::EventRule;
     use tokio::sync::mpsc;
-    use uuid::Uuid;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    fn make_event_rule(id: Uuid) -> EventRule {
+    fn make_event_rule(id: RuleId) -> EventRule {
         EventRule {
             id,
             name: "test-rule".to_string(),
@@ -173,7 +171,7 @@ mod tests {
     #[tokio::test]
     async fn test_refresh_event_rules_uses_correct_path() {
         let server = MockServer::start().await;
-        let id = Uuid::new_v4();
+        let id = RuleId::new_v4();
 
         Mock::given(method("GET"))
             .and(path("/api/v1/rules"))
@@ -194,7 +192,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_event_rule_uses_correct_path() {
         let server = MockServer::start().await;
-        let id = Uuid::new_v4();
+        let id = RuleId::new_v4();
 
         Mock::given(method("DELETE"))
             .and(path(format!("/api/v1/rules/{}", id)))

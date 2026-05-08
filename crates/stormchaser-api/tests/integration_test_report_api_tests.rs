@@ -17,7 +17,7 @@ async fn test_report_api_integration() {
     });
     let pool = PgPool::connect(&db_url).await.unwrap();
 
-    let run_id = Uuid::new_v4();
+    let run_id = stormchaser_model::RunId::new_v4();
     let step_id = Uuid::new_v4();
 
     // 1. Setup data

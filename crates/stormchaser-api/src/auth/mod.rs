@@ -9,7 +9,6 @@ use axum::{
 };
 use jsonwebtoken::{decode, decode_header, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
-
 pub use stormchaser_model::auth::Claims;
 
 /// Fallback JWT secret for local development

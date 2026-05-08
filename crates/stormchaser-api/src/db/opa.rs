@@ -1,10 +1,9 @@
 use sqlx::PgPool;
-use uuid::Uuid;
 
 /// Retrieves run outputs for OPA evaluation.
 pub async fn get_run_outputs_for_opa(
     pool: &PgPool,
-    run_id: Uuid,
+    run_id: stormchaser_model::RunId,
 ) -> Result<serde_json::Map<String, serde_json::Value>, sqlx::Error> {
     use sqlx::Row;
     let outputs_rows = sqlx::query(
@@ -43,7 +42,7 @@ pub async fn get_run_outputs_for_opa(
 /// Retrieves workflow context for OPA evaluation.
 pub async fn get_workflow_context_for_opa(
     pool: &PgPool,
-    run_id: Uuid,
+    run_id: stormchaser_model::RunId,
 ) -> Result<Option<WorkflowOpaContextData>, sqlx::Error> {
     let context_row = sqlx::query(
         r#"

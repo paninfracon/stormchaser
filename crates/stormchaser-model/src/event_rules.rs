@@ -1,17 +1,17 @@
 //! Rule-based event processing and webhook configuration models.
 
+use crate::id::*;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use utoipa::ToSchema;
-use uuid::Uuid;
 
 /// Configuration for an external webhook integration.
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow, ToSchema)]
 pub struct WebhookConfig {
     /// Unique identifier for the webhook configuration.
-    pub id: Uuid,
+    pub id: WebhookId,
     /// Descriptive name for the webhook.
     pub name: String,
     /// Optional detailed description.
@@ -38,13 +38,13 @@ pub struct WebhookConfig {
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow, ToSchema)]
 pub struct EventRule {
     /// Unique identifier for the event rule.
-    pub id: Uuid,
+    pub id: RuleId,
     /// Name of the event rule.
     pub name: String,
     /// Optional description of the rule's behavior.
     pub description: Option<String>,
     /// Optional ID of the webhook this rule applies to.
-    pub webhook_id: Option<Uuid>,
+    pub webhook_id: Option<WebhookId>,
     /// Pattern matching the type of event to handle.
     pub event_type_pattern: String,
     /// CEL expression used to filter matching events.

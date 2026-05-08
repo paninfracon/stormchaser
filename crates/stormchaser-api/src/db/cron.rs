@@ -1,6 +1,6 @@
 use serde_json::Value;
 use sqlx::PgPool;
-use uuid::Uuid;
+use stormchaser_model::CronWorkflowId;
 
 use stormchaser_model::cron;
 
@@ -8,7 +8,7 @@ use stormchaser_model::cron;
 #[allow(clippy::too_many_arguments)]
 pub async fn create_cron_workflow(
     pool: &PgPool,
-    id: Uuid,
+    id: CronWorkflowId,
     name: &str,
     description: &Option<String>,
     cronspec: &str,
@@ -54,7 +54,7 @@ pub async fn list_cron_workflows(pool: &PgPool) -> Result<Vec<cron::CronWorkflow
 /// Get cron workflow.
 pub async fn get_cron_workflow(
     pool: &PgPool,
-    id: Uuid,
+    id: CronWorkflowId,
 ) -> Result<Option<cron::CronWorkflow>, sqlx::Error> {
     sqlx::query_as("SELECT * FROM cron_workflows WHERE id = $1")
         .bind(id)
@@ -66,7 +66,7 @@ pub async fn get_cron_workflow(
 /// Get active cron workflow.
 pub async fn get_active_cron_workflow(
     pool: &PgPool,
-    id: Uuid,
+    id: CronWorkflowId,
 ) -> Result<Option<cron::CronWorkflow>, sqlx::Error> {
     sqlx::query_as("SELECT * FROM cron_workflows WHERE id = $1 AND is_active = TRUE")
         .bind(id)
@@ -75,7 +75,7 @@ pub async fn get_active_cron_workflow(
 }
 
 /// Deletes a scheduled workflow configuration
-pub async fn delete_cron_workflow(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
+pub async fn delete_cron_workflow(pool: &PgPool, id: CronWorkflowId) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM cron_workflows WHERE id = $1")
         .bind(id)
         .execute(pool)
@@ -86,7 +86,7 @@ pub async fn delete_cron_workflow(pool: &PgPool, id: Uuid) -> Result<(), sqlx::E
 /// Inserts a new cron workflow.
 pub async fn insert_cron_workflow(
     pool: &PgPool,
-    id: Uuid,
+    id: CronWorkflowId,
     payload: &crate::routes::CreateCronWorkflowRequest,
     secret_token: &str,
     external_job_id: Option<String>,

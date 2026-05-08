@@ -5,6 +5,7 @@
 
 use serde_json::Value;
 use std::collections::HashMap;
+use stormchaser_model::dsl::Step;
 
 /// Cryptographic utilities for job state.
 pub mod crypto;
@@ -18,7 +19,6 @@ use k8s_openapi::api::core::v1::ResourceRequirements as K8sResources;
 use kube::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use stormchaser_model::dsl::Step;
 use uuid::Uuid;
 
 use stormchaser_model::dsl;

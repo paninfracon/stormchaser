@@ -3,10 +3,24 @@ use crate::ui::ui;
 use chrono::{TimeZone, Utc};
 use insta::assert_debug_snapshot;
 use ratatui::{backend::TestBackend, Terminal};
+use stormchaser_model::cron::CronWorkflow;
+use stormchaser_model::event_rules::EventRule;
+use stormchaser_model::storage::ArtifactRegistry;
+use stormchaser_model::test_report::TestCase;
+use stormchaser_model::test_report::TestCaseStatus;
+use stormchaser_model::test_report::TestSummary;
+use stormchaser_model::workflow::RunStatus;
+use stormchaser_model::CronWorkflowId;
+use stormchaser_model::RuleId;
+use stormchaser_model::RunId;
+use stormchaser_model::StepInstanceId;
+use stormchaser_model::TestReportId;
+use stormchaser_model::WebhookId;
 use stormchaser_model::{
     event_rules::WebhookConfig,
     storage::{BackendType, StorageBackend},
 };
+use uuid::Uuid;
 
 fn create_test_app<'a>() -> App<'a> {
     let (tx, _) = tokio::sync::mpsc::channel(100);
@@ -28,7 +42,7 @@ fn render_storage_backends_tab() {
     let updated_at = Utc.timestamp_opt(1609459200, 0).unwrap();
 
     app.storage_backends = vec![StorageBackend {
-        id: uuid::Uuid::nil(),
+        id: stormchaser_model::BackendId::new(uuid::Uuid::nil()),
         name: "test-sfs".to_string(),
         description: Some("Test SFS".to_string()),
         backend_type: BackendType::S3,
@@ -81,7 +95,7 @@ fn render_webhooks_tab() {
     let updated_at = Utc.timestamp_opt(1609459200, 0).unwrap();
 
     app.webhooks = vec![WebhookConfig {
-        id: uuid::Uuid::nil(),
+        id: WebhookId::new(Uuid::nil()),
         name: "test-webhook".to_string(),
         description: Some("Test Webhook".to_string()),
         source_type: "github".to_string(),
@@ -110,11 +124,11 @@ fn render_event_rules_tab() {
     let created_at = Utc.timestamp_opt(1609459200, 0).unwrap();
     let updated_at = Utc.timestamp_opt(1609459200, 0).unwrap();
 
-    app.event_rules = vec![stormchaser_model::event_rules::EventRule {
-        id: uuid::Uuid::nil(),
+    app.event_rules = vec![EventRule {
+        id: RuleId::new(Uuid::nil()),
         name: "test-rule".to_string(),
         description: Some("Test Rule".to_string()),
-        webhook_id: Some(uuid::Uuid::nil()),
+        webhook_id: Some(WebhookId::new(Uuid::nil())),
         event_type_pattern: "push".to_string(),
         condition_expr: Some("payload.ref == 'refs/heads/main'".to_string()),
         workflow_name: "test".to_string(),
@@ -171,8 +185,8 @@ fn render_cron_workflows_tab() {
     let created_at = Utc.timestamp_opt(1609459200, 0).unwrap();
     let updated_at = Utc.timestamp_opt(1609459200, 0).unwrap();
 
-    app.cron_workflows = vec![stormchaser_model::cron::CronWorkflow {
-        id: uuid::Uuid::nil(),
+    app.cron_workflows = vec![CronWorkflow {
+        id: CronWorkflowId::new(Uuid::nil()),
         name: "test-cron".to_string(),
         description: Some("Test Cron".to_string()),
         cronspec: "* * * * *".to_string(),
@@ -277,10 +291,10 @@ fn render_runs_tab_populated() {
     let created_at = Utc.timestamp_opt(1609459200, 0).unwrap();
 
     app.runs = vec![crate::app::WorkflowRunDetail {
-        id: uuid::Uuid::nil(),
+        id: RunId::new(uuid::Uuid::nil()),
         workflow_name: "test-workflow".to_string(),
         initiating_user: "jacrisp".to_string(),
-        status: stormchaser_model::workflow::RunStatus::Succeeded,
+        status: RunStatus::Succeeded,
         created_at,
         finished_at: Some(created_at),
     }];
@@ -302,10 +316,10 @@ fn render_run_detail_populated() {
 
     let detail = crate::app::WorkflowRunFullDetail {
         detail: crate::app::WorkflowRunDetail {
-            id: uuid::Uuid::nil(),
+            id: RunId::new(uuid::Uuid::nil()),
             workflow_name: "test-workflow".to_string(),
             initiating_user: "jacrisp".to_string(),
-            status: stormchaser_model::workflow::RunStatus::Running,
+            status: RunStatus::Running,
             created_at,
             finished_at: None,
         },
@@ -400,19 +414,19 @@ fn render_test_results_pane() {
 
     let detail = crate::app::WorkflowRunFullDetail {
         detail: crate::app::WorkflowRunDetail {
-            id: uuid::Uuid::nil(),
+            id: RunId::new(uuid::Uuid::nil()),
             workflow_name: "test-workflow".to_string(),
             initiating_user: "jacrisp".to_string(),
-            status: stormchaser_model::workflow::RunStatus::Succeeded,
+            status: RunStatus::Succeeded,
             created_at,
             finished_at: None,
         },
         steps: vec![],
         artifacts: vec![],
-        test_summaries: vec![stormchaser_model::test_report::TestSummary {
-            id: uuid::Uuid::nil(),
-            run_id: uuid::Uuid::nil(),
-            step_instance_id: uuid::Uuid::nil(),
+        test_summaries: vec![TestSummary {
+            id: TestReportId::new(Uuid::nil()),
+            run_id: RunId::new(Uuid::nil()),
+            step_instance_id: StepInstanceId::new(Uuid::nil()),
             report_name: "test_step".to_string(),
             total_tests: 10,
             passed: 9,
@@ -423,26 +437,26 @@ fn render_test_results_pane() {
             created_at,
         }],
         test_cases: vec![
-            stormchaser_model::test_report::TestCase {
-                id: uuid::Uuid::nil(),
-                run_id: uuid::Uuid::nil(),
-                step_instance_id: uuid::Uuid::nil(),
+            TestCase {
+                id: TestReportId::new(Uuid::nil()),
+                run_id: RunId::new(Uuid::nil()),
+                step_instance_id: StepInstanceId::new(Uuid::nil()),
                 report_name: "test_step".to_string(),
                 test_suite: Some("MySuite".to_string()),
                 test_case: "test_success".to_string(),
-                status: stormchaser_model::test_report::TestCaseStatus::Passed,
+                status: TestCaseStatus::Passed,
                 duration_ms: Some(100),
                 message: None,
                 created_at,
             },
-            stormchaser_model::test_report::TestCase {
-                id: uuid::Uuid::nil(),
-                run_id: uuid::Uuid::nil(),
-                step_instance_id: uuid::Uuid::nil(),
+            TestCase {
+                id: TestReportId::new(Uuid::nil()),
+                run_id: RunId::new(Uuid::nil()),
+                step_instance_id: StepInstanceId::new(Uuid::nil()),
                 report_name: "test_step".to_string(),
                 test_suite: Some("MySuite".to_string()),
                 test_case: "test_failure".to_string(),
-                status: stormchaser_model::test_report::TestCaseStatus::Failed,
+                status: TestCaseStatus::Failed,
                 duration_ms: Some(100),
                 message: Some("assertion failed".to_string()),
                 created_at,
@@ -466,14 +480,14 @@ fn render_run_detail_with_artifacts() {
     app.active_pane = Pane::RunDetail;
 
     let created_at = Utc.timestamp_opt(1609459200, 0).unwrap();
-    let step_instance_id = uuid::Uuid::new_v4();
+    let step_instance_id = StepInstanceId::new_v4();
 
     let detail = crate::app::WorkflowRunFullDetail {
         detail: crate::app::WorkflowRunDetail {
-            id: uuid::Uuid::nil(),
+            id: RunId::new(uuid::Uuid::nil()),
             workflow_name: "test-workflow".to_string(),
             initiating_user: "jacrisp".to_string(),
-            status: stormchaser_model::workflow::RunStatus::Succeeded,
+            status: RunStatus::Succeeded,
             created_at,
             finished_at: None,
         },
@@ -487,12 +501,12 @@ fn render_run_detail_with_artifacts() {
             history: vec![],
             logs: vec![],
         }],
-        artifacts: vec![stormchaser_model::storage::ArtifactRegistry {
-            id: uuid::Uuid::nil(),
-            run_id: uuid::Uuid::nil(),
+        artifacts: vec![ArtifactRegistry {
+            id: stormchaser_model::ArtifactId::new(uuid::Uuid::nil()),
+            run_id: RunId::new(Uuid::nil()),
             step_instance_id,
             artifact_name: "binary".to_string(),
-            backend_id: uuid::Uuid::nil(),
+            backend_id: stormchaser_model::BackendId::new(Uuid::nil()),
             remote_path: "path/to/bin".to_string(),
             metadata: serde_json::json!({"size": 1024}),
             created_at,

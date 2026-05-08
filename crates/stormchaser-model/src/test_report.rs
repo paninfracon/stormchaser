@@ -1,18 +1,18 @@
 //! Test reporting and summary models for workflow execution.
 
+use crate::id::*;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
-use uuid::Uuid;
 
 /// Details of a single test report associated with a step instance.
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow, ToSchema)]
 pub struct TestReport {
     /// Unique identifier for the test report.
-    pub id: Uuid,
+    pub id: TestReportId,
     /// Associated workflow run ID.
-    pub run_id: Uuid,
+    pub run_id: RunId,
     /// Associated step instance ID.
-    pub step_instance_id: Uuid,
+    pub step_instance_id: StepInstanceId,
     /// Logical name of the report.
     pub report_name: String,
     /// Original file name of the report.
@@ -22,7 +22,7 @@ pub struct TestReport {
     /// Raw content of the report, if small enough to be inlined.
     pub content: Option<String>,
     /// Storage backend ID where the full report is stored.
-    pub backend_id: Option<Uuid>,
+    pub backend_id: Option<BackendId>,
     /// Path to the report in the remote storage backend.
     pub remote_path: Option<String>,
     /// Checksum of the report content.
@@ -35,11 +35,11 @@ pub struct TestReport {
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow, Default, ToSchema)]
 pub struct TestSummary {
     /// Unique identifier for the summary.
-    pub id: Uuid,
+    pub id: TestReportId,
     /// Associated workflow run ID.
-    pub run_id: Uuid,
+    pub run_id: RunId,
     /// Associated step instance ID.
-    pub step_instance_id: Uuid,
+    pub step_instance_id: StepInstanceId,
     /// Logical name of the report.
     pub report_name: String,
     /// Total number of tests executed.
@@ -77,11 +77,11 @@ pub enum TestCaseStatus {
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow, ToSchema)]
 pub struct TestCase {
     /// Unique identifier for the test case record.
-    pub id: Uuid,
+    pub id: TestReportId,
     /// Associated workflow run ID.
-    pub run_id: Uuid,
+    pub run_id: RunId,
     /// Associated step instance ID.
-    pub step_instance_id: Uuid,
+    pub step_instance_id: StepInstanceId,
     /// Logical name of the report containing this test case.
     pub report_name: String,
     /// Name of the test suite this case belongs to.

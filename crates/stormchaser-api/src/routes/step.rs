@@ -10,10 +10,11 @@ use futures::StreamExt;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::time::Duration;
+use stormchaser_model::RunId;
+use stormchaser_model::StepInstanceId;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
 use utoipa::ToSchema;
-use uuid::Uuid;
 
 #[derive(Deserialize, ToSchema)]
 pub struct LogsQuery {
@@ -30,7 +31,7 @@ pub fn format_log_event(line: &str) -> Event {
 #[utoipa::path(
     get,
     path = "/api/v1/runs/{run_id}/steps/{step_id}/logs/stream",
-    params(("run_id" = Uuid, Path, description="Run ID"), ("step_id" = Uuid, Path, description="Step instance ID")),
+    params(("run_id" = stormchaser_model::RunId, Path, description="Run ID"), ("step_id" = stormchaser_model::StepInstanceId, Path, description="Step instance ID")),
     responses(
         (status = 200, description = "Success"),
         (status = 400, description = "Bad Request"),
@@ -42,7 +43,7 @@ pub fn format_log_event(line: &str) -> Event {
 pub async fn stream_step_logs_api(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path((run_id, step_id)): Path<(Uuid, Uuid)>,
+    Path((run_id, step_id)): Path<(RunId, StepInstanceId)>,
 ) -> Result<
     axum::response::sse::Sse<
         impl futures::stream::Stream<Item = Result<Event, std::convert::Infallible>>,
@@ -88,8 +89,8 @@ pub async fn stream_step_logs_api(
     get,
     path = "/api/v1/runs/{run_id}/steps/{step_id}/logs",
     params(
-        ("run_id" = Uuid, Path, description="Run ID"),
-        ("step_id" = Uuid, Path, description="Step instance ID"),
+        ("run_id" = stormchaser_model::RunId, Path, description="Run ID"),
+        ("step_id" = stormchaser_model::StepInstanceId, Path, description="Step instance ID"),
         ("limit" = Option<usize>, Query, description="Limit log lines")
     ),
     responses(
@@ -103,7 +104,7 @@ pub async fn stream_step_logs_api(
 pub async fn get_step_logs_api(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path((run_id, step_id)): Path<(Uuid, Uuid)>,
+    Path((run_id, step_id)): Path<(RunId, StepInstanceId)>,
     Query(query): Query<LogsQuery>,
 ) -> Result<Json<Vec<String>>, StatusCode> {
     let log_backend = match &state.log_backend {
@@ -137,7 +138,7 @@ pub async fn get_step_logs_api(
 #[utoipa::path(
     get,
     path = "/api/v1/runs/{run_id}/logs/stream",
-    params(("run_id" = Uuid, Path, description="Run ID")),
+    params(("run_id" = stormchaser_model::RunId, Path, description="Run ID")),
     responses(
         (status = 200, description = "Success"),
         (status = 400, description = "Bad Request"),
@@ -149,7 +150,7 @@ pub async fn get_step_logs_api(
 pub async fn stream_run_logs_api(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path(run_id): Path<Uuid>,
+    Path(run_id): Path<RunId>,
 ) -> Result<
     axum::response::sse::Sse<
         impl futures::stream::Stream<Item = Result<Event, std::convert::Infallible>>,
@@ -273,7 +274,7 @@ pub async fn stream_run_logs_api(
     get,
     path = "/api/v1/runs/{run_id}/status/stream",
     params(
-        ("run_id" = Uuid, Path, description = "Run ID")
+        ("run_id" = stormchaser_model::RunId, Path, description = "Run ID")
     ),
     responses(
         (status = 200, description = "Status stream (SSE)")
@@ -287,7 +288,7 @@ pub async fn stream_run_logs_api(
 pub async fn stream_run_status_api(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path(run_id): Path<Uuid>,
+    Path(run_id): Path<RunId>,
 ) -> Result<
     axum::response::sse::Sse<
         impl futures::stream::Stream<Item = Result<Event, std::convert::Infallible>>,
@@ -299,7 +300,10 @@ pub async fn stream_run_status_api(
 
     tokio::spawn(async move {
         let mut last_run_status: Option<String> = None;
-        let mut last_step_statuses: HashMap<Uuid, String> = HashMap::new();
+        let mut last_step_statuses: std::collections::HashMap<
+            stormchaser_model::StepInstanceId,
+            String,
+        > = HashMap::new();
 
         loop {
             // Check workflow run status

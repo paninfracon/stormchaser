@@ -2,6 +2,7 @@
 
 use serde_json::Value;
 use std::collections::HashMap;
+use stormchaser_model::dsl::Step;
 
 /// Cryptographic utilities for container state encryption.
 pub mod crypto;
@@ -12,7 +13,6 @@ pub mod transitions;
 
 use bollard::Docker;
 use serde::{Deserialize, Serialize};
-use stormchaser_model::dsl::Step;
 use uuid::Uuid;
 
 /// Metadata associated with a container executing a workflow step.

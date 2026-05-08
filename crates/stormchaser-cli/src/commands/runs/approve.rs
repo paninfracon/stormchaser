@@ -1,13 +1,12 @@
 use crate::utils::{handle_response, parse_key_val_list, require_token};
 use anyhow::Result;
-use uuid::Uuid;
 
 pub async fn approve_step(
     url: &str,
     token: Option<&str>,
     http_client: &reqwest_middleware::ClientWithMiddleware,
-    run_id: Uuid,
-    step_id: Uuid,
+    run_id: stormchaser_model::RunId,
+    step_id: stormchaser_model::StepInstanceId,
     input: Vec<String>,
 ) -> Result<()> {
     let token = require_token(token)?;
@@ -28,8 +27,8 @@ pub async fn reject_step(
     url: &str,
     token: Option<&str>,
     http_client: &reqwest_middleware::ClientWithMiddleware,
-    run_id: Uuid,
-    step_id: Uuid,
+    run_id: stormchaser_model::RunId,
+    step_id: stormchaser_model::StepInstanceId,
 ) -> Result<()> {
     let token = require_token(token)?;
     let res = http_client
@@ -80,8 +79,8 @@ mod tests {
     #[tokio::test]
     async fn test_runs_approve() {
         let server = MockServer::start().await;
-        let run_id = Uuid::new_v4();
-        let step_id = Uuid::new_v4();
+        let run_id = stormchaser_model::RunId::new_v4();
+        let step_id = stormchaser_model::StepInstanceId::new_v4();
         Mock::given(method("POST"))
             .and(path(format!(
                 "/api/v1/runs/{}/steps/{}/approve",
@@ -109,8 +108,8 @@ mod tests {
     #[tokio::test]
     async fn test_runs_reject() {
         let server = MockServer::start().await;
-        let run_id = Uuid::new_v4();
-        let step_id = Uuid::new_v4();
+        let run_id = stormchaser_model::RunId::new_v4();
+        let step_id = stormchaser_model::StepInstanceId::new_v4();
         Mock::given(method("POST"))
             .and(path(format!(
                 "/api/v1/runs/{}/steps/{}/reject",

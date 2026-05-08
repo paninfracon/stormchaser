@@ -275,11 +275,11 @@ impl WorkflowMachine<state::Running> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uuid::Uuid;
+    use stormchaser_model::RunId;
 
     fn dummy_run() -> WorkflowRun {
         WorkflowRun {
-            id: Uuid::new_v4(),
+            id: RunId::new_v4(),
             workflow_name: "test".to_string(),
             initiating_user: "u".to_string(),
             status: RunStatus::Succeeded, // start with something else

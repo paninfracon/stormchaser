@@ -11,12 +11,11 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use stormchaser_api::{app, AppState, Claims, JWT_SECRET};
+use stormchaser_model::step::StepStatus;
+use stormchaser_model::workflow::RunStatus;
 use stormchaser_model::OpaClient;
 use tower::ServiceExt;
 use uuid::Uuid;
-
-use stormchaser_model::step::StepStatus;
-use stormchaser_model::workflow::RunStatus;
 
 fn get_token() -> String {
     let claims = Claims {
@@ -49,7 +48,11 @@ async fn test_storage_backend_crud() {
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
-    let pool = match PgPoolOptions::new().connect(&db_url).await {
+    let pool = match PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&db_url)
+        .await
+    {
         Ok(p) => p,
         Err(_) => return,
     };
@@ -179,7 +182,11 @@ async fn test_artifact_listing() {
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
-    let pool = match PgPoolOptions::new().connect(&db_url).await {
+    let pool = match PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&db_url)
+        .await
+    {
         Ok(p) => p,
         Err(_) => return,
     };

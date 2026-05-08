@@ -1,7 +1,8 @@
 use std::sync::Arc;
 use stormchaser_engine::handler;
 use stormchaser_model::step::StepInstance;
-use uuid::Uuid;
+use stormchaser_model::workflow::RunStatus;
+use stormchaser_model::RunId;
 
 // Assumes there's a test setup function like in other tests
 mod common {
@@ -34,14 +35,13 @@ mod common {
 use stormchaser_dsl::StormchaserParser;
 use stormchaser_engine::db;
 use stormchaser_model::workflow;
-use stormchaser_model::workflow::RunStatus;
 use stormchaser_tls::TlsConfig;
 use stormchaser_tls::TlsReloader;
 
 #[tokio::test]
 async fn test_step_library_direct_run() {
     let (pool, nats_client, _) = common::setup_test_env().await;
-    let run_id = Uuid::new_v4();
+    let run_id = RunId::new_v4();
 
     let dsl = r#"
         stormchaser_dsl_version = "0.1"
