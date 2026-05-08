@@ -190,7 +190,7 @@ pub async fn delete_storage_backend(
     get,
     path = "/api/v1/runs/{id}/artifacts",
     params(
-        ("id" = stormchaser_model::BackendId, Path, description = "Run ID")
+        ("id" = stormchaser_model::RunId, Path, description = "Run ID")
     ),
     responses(
         (status = 200, description = "List of artifacts", body = [ArtifactRegistry]),
