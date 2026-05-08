@@ -26,13 +26,13 @@ workflows.
 
 | Crate | Version | Docs |
 |---|---|---|
-| `stormchaser-cli` | [![Crates.io](https://img.shields.io/badge/crates.io-v1.3.0-orange.svg)](https://crates.io/crates/stormchaser-cli) | [![Docs.rs](https://img.shields.io/badge/docs.rs-v1.3.0-blue.svg)](https://docs.rs/stormchaser-cli) |
-| `stormchaser-engine` | [![Crates.io](https://img.shields.io/badge/crates.io-v1.3.0-orange.svg)](https://crates.io/crates/stormchaser-engine) | [![Docs.rs](https://img.shields.io/badge/docs.rs-v1.3.0-blue.svg)](https://docs.rs/stormchaser-engine) |
-| `stormchaser-model` | [![Crates.io](https://img.shields.io/badge/crates.io-v1.3.0-orange.svg)](https://crates.io/crates/stormchaser-model) | [![Docs.rs](https://img.shields.io/badge/docs.rs-v1.3.0-blue.svg)](https://docs.rs/stormchaser-model) |
-| `stormchaser-api` | [![Crates.io](https://img.shields.io/badge/crates.io-v1.3.0-orange.svg)](https://crates.io/crates/stormchaser-api) | [![Docs.rs](https://img.shields.io/badge/docs.rs-v1.3.0-blue.svg)](https://docs.rs/stormchaser-api) |
-| `stormchaser-dsl` | [![Crates.io](https://img.shields.io/badge/crates.io-v1.3.0-orange.svg)](https://crates.io/crates/stormchaser-dsl) | [![Docs.rs](https://img.shields.io/badge/docs.rs-v1.3.0-blue.svg)](https://docs.rs/stormchaser-dsl) |
-| `stormchaser-opa` | [![Crates.io](https://img.shields.io/badge/crates.io-v1.3.0-orange.svg)](https://crates.io/crates/stormchaser-opa) | [![Docs.rs](https://img.shields.io/badge/docs.rs-v1.3.0-blue.svg)](https://docs.rs/stormchaser-opa) |
-| `stormchaser-tls` | [![Crates.io](https://img.shields.io/badge/crates.io-v1.3.0-orange.svg)](https://crates.io/crates/stormchaser-tls) | [![Docs.rs](https://img.shields.io/badge/docs.rs-v1.3.0-blue.svg)](https://docs.rs/stormchaser-tls) |
+| `stormchaser-cli` | [![Crates.io](https://img.shields.io/badge/crates.io-v1.3.0-orange.svg)](https://crates.io/crates/stormchaser-cli/1.3.0) | [![Docs.rs](https://img.shields.io/badge/docs.rs-v1.3.0-blue.svg)](https://docs.rs/stormchaser-cli/1.3.0) |
+| `stormchaser-engine` | [![Crates.io](https://img.shields.io/badge/crates.io-v1.3.0-orange.svg)](https://crates.io/crates/stormchaser-engine/1.3.0) | [![Docs.rs](https://img.shields.io/badge/docs.rs-v1.3.0-blue.svg)](https://docs.rs/stormchaser-engine/1.3.0) |
+| `stormchaser-model` | [![Crates.io](https://img.shields.io/badge/crates.io-v1.3.0-orange.svg)](https://crates.io/crates/stormchaser-model/1.3.0) | [![Docs.rs](https://img.shields.io/badge/docs.rs-v1.3.0-blue.svg)](https://docs.rs/stormchaser-model/1.3.0) |
+| `stormchaser-api` | [![Crates.io](https://img.shields.io/badge/crates.io-v1.3.0-orange.svg)](https://crates.io/crates/stormchaser-api/1.3.0) | [![Docs.rs](https://img.shields.io/badge/docs.rs-v1.3.0-blue.svg)](https://docs.rs/stormchaser-api/1.3.0) |
+| `stormchaser-dsl` | [![Crates.io](https://img.shields.io/badge/crates.io-v1.3.0-orange.svg)](https://crates.io/crates/stormchaser-dsl/1.3.0) | [![Docs.rs](https://img.shields.io/badge/docs.rs-v1.3.0-blue.svg)](https://docs.rs/stormchaser-dsl/1.3.0) |
+| `stormchaser-opa` | [![Crates.io](https://img.shields.io/badge/crates.io-v1.3.0-orange.svg)](https://crates.io/crates/stormchaser-opa/1.3.0) | [![Docs.rs](https://img.shields.io/badge/docs.rs-v1.3.0-blue.svg)](https://docs.rs/stormchaser-opa/1.3.0) |
+| `stormchaser-tls` | [![Crates.io](https://img.shields.io/badge/crates.io-v1.3.0-orange.svg)](https://crates.io/crates/stormchaser-tls/1.3.0) | [![Docs.rs](https://img.shields.io/badge/docs.rs-v1.3.0-blue.svg)](https://docs.rs/stormchaser-tls/1.3.0) |
 
 ## 📝 Example Workflow
 
