@@ -17,7 +17,7 @@ pub async fn persist_step_test_reports(
     pool: &PgPool,
 ) -> Result<()> {
     if let Some(reports) = test_reports {
-        for (_key, report_val) in reports {
+        for report_val in reports.values() {
             let name = report_val
                 .get("name")
                 .and_then(|v| v.as_str())

@@ -1,16 +1,13 @@
 use crate::handler::{archive_workflow, dispatch_pending_steps, fetch_run, fetch_step_instance};
 use crate::workflow_machine::{state, WorkflowMachine};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use chrono::Utc;
-use serde_json::Value;
 use sqlx::PgPool;
 use std::sync::Arc;
 use stormchaser_model::events::WorkflowFailedEvent;
-use stormchaser_model::events::{EventSource, EventType, SchemaVersion, WorkflowEventType};
+use stormchaser_model::events::{EventSource, EventType, WorkflowEventType};
 use stormchaser_model::nats::publish_cloudevent;
 use stormchaser_model::step::StepStatus;
-use stormchaser_model::RunId;
-use stormchaser_model::StepInstanceId;
 use stormchaser_tls::TlsReloader;
 use tracing::{error, info};
 

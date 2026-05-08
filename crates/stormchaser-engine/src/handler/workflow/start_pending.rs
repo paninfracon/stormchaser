@@ -7,7 +7,7 @@ use std::sync::Arc;
 use stormchaser_dsl::ast;
 use stormchaser_dsl::ast::Workflow;
 use stormchaser_model::events::WorkflowRunningEvent;
-use stormchaser_model::events::{EventSource, EventType, SchemaVersion, WorkflowEventType};
+use stormchaser_model::events::{EventSource, EventType, WorkflowEventType};
 use stormchaser_model::RunId;
 use stormchaser_tls::TlsReloader;
 use tracing::{debug, error, info};

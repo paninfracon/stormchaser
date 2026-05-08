@@ -1,5 +1,4 @@
 use sqlx::PgPool;
-use stormchaser_model::RunId;
 
 /// Retrieves run outputs for OPA evaluation.
 pub async fn get_run_outputs_for_opa(

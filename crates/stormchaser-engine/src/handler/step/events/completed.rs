@@ -1,4 +1,5 @@
 #![allow(clippy::explicit_auto_deref)]
+use crate::handler::StepInstance;
 use crate::handler::{
     archive_workflow, dispatch_pending_steps, fetch_outputs, fetch_run, fetch_run_context,
     fetch_step_instance,
@@ -12,12 +13,10 @@ use std::sync::Arc;
 use stormchaser_dsl::ast::{self, Workflow};
 use stormchaser_model::dsl::OutputExtraction;
 use stormchaser_model::events::WorkflowCompletedEvent;
-use stormchaser_model::events::{EventSource, EventType, SchemaVersion, WorkflowEventType};
+use stormchaser_model::events::{EventSource, EventType, WorkflowEventType};
 use stormchaser_model::nats::publish_cloudevent;
-use stormchaser_model::step::{StepInstance, StepStatus};
+use stormchaser_model::step::StepStatus;
 use stormchaser_model::LogBackend;
-use stormchaser_model::RunId;
-use stormchaser_model::StepInstanceId;
 use stormchaser_tls::TlsReloader;
 use tracing::{debug, error, info};
 use uuid::Uuid;

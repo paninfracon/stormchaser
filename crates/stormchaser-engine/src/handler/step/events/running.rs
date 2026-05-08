@@ -1,9 +1,6 @@
 use crate::handler::fetch_step_instance;
-use anyhow::{Context, Result};
-use serde_json::Value;
+use anyhow::Result;
 use sqlx::PgPool;
-use stormchaser_model::RunId;
-use stormchaser_model::StepInstanceId;
 use tracing::info;
 
 #[tracing::instrument(skip(event, pool), fields(run_id = tracing::field::Empty, step_id = tracing::field::Empty))]

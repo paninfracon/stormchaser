@@ -33,4 +33,5 @@ path-clean = "1.0"
 tempfile = "3.10"
 
 [features]
+default = ["sqlx"]
 sqlx = ["dep:sqlx"]
