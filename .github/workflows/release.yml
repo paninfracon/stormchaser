@@ -115,6 +115,7 @@ jobs:
 
   build-mac-windows-cli:
     name: Build CLI for macOS/Windows
+    needs: build-linux-binaries
     if: startsWith(github.ref, 'refs/tags/')
     strategy:
       matrix:
