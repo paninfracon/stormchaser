@@ -1,12 +1,13 @@
 use serde_json::Value;
 use sqlx::PgPool;
+use stormchaser_model::StepInstanceId;
 
 /// Inserts a record into the approval registry.
 /// Insert approval registry.
 pub async fn insert_approval_registry(
     pool: &PgPool,
     id: stormchaser_model::EventId,
-    step_id: stormchaser_model::StepInstanceId,
+    step_id: StepInstanceId,
     user_id: &str,
     status: &str,
     payload: &Value,

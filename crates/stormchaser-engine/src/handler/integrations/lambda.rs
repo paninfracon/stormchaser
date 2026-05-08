@@ -161,7 +161,7 @@ async fn handle_lambda_response(
         let event = stormchaser_model::events::StepCompletedEvent {
             run_id,
             step_id,
-            event_type: "stormchaser.v1.step.completed".to_string(),
+            event_type: EventType::Step(StepEventType::Completed),
             outputs: Some(outputs_map),
             exit_code: Some(0),
             runner_id: None,
@@ -173,11 +173,11 @@ async fn handle_lambda_response(
         let js = async_nats::jetstream::new(nats_client);
         stormchaser_model::nats::publish_cloudevent(
             &js,
-            "stormchaser.v1.step.completed",
-            "stormchaser.v1.step.completed",
-            "/stormchaser",
+            NatsSubject::StepCompleted,
+            EventType::Step(StepEventType::Completed),
+            EventSource::System,
             serde_json::to_value(event).unwrap(),
-            Some("1.0"),
+            Some(SchemaVersion::new("1.0".to_string())),
             None,
         )
         .await?;
@@ -209,9 +209,9 @@ async fn handle_lambda_response(
             &js,
             "stormchaser.v1.step.failed",
             "stormchaser.v1.step.failed",
-            "/stormchaser",
+            EventSource::System,
             serde_json::to_value(event).unwrap(),
-            Some("1.0"),
+            Some(SchemaVersion::new("1.0".to_string())),
             None,
         )
         .await?;

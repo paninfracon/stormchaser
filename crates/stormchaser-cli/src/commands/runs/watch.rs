@@ -10,7 +10,7 @@ pub async fn watch_run(
     let token = require_token(token)?;
     let res = http_client
         .get(format!("{}/api/v1/runs/{}/status/stream", url, id))
-        .header("Authorization", format!("Bearer {}", token))
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
         .send()
         .await?;
 

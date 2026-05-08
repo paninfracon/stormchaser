@@ -11,6 +11,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::time::Duration;
 use stormchaser_model::dsl::CommonContainerSpec;
+use stormchaser_model::step::StepStatus;
 use tokio::time::sleep;
 use tracing::{error, info};
 use uuid::Uuid;
@@ -162,7 +163,7 @@ impl DockerContainerMachine<state::Running> {
                 let packing_event = serde_json::json!({
                     "run_id": self.metadata.run_id,
                     "step_id": self.metadata.step_id,
-                    "status": "packing_sfs",
+                    "status": StepStatus::PackingSfs,
                     "timestamp": chrono::Utc::now(),
                 });
                 if let Ok(ce) = cloudevents::EventBuilderV10::new()
@@ -170,7 +171,7 @@ impl DockerContainerMachine<state::Running> {
                     .ty("stormchaser.v1.step.packing_sfs")
                     .source("/stormchaser/runner")
                     .time(chrono::Utc::now())
-                    .data("application/json", packing_event)
+                    .data(stormchaser_model::APPLICATION_JSON, packing_event)
                     .build()
                 {
                     if let Ok(payload_bytes) = serde_json::to_vec(&ce) {

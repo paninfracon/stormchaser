@@ -4,7 +4,10 @@ use chrono::Utc;
 use serde_json::Value;
 use sqlx::PgPool;
 use stormchaser_model::dsl::JinjaRenderSpec;
-use stormchaser_model::events::StepCompletedEvent;
+use stormchaser_model::events::{
+    EventSource, EventType, SchemaVersion, StepCompletedEvent, StepEventType,
+};
+use stormchaser_model::nats::NatsSubject;
 use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
 use tracing::info;
@@ -116,7 +119,7 @@ async fn save_output_and_complete(
     let event = StepCompletedEvent {
         run_id,
         step_id,
-        event_type: "stormchaser.v1.step.completed".to_string(),
+        event_type: EventType::Step(StepEventType::Completed),
         outputs: Some(outputs_map),
         exit_code: Some(0),
         runner_id: None,
@@ -128,11 +131,11 @@ async fn save_output_and_complete(
     let js = async_nats::jetstream::new(nats_client);
     stormchaser_model::nats::publish_cloudevent(
         &js,
-        "stormchaser.v1.step.completed",
-        "stormchaser.v1.step.completed",
-        "/stormchaser",
+        NatsSubject::StepCompleted,
+        EventType::Step(StepEventType::Completed),
+        EventSource::System,
         serde_json::to_value(event).unwrap(),
-        Some("1.0"),
+        Some(SchemaVersion::new("1.0".to_string())),
         None,
     )
     .await?;

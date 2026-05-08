@@ -1,4 +1,5 @@
 use sqlx::PgPool;
+use stormchaser_model::step::StepStatus;
 use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
 
@@ -86,9 +87,9 @@ pub async fn get_step_names(
 pub async fn get_combined_step_statuses(
     pool: &PgPool,
     run_id: RunId,
-) -> Result<Vec<(stormchaser_model::StepInstanceId, String, String)>, sqlx::Error> {
+) -> Result<Vec<(stormchaser_model::StepInstanceId, String, StepStatus)>, sqlx::Error> {
     sqlx::query_as(
-        "SELECT id, step_name, status::text FROM combined_step_instances WHERE run_id = $1",
+        r#"SELECT id, step_name, status as "status: StepStatus" FROM combined_step_instances WHERE run_id = $1"#,
     )
     .bind(run_id)
     .fetch_all(pool)

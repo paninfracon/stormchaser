@@ -5,7 +5,8 @@ use std::collections::HashMap;
 use std::env;
 use stormchaser_model::cron;
 use stormchaser_model::events::WorkflowQueuedEvent;
-use stormchaser_model::nats::publish_cloudevent;
+use stormchaser_model::events::{EventSource, EventType, SchemaVersion, WorkflowEventType};
+use stormchaser_model::nats::{publish_cloudevent, NatsSubject};
 use stormchaser_model::workflow::RunStatus;
 use stormchaser_model::CronWorkflowId;
 use stormchaser_model::RunId;
@@ -165,7 +166,7 @@ pub async fn trigger_cron_workflow(
 
     // 2. Validate Token (using constant-time approach via hashing)
     let auth_header = headers
-        .get("Authorization")
+        .get(axum::http::header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok())
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
@@ -233,7 +234,7 @@ pub async fn trigger_cron_workflow(
     // Publish to NATS
     let event = WorkflowQueuedEvent {
         run_id,
-        event_type: "workflow_queued".to_string(),
+        event_type: EventType::Workflow(WorkflowEventType::Queued),
         timestamp: Utc::now(),
         dsl: None,
         inputs: None,
@@ -242,11 +243,11 @@ pub async fn trigger_cron_workflow(
 
     publish_cloudevent(
         &jetstream::new(state.nats.clone()),
-        "stormchaser.v1.run.queued",
-        "stormchaser.v1.run.queued",
-        "/stormchaser",
+        NatsSubject::RunQueued,
+        EventType::Workflow(WorkflowEventType::Queued),
+        EventSource::System,
         serde_json::to_value(event).unwrap(),
-        Some("1.0"),
+        Some(SchemaVersion::new("1.0".to_string())),
         None,
     )
     .await
@@ -254,7 +255,7 @@ pub async fn trigger_cron_workflow(
 
     Ok(Json(EnqueueResponse {
         run_id,
-        status: "queued".to_string(),
+        status: RunStatus::Queued,
     }))
 }
 

@@ -10,6 +10,12 @@ use std::collections::HashMap;
 use std::time::Duration;
 use stormchaser_model::events::StepCompletedEvent;
 use stormchaser_model::events::StepFailedEvent;
+use stormchaser_model::events::{EventSource, EventType, SchemaVersion, StepEventType};
+use stormchaser_model::nats::publish_cloudevent;
+use stormchaser_model::nats::NatsSubject;
+use stormchaser_model::step::StepStatus;
+use stormchaser_model::RunId;
+use stormchaser_model::StepInstanceId;
 use tokio::time::sleep;
 use tracing::{error, info, warn};
 use uuid::Uuid;
@@ -26,15 +32,15 @@ async fn term_message(msg: &Message, reason: &str) {
 /// Builds a serialized CloudEvent payload for use with basic NATS `request`.
 fn build_cloudevent_payload(
     event_type: &str,
-    source: &str,
+    source: EventSource,
     data: Value,
 ) -> anyhow::Result<bytes::Bytes> {
     let event = cloudevents::EventBuilderV10::new()
         .id(Uuid::new_v4().to_string())
         .ty(event_type)
-        .source(source)
+        .source(source.as_str())
         .time(chrono::Utc::now())
-        .data("application/json", data)
+        .data(stormchaser_model::APPLICATION_JSON, data)
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to build CloudEvent: {}", e))?;
     let payload = serde_json::to_string(&event)?;
@@ -121,10 +127,13 @@ pub async fn scan_for_orphans(
 
             tokio::spawn(async move {
                 // Before adopting, query the orchestrator to see if this step is still relevant
-                let query_data = json!({ "step_id": step_id });
+                let query_data = serde_json::to_value(stormchaser_model::events::StepQueryEvent {
+                    step_id: StepInstanceId::new(step_id),
+                })
+                .unwrap();
                 let query_ce_payload = match build_cloudevent_payload(
                     "stormchaser.v1.step.query",
-                    "/stormchaser",
+                    EventSource::System,
                     query_data,
                 ) {
                     Ok(p) => p,
@@ -204,7 +213,7 @@ pub async fn scan_for_orphans(
                             let event = json!({
                                 "run_id": run_id,
                                 "step_id": step_id,
-                                "status": "succeeded",
+                                "status": StepStatus::Succeeded,
                                 "runner_id": r_id,
                                 "exit_code": metrics.exit_code,
                                 "outputs": {
@@ -213,13 +222,13 @@ pub async fn scan_for_orphans(
                                     "run latency": format!("{}ms", metrics.latency_ms),
                                 }
                             });
-                            let _ = stormchaser_model::nats::publish_cloudevent(
+                            let _ = publish_cloudevent(
                                 &async_nats::jetstream::new(nats.clone()),
-                                "stormchaser.v1.step.completed",
-                                "stormchaser.v1.step.completed",
-                                "/stormchaser",
+                                NatsSubject::StepCompleted,
+                                EventType::Step(StepEventType::Completed),
+                                EventSource::System,
                                 serde_json::to_value(event).unwrap(),
-                                Some("1.0"),
+                                Some(SchemaVersion::new("1.0".to_string())),
                                 None,
                             )
                             .await;
@@ -229,7 +238,7 @@ pub async fn scan_for_orphans(
                             let event = json!({
                                 "run_id": run_id,
                                 "step_id": step_id,
-                                "status": "failed",
+                                "status": StepStatus::Failed,
                                 "error": reason,
                                 "runner_id": r_id,
                                 "exit_code": metrics.exit_code,
@@ -239,13 +248,13 @@ pub async fn scan_for_orphans(
                                     "run latency": format!("{}ms", metrics.latency_ms),
                                 }
                             });
-                            let _ = stormchaser_model::nats::publish_cloudevent(
+                            let _ = publish_cloudevent(
                                 &async_nats::jetstream::new(nats.clone()),
-                                "stormchaser.v1.step.failed",
-                                "stormchaser.v1.step.failed",
-                                "/stormchaser",
+                                NatsSubject::StepFailed,
+                                EventType::Step(StepEventType::Failed),
+                                EventSource::System,
                                 serde_json::to_value(event).unwrap(),
-                                Some("1.0"),
+                                Some(SchemaVersion::new("1.0".to_string())),
                                 None,
                             )
                             .await;
@@ -336,20 +345,20 @@ pub async fn handle_task(
         }
     });
 
-    let running_event = json!({
-        "run_id": run_id,
-        "step_id": step_id,
-        "status": "running",
-        "runner_id": runner_id,
-        "timestamp": chrono::Utc::now(),
-    });
-    let _ = stormchaser_model::nats::publish_cloudevent(
+    let running_event = stormchaser_model::events::StepRunningEvent {
+        run_id: RunId::new(run_id),
+        step_id: StepInstanceId::new(step_id),
+        event_type: EventType::Step(StepEventType::Running),
+        runner_id: Some(runner_id.clone()),
+        timestamp: chrono::Utc::now(),
+    };
+    let _ = publish_cloudevent(
         &async_nats::jetstream::new(nats_client.clone()),
-        "stormchaser.v1.step.running",
-        "stormchaser.v1.step.running",
-        "/stormchaser",
+        NatsSubject::StepRunning,
+        EventType::Step(StepEventType::Running),
+        EventSource::System,
         serde_json::to_value(running_event).unwrap(),
-        Some("1.0"),
+        Some(SchemaVersion::new("1.0".to_string())),
         None,
     )
     .await;
@@ -399,9 +408,9 @@ pub async fn handle_task(
             );
 
             let event = StepCompletedEvent {
-                run_id: stormchaser_model::RunId::new(run_id),
-                step_id: stormchaser_model::StepInstanceId::new(step_id),
-                event_type: "stormchaser.v1.step.completed".to_string(),
+                run_id: RunId::new(run_id),
+                step_id: StepInstanceId::new(step_id),
+                event_type: EventType::Step(StepEventType::Failed),
                 runner_id: Some(runner_id.clone()),
                 exit_code: metrics.exit_code.map(|c| c as i32),
                 storage_hashes: metrics.storage_hashes.map(|h| {
@@ -416,13 +425,13 @@ pub async fn handle_task(
                 outputs: Some(outputs),
                 timestamp: chrono::Utc::now(),
             };
-            let _ = stormchaser_model::nats::publish_cloudevent(
+            let _ = publish_cloudevent(
                 &async_nats::jetstream::new(nats_client.clone()),
-                "stormchaser.v1.step.completed",
-                "stormchaser.v1.step.completed",
-                "/stormchaser",
+                NatsSubject::StepCompleted,
+                EventType::Step(StepEventType::Completed),
+                EventSource::System,
                 serde_json::to_value(event).unwrap(),
-                Some("1.0"),
+                Some(SchemaVersion::new("1.0".to_string())),
                 None,
             )
             .await;
@@ -444,9 +453,9 @@ pub async fn handle_task(
             );
 
             let event = StepFailedEvent {
-                run_id: stormchaser_model::RunId::new(run_id),
-                step_id: stormchaser_model::StepInstanceId::new(step_id),
-                event_type: "stormchaser.v1.step.failed".to_string(),
+                run_id: RunId::new(run_id),
+                step_id: StepInstanceId::new(step_id),
+                event_type: EventType::Step(StepEventType::Failed),
                 error: reason,
                 runner_id: Some(runner_id.clone()),
                 exit_code: metrics.exit_code.map(|c| c as i32),
@@ -462,13 +471,14 @@ pub async fn handle_task(
                 outputs: Some(outputs),
                 timestamp: chrono::Utc::now(),
             };
-            let _ = stormchaser_model::nats::publish_cloudevent(
+            use stormchaser_model::nats::NatsSubject;
+            let _ = publish_cloudevent(
                 &async_nats::jetstream::new(nats_client.clone()),
-                "stormchaser.v1.step.failed",
-                "stormchaser.v1.step.failed",
-                "/stormchaser",
+                NatsSubject::StepFailed,
+                EventType::Step(StepEventType::Failed),
+                EventSource::System,
                 serde_json::to_value(event).unwrap(),
-                Some("1.0"),
+                Some(SchemaVersion::new("1.0".to_string())),
                 None,
             )
             .await;
@@ -478,17 +488,18 @@ pub async fn handle_task(
             let event = json!({
                 "run_id": run_id,
                 "step_id": step_id,
-                "status": "failed",
+                "status": StepStatus::Failed,
                 "error": format!("{:?}", e),
                 "runner_id": runner_id,
             });
-            let _ = stormchaser_model::nats::publish_cloudevent(
+            use stormchaser_model::nats::NatsSubject;
+            let _ = publish_cloudevent(
                 &async_nats::jetstream::new(nats_client.clone()),
-                "stormchaser.v1.step.failed",
-                "stormchaser.v1.step.failed",
-                "/stormchaser",
+                NatsSubject::StepFailed,
+                EventType::Step(StepEventType::Failed),
+                EventSource::System,
                 serde_json::to_value(event).unwrap(),
-                Some("1.0"),
+                Some(SchemaVersion::new("1.0".to_string())),
                 None,
             )
             .await;

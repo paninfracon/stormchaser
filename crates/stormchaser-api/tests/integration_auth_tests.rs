@@ -185,7 +185,7 @@ async fn test_auth_exchange_success() {
             Request::builder()
                 .method("POST")
                 .uri("/api/v1/auth/exchange")
-                .header("Content-Type", "application/json")
+                .header("Content-Type", stormchaser_model::APPLICATION_JSON)
                 .extension(ConnectInfo(addr))
                 .body(Body::from(
                     json!({
@@ -235,7 +235,7 @@ async fn test_auth_exchange_failure() {
             Request::builder()
                 .method("POST")
                 .uri("/api/v1/auth/exchange")
-                .header("Content-Type", "application/json")
+                .header("Content-Type", stormchaser_model::APPLICATION_JSON)
                 .extension(ConnectInfo(addr))
                 .body(Body::from(
                     json!({
@@ -284,7 +284,7 @@ async fn test_auth_refresh_success() {
             Request::builder()
                 .method("POST")
                 .uri("/api/v1/auth/refresh")
-                .header("Content-Type", "application/json")
+                .header("Content-Type", stormchaser_model::APPLICATION_JSON)
                 .extension(ConnectInfo(addr))
                 .body(Body::from(
                     json!({
@@ -350,7 +350,7 @@ async fn test_auth_exchange_network_error() {
             Request::builder()
                 .method("POST")
                 .uri("/api/v1/auth/exchange")
-                .header("Content-Type", "application/json")
+                .header("Content-Type", stormchaser_model::APPLICATION_JSON)
                 .extension(ConnectInfo(addr))
                 .body(Body::from(
                     json!({
@@ -382,7 +382,7 @@ async fn test_auth_exchange_invalid_json() {
             Request::builder()
                 .method("POST")
                 .uri("/api/v1/auth/exchange")
-                .header("Content-Type", "application/json")
+                .header("Content-Type", stormchaser_model::APPLICATION_JSON)
                 .extension(ConnectInfo(addr))
                 .body(Body::from(
                     json!({
@@ -416,7 +416,7 @@ async fn test_auth_exchange_invalid_id_token_header() {
             Request::builder()
                 .method("POST")
                 .uri("/api/v1/auth/exchange")
-                .header("Content-Type", "application/json")
+                .header("Content-Type", stormchaser_model::APPLICATION_JSON)
                 .extension(ConnectInfo(addr))
                 .body(Body::from(
                     json!({
@@ -463,7 +463,7 @@ async fn test_auth_exchange_no_kid() {
             Request::builder()
                 .method("POST")
                 .uri("/api/v1/auth/exchange")
-                .header("Content-Type", "application/json")
+                .header("Content-Type", stormchaser_model::APPLICATION_JSON)
                 .extension(ConnectInfo(addr))
                 .body(Body::from(
                     json!({
@@ -507,7 +507,7 @@ async fn test_auth_exchange_kid_not_found() {
             Request::builder()
                 .method("POST")
                 .uri("/api/v1/auth/exchange")
-                .header("Content-Type", "application/json")
+                .header("Content-Type", stormchaser_model::APPLICATION_JSON)
                 .extension(ConnectInfo(addr))
                 .body(Body::from(
                     json!({
@@ -555,7 +555,7 @@ async fn test_auth_exchange_invalid_jwk() {
             Request::builder()
                 .method("POST")
                 .uri("/api/v1/auth/exchange")
-                .header("Content-Type", "application/json")
+                .header("Content-Type", stormchaser_model::APPLICATION_JSON)
                 .extension(ConnectInfo(addr))
                 .body(Body::from(
                     json!({
@@ -611,7 +611,7 @@ async fn test_auth_exchange_invalid_signature() {
             Request::builder()
                 .method("POST")
                 .uri("/api/v1/auth/exchange")
-                .header("Content-Type", "application/json")
+                .header("Content-Type", stormchaser_model::APPLICATION_JSON)
                 .extension(ConnectInfo(addr))
                 .body(Body::from(
                     json!({
@@ -665,7 +665,7 @@ async fn test_auth_refresh_network_error() {
             Request::builder()
                 .method("POST")
                 .uri("/api/v1/auth/refresh")
-                .header("Content-Type", "application/json")
+                .header("Content-Type", stormchaser_model::APPLICATION_JSON)
                 .extension(ConnectInfo(addr))
                 .body(Body::from(
                     json!({
@@ -696,7 +696,7 @@ async fn test_auth_refresh_invalid_json() {
             Request::builder()
                 .method("POST")
                 .uri("/api/v1/auth/refresh")
-                .header("Content-Type", "application/json")
+                .header("Content-Type", stormchaser_model::APPLICATION_JSON)
                 .extension(ConnectInfo(addr))
                 .body(Body::from(
                     json!({
@@ -729,7 +729,7 @@ async fn test_auth_refresh_invalid_id_token_header() {
             Request::builder()
                 .method("POST")
                 .uri("/api/v1/auth/refresh")
-                .header("Content-Type", "application/json")
+                .header("Content-Type", stormchaser_model::APPLICATION_JSON)
                 .extension(ConnectInfo(addr))
                 .body(Body::from(
                     json!({
@@ -775,7 +775,7 @@ async fn test_auth_refresh_no_kid() {
             Request::builder()
                 .method("POST")
                 .uri("/api/v1/auth/refresh")
-                .header("Content-Type", "application/json")
+                .header("Content-Type", stormchaser_model::APPLICATION_JSON)
                 .extension(ConnectInfo(addr))
                 .body(Body::from(
                     json!({
@@ -818,7 +818,7 @@ async fn test_auth_refresh_kid_not_found() {
             Request::builder()
                 .method("POST")
                 .uri("/api/v1/auth/refresh")
-                .header("Content-Type", "application/json")
+                .header("Content-Type", stormchaser_model::APPLICATION_JSON)
                 .extension(ConnectInfo(addr))
                 .body(Body::from(
                     json!({
@@ -864,7 +864,7 @@ async fn test_auth_refresh_invalid_jwk() {
             Request::builder()
                 .method("POST")
                 .uri("/api/v1/auth/refresh")
-                .header("Content-Type", "application/json")
+                .header("Content-Type", stormchaser_model::APPLICATION_JSON)
                 .extension(ConnectInfo(addr))
                 .body(Body::from(
                     json!({
@@ -918,7 +918,7 @@ async fn test_auth_refresh_invalid_signature() {
             Request::builder()
                 .method("POST")
                 .uri("/api/v1/auth/refresh")
-                .header("Content-Type", "application/json")
+                .header("Content-Type", stormchaser_model::APPLICATION_JSON)
                 .extension(ConnectInfo(addr))
                 .body(Body::from(
                     json!({

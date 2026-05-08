@@ -22,7 +22,7 @@ pub async fn list_runs(
 
     let res = http_client
         .get(url)
-        .header("Authorization", format!("Bearer {}", token))
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
         .send()
         .await?;
     handle_response(res).await
@@ -108,7 +108,7 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/api/v1/runs"))
-            .and(header("Authorization", "Bearer test-token"))
+            .and(header(reqwest::header::AUTHORIZATION, "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
             .mount(&server)
             .await;

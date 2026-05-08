@@ -27,7 +27,7 @@ pub async fn generate_parking_instructions(
                     .await?;
 
             Ok(serde_json::json!({
-                "backend_type": "s3",
+                "backend_type": BackendType::S3,
                 "put_url": put_url,
                 "path": artifact.path,
                 "retention": artifact.retention,

@@ -88,7 +88,10 @@ async fn test_list_webhooks() {
         .oneshot(
             Request::builder()
                 .uri("/api/v1/webhooks")
-                .header("Authorization", format!("Bearer {}", get_token()))
+                .header(
+                    axum::http::header::AUTHORIZATION,
+                    format!("Bearer {}", get_token()),
+                )
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())
                 .unwrap(),
@@ -111,7 +114,10 @@ async fn test_list_event_rules() {
         .oneshot(
             Request::builder()
                 .uri("/api/v1/rules")
-                .header("Authorization", format!("Bearer {}", get_token()))
+                .header(
+                    axum::http::header::AUTHORIZATION,
+                    format!("Bearer {}", get_token()),
+                )
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())
                 .unwrap(),
@@ -134,7 +140,10 @@ async fn test_list_cron_workflows() {
         .oneshot(
             Request::builder()
                 .uri("/api/v1/cron-workflows")
-                .header("Authorization", format!("Bearer {}", get_token()))
+                .header(
+                    axum::http::header::AUTHORIZATION,
+                    format!("Bearer {}", get_token()),
+                )
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())
                 .unwrap(),
@@ -157,7 +166,10 @@ async fn test_list_storage_backends() {
         .oneshot(
             Request::builder()
                 .uri("/api/v1/storage-backends")
-                .header("Authorization", format!("Bearer {}", get_token()))
+                .header(
+                    axum::http::header::AUTHORIZATION,
+                    format!("Bearer {}", get_token()),
+                )
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())
                 .unwrap(),
@@ -182,8 +194,11 @@ async fn test_create_webhook() {
             Request::builder()
                 .method("POST")
                 .uri("/api/v1/webhooks")
-                .header("Content-Type", "application/json")
-                .header("Authorization", format!("Bearer {}", get_token()))
+                .header("Content-Type", stormchaser_model::APPLICATION_JSON)
+                .header(
+                    axum::http::header::AUTHORIZATION,
+                    format!("Bearer {}", get_token()),
+                )
                 .extension(ConnectInfo(addr))
                 .body(Body::from(
                     serde_json::to_vec(&json!({
@@ -215,8 +230,11 @@ async fn test_create_cron_workflow() {
             Request::builder()
                 .method("POST")
                 .uri("/api/v1/cron-workflows")
-                .header("Content-Type", "application/json")
-                .header("Authorization", format!("Bearer {}", get_token()))
+                .header("Content-Type", stormchaser_model::APPLICATION_JSON)
+                .header(
+                    axum::http::header::AUTHORIZATION,
+                    format!("Bearer {}", get_token()),
+                )
                 .extension(ConnectInfo(addr))
                 .body(Body::from(
                     serde_json::to_vec(&json!({
@@ -271,8 +289,11 @@ async fn test_create_event_rule() {
             Request::builder()
                 .method("POST")
                 .uri("/api/v1/rules")
-                .header("Content-Type", "application/json")
-                .header("Authorization", format!("Bearer {}", get_token()))
+                .header("Content-Type", stormchaser_model::APPLICATION_JSON)
+                .header(
+                    axum::http::header::AUTHORIZATION,
+                    format!("Bearer {}", get_token()),
+                )
                 .extension(ConnectInfo(addr))
                 .body(Body::from(
                     serde_json::to_vec(&json!({
@@ -325,7 +346,10 @@ async fn test_stream_run_status() {
         .oneshot(
             Request::builder()
                 .uri(format!("/api/v1/runs/{}/status/stream", run_id))
-                .header("Authorization", format!("Bearer {}", get_token()))
+                .header(
+                    axum::http::header::AUTHORIZATION,
+                    format!("Bearer {}", get_token()),
+                )
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())
                 .unwrap(),
@@ -378,7 +402,10 @@ async fn test_delete_cron_workflow() {
             Request::builder()
                 .method("DELETE")
                 .uri(format!("/api/v1/cron-workflows/{}", id))
-                .header("Authorization", format!("Bearer {}", get_token()))
+                .header(
+                    axum::http::header::AUTHORIZATION,
+                    format!("Bearer {}", get_token()),
+                )
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())
                 .unwrap(),
@@ -431,7 +458,7 @@ async fn test_trigger_cron_workflow() {
             Request::builder()
                 .method("POST")
                 .uri(format!("/api/v1/cron-trigger/{}", id))
-                .header("Authorization", "Bearer bad-token")
+                .header(axum::http::header::AUTHORIZATION, "Bearer bad-token")
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())
                 .unwrap(),
@@ -447,7 +474,10 @@ async fn test_trigger_cron_workflow() {
             Request::builder()
                 .method("POST")
                 .uri(format!("/api/v1/cron-trigger/{}", id))
-                .header("Authorization", format!("Bearer {}", secret))
+                .header(
+                    axum::http::header::AUTHORIZATION,
+                    format!("Bearer {}", secret),
+                )
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())
                 .unwrap(),
@@ -480,7 +510,10 @@ async fn test_stream_run_logs() {
         .oneshot(
             Request::builder()
                 .uri(format!("/api/v1/runs/{}/logs/stream", run_id))
-                .header("Authorization", format!("Bearer {}", get_token()))
+                .header(
+                    axum::http::header::AUTHORIZATION,
+                    format!("Bearer {}", get_token()),
+                )
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())
                 .unwrap(),
@@ -543,7 +576,10 @@ async fn test_stream_step_logs() {
                     "/api/v1/runs/{}/steps/{}/logs/stream",
                     run_id, step_id
                 ))
-                .header("Authorization", format!("Bearer {}", get_token()))
+                .header(
+                    axum::http::header::AUTHORIZATION,
+                    format!("Bearer {}", get_token()),
+                )
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())
                 .unwrap(),
@@ -588,7 +624,10 @@ async fn test_list_workflow_runs() {
         .oneshot(
             Request::builder()
                 .uri("/api/v1/runs")
-                .header("Authorization", format!("Bearer {}", get_token()))
+                .header(
+                    axum::http::header::AUTHORIZATION,
+                    format!("Bearer {}", get_token()),
+                )
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())
                 .unwrap(),
@@ -612,7 +651,10 @@ async fn test_get_workflow_run_not_found() {
         .oneshot(
             Request::builder()
                 .uri(format!("/api/v1/runs/{}", run_id))
-                .header("Authorization", format!("Bearer {}", get_token()))
+                .header(
+                    axum::http::header::AUTHORIZATION,
+                    format!("Bearer {}", get_token()),
+                )
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())
                 .unwrap(),
@@ -653,7 +695,10 @@ async fn test_delete_workflow_run() {
             Request::builder()
                 .method("DELETE")
                 .uri(format!("/api/v1/runs/{}", run_id))
-                .header("Authorization", format!("Bearer {}", get_token()))
+                .header(
+                    axum::http::header::AUTHORIZATION,
+                    format!("Bearer {}", get_token()),
+                )
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())
                 .unwrap(),
@@ -677,8 +722,11 @@ async fn test_direct_run() {
             Request::builder()
                 .method("POST")
                 .uri("/api/v1/runs/direct")
-                .header("Authorization", format!("Bearer {}", get_token()))
-                .header("Content-Type", "application/json")
+                .header(
+                    axum::http::header::AUTHORIZATION,
+                    format!("Bearer {}", get_token()),
+                )
+                .header("Content-Type", stormchaser_model::APPLICATION_JSON)
                 .extension(ConnectInfo(addr))
                 .body(Body::from(
                     serde_json::to_vec(&json!({
@@ -710,8 +758,11 @@ async fn test_run_from_git() {
             Request::builder()
                 .method("POST")
                 .uri("/api/v1/runs")
-                .header("Authorization", format!("Bearer {}", get_token()))
-                .header("Content-Type", "application/json")
+                .header(
+                    axum::http::header::AUTHORIZATION,
+                    format!("Bearer {}", get_token()),
+                )
+                .header("Content-Type", stormchaser_model::APPLICATION_JSON)
                 .extension(ConnectInfo(addr))
                 .body(Body::from(
                     serde_json::to_vec(&json!({
@@ -827,11 +878,14 @@ async fn test_run_from_git() {
 
     // Mock runner completing the step
     stormchaser_engine::handler::step::events::handle_step_completed(
-        serde_json::json!({
+        serde_json::from_value(serde_json::json!({
             "run_id": run_id,
             "step_id": step_id.to_string(),
+            "event_type": "StepCompletedEvent",
+            "timestamp": chrono::Utc::now(),
             "outputs": {}
-        }),
+        }))
+        .unwrap(),
         pool.clone(),
         nats_client.clone(),
         std::sync::Arc::new(None),
@@ -849,7 +903,10 @@ async fn test_run_from_git() {
                 Request::builder()
                     .method("GET")
                     .uri(format!("/api/v1/runs/{}", run_id))
-                    .header("Authorization", format!("Bearer {}", get_token()))
+                    .header(
+                        axum::http::header::AUTHORIZATION,
+                        format!("Bearer {}", get_token()),
+                    )
                     .extension(ConnectInfo(addr))
                     .body(Body::empty())
                     .unwrap(),
@@ -892,7 +949,10 @@ async fn test_stream_workflow_runs() {
         .oneshot(
             Request::builder()
                 .uri("/api/v1/runs/stream")
-                .header("Authorization", format!("Bearer {}", get_token()))
+                .header(
+                    axum::http::header::AUTHORIZATION,
+                    format!("Bearer {}", get_token()),
+                )
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())
                 .unwrap(),

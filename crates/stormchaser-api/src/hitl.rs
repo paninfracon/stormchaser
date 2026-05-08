@@ -13,7 +13,13 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use stormchaser_model::auth::ApprovalOpaContext;
+use stormchaser_model::events::{
+    EventSource, EventType, SchemaVersion, StepCompletedEvent, StepEventType, StepFailedEvent,
+};
 use stormchaser_model::step::StepStatus;
+use stormchaser_model::EventId;
+use stormchaser_model::RunId;
+use stormchaser_model::StepInstanceId;
 
 use crate::auth::AuthClaims;
 use crate::db::{
@@ -23,13 +29,12 @@ use crate::db::{
 use async_nats::jetstream::new as new_jetstream;
 use chrono::Utc;
 use stormchaser_model::dsl::{Step, Workflow};
-use stormchaser_model::events::{StepCompletedEvent, StepFailedEvent};
-use stormchaser_model::nats::publish_cloudevent;
+use stormchaser_model::nats::{publish_cloudevent, NatsSubject};
 
 #[derive(serde::Deserialize, serde::Serialize)]
 struct ApprovalLinkPayload {
-    run_id: stormchaser_model::RunId,
-    step_id: stormchaser_model::StepInstanceId,
+    run_id: RunId,
+    step_id: StepInstanceId,
     action: String,
     #[serde(default)]
     inputs: Value,
@@ -112,7 +117,7 @@ pub async fn approve_step_link(
     // 6. Insert into approval_registry
     let _ = insert_approval_registry(
         &state.pool,
-        stormchaser_model::EventId::new_v4(),
+        EventId::new_v4(),
         payload.step_id,
         "system-link",
         status_str,
@@ -155,7 +160,7 @@ pub async fn approve_step_link(
 
 async fn check_approval_opa(
     state: &AppState,
-    run_id: stormchaser_model::RunId,
+    run_id: RunId,
     step_name: &str,
     token: Option<&str>,
 ) -> Result<(), (StatusCode, String)> {
@@ -245,7 +250,7 @@ pub async fn approve_step(
     State(state): State<AppState>,
     AuthClaims(claims): AuthClaims,
     headers: HeaderMap,
-    Path((run_id, step_id)): Path<(stormchaser_model::RunId, stormchaser_model::StepInstanceId)>,
+    Path((run_id, step_id)): Path<(RunId, StepInstanceId)>,
     Json(inputs): Json<Value>,
 ) -> impl IntoResponse {
     let token = headers
@@ -275,7 +280,7 @@ pub async fn approve_step(
     // 2. Insert into approval_registry
     let _ = insert_approval_registry(
         &state.pool,
-        stormchaser_model::EventId::new_v4(),
+        EventId::new_v4(),
         step_id,
         &claims.sub,
         "approved",
@@ -287,7 +292,7 @@ pub async fn approve_step(
     let completion_event = StepCompletedEvent {
         run_id,
         step_id,
-        event_type: "stormchaser.v1.step.completed".to_string(),
+        event_type: EventType::Step(StepEventType::Completed),
         runner_id: None,
         exit_code: Some(0),
         storage_hashes: None,
@@ -299,11 +304,11 @@ pub async fn approve_step(
 
     match publish_cloudevent(
         &new_jetstream(state.nats.clone()),
-        "stormchaser.v1.step.completed",
-        "stormchaser.v1.step.completed",
-        "/stormchaser/api",
+        NatsSubject::StepCompleted,
+        EventType::Step(StepEventType::Completed),
+        EventSource::Api,
         serde_json::to_value(completion_event).unwrap(),
-        Some("1.0"),
+        Some(SchemaVersion::new("1.0".to_string())),
         None,
     )
     .await
@@ -318,7 +323,7 @@ pub async fn reject_step(
     State(state): State<AppState>,
     AuthClaims(claims): AuthClaims,
     headers: HeaderMap,
-    Path((run_id, step_id)): Path<(stormchaser_model::RunId, stormchaser_model::StepInstanceId)>,
+    Path((run_id, step_id)): Path<(RunId, StepInstanceId)>,
 ) -> impl IntoResponse {
     let token = headers
         .get(AUTHORIZATION)
@@ -345,7 +350,7 @@ pub async fn reject_step(
 
     let _ = insert_approval_registry(
         &state.pool,
-        stormchaser_model::EventId::new_v4(),
+        EventId::new_v4(),
         step_id,
         &claims.sub,
         "rejected",
@@ -356,7 +361,7 @@ pub async fn reject_step(
     let event = StepFailedEvent {
         run_id,
         step_id,
-        event_type: "stormchaser.v1.step.failed".to_string(),
+        event_type: EventType::Step(StepEventType::Failed),
         error: "Rejected by human".to_string(),
         exit_code: Some(1),
         runner_id: None,
@@ -369,11 +374,11 @@ pub async fn reject_step(
 
     match publish_cloudevent(
         &new_jetstream(state.nats.clone()),
-        "stormchaser.v1.step.failed",
-        "stormchaser.v1.step.failed",
-        "/stormchaser/api",
+        NatsSubject::StepFailed,
+        EventType::Step(StepEventType::Failed),
+        EventSource::Api,
         serde_json::to_value(event).unwrap(),
-        Some("1.0"),
+        Some(SchemaVersion::new("1.0".to_string())),
         None,
     )
     .await
@@ -406,7 +411,7 @@ pub async fn correlate_event(
     let completion_event = StepCompletedEvent {
         run_id: corr.run_id,
         step_id: corr.step_instance_id,
-        event_type: "stormchaser.v1.step.completed".to_string(),
+        event_type: EventType::Step(StepEventType::Completed),
         runner_id: None,
         exit_code: Some(0),
         storage_hashes: None,
@@ -418,11 +423,11 @@ pub async fn correlate_event(
 
     match publish_cloudevent(
         &new_jetstream(state.nats.clone()),
-        "stormchaser.v1.step.completed",
-        "stormchaser.v1.step.completed",
-        "/stormchaser/api",
+        NatsSubject::StepCompleted,
+        EventType::Step(StepEventType::Completed),
+        EventSource::Api,
         serde_json::to_value(completion_event).unwrap(),
-        Some("1.0"),
+        Some(SchemaVersion::new("1.0".to_string())),
         None,
     )
     .await

@@ -36,7 +36,7 @@ impl<'a> App<'a> {
                     let client = reqwest::Client::new();
                     if let Ok(res) = client
                         .get(format!("{}/api/v1/runs/{}", url, run_id))
-                        .header("Authorization", format!("Bearer {}", token))
+                        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
                         .send()
                         .await
                     {

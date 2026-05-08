@@ -179,11 +179,13 @@ pub async fn get_workflow_run_detail(
 pub async fn get_workflow_run_status(
     pool: &PgPool,
     run_id: RunId,
-) -> Result<Option<String>, sqlx::Error> {
-    sqlx::query_scalar("SELECT status::text FROM combined_workflow_runs WHERE id = $1")
-        .bind(run_id)
-        .fetch_optional(pool)
-        .await
+) -> Result<Option<RunStatus>, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"SELECT status as "status: RunStatus" FROM combined_workflow_runs WHERE id = $1"#,
+    )
+    .bind(run_id)
+    .fetch_optional(pool)
+    .await
 }
 
 /// Retrieves the combined status for a workflow run.
@@ -191,11 +193,13 @@ pub async fn get_workflow_run_status(
 pub async fn get_combined_run_status(
     pool: &PgPool,
     run_id: RunId,
-) -> Result<Option<String>, sqlx::Error> {
-    sqlx::query_scalar("SELECT status::text FROM combined_workflow_runs WHERE id = $1")
-        .bind(run_id)
-        .fetch_optional(pool)
-        .await
+) -> Result<Option<RunStatus>, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"SELECT status as "status: RunStatus" FROM combined_workflow_runs WHERE id = $1"#,
+    )
+    .bind(run_id)
+    .fetch_optional(pool)
+    .await
 }
 
 /// Deletes a workflow run completely from the system (active and archived).

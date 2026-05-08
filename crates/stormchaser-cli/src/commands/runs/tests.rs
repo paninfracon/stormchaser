@@ -53,7 +53,7 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/api/v1/runs"))
-            .and(header("Authorization", "Bearer test-token"))
+            .and(header(reqwest::header::AUTHORIZATION, "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
             .mount(&server)
             .await;
@@ -79,7 +79,7 @@ mod tests {
         let id = stormchaser_model::RunId::new_v4();
         Mock::given(method("GET"))
             .and(path(format!("/api/v1/runs/{}", id)))
-            .and(header("Authorization", "Bearer test-token"))
+            .and(header(reqwest::header::AUTHORIZATION, "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": id})))
             .mount(&server)
             .await;
@@ -97,7 +97,7 @@ mod tests {
         let id = stormchaser_model::RunId::new_v4();
         Mock::given(method("GET"))
             .and(path(format!("/api/v1/runs/{}/artifacts", id)))
-            .and(header("Authorization", "Bearer test-token"))
+            .and(header(reqwest::header::AUTHORIZATION, "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
             .mount(&server)
             .await;
@@ -119,7 +119,7 @@ mod tests {
                 "/api/v1/runs/{}/steps/{}/approve",
                 run_id, step_id
             )))
-            .and(header("Authorization", "Bearer test-token"))
+            .and(header(reqwest::header::AUTHORIZATION, "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "approved"})))
             .mount(&server)
             .await;
@@ -145,7 +145,7 @@ mod tests {
                 "/api/v1/runs/{}/steps/{}/reject",
                 run_id, step_id
             )))
-            .and(header("Authorization", "Bearer test-token"))
+            .and(header(reqwest::header::AUTHORIZATION, "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "rejected"})))
             .mount(&server)
             .await;
@@ -164,7 +164,7 @@ mod tests {
             .and(path("/api/v1/runs"))
             // It expects a query string `?status=Running` but wiremock path matcher ignores query
             // so we can just match path or use path_and_query
-            .and(header("Authorization", "Bearer test-token"))
+            .and(header(reqwest::header::AUTHORIZATION, "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
             .mount(&server)
             .await;
@@ -181,10 +181,10 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/api/v1/runs/enqueue"))
-            .and(header("Authorization", "Bearer test-token"))
+            .and(header(reqwest::header::AUTHORIZATION, "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "id": "12345678-1234-1234-1234-123456789012",
-                "status": "queued"
+                "status": RunStatus::Queued
             })))
             .mount(&server)
             .await;

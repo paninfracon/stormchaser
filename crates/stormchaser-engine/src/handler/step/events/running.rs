@@ -6,18 +6,19 @@ use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
 use tracing::info;
 
-#[tracing::instrument(skip(payload, pool), fields(run_id = tracing::field::Empty, step_id = tracing::field::Empty))]
+#[tracing::instrument(skip(event, pool), fields(run_id = tracing::field::Empty, step_id = tracing::field::Empty))]
 /// Handle step running.
-pub async fn handle_step_running(payload: Value, pool: PgPool) -> Result<()> {
-    let run_id_str = payload["run_id"].as_str().context("Missing run_id")?;
-    let run_id = uuid::Uuid::parse_str(run_id_str).map(RunId::new)?;
-    let step_id_str = payload["step_id"].as_str().context("Missing step_id")?;
-    let step_id = uuid::Uuid::parse_str(step_id_str).map(StepInstanceId::new)?;
+pub async fn handle_step_running(
+    event: stormchaser_model::events::StepRunningEvent,
+    pool: PgPool,
+) -> Result<()> {
+    let run_id = event.run_id;
+    let step_id = event.step_id;
 
     let span = tracing::Span::current();
     span.record("run_id", tracing::field::display(run_id));
     span.record("step_id", tracing::field::display(step_id));
-    let runner_id = payload["runner_id"].as_str().unwrap_or("unknown");
+    let runner_id = event.runner_id.as_deref().unwrap_or("unknown");
 
     info!(
         "Step {} (Run {}) is now running on runner {}",

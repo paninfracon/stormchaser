@@ -6,6 +6,7 @@ use std::sync::Arc;
 use stormchaser_dsl::StormchaserParser;
 use stormchaser_model::auth::{EngineOpaContext, OpaClient};
 use stormchaser_model::events::WorkflowStartPendingEvent;
+use stormchaser_model::events::{EventSource, EventType, SchemaVersion, WorkflowEventType};
 use stormchaser_model::workflow::{RunStatus, WorkflowRun};
 use stormchaser_model::RunId;
 use tracing::{debug, error, info};
@@ -104,17 +105,18 @@ pub async fn handle_workflow_direct(
     // 4. Emit event for transition to StartPending
     let event = WorkflowStartPendingEvent {
         run_id,
-        event_type: "workflow_start_pending".to_string(),
+        event_type: EventType::Workflow(WorkflowEventType::StartPending),
         timestamp: Utc::now(),
     };
     let js = async_nats::jetstream::new(nats_client);
+    use stormchaser_model::nats::NatsSubject;
     stormchaser_model::nats::publish_cloudevent(
         &js,
-        "stormchaser.v1.run.start_pending",
-        "stormchaser.v1.run.start_pending",
-        "/stormchaser",
+        NatsSubject::RunStartPending,
+        EventType::Workflow(WorkflowEventType::StartPending),
+        EventSource::System,
         serde_json::to_value(event).unwrap(),
-        Some("1.0"),
+        Some(SchemaVersion::new("1.0".to_string())),
         None,
     )
     .await

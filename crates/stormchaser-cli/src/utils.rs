@@ -45,7 +45,7 @@ pub async fn stream_run_logs(
 ) -> Result<()> {
     let res = http_client
         .get(format!("{}/api/v1/runs/{}/logs/stream", cli_url, run_id))
-        .header("Authorization", format!("Bearer {}", token))
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
         .send()
         .await?;
 
@@ -81,7 +81,7 @@ pub async fn stream_run_status(
 ) -> Result<()> {
     let res = http_client
         .get(format!("{}/api/v1/runs/{}/status/stream", cli_url, run_id))
-        .header("Authorization", format!("Bearer {}", token))
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
         .send()
         .await?;
 

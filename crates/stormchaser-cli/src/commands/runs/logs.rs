@@ -16,7 +16,7 @@ pub async fn stream_logs(
             id,
             urlencoding::encode(&step_name)
         ))
-        .header("Authorization", format!("Bearer {}", token))
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
         .send()
         .await?;
 

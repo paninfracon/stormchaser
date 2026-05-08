@@ -7,14 +7,16 @@ use stormchaser_model::BackendId;
 use stormchaser_model::StorageBackend;
 use tar::Archive;
 
+use std::collections::HashMap;
+
 pub async fn persist_step_test_reports(
-    payload: &Value,
+    test_reports: Option<&HashMap<String, Value>>,
     tx: &mut Transaction<'_, Postgres>,
     run_id: stormchaser_model::RunId,
     step_id: stormchaser_model::StepInstanceId,
     pool: &PgPool,
 ) -> Result<()> {
-    if let Some(reports) = payload["test_reports"].as_object() {
+    if let Some(reports) = test_reports {
         for (_key, report_val) in reports {
             let name = report_val
                 .get("name")

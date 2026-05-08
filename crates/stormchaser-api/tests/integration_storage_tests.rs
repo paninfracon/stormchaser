@@ -12,6 +12,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use stormchaser_api::{app, AppState, Claims, JWT_SECRET};
 use stormchaser_model::step::StepStatus;
+use stormchaser_model::storage::BackendType;
 use stormchaser_model::workflow::RunStatus;
 use stormchaser_model::OpaClient;
 use tower::ServiceExt;
@@ -74,7 +75,7 @@ async fn test_storage_backend_crud() {
     let create_payload = json!({
         "name": "test-s3",
         "description": "Test S3 Backend",
-        "backend_type": "s3",
+        "backend_type": BackendType::S3,
         "config": {
             "bucket": "test-bucket",
             "endpoint": "http://localhost:9000"
@@ -89,7 +90,10 @@ async fn test_storage_backend_crud() {
                 .method(http::Method::POST)
                 .uri("/api/v1/storage-backends")
                 .header(http::header::AUTHORIZATION, format!("Bearer {}", token))
-                .header(http::header::CONTENT_TYPE, "application/json")
+                .header(
+                    http::header::CONTENT_TYPE,
+                    stormchaser_model::APPLICATION_JSON,
+                )
                 .extension(ConnectInfo(addr))
                 .body(Body::from(serde_json::to_vec(&create_payload).unwrap()))
                 .unwrap(),
@@ -137,7 +141,10 @@ async fn test_storage_backend_crud() {
                 .method(http::Method::PATCH)
                 .uri(format!("/api/v1/storage-backends/{}", backend_id))
                 .header(http::header::AUTHORIZATION, format!("Bearer {}", token))
-                .header(http::header::CONTENT_TYPE, "application/json")
+                .header(
+                    http::header::CONTENT_TYPE,
+                    stormchaser_model::APPLICATION_JSON,
+                )
                 .extension(ConnectInfo(addr))
                 .body(Body::from(serde_json::to_vec(&update_payload).unwrap()))
                 .unwrap(),

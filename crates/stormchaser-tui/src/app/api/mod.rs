@@ -21,7 +21,7 @@ impl<'a> App<'a> {
         let client = reqwest::Client::new();
         let mut req = client.request(method, format!("{}{}", self.url, path));
         if let Some(token) = &self.token {
-            req = req.header("Authorization", format!("Bearer {}", token));
+            req = req.header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token));
         }
         if let Some(body) = body {
             req = req.json(&body);

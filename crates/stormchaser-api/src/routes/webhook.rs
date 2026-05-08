@@ -16,7 +16,8 @@ use sha2::Sha256;
 use std::collections::HashMap;
 use stormchaser_model::event_rules::WebhookConfig;
 use stormchaser_model::events::WorkflowQueuedEvent;
-use stormchaser_model::nats::publish_cloudevent;
+use stormchaser_model::events::{EventSource, EventType, SchemaVersion, WorkflowEventType};
+use stormchaser_model::nats::{publish_cloudevent, NatsSubject};
 use stormchaser_model::workflow::RunStatus;
 use stormchaser_model::WebhookId;
 
@@ -353,7 +354,7 @@ pub async fn handle_webhook(
 
         let event = WorkflowQueuedEvent {
             run_id,
-            event_type: "workflow_queued".to_string(),
+            event_type: EventType::Workflow(WorkflowEventType::Queued),
             timestamp: Utc::now(),
             dsl: None,
             inputs: None,
@@ -362,11 +363,11 @@ pub async fn handle_webhook(
 
         publish_cloudevent(
             &jetstream::new(state.nats.clone()),
-            "stormchaser.v1.run.queued",
-            "stormchaser.v1.run.queued",
-            "/stormchaser",
+            NatsSubject::RunQueued,
+            EventType::Workflow(WorkflowEventType::Queued),
+            EventSource::System,
             serde_json::to_value(event).unwrap(),
-            Some("1.0"),
+            Some(SchemaVersion::new("1.0".to_string())),
             None,
         )
         .await

@@ -12,6 +12,8 @@ use std::sync::Arc;
 use stormchaser_dsl::ast::{self, Workflow};
 use stormchaser_model::dsl::OutputExtraction;
 use stormchaser_model::events::WorkflowCompletedEvent;
+use stormchaser_model::events::{EventSource, EventType, SchemaVersion, WorkflowEventType};
+use stormchaser_model::nats::publish_cloudevent;
 use stormchaser_model::step::{StepInstance, StepStatus};
 use stormchaser_model::LogBackend;
 use stormchaser_model::RunId;
@@ -26,19 +28,17 @@ use crate::handler::step::scheduling::schedule_step;
 
 use super::helpers::persist_step_test_reports;
 
-#[tracing::instrument(skip(payload, pool, nats_client, log_backend, tls_reloader), fields(run_id = tracing::field::Empty, step_id = tracing::field::Empty))]
+#[tracing::instrument(skip(event, pool, nats_client, log_backend, tls_reloader), fields(run_id = tracing::field::Empty, step_id = tracing::field::Empty))]
 /// Handle step completed.
 pub async fn handle_step_completed(
-    payload: Value,
+    event: stormchaser_model::events::StepCompletedEvent,
     pool: PgPool,
     nats_client: async_nats::Client,
     log_backend: Arc<Option<LogBackend>>,
     tls_reloader: Arc<TlsReloader>,
 ) -> Result<()> {
-    let run_id_str = payload["run_id"].as_str().context("Missing run_id")?;
-    let run_id = uuid::Uuid::parse_str(run_id_str).map(RunId::new)?;
-    let step_id_str = payload["step_id"].as_str().context("Missing step_id")?;
-    let step_id = uuid::Uuid::parse_str(step_id_str).map(StepInstanceId::new)?;
+    let run_id = event.run_id;
+    let step_id = event.step_id;
 
     let span = tracing::Span::current();
     span.record("run_id", tracing::field::display(run_id));
@@ -94,14 +94,32 @@ pub async fn handle_step_completed(
         crate::db::get_step_instances_by_run_id(&mut *tx, run_id).await?;
 
     // 3. Persist outputs
-    if let Some(outputs) = payload["outputs"].as_object() {
+    if let Some(outputs) = event
+        .outputs
+        .as_ref()
+        .map(|m| {
+            m.clone()
+                .into_iter()
+                .collect::<serde_json::Map<String, serde_json::Value>>()
+        })
+        .as_ref()
+    {
         for (key, value) in outputs {
             crate::db::upsert_step_output(&mut *tx, step_id, key, value).await?;
         }
     }
 
     // 3.5 Persist storage hashes if provided
-    if let Some(storage_hashes) = payload["storage_hashes"].as_object() {
+    if let Some(storage_hashes) = event
+        .storage_hashes
+        .as_ref()
+        .map(|m| {
+            m.clone()
+                .into_iter()
+                .collect::<serde_json::Map<String, serde_json::Value>>()
+        })
+        .as_ref()
+    {
         for (name, hash_val) in storage_hashes {
             if let Some(hash) = hash_val.as_str() {
                 crate::db::upsert_run_storage_state(&mut *tx, run_id.into_inner(), name, hash)
@@ -111,7 +129,16 @@ pub async fn handle_step_completed(
     }
 
     // 3.6 Persist artifact metadata if provided
-    if let Some(artifacts) = payload["artifacts"].as_object() {
+    if let Some(artifacts) = event
+        .artifacts
+        .as_ref()
+        .map(|m| {
+            m.clone()
+                .into_iter()
+                .collect::<serde_json::Map<String, serde_json::Value>>()
+        })
+        .as_ref()
+    {
         let context = fetch_run_context(run_id, &mut *tx).await?;
         let workflow: Workflow = serde_json::from_value(context.workflow_definition)
             .context("Failed to parse workflow definition from DB")?;
@@ -147,7 +174,7 @@ pub async fn handle_step_completed(
     }
 
     // 3.8 Persist test reports if provided
-    persist_step_test_reports(&payload, &mut tx, run_id, step_id, &pool).await?;
+    persist_step_test_reports(event.test_reports.as_ref(), &mut tx, run_id, step_id, &pool).await?;
 
     // 2.5 Scrape outputs from logs if configured
     let context = fetch_run_context(run_id, &mut *tx).await?;
@@ -412,14 +439,15 @@ pub async fn handle_step_completed(
         let _ = machine.succeed(&mut *tx).await?;
 
         let js = async_nats::jetstream::new(nats_client.clone());
-        if let Err(e) = stormchaser_model::nats::publish_cloudevent(
+        use stormchaser_model::nats::NatsSubject;
+        if let Err(e) = publish_cloudevent(
             &js,
-            "stormchaser.v1.run.completed",
-            "workflow_completed",
-            "stormchaser-engine",
+            NatsSubject::RunCompleted,
+            EventType::Workflow(WorkflowEventType::Completed),
+            EventSource::Engine,
             serde_json::to_value(WorkflowCompletedEvent {
                 run_id,
-                event_type: "workflow_completed".to_string(),
+                event_type: EventType::Workflow(WorkflowEventType::Completed),
                 timestamp: chrono::Utc::now(),
             })
             .unwrap(),

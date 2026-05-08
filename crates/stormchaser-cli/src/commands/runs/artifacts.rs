@@ -10,7 +10,7 @@ pub async fn list_artifacts(
     let token = require_token(token)?;
     let res = http_client
         .get(format!("{}/api/v1/runs/{}/artifacts", url, id))
-        .header("Authorization", format!("Bearer {}", token))
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
         .send()
         .await?;
     handle_response(res).await
@@ -30,7 +30,7 @@ mod tests {
         let id = stormchaser_model::RunId::new_v4();
         Mock::given(method("GET"))
             .and(path(format!("/api/v1/runs/{}/artifacts", id)))
-            .and(header("Authorization", "Bearer test-token"))
+            .and(header(reqwest::header::AUTHORIZATION, "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
             .mount(&server)
             .await;

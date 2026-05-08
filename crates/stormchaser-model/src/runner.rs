@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// The connection status of a remote runner.
-#[derive(Debug, Serialize, Deserialize, Clone, sqlx::Type, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone, sqlx::Type, PartialEq, Eq, schemars::JsonSchema)]
 #[sqlx(type_name = "runner_status", rename_all = "snake_case")]
 pub enum RunnerStatus {
     /// The runner is currently online and communicating.

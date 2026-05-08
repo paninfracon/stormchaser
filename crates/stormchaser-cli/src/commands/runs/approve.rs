@@ -16,7 +16,7 @@ pub async fn approve_step(
             "{}/api/v1/runs/{}/steps/{}/approve",
             url, run_id, step_id
         ))
-        .header("Authorization", format!("Bearer {}", token))
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
         .json(&inputs)
         .send()
         .await?;
@@ -36,7 +36,7 @@ pub async fn reject_step(
             "{}/api/v1/runs/{}/steps/{}/reject",
             url, run_id, step_id
         ))
-        .header("Authorization", format!("Bearer {}", token))
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
         .send()
         .await?;
     handle_response(res).await
@@ -62,7 +62,7 @@ pub async fn list_pending(
     let token = require_token(token)?;
     let res = http_client
         .get(format!("{}/api/v1/runs?status=Running", url))
-        .header("Authorization", format!("Bearer {}", token))
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
         .send()
         .await?;
     handle_response(res).await
@@ -86,7 +86,7 @@ mod tests {
                 "/api/v1/runs/{}/steps/{}/approve",
                 run_id, step_id
             )))
-            .and(header("Authorization", "Bearer test-token"))
+            .and(header(reqwest::header::AUTHORIZATION, "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "approved"})))
             .mount(&server)
             .await;
@@ -115,7 +115,7 @@ mod tests {
                 "/api/v1/runs/{}/steps/{}/reject",
                 run_id, step_id
             )))
-            .and(header("Authorization", "Bearer test-token"))
+            .and(header(reqwest::header::AUTHORIZATION, "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "rejected"})))
             .mount(&server)
             .await;
@@ -131,7 +131,7 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/api/v1/runs"))
-            .and(header("Authorization", "Bearer test-token"))
+            .and(header(reqwest::header::AUTHORIZATION, "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
             .mount(&server)
             .await;

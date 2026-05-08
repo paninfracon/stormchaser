@@ -8,7 +8,9 @@ use serde_json::Value;
 use utoipa::ToSchema;
 
 /// The execution status of a single workflow step.
-#[derive(Debug, Serialize, Deserialize, Clone, sqlx::Type, PartialEq, Eq, ToSchema)]
+#[derive(
+    Debug, Serialize, Deserialize, Clone, sqlx::Type, PartialEq, Eq, ToSchema, schemars::JsonSchema,
+)]
 #[sqlx(type_name = "step_status", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum StepStatus {
