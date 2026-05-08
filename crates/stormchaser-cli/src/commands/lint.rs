@@ -223,6 +223,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_lint_handle_valid_workflow() -> Result<()> {
+        let _guard = LINT_MUTEX.lock().await;
         let mut file = NamedTempFile::new()?;
         writeln!(
             file,
