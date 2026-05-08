@@ -149,3 +149,44 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
         env:
           SQLX_OFFLINE: true
+
+  publish-crates:
+    name: Publish to Crates.io
+    needs: build-linux-binaries
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish Crates
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          # Publish foundational crates first
+          cargo publish -p stormchaser-model
+          sleep 15
+          cargo publish -p stormchaser-opa
+          sleep 15
+          cargo publish -p stormchaser-tls
+          sleep 15
+          cargo publish -p stormchaser-dsl
+          sleep 15
+
+          # Publish dependent crates
+          cargo publish -p stormchaser-engine
+          sleep 15
+          cargo publish -p stormchaser-api
+          sleep 15
+          cargo publish -p stormchaser-runner-docker
+          sleep 15
+          cargo publish -p stormchaser-runner-k8s
+          sleep 15
+          cargo publish -p stormchaser-agent
+          sleep 15
+
+          # Publish top-level CLI
+          cargo publish -p stormchaser-cli

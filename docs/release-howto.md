@@ -120,3 +120,36 @@ helm dependency update deploy/charts/stormchaser
 helm package deploy/charts/stormchaser
 # Push the resulting .tgz to your Helm repository (if applicable)
 ```
+
+### Step 5: Publish Crates to crates.io
+
+Ensure your local `CARGO_REGISTRY_TOKEN` is configured or run `cargo login`.
+
+Due to index propagation delays, publish the foundational crates first and pause before publishing dependent crates.
+
+```bash
+# Publish foundational crates first
+cargo publish -p stormchaser-model
+sleep 15
+cargo publish -p stormchaser-opa
+sleep 15
+cargo publish -p stormchaser-tls
+sleep 15
+cargo publish -p stormchaser-dsl
+sleep 15
+
+# Publish dependent crates
+cargo publish -p stormchaser-engine
+sleep 15
+cargo publish -p stormchaser-api
+sleep 15
+cargo publish -p stormchaser-runner-docker
+sleep 15
+cargo publish -p stormchaser-runner-k8s
+sleep 15
+cargo publish -p stormchaser-agent
+sleep 15
+
+# Publish top-level CLI
+cargo publish -p stormchaser-cli
+```
