@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-05-07
+
+### Added
+
+- Feature/strongly typed ids (#20)
+- Nats messaging improvements (#16)
+- Comprehensive unit and snapshot tests for dialogs and panes (#19)
+
+### Changed
+
+- Reduce cyclomatic complexity in parser and dispatch (#17)
+- Shorten long Rust entity paths (#18)
+
 ### Fixed
 
 - Fixed CI formatting issues in `stormchaser-runner-k8s`.
