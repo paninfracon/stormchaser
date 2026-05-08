@@ -1,6 +1,6 @@
-# stormchaser-tui
+# stormchaser-model
 
-Interactive terminal dashboard (TUI) for real-time monitoring of Stormchaser workflow state, logs, and general orchestration metrics.
+Foundational domain types and core execution state models for Stormchaser. This crate remains pure and free of execution logic, defining the shared data structures used across the workspace.
 
 ---
 

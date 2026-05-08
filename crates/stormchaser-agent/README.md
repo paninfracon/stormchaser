@@ -1,6 +1,6 @@
-# stormchaser-tui
+# stormchaser-agent
 
-Interactive terminal dashboard (TUI) for real-time monitoring of Stormchaser workflow state, logs, and general orchestration metrics.
+Runner-side execution wrapper for Stormchaser. Executes user commands within the runner environment, manages storage "parking" for the Stormchaser File System (SFS), and collects artifacts and test reports.
 
 ---
 

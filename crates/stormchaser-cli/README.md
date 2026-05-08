@@ -1,6 +1,6 @@
-# stormchaser-tui
+# stormchaser-cli
 
-Interactive terminal dashboard (TUI) for real-time monitoring of Stormchaser workflow state, logs, and general orchestration metrics.
+Primary user command-line interface for running, linting, exporting schemas, and interacting with Stormchaser workflows and the orchestration API.
 
 ---
 

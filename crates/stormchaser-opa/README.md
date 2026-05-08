@@ -1,6 +1,6 @@
-# stormchaser-tui
+# stormchaser-opa
 
-Interactive terminal dashboard (TUI) for real-time monitoring of Stormchaser workflow state, logs, and general orchestration metrics.
+Shared Open Policy Agent (OPA) integration and data structures for fail-closed policy evaluation in Stormchaser.
 
 ---
 

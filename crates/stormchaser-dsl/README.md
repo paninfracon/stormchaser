@@ -1,6 +1,6 @@
-# stormchaser-tui
+# stormchaser-dsl
 
-Interactive terminal dashboard (TUI) for real-time monitoring of Stormchaser workflow state, logs, and general orchestration metrics.
+Specialized HCL parser, abstract syntax tree (AST) representation, and bidirectional serialization logic for the Stormchaser workflow Domain Specific Language (DSL).
 
 ---
 

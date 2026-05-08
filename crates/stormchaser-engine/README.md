@@ -1,6 +1,6 @@
-# stormchaser-tui
+# stormchaser-engine
 
-Interactive terminal dashboard (TUI) for real-time monitoring of Stormchaser workflow state, logs, and general orchestration metrics.
+The core orchestration layer managing state transitions, runtime expression evaluation, Git caching, and NATS message handling for the Stormchaser workflow engine.
 
 ---
 

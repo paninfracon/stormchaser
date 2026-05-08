@@ -1,6 +1,6 @@
-# stormchaser-tui
+# stormchaser-runner-docker
 
-Interactive terminal dashboard (TUI) for real-time monitoring of Stormchaser workflow state, logs, and general orchestration metrics.
+Docker-specific executor for Stormchaser, managing Docker container lifecycles for distributed workflow step execution.
 
 ---
 

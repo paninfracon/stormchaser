@@ -1,6 +1,6 @@
-# stormchaser-tui
+# stormchaser-tls
 
-Interactive terminal dashboard (TUI) for real-time monitoring of Stormchaser workflow state, logs, and general orchestration metrics.
+Shared security configuration, including standardized mTLS and TLS setup for secure inter-service communication within the Stormchaser architecture.
 
 ---
 

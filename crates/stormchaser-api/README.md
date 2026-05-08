@@ -1,6 +1,6 @@
-# stormchaser-tui
+# stormchaser-api
 
-Interactive terminal dashboard (TUI) for real-time monitoring of Stormchaser workflow state, logs, and general orchestration metrics.
+REST interface for external interaction with Stormchaser, featuring OPA-backed authorization, telemetry logic, and management of Human-In-The-Loop approval flows.
 
 ---
 
