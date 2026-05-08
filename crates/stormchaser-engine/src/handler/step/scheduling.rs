@@ -2,8 +2,7 @@ use serde_json::Value;
 use stormchaser_dsl::ast;
 use stormchaser_model::dsl;
 use stormchaser_model::step::StepStatus;
-use stormchaser_model::RunId;
-use stormchaser_model::StepInstanceId;
+use stormchaser_model::{EventId, RunId, StepInstanceId};
 
 use anyhow::Result;
 use sqlx::PgPool;
@@ -164,8 +163,8 @@ pub async fn schedule_step(
                 {
                     let _ = crate::db::insert_event_correlation(
                         &mut *executor,
-                        Uuid::new_v4(),
-                        step_instance_id,
+                        EventId::new_v4(),
+                        StepInstanceId::new(step_instance_id),
                         run_id,
                         &wait_spec.correlation_key,
                         &wait_spec.correlation_value,
@@ -209,8 +208,8 @@ pub async fn schedule_step(
                 {
                     let _ = crate::db::insert_event_correlation(
                         &mut *executor,
-                        Uuid::new_v4(),
-                        step_instance_id,
+                        EventId::new_v4(),
+                        StepInstanceId::new(step_instance_id),
                         run_id,
                         &wait_spec.correlation_key,
                         &wait_spec.correlation_value,

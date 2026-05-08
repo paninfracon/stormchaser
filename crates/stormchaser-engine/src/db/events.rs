@@ -1,13 +1,12 @@
 use sqlx::{Executor, Postgres};
-use stormchaser_model::RunId;
-use uuid::Uuid;
+use stormchaser_model::{EventId, RunId, StepInstanceId};
 
 #[allow(clippy::too_many_arguments)]
 /// Insert event correlation.
 pub async fn insert_event_correlation<'a, E>(
     executor: E,
-    id: Uuid,
-    step_instance_id: Uuid,
+    id: EventId,
+    step_instance_id: StepInstanceId,
     run_id: RunId,
     correlation_key: &str,
     correlation_value: &str,
