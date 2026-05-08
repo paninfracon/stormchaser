@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-05-08
+
+### Added
+
+- docs: add crate-specific README.md files for crates.io publishing
+
 ## [1.3.0] - 2026-05-07
 
 ### Added
