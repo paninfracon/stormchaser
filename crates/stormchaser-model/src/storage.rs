@@ -1,6 +1,6 @@
 //! Storage backend and artifact registry models.
 
-use crate::id::{BackendId, RunId, StepInstanceId};
+use crate::id::{ArtifactId, BackendId, RunId, StepInstanceId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
@@ -55,7 +55,7 @@ pub struct StorageBackend {
 #[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow, ToSchema)]
 pub struct ArtifactRegistry {
     /// Unique identifier for the artifact record.
-    pub id: BackendId,
+    pub id: ArtifactId,
     /// Associated workflow run ID.
     pub run_id: RunId,
     /// Associated step instance ID that produced the artifact.

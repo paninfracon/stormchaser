@@ -190,6 +190,21 @@ impl_id_traits!(BackendId);
     Display,
     FromStr
 ))]
+pub struct ArtifactId(Uuid);
+impl_id_traits!(ArtifactId);
+
+#[nutype(derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Display,
+    FromStr
+))]
 pub struct TestReportId(Uuid);
 impl_id_traits!(TestReportId);
 

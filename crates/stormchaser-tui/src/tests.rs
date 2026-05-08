@@ -502,7 +502,7 @@ fn render_run_detail_with_artifacts() {
             logs: vec![],
         }],
         artifacts: vec![ArtifactRegistry {
-            id: stormchaser_model::BackendId::new(uuid::Uuid::nil()),
+            id: stormchaser_model::ArtifactId::new(uuid::Uuid::nil()),
             run_id: RunId::new(Uuid::nil()),
             step_instance_id,
             artifact_name: "binary".to_string(),
