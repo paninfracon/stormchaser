@@ -165,16 +165,9 @@ async fn test_db_layer_functions() {
 
     // Event correlation
     let corr_id = EventId::new_v4();
-    db::events::insert_event_correlation(
-        &pool,
-        corr_id.into_inner(),
-        step_id.into_inner(),
-        run_id,
-        "test-key",
-        "test-val",
-    )
-    .await
-    .unwrap();
+    db::events::insert_event_correlation(&pool, corr_id, step_id, run_id, "test-key", "test-val")
+        .await
+        .unwrap();
 
     // Storage
     db::storage::insert_step_test_report(
