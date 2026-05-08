@@ -205,9 +205,9 @@ pub async fn delete_storage_backend(
 pub async fn list_run_artifacts(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path(id): Path<BackendId>,
+    Path(run_id): Path<RunId>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let artifacts = db::list_run_artifacts(&state.pool, RunId::new(id.into_inner()))
+    let artifacts = db::list_run_artifacts(&state.pool, run_id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -230,9 +230,9 @@ pub async fn list_run_artifacts(
 pub async fn list_run_test_reports(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path(id): Path<BackendId>,
+    Path(run_id): Path<RunId>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let reports = db::list_run_test_reports(&state.pool, RunId::new(id.into_inner()))
+    let reports = db::list_run_test_reports(&state.pool, run_id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -255,9 +255,9 @@ pub async fn list_run_test_reports(
 pub async fn list_run_test_summaries(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path(id): Path<BackendId>,
+    Path(run_id): Path<RunId>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let summaries = db::list_run_test_summaries(&state.pool, RunId::new(id.into_inner()))
+    let summaries = db::list_run_test_summaries(&state.pool, run_id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
