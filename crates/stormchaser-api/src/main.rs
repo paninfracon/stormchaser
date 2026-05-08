@@ -196,6 +196,7 @@ pub async fn run_server(config: Config) -> anyhow::Result<()> {
     migrate!("./migrations").run(&pool).await?;
 
     let nats_options = async_nats::ConnectOptions::new()
+        .retry_on_initial_connect()
         .tls_client_config((*tls_reloader.client_config()).clone());
 
     let nats_client = connect_with_options(config.nats_url, nats_options).await?;

@@ -11,6 +11,13 @@ NC='\033[0m' # No Color
 
 REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." &> /dev/null && pwd)
 
+# Load environment variables if present
+if [ -f "$REPO_ROOT/.env" ]; then
+    set -a
+    source "$REPO_ROOT/.env"
+    set +a
+fi
+
 # 1. Determine Host IP
 HOST_IP=$(ip -4 addr show docker0 | grep -Po 'inet \K[\d.]+' || hostname -I | awk '{print $1}')
 echo -e "${BLUE}>>> Detected Host IP: $HOST_IP${NC}"
@@ -72,6 +79,11 @@ wait_for_api
 
 # Get OIDC token
 TOKEN=${STORMCHASER_TOKEN:-$1}
+
+if [ -z "$TOKEN" ]; then
+  echo "Generating temporary token for dogfooding..."
+  TOKEN=$(python3 "$REPO_ROOT/scripts/generate_dev_token.py")
+fi
 
 if [ -z "$TOKEN" ]; then
   echo -e "${RED}Error: Authentication token required.${NC}"

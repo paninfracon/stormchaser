@@ -154,7 +154,8 @@ pub async fn run_runner(config: Config) -> Result<()> {
     });
 
     // 2. Connect to NATS
-    let nats_client = async_nats::connect(nats_url)
+    let nats_options = async_nats::ConnectOptions::new().retry_on_initial_connect();
+    let nats_client = async_nats::connect_with_options(nats_url, nats_options)
         .await
         .context("Failed to connect to NATS")?;
 
