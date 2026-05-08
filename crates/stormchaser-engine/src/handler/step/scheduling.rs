@@ -115,7 +115,7 @@ pub async fn schedule_step(
             crate::db::count_running_steps_for_run(&mut *executor, run_id).await?;
 
         for (idx, item) in items.into_iter().enumerate() {
-            let step_instance_id = Uuid::new_v4();
+            let step_instance_id = StepInstanceId::new(Uuid::new_v4());
             let status = match step_dsl.r#type.as_str() {
                 "Approval" | "Wait" => StepStatus::WaitingForEvent,
                 _ => {
@@ -145,7 +145,7 @@ pub async fn schedule_step(
 
             crate::db::insert_step_instance_with_spec(
                 &mut *executor,
-                StepInstanceId::new(step_instance_id),
+                step_instance_id,
                 run_id,
                 &step_dsl.name,
                 &resolved_type,
@@ -164,7 +164,7 @@ pub async fn schedule_step(
                     let _ = crate::db::insert_event_correlation(
                         &mut *executor,
                         EventId::new_v4(),
-                        StepInstanceId::new(step_instance_id),
+                        step_instance_id,
                         run_id,
                         &wait_spec.correlation_key,
                         &wait_spec.correlation_value,
@@ -177,7 +177,7 @@ pub async fn schedule_step(
         let _ = crate::hcl_eval::resolve_expressions(&mut resolved_spec, hcl_ctx);
         let _ = crate::hcl_eval::resolve_expressions(&mut resolved_params, hcl_ctx);
 
-        let step_instance_id = Uuid::new_v4();
+        let step_instance_id = StepInstanceId::new(Uuid::new_v4());
         let initial_status = match resolved_type.as_str() {
             "Approval" | "Wait" => StepStatus::WaitingForEvent,
             _ => StepStatus::Pending,
@@ -189,7 +189,7 @@ pub async fn schedule_step(
         );
         let insert_result = crate::db::insert_step_instance_with_spec_on_conflict_do_nothing(
             &mut *executor,
-            StepInstanceId::new(step_instance_id),
+            step_instance_id,
             run_id,
             &step_dsl.name,
             &resolved_type,
@@ -209,7 +209,7 @@ pub async fn schedule_step(
                     let _ = crate::db::insert_event_correlation(
                         &mut *executor,
                         EventId::new_v4(),
-                        StepInstanceId::new(step_instance_id),
+                        step_instance_id,
                         run_id,
                         &wait_spec.correlation_key,
                         &wait_spec.correlation_value,
@@ -227,7 +227,7 @@ pub async fn schedule_step(
                         tokio::spawn(async move {
                             let _ = handle_approval_notification(
                                 run_id,
-                                stormchaser_model::StepInstanceId::new(step_instance_id),
+                                step_instance_id,
                                 spec_val,
                                 pool,
                                 nats_client,
