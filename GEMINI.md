@@ -121,6 +121,7 @@ The project is divided into specialized crates to ensure a clear separation of c
 - **Improvement**: When assessing code quality for improvements do not attempt to implment new features.
 - **Honoring tests**: Never shortcut tests to just return when fixing test failures
 - **Work Ethic**: Don't be lazy and use shortcut solutions when there is a comprehensive fix possible
+- **DEad Code**: Don't use `#[allow(dead_code)]` to suppress clippy warnings
 
 ## Agent Performance & Context Efficiency
 
