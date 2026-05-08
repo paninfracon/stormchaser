@@ -20,7 +20,6 @@ use stormchaser_model::events::WorkflowQueuedEvent;
 use stormchaser_model::nats::publish_cloudevent;
 use stormchaser_model::workflow::RunStatus;
 use stormchaser_model::RunId;
-use stormchaser_model::StepId;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -232,7 +231,7 @@ pub async fn get_workflow_run(
             backend
                 .fetch_step_logs(
                     &instance.step_name,
-                    StepId::new(instance.id.into_inner()),
+                    instance.id,
                     instance.started_at,
                     instance.finished_at,
                     Some(100), // Reduce payload size for full detail, TUI will fetch on demand

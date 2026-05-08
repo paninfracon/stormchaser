@@ -9,7 +9,6 @@ use stormchaser_model::events::StepScheduledEvent;
 use stormchaser_model::storage::BackendType;
 use stormchaser_model::storage::StorageBackend;
 use stormchaser_model::RunId;
-use stormchaser_model::StepId;
 use stormchaser_model::StepInstanceId;
 use stormchaser_tls::TlsReloader;
 
@@ -430,7 +429,7 @@ pub async fn dispatch_step_instance(
 
     let payload = StepScheduledEvent {
         run_id,
-        step_id: StepId::new(step_instance_id.into_inner()),
+        step_id: step_instance_id,
         step_name: Some(step_name.to_string()),
         step_type: Some(step_type.clone()),
         spec: Some(resolved_spec),

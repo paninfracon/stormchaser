@@ -249,7 +249,7 @@ impl DockerContainerMachine<state::Initialized> {
         if let Some(nats) = &self.nats {
             let running_event = StepRunningEvent {
                 run_id: stormchaser_model::RunId::new(self.metadata.run_id),
-                step_id: stormchaser_model::StepId::new(self.metadata.step_id),
+                step_id: stormchaser_model::StepInstanceId::new(self.metadata.step_id),
                 event_type: "stormchaser.v1.step.running".to_string(),
                 timestamp: chrono::Utc::now(),
             };

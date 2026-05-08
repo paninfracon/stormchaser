@@ -6,7 +6,6 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use stormchaser_model::events::StepFailedEvent;
 use stormchaser_model::RunId;
-use stormchaser_model::StepId;
 use stormchaser_model::StepInstanceId;
 use stormchaser_tls::TlsReloader;
 
@@ -174,7 +173,7 @@ pub async fn try_dispatch(
                 Err(e) => {
                     let event = StepFailedEvent {
                         run_id,
-                        step_id: StepId::new(step_instance_id.into_inner()),
+                        step_id: step_instance_id,
                         event_type: "stormchaser.v1.step.failed".to_string(),
                         error: format!("JQ execution failed: {:?}", e),
                         runner_id: None,

@@ -264,7 +264,7 @@ pub async fn handle_task(
             tracing::error!("Failed to acquire K8s client: {:?}", e);
             let fail_event = StepFailedEvent {
                 run_id: stormchaser_model::RunId::new(run_id),
-                step_id: stormchaser_model::StepId::new(step_id),
+                step_id: stormchaser_model::StepInstanceId::new(step_id),
                 event_type: "stormchaser.v1.step.failed".to_string(),
                 error: format!("Failed to acquire K8s client: {:?}", e),
                 runner_id: Some(runner_id.clone()),

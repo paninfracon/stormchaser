@@ -25,13 +25,13 @@ pub async fn handle_step_query(
                 .ok()
                 .and_then(|v| v.as_str().map(str::to_string));
             StepQueryResponseEvent {
-                step_id: stormchaser_model::StepId::new(step_id.into_inner()),
+                step_id,
                 status: status_str,
                 exists: true,
             }
         } else {
             StepQueryResponseEvent {
-                step_id: stormchaser_model::StepId::new(step_id.into_inner()),
+                step_id,
                 status: None,
                 exists: false,
             }

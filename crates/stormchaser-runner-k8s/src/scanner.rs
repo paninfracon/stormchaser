@@ -283,7 +283,7 @@ pub async fn scan_for_orphans(
 
                                 let event = StepFailedEvent {
                                     run_id: stormchaser_model::RunId::new(run_id),
-                                    step_id: stormchaser_model::StepId::new(step_id),
+                                    step_id: stormchaser_model::StepInstanceId::new(step_id),
                                     event_type: "stormchaser.v1.step.failed".to_string(),
                                     error: reason,
                                     runner_id: Some(r_id.clone()),

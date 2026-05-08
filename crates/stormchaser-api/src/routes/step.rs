@@ -61,10 +61,7 @@ pub async fn stream_step_logs_api(
         .ok_or(StatusCode::NOT_FOUND)?;
 
     let rx = log_backend
-        .stream_step_logs(
-            &instance.step_name,
-            stormchaser_model::StepId::new(step_id.into_inner()),
-        )
+        .stream_step_logs(&instance.step_name, step_id)
         .await
         .map_err(|e| {
             tracing::error!("Failed to stream logs: {}", e);
@@ -123,7 +120,7 @@ pub async fn get_step_logs_api(
     let logs = log_backend
         .fetch_step_logs(
             &instance.step_name,
-            stormchaser_model::StepId::new(step_id.into_inner()),
+            step_id,
             instance.started_at,
             instance.finished_at,
             query.limit,
@@ -206,10 +203,7 @@ pub async fn stream_run_logs_api(
                             step_name_clone
                         );
                         if let Ok(mut step_rx) = log_backend
-                            .stream_step_logs(
-                                &step_name_clone,
-                                stormchaser_model::StepId::new(step_id.into_inner()),
-                            )
+                            .stream_step_logs(&step_name_clone, step_id)
                             .await
                         {
                             tracing::debug!(

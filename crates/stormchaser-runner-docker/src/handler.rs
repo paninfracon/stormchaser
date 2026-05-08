@@ -400,7 +400,7 @@ pub async fn handle_task(
 
             let event = StepCompletedEvent {
                 run_id: stormchaser_model::RunId::new(run_id),
-                step_id: stormchaser_model::StepId::new(step_id),
+                step_id: stormchaser_model::StepInstanceId::new(step_id),
                 event_type: "stormchaser.v1.step.completed".to_string(),
                 runner_id: Some(runner_id.clone()),
                 exit_code: metrics.exit_code.map(|c| c as i32),
@@ -445,7 +445,7 @@ pub async fn handle_task(
 
             let event = StepFailedEvent {
                 run_id: stormchaser_model::RunId::new(run_id),
-                step_id: stormchaser_model::StepId::new(step_id),
+                step_id: stormchaser_model::StepInstanceId::new(step_id),
                 event_type: "stormchaser.v1.step.failed".to_string(),
                 error: reason,
                 runner_id: Some(runner_id.clone()),

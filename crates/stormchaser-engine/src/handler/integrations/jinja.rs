@@ -115,7 +115,7 @@ async fn save_output_and_complete(
 
     let event = StepCompletedEvent {
         run_id,
-        step_id: stormchaser_model::StepId::new(step_id.into_inner()),
+        step_id,
         event_type: "stormchaser.v1.step.completed".to_string(),
         outputs: Some(outputs_map),
         exit_code: Some(0),

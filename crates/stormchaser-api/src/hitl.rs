@@ -14,7 +14,6 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use stormchaser_model::auth::ApprovalOpaContext;
 use stormchaser_model::step::StepStatus;
-use stormchaser_model::StepId;
 
 use crate::auth::AuthClaims;
 use crate::db::{
@@ -287,7 +286,7 @@ pub async fn approve_step(
     // 3. Publish to NATS simulating step completion
     let completion_event = StepCompletedEvent {
         run_id,
-        step_id: stormchaser_model::StepId::new(step_id.into_inner()),
+        step_id,
         event_type: "stormchaser.v1.step.completed".to_string(),
         runner_id: None,
         exit_code: Some(0),
@@ -356,7 +355,7 @@ pub async fn reject_step(
 
     let event = StepFailedEvent {
         run_id,
-        step_id: stormchaser_model::StepId::new(step_id.into_inner()),
+        step_id,
         event_type: "stormchaser.v1.step.failed".to_string(),
         error: "Rejected by human".to_string(),
         exit_code: Some(1),
@@ -406,7 +405,7 @@ pub async fn correlate_event(
     // 2. Publish to stormchaser.step.completed
     let completion_event = StepCompletedEvent {
         run_id: corr.run_id,
-        step_id: StepId::new(corr.step_instance_id.into_inner()),
+        step_id: corr.step_instance_id,
         event_type: "stormchaser.v1.step.completed".to_string(),
         runner_id: None,
         exit_code: Some(0),
