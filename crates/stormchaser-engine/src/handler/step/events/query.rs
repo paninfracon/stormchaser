@@ -2,7 +2,6 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 use sqlx::PgPool;
 use stormchaser_model::events::StepQueryResponseEvent;
-use stormchaser_model::StepId;
 use stormchaser_model::StepInstance;
 use stormchaser_model::StepInstanceId;
 
@@ -26,13 +25,13 @@ pub async fn handle_step_query(
                 .ok()
                 .and_then(|v| v.as_str().map(str::to_string));
             StepQueryResponseEvent {
-                step_id: StepId::new(step_id.into_inner()),
+                step_id: stormchaser_model::StepId::new(step_id.into_inner()),
                 status: status_str,
                 exists: true,
             }
         } else {
             StepQueryResponseEvent {
-                step_id: StepId::new(step_id.into_inner()),
+                step_id: stormchaser_model::StepId::new(step_id.into_inner()),
                 status: None,
                 exists: false,
             }

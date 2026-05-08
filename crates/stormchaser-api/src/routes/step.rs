@@ -11,12 +11,10 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::time::Duration;
 use stormchaser_model::RunId;
-use stormchaser_model::StepId;
 use stormchaser_model::StepInstanceId;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
 use utoipa::ToSchema;
-use uuid::Uuid;
 
 #[derive(Deserialize, ToSchema)]
 pub struct LogsQuery {
@@ -33,7 +31,7 @@ pub fn format_log_event(line: &str) -> Event {
 #[utoipa::path(
     get,
     path = "/api/v1/runs/{run_id}/steps/{step_id}/logs/stream",
-    params(("run_id" = Uuid, Path, description="Run ID"), ("step_id" = Uuid, Path, description="Step instance ID")),
+    params(("run_id" = stormchaser_model::RunId, Path, description="Run ID"), ("step_id" = stormchaser_model::StepInstanceId, Path, description="Step instance ID")),
     responses(
         (status = 200, description = "Success"),
         (status = 400, description = "Bad Request"),
@@ -63,7 +61,10 @@ pub async fn stream_step_logs_api(
         .ok_or(StatusCode::NOT_FOUND)?;
 
     let rx = log_backend
-        .stream_step_logs(&instance.step_name, StepId::new(step_id.into_inner()))
+        .stream_step_logs(
+            &instance.step_name,
+            stormchaser_model::StepId::new(step_id.into_inner()),
+        )
         .await
         .map_err(|e| {
             tracing::error!("Failed to stream logs: {}", e);
@@ -91,8 +92,8 @@ pub async fn stream_step_logs_api(
     get,
     path = "/api/v1/runs/{run_id}/steps/{step_id}/logs",
     params(
-        ("run_id" = Uuid, Path, description="Run ID"),
-        ("step_id" = Uuid, Path, description="Step instance ID"),
+        ("run_id" = stormchaser_model::RunId, Path, description="Run ID"),
+        ("step_id" = stormchaser_model::StepInstanceId, Path, description="Step instance ID"),
         ("limit" = Option<usize>, Query, description="Limit log lines")
     ),
     responses(
@@ -122,7 +123,7 @@ pub async fn get_step_logs_api(
     let logs = log_backend
         .fetch_step_logs(
             &instance.step_name,
-            StepId::new(step_id.into_inner()),
+            stormchaser_model::StepId::new(step_id.into_inner()),
             instance.started_at,
             instance.finished_at,
             query.limit,
@@ -140,7 +141,7 @@ pub async fn get_step_logs_api(
 #[utoipa::path(
     get,
     path = "/api/v1/runs/{run_id}/logs/stream",
-    params(("run_id" = Uuid, Path, description="Run ID")),
+    params(("run_id" = stormchaser_model::RunId, Path, description="Run ID")),
     responses(
         (status = 200, description = "Success"),
         (status = 400, description = "Bad Request"),
@@ -205,7 +206,10 @@ pub async fn stream_run_logs_api(
                             step_name_clone
                         );
                         if let Ok(mut step_rx) = log_backend
-                            .stream_step_logs(&step_name_clone, StepId::new(step_id))
+                            .stream_step_logs(
+                                &step_name_clone,
+                                stormchaser_model::StepId::new(step_id.into_inner()),
+                            )
                             .await
                         {
                             tracing::debug!(
@@ -276,7 +280,7 @@ pub async fn stream_run_logs_api(
     get,
     path = "/api/v1/runs/{run_id}/status/stream",
     params(
-        ("run_id" = Uuid, Path, description = "Run ID")
+        ("run_id" = stormchaser_model::RunId, Path, description = "Run ID")
     ),
     responses(
         (status = 200, description = "Status stream (SSE)")
@@ -302,7 +306,10 @@ pub async fn stream_run_status_api(
 
     tokio::spawn(async move {
         let mut last_run_status: Option<String> = None;
-        let mut last_step_statuses: HashMap<Uuid, String> = HashMap::new();
+        let mut last_step_statuses: std::collections::HashMap<
+            stormchaser_model::StepInstanceId,
+            String,
+        > = HashMap::new();
 
         loop {
             // Check workflow run status

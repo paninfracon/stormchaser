@@ -97,7 +97,7 @@ pub async fn list_cron_workflows(
 #[utoipa::path(
     delete,
     path = "/api/v1/cron-workflows/{id}",
-    params(("id" = Uuid, Path, description="Cron ID")),
+    params(("id" = stormchaser_model::CronWorkflowId, Path, description="Cron ID")),
     responses(
         (status = 200, description = "Success"),
         (status = 400, description = "Bad Request"),
@@ -138,7 +138,7 @@ pub async fn delete_cron_workflow(
     post,
     path = "/api/v1/cron-trigger/{id}",
     params(
-        ("id" = Uuid, Path, description = "Cron workflow ID")
+        ("id" = stormchaser_model::CronWorkflowId, Path, description = "Cron workflow ID")
     ),
     responses(
         (status = 200, description = "Workflow triggered", body = EnqueueResponse),

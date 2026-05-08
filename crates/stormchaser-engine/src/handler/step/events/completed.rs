@@ -15,7 +15,6 @@ use stormchaser_model::events::WorkflowCompletedEvent;
 use stormchaser_model::step::{StepInstance, StepStatus};
 use stormchaser_model::LogBackend;
 use stormchaser_model::RunId;
-use stormchaser_model::StepId;
 use stormchaser_model::StepInstanceId;
 use stormchaser_tls::TlsReloader;
 use tracing::{debug, error, info};
@@ -69,8 +68,7 @@ pub async fn handle_step_completed(
         return Ok(());
     }
 
-    let _ =
-        release_step_quota_for_instance(&mut *tx, run_id.into_inner(), step_id.into_inner()).await;
+    let _ = release_step_quota_for_instance(&mut *tx, run_id, step_id).await;
 
     let machine =
         crate::step_machine::StepMachine::<crate::step_machine::state::Running>::from_instance(
@@ -149,14 +147,7 @@ pub async fn handle_step_completed(
     }
 
     // 3.8 Persist test reports if provided
-    persist_step_test_reports(
-        &payload,
-        &mut tx,
-        run_id.into_inner(),
-        step_id.into_inner(),
-        &pool,
-    )
-    .await?;
+    persist_step_test_reports(&payload, &mut tx, run_id, step_id, &pool).await?;
 
     // 2.5 Scrape outputs from logs if configured
     let context = fetch_run_context(run_id, &mut *tx).await?;
@@ -212,7 +203,7 @@ pub async fn handle_step_completed(
             let logs = backend
                 .fetch_step_logs(
                     &dsl_step.name,
-                    StepId::new(step_id.into_inner()),
+                    stormchaser_model::StepId::new(step_id.into_inner()),
                     current_step_instance.started_at,
                     current_step_instance.finished_at,
                     Some(5000), // Get up to 5000 lines for output scraping

@@ -136,23 +136,16 @@ fn build_approval_mailer(spec: &stormchaser_model::dsl::EmailSpec) -> lettre::Sm
 mod tests {
     use super::*;
     use stormchaser_model::dsl::{EmailBackend, EmailSpec};
-    use uuid::Uuid;
 
     #[test]
     #[cfg(feature = "email")]
     fn test_generate_approval_links() {
-        let run_id = Uuid::new_v4();
-        let step_id = Uuid::new_v4();
+        let run_id = stormchaser_model::RunId::new_v4();
+        let step_id = stormchaser_model::StepInstanceId::new_v4();
         let secret = "test-secret";
         let base_url = "https://paninfracon.net";
 
-        let (approve, reject) = generate_approval_links(
-            stormchaser_model::RunId::new(run_id),
-            stormchaser_model::StepInstanceId::new(step_id),
-            secret,
-            base_url,
-        )
-        .unwrap();
+        let (approve, reject) = generate_approval_links(run_id, step_id, secret, base_url).unwrap();
 
         assert!(approve.starts_with(base_url));
         assert!(reject.starts_with(base_url));

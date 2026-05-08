@@ -11,7 +11,6 @@ use stormchaser_model::storage::ArtifactRegistry;
 use stormchaser_model::BackendId;
 use stormchaser_model::RunId;
 use stormchaser_model::TestReportId;
-use uuid::Uuid;
 
 /// Creates a storage backend.
 #[utoipa::path(
@@ -30,7 +29,7 @@ pub async fn create_storage_backend(
     State(state): State<AppState>,
     Json(payload): Json<CreateStorageBackendRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let id = Uuid::new_v4();
+    let id = stormchaser_model::BackendId::new_v4();
 
     let mut tx = state
         .pool
@@ -47,7 +46,7 @@ pub async fn create_storage_backend(
 
     db::create_storage_backend(
         &mut tx,
-        BackendId::new(id),
+        id,
         &payload.name,
         &payload.description,
         &payload.backend_type,
@@ -95,7 +94,7 @@ pub async fn list_storage_backends(
 #[utoipa::path(
     get,
     path = "/api/v1/storage-backends/{id}",
-    params(("id" = Uuid, Path, description="Backend ID")),
+    params(("id" = stormchaser_model::BackendId, Path, description="Backend ID")),
     responses(
         (status = 200, description = "Success"),
         (status = 400, description = "Bad Request"),
@@ -121,7 +120,7 @@ pub async fn get_storage_backend(
 #[utoipa::path(
     put,
     path = "/api/v1/storage-backends/{id}",
-    params(("id" = Uuid, Path, description="Backend ID")),
+    params(("id" = stormchaser_model::BackendId, Path, description="Backend ID")),
     responses(
         (status = 200, description = "Success"),
         (status = 400, description = "Bad Request"),
@@ -166,7 +165,7 @@ pub async fn update_storage_backend(
 #[utoipa::path(
     delete,
     path = "/api/v1/storage-backends/{id}",
-    params(("id" = Uuid, Path, description="Backend ID")),
+    params(("id" = stormchaser_model::BackendId, Path, description="Backend ID")),
     responses(
         (status = 200, description = "Success"),
         (status = 400, description = "Bad Request"),
@@ -191,7 +190,7 @@ pub async fn delete_storage_backend(
     get,
     path = "/api/v1/runs/{id}/artifacts",
     params(
-        ("id" = Uuid, Path, description = "Run ID")
+        ("id" = stormchaser_model::BackendId, Path, description = "Run ID")
     ),
     responses(
         (status = 200, description = "List of artifacts", body = [ArtifactRegistry]),
@@ -219,7 +218,7 @@ pub async fn list_run_artifacts(
 #[utoipa::path(
     get,
     path = "/api/v1/runs/{run_id}/reports",
-    params(("run_id" = Uuid, Path, description="Run ID")),
+    params(("run_id" = stormchaser_model::RunId, Path, description="Run ID")),
     responses(
         (status = 200, description = "Success"),
         (status = 400, description = "Bad Request"),
@@ -244,7 +243,7 @@ pub async fn list_run_test_reports(
 #[utoipa::path(
     get,
     path = "/api/v1/runs/{run_id}/test-summaries",
-    params(("run_id" = Uuid, Path, description="Run ID")),
+    params(("run_id" = stormchaser_model::RunId, Path, description="Run ID")),
     responses(
         (status = 200, description = "Success"),
         (status = 400, description = "Bad Request"),
@@ -269,8 +268,8 @@ pub async fn list_run_test_summaries(
     get,
     path = "/api/v1/runs/{run_id}/reports/{report_id}",
     params(
-        ("run_id" = Uuid, Path, description = "Run ID"),
-        ("report_id" = Uuid, Path, description = "Report ID")
+        ("run_id" = stormchaser_model::RunId, Path, description = "Run ID"),
+        ("report_id" = stormchaser_model::TestReportId, Path, description = "Report ID")
     ),
     responses(
         (status = 200, description = "Test report content"),

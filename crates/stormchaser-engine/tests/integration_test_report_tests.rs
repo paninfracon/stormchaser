@@ -1,7 +1,5 @@
 use sqlx::PgPool;
 use stormchaser_model::test_report::{TestCase, TestCaseStatus, TestSummary};
-use stormchaser_model::RunId;
-use stormchaser_model::StepInstanceId;
 use stormchaser_model::TestReportId;
 use uuid::Uuid;
 
@@ -69,8 +67,8 @@ async fn test_report_persistence_integration() {
     // 4. Test Case Insertion
     let test_case = TestCase {
         id: TestReportId::new_v4(),
-        run_id: RunId::new(run_id),
-        step_instance_id: StepInstanceId::new(step_id),
+        run_id: stormchaser_model::RunId::new(run_id),
+        step_instance_id: stormchaser_model::StepInstanceId::new(step_id),
         report_name: "api-tests".to_string(),
         test_suite: Some("suite1".to_string()),
         test_case: "test1".to_string(),

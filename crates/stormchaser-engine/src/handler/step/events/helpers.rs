@@ -4,17 +4,14 @@ use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 use std::io::Read;
 use stormchaser_model::BackendId;
-use stormchaser_model::RunId;
-use stormchaser_model::StepInstanceId;
 use stormchaser_model::StorageBackend;
 use tar::Archive;
-use uuid::Uuid;
 
 pub async fn persist_step_test_reports(
     payload: &Value,
     tx: &mut Transaction<'_, Postgres>,
-    run_id: Uuid,
-    step_id: Uuid,
+    run_id: stormchaser_model::RunId,
+    step_id: stormchaser_model::StepInstanceId,
     pool: &PgPool,
 ) -> Result<()> {
     if let Some(reports) = payload["test_reports"].as_object() {
@@ -79,12 +76,9 @@ pub async fn persist_step_test_reports(
                             entry.read_to_string(&mut content)?;
 
                             if format == "junit" {
-                                if let Ok((summary, cases)) = crate::junit::parse_junit(
-                                    &content,
-                                    name,
-                                    RunId::new(run_id),
-                                    StepInstanceId::new(step_id),
-                                ) {
+                                if let Ok((summary, cases)) =
+                                    crate::junit::parse_junit(&content, name, run_id, step_id)
+                                {
                                     summaries.push(summary);
                                     test_cases.extend(cases);
                                 }
@@ -94,15 +88,21 @@ pub async fn persist_step_test_reports(
                     }
 
                     for case in test_cases {
-                        crate::db::insert_step_test_case(&mut **tx, run_id, step_id, name, &case)
-                            .await?;
+                        crate::db::insert_step_test_case(
+                            &mut **tx,
+                            run_id.into_inner(),
+                            step_id.into_inner(),
+                            name,
+                            &case,
+                        )
+                        .await?;
                     }
 
                     if let Some(final_summary) = crate::junit::aggregate_summaries(&summaries) {
                         crate::db::insert_step_test_summary(
                             &mut **tx,
-                            run_id,
-                            step_id,
+                            run_id.into_inner(),
+                            step_id.into_inner(),
                             name,
                             &final_summary,
                         )
@@ -113,8 +113,8 @@ pub async fn persist_step_test_reports(
 
                     crate::db::insert_step_test_report(
                         &mut **tx,
-                        run_id,
-                        step_id,
+                        run_id.into_inner(),
+                        step_id.into_inner(),
                         name,
                         file_name,
                         format,
@@ -128,19 +128,24 @@ pub async fn persist_step_test_reports(
             } else if let Some(content) = report_val.get("content").and_then(|v| v.as_str()) {
                 // Legacy in-memory report
                 if format == "junit" {
-                    if let Ok((summary, cases)) = crate::junit::parse_junit(
-                        content,
-                        name,
-                        RunId::new(run_id),
-                        StepInstanceId::new(step_id),
-                    ) {
+                    if let Ok((summary, cases)) =
+                        crate::junit::parse_junit(content, name, run_id, step_id)
+                    {
                         crate::db::insert_step_test_summary(
-                            &mut **tx, run_id, step_id, name, &summary,
+                            &mut **tx,
+                            run_id.into_inner(),
+                            step_id.into_inner(),
+                            name,
+                            &summary,
                         )
                         .await?;
                         for case in cases {
                             crate::db::insert_step_test_case(
-                                &mut **tx, run_id, step_id, name, &case,
+                                &mut **tx,
+                                run_id.into_inner(),
+                                step_id.into_inner(),
+                                name,
+                                &case,
                             )
                             .await?;
                         }
@@ -149,8 +154,8 @@ pub async fn persist_step_test_reports(
 
                 crate::db::insert_step_test_report(
                     &mut **tx,
-                    run_id,
-                    step_id,
+                    run_id.into_inner(),
+                    step_id.into_inner(),
                     name,
                     file_name,
                     format,

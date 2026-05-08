@@ -77,7 +77,7 @@ pub async fn list_event_rules(
     delete,
     path = "/api/v1/rules/{id}",
     params(
-        ("id" = Uuid, Path, description = "Event rule ID")
+        ("id" = stormchaser_model::RuleId, Path, description = "Event rule ID")
     ),
     responses(
         (status = 204, description = "Event rule deleted"),

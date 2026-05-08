@@ -1,7 +1,6 @@
 use sqlx::PgPool;
 use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
-use uuid::Uuid;
 
 use stormchaser_model::step;
 
@@ -62,7 +61,7 @@ pub async fn get_step_id_by_name(
     pool: &PgPool,
     run_id: RunId,
     step_name: &str,
-) -> Result<Option<Uuid>, sqlx::Error> {
+) -> Result<Option<stormchaser_model::StepInstanceId>, sqlx::Error> {
     sqlx::query_scalar("SELECT id FROM step_instances WHERE run_id = $1 AND step_name = $2 LIMIT 1")
         .bind(run_id)
         .bind(step_name)
@@ -75,7 +74,7 @@ pub async fn get_step_id_by_name(
 pub async fn get_step_names(
     pool: &PgPool,
     run_id: RunId,
-) -> Result<Vec<(Uuid, String)>, sqlx::Error> {
+) -> Result<Vec<(stormchaser_model::StepInstanceId, String)>, sqlx::Error> {
     sqlx::query_as("SELECT id, step_name FROM combined_step_instances WHERE run_id = $1")
         .bind(run_id)
         .fetch_all(pool)
@@ -87,7 +86,7 @@ pub async fn get_step_names(
 pub async fn get_combined_step_statuses(
     pool: &PgPool,
     run_id: RunId,
-) -> Result<Vec<(Uuid, String, String)>, sqlx::Error> {
+) -> Result<Vec<(stormchaser_model::StepInstanceId, String, String)>, sqlx::Error> {
     sqlx::query_as(
         "SELECT id, step_name, status::text FROM combined_step_instances WHERE run_id = $1",
     )

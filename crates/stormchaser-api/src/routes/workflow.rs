@@ -44,7 +44,7 @@ pub async fn enqueue_workflow(
     State(state): State<AppState>,
     Json(payload): Json<EnqueueRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let run_id = Uuid::new_v4();
+    let run_id = stormchaser_model::RunId::new_v4();
     let user_id = claims.email.clone().unwrap_or(claims.sub.clone());
 
     let span = tracing::Span::current();
@@ -63,7 +63,7 @@ pub async fn enqueue_workflow(
     // Create WorkflowRun with initiating_user
     db::insert_workflow_run(
         &mut tx,
-        RunId::new(run_id),
+        run_id,
         &payload.workflow_name,
         &user_id,
         &payload.repo_url,
@@ -79,7 +79,7 @@ pub async fn enqueue_workflow(
     // Create RunContext (placeholder for dsl_version and workflow_definition)
     db::insert_run_context(
         &mut tx,
-        RunId::new(run_id),
+        run_id,
         "v1",
         serde_json::json!({}),
         "",
@@ -95,17 +95,9 @@ pub async fn enqueue_workflow(
         .and_then(|o| o.timeout.clone())
         .unwrap_or_else(|| "1h".to_string());
 
-    db::insert_run_quotas(
-        &mut tx,
-        RunId::new(run_id),
-        10,
-        "1",
-        "4Gi",
-        "10Gi",
-        &timeout,
-    )
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db::insert_run_quotas(&mut tx, run_id, 10, "1", "4Gi", "10Gi", &timeout)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     tx.commit()
         .await
@@ -113,7 +105,7 @@ pub async fn enqueue_workflow(
 
     // Publish to NATS
     let event = WorkflowQueuedEvent {
-        run_id: RunId::new(run_id),
+        run_id,
         event_type: "workflow_queued".to_string(),
         timestamp: Utc::now(),
         dsl: None,
@@ -142,7 +134,7 @@ pub async fn enqueue_workflow(
     );
 
     Ok(Json(EnqueueResponse {
-        run_id: stormchaser_model::RunId::new(run_id),
+        run_id,
         status: "queued".to_string(),
     }))
 }
@@ -186,7 +178,7 @@ pub async fn list_workflow_runs(
     get,
     path = "/api/v1/runs/{id}",
     params(
-        ("id" = Uuid, Path, description = "Run ID")
+        ("id" = stormchaser_model::RunId, Path, description = "Run ID")
     ),
     responses(
         (status = 200, description = "Workflow run details", body = WorkflowRunFullDetail),
@@ -300,7 +292,7 @@ pub async fn get_workflow_run(
 #[utoipa::path(
     delete,
     path = "/api/v1/runs/{run_id}",
-    params(("run_id" = Uuid, Path, description="Run ID")),
+    params(("run_id" = stormchaser_model::RunId, Path, description="Run ID")),
     responses(
         (status = 200, description = "Success"),
         (status = 400, description = "Bad Request"),
@@ -344,7 +336,7 @@ pub async fn direct_run(
     State(state): State<AppState>,
     Json(payload): Json<DirectRunRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let run_id = Uuid::new_v4();
+    let run_id = stormchaser_model::RunId::new_v4();
     let user_id = claims.email.clone().unwrap_or(claims.sub.clone());
 
     let span = tracing::Span::current();
@@ -386,7 +378,7 @@ pub async fn direct_run(
         })?;
 
     Ok(Json(EnqueueResponse {
-        run_id: stormchaser_model::RunId::new(run_id),
+        run_id,
         status: "started".to_string(),
     }))
 }
@@ -440,9 +432,10 @@ pub async fn stream_workflow_runs_api(
             if let Some(run_id_str) = payload.get("run_id").and_then(|id| id.as_str()) {
                 if let Ok(run_id) = Uuid::parse_str(run_id_str) {
                     // Fetch full detail for the run
-                    let detail = db::get_workflow_run_detail(&pool, RunId::new(run_id))
-                        .await
-                        .unwrap_or(None);
+                    let detail =
+                        db::get_workflow_run_detail(&pool, stormchaser_model::RunId::new(run_id))
+                            .await
+                            .unwrap_or(None);
 
                     if let Some(run) = detail {
                         let data = serde_json::to_string(&run).unwrap_or_default();

@@ -6,7 +6,6 @@ use sqlx::PgPool;
 use stormchaser_model::dsl::JinjaRenderSpec;
 use stormchaser_model::events::StepCompletedEvent;
 use stormchaser_model::RunId;
-use stormchaser_model::StepId;
 use stormchaser_model::StepInstanceId;
 use tracing::info;
 
@@ -116,7 +115,7 @@ async fn save_output_and_complete(
 
     let event = StepCompletedEvent {
         run_id,
-        step_id: StepId::new(step_id.into_inner()),
+        step_id: stormchaser_model::StepId::new(step_id.into_inner()),
         event_type: "stormchaser.v1.step.completed".to_string(),
         outputs: Some(outputs_map),
         exit_code: Some(0),

@@ -4,8 +4,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use stormchaser_model::dsl::Step;
 use stormchaser_model::events::StepFailedEvent;
-use stormchaser_model::RunId;
-use stormchaser_model::StepId;
 use tokio::time::sleep;
 use uuid::Uuid;
 
@@ -265,8 +263,8 @@ pub async fn handle_task(
             in_progress_handle.abort();
             tracing::error!("Failed to acquire K8s client: {:?}", e);
             let fail_event = StepFailedEvent {
-                run_id: RunId::new(run_id),
-                step_id: StepId::new(step_id),
+                run_id: stormchaser_model::RunId::new(run_id),
+                step_id: stormchaser_model::StepId::new(step_id),
                 event_type: "stormchaser.v1.step.failed".to_string(),
                 error: format!("Failed to acquire K8s client: {:?}", e),
                 runner_id: Some(runner_id.clone()),

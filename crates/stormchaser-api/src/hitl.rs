@@ -14,10 +14,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use stormchaser_model::auth::ApprovalOpaContext;
 use stormchaser_model::step::StepStatus;
-use stormchaser_model::RunId;
 use stormchaser_model::StepId;
-use stormchaser_model::StepInstanceId;
-use uuid::Uuid;
 
 use crate::auth::AuthClaims;
 use crate::db::{
@@ -32,8 +29,8 @@ use stormchaser_model::nats::publish_cloudevent;
 
 #[derive(serde::Deserialize, serde::Serialize)]
 struct ApprovalLinkPayload {
-    run_id: Uuid,
-    step_id: Uuid,
+    run_id: stormchaser_model::RunId,
+    step_id: stormchaser_model::StepInstanceId,
     action: String,
     #[serde(default)]
     inputs: Value,
@@ -97,13 +94,9 @@ pub async fn approve_step_link(
     };
 
     // 5. Verify step exists and is WaitingForEvent
-    let step = get_step_instance_for_approval(
-        &state.pool,
-        StepInstanceId::new(payload.step_id),
-        RunId::new(payload.run_id),
-    )
-    .await
-    .unwrap_or(None);
+    let step = get_step_instance_for_approval(&state.pool, payload.step_id, payload.run_id)
+        .await
+        .unwrap_or(None);
 
     let step = match step {
         Some(s) => s,
@@ -120,7 +113,7 @@ pub async fn approve_step_link(
     // 6. Insert into approval_registry
     let _ = insert_approval_registry(
         &state.pool,
-        Uuid::new_v4(),
+        stormchaser_model::EventId::new_v4(),
         payload.step_id,
         "system-link",
         status_str,
@@ -163,7 +156,7 @@ pub async fn approve_step_link(
 
 async fn check_approval_opa(
     state: &AppState,
-    run_id: Uuid,
+    run_id: stormchaser_model::RunId,
     step_name: &str,
     token: Option<&str>,
 ) -> Result<(), (StatusCode, String)> {
@@ -209,7 +202,7 @@ async fn check_approval_opa(
         };
 
         let opa_context = ApprovalOpaContext {
-            run_id: RunId::new(run_id),
+            run_id,
             initiating_user: context_data.initiating_user,
             step_ast,
             inputs: context_data.run_inputs,
@@ -253,7 +246,7 @@ pub async fn approve_step(
     State(state): State<AppState>,
     AuthClaims(claims): AuthClaims,
     headers: HeaderMap,
-    Path((run_id, step_id)): Path<(Uuid, Uuid)>,
+    Path((run_id, step_id)): Path<(stormchaser_model::RunId, stormchaser_model::StepInstanceId)>,
     Json(inputs): Json<Value>,
 ) -> impl IntoResponse {
     let token = headers
@@ -262,13 +255,9 @@ pub async fn approve_step(
         .and_then(|s| s.strip_prefix("Bearer "));
 
     // 1. Verify step exists and is WaitingForEvent
-    let step = get_step_instance_for_approval(
-        &state.pool,
-        StepInstanceId::new(step_id),
-        RunId::new(run_id),
-    )
-    .await
-    .unwrap_or(None);
+    let step = get_step_instance_for_approval(&state.pool, step_id, run_id)
+        .await
+        .unwrap_or(None);
 
     let step = match step {
         Some(s) => s,
@@ -287,7 +276,7 @@ pub async fn approve_step(
     // 2. Insert into approval_registry
     let _ = insert_approval_registry(
         &state.pool,
-        Uuid::new_v4(),
+        stormchaser_model::EventId::new_v4(),
         step_id,
         &claims.sub,
         "approved",
@@ -297,8 +286,8 @@ pub async fn approve_step(
 
     // 3. Publish to NATS simulating step completion
     let completion_event = StepCompletedEvent {
-        run_id: RunId::new(run_id),
-        step_id: StepId::new(step_id),
+        run_id,
+        step_id: stormchaser_model::StepId::new(step_id.into_inner()),
         event_type: "stormchaser.v1.step.completed".to_string(),
         runner_id: None,
         exit_code: Some(0),
@@ -330,20 +319,16 @@ pub async fn reject_step(
     State(state): State<AppState>,
     AuthClaims(claims): AuthClaims,
     headers: HeaderMap,
-    Path((run_id, step_id)): Path<(Uuid, Uuid)>,
+    Path((run_id, step_id)): Path<(stormchaser_model::RunId, stormchaser_model::StepInstanceId)>,
 ) -> impl IntoResponse {
     let token = headers
         .get(AUTHORIZATION)
         .and_then(|h| h.to_str().ok())
         .and_then(|s| s.strip_prefix("Bearer "));
 
-    let step = get_step_instance_for_approval(
-        &state.pool,
-        StepInstanceId::new(step_id),
-        RunId::new(run_id),
-    )
-    .await
-    .unwrap_or(None);
+    let step = get_step_instance_for_approval(&state.pool, step_id, run_id)
+        .await
+        .unwrap_or(None);
 
     let step = match step {
         Some(s) => s,
@@ -361,7 +346,7 @@ pub async fn reject_step(
 
     let _ = insert_approval_registry(
         &state.pool,
-        Uuid::new_v4(),
+        stormchaser_model::EventId::new_v4(),
         step_id,
         &claims.sub,
         "rejected",
@@ -370,8 +355,8 @@ pub async fn reject_step(
     .await;
 
     let event = StepFailedEvent {
-        run_id: RunId::new(run_id),
-        step_id: StepId::new(step_id),
+        run_id,
+        step_id: stormchaser_model::StepId::new(step_id.into_inner()),
         event_type: "stormchaser.v1.step.failed".to_string(),
         error: "Rejected by human".to_string(),
         exit_code: Some(1),

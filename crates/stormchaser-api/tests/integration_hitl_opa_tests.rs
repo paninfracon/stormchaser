@@ -10,7 +10,6 @@ use stormchaser_api::auth::AuthClaims;
 use stormchaser_api::hitl::approve_step;
 use stormchaser_api::AppState;
 use stormchaser_model::auth::{Claims, OpaClient};
-use uuid::Uuid;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -62,8 +61,8 @@ async fn test_hitl_opa_integration() {
         .await;
 
     let state = mock_state(mock_server.uri()).await;
-    let run_id = Uuid::new_v4();
-    let step_id = Uuid::new_v4();
+    let run_id = stormchaser_model::RunId::new_v4();
+    let step_id = stormchaser_model::StepInstanceId::new_v4();
 
     // 1. Insert workflow run
     sqlx::query("INSERT INTO workflow_runs (id, workflow_name, initiating_user, repo_url, workflow_path, git_ref, status, fencing_token) VALUES ($1, 'wf', 'user', 'url', 'path', 'ref', 'running'::run_status, 1)").bind(run_id).execute(&state.pool).await.unwrap();
@@ -79,7 +78,7 @@ async fn test_hitl_opa_integration() {
     sqlx::query("INSERT INTO step_instances (id, run_id, step_name, step_type, status, created_at) VALUES ($1, $2, 'step', 'approval', 'waiting_for_event'::step_status, now())").bind(step_id).bind(run_id).execute(&state.pool).await.unwrap();
 
     // 4. Insert step outputs to satisfy get_run_outputs_for_opa
-    let prev_step_id = Uuid::new_v4();
+    let prev_step_id = stormchaser_model::StepInstanceId::new_v4();
     sqlx::query("INSERT INTO step_instances (id, run_id, step_name, step_type, status, created_at) VALUES ($1, $2, 'prev', 'run_container', 'succeeded'::step_status, now())").bind(prev_step_id).bind(run_id).execute(&state.pool).await.unwrap();
     sqlx::query("INSERT INTO step_outputs (step_instance_id, key, value, is_sensitive) VALUES ($1, 'test_key', '\"test_val\"', false)").bind(prev_step_id).execute(&state.pool).await.unwrap();
 

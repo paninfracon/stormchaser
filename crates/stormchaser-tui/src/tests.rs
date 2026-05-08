@@ -10,7 +10,6 @@ use stormchaser_model::test_report::TestCase;
 use stormchaser_model::test_report::TestCaseStatus;
 use stormchaser_model::test_report::TestSummary;
 use stormchaser_model::workflow::RunStatus;
-use stormchaser_model::BackendId;
 use stormchaser_model::CronWorkflowId;
 use stormchaser_model::RuleId;
 use stormchaser_model::RunId;
@@ -43,7 +42,7 @@ fn render_storage_backends_tab() {
     let updated_at = Utc.timestamp_opt(1609459200, 0).unwrap();
 
     app.storage_backends = vec![StorageBackend {
-        id: BackendId::new(uuid::Uuid::nil()),
+        id: stormchaser_model::BackendId::new(uuid::Uuid::nil()),
         name: "test-sfs".to_string(),
         description: Some("Test SFS".to_string()),
         backend_type: BackendType::S3,
@@ -503,11 +502,11 @@ fn render_run_detail_with_artifacts() {
             logs: vec![],
         }],
         artifacts: vec![ArtifactRegistry {
-            id: BackendId::new(uuid::Uuid::nil()),
+            id: stormchaser_model::BackendId::new(uuid::Uuid::nil()),
             run_id: RunId::new(Uuid::nil()),
             step_instance_id,
             artifact_name: "binary".to_string(),
-            backend_id: BackendId::new(Uuid::nil()),
+            backend_id: stormchaser_model::BackendId::new(Uuid::nil()),
             remote_path: "path/to/bin".to_string(),
             metadata: serde_json::json!({"size": 1024}),
             created_at,

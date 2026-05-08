@@ -53,8 +53,7 @@ pub async fn handle_step_failed(
         return Ok(());
     }
 
-    let _ =
-        release_step_quota_for_instance(&mut *tx, run_id.into_inner(), step_id.into_inner()).await;
+    let _ = release_step_quota_for_instance(&mut *tx, run_id, step_id).await;
 
     let machine =
         crate::step_machine::StepMachine::<crate::step_machine::state::Running>::from_instance(
@@ -85,14 +84,7 @@ pub async fn handle_step_failed(
     }
 
     // Persist test reports even on failure
-    persist_step_test_reports(
-        &payload,
-        &mut tx,
-        run_id.into_inner(),
-        step_id.into_inner(),
-        &pool,
-    )
-    .await?;
+    persist_step_test_reports(&payload, &mut tx, run_id, step_id, &pool).await?;
 
     let run = fetch_run(run_id, &mut *tx).await?;
     let run_machine = WorkflowMachine::<state::Running>::new_from_run(run.clone());

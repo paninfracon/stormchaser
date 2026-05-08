@@ -18,9 +18,7 @@ use stormchaser_model::event_rules::WebhookConfig;
 use stormchaser_model::events::WorkflowQueuedEvent;
 use stormchaser_model::nats::publish_cloudevent;
 use stormchaser_model::workflow::RunStatus;
-use stormchaser_model::RunId;
 use stormchaser_model::WebhookId;
-use uuid::Uuid;
 
 /// Create webhook.
 #[utoipa::path(
@@ -39,10 +37,10 @@ pub async fn create_webhook(
     State(state): State<AppState>,
     Json(payload): Json<CreateWebhookRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let id = Uuid::new_v4();
+    let id = stormchaser_model::WebhookId::new_v4();
     db::insert_webhook(
         &state.pool,
-        WebhookId::new(id),
+        id,
         &payload.name,
         &payload.description,
         &payload.source_type,
@@ -84,7 +82,7 @@ pub async fn list_webhooks(
 #[utoipa::path(
     get,
     path = "/api/v1/webhooks/{id}",
-    params(("id" = Uuid, Path, description="Webhook ID")),
+    params(("id" = stormchaser_model::WebhookId, Path, description="Webhook ID")),
     responses(
         (status = 200, description = "Success"),
         (status = 400, description = "Bad Request"),
@@ -111,7 +109,7 @@ pub async fn get_webhook(
     patch,
     path = "/api/v1/webhooks/{id}",
     request_body = UpdateWebhookRequest,
-    params(("id" = Uuid, Path, description="Webhook ID")),
+    params(("id" = stormchaser_model::WebhookId, Path, description="Webhook ID")),
     responses(
         (status = 200, description = "Success"),
         (status = 400, description = "Bad Request"),
@@ -156,7 +154,7 @@ pub async fn update_webhook(
 #[utoipa::path(
     delete,
     path = "/api/v1/webhooks/{id}",
-    params(("id" = Uuid, Path, description="Webhook ID")),
+    params(("id" = stormchaser_model::WebhookId, Path, description="Webhook ID")),
     responses(
         (status = 200, description = "Success"),
         (status = 400, description = "Bad Request"),
@@ -181,7 +179,7 @@ pub async fn delete_webhook(
     post,
     path = "/api/v1/webhooks/{id}",
     params(
-        ("id" = Uuid, Path, description = "Webhook ID")
+        ("id" = stormchaser_model::WebhookId, Path, description = "Webhook ID")
     ),
     request_body = String,
     responses(
@@ -231,13 +229,12 @@ pub async fn handle_webhook(
     );
 
     // 3. Find matching EventRules
-    let rules =
-        db::get_active_event_rules_by_webhook(&state.pool, WebhookId::new(webhook_id.into_inner()))
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to fetch rules: {:?}", e);
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
+    let rules = db::get_active_event_rules_by_webhook(&state.pool, webhook_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to fetch rules: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     let mut triggered_count = 0;
     let mut hcl_ctx = hcl::eval::Context::default();
@@ -301,7 +298,7 @@ pub async fn handle_webhook(
         }
 
         // 4. Trigger Workflow
-        let run_id = Uuid::new_v4();
+        let run_id = stormchaser_model::RunId::new_v4();
 
         tracing::info!(run_id = %run_id, "Enqueuing webhook workflow: {}", rule.workflow_name);
         let fencing_token = Utc::now().timestamp_nanos_opt().unwrap_or(0);
@@ -314,7 +311,7 @@ pub async fn handle_webhook(
 
         db::insert_workflow_run(
             &mut tx,
-            RunId::new(run_id),
+            run_id,
             &rule.workflow_name,
             &format!("webhook:{}", webhook.name),
             &rule.repo_url,
@@ -331,7 +328,7 @@ pub async fn handle_webhook(
 
         db::insert_run_context(
             &mut tx,
-            RunId::new(run_id),
+            run_id,
             "v1",
             serde_json::json!({}),
             "",
@@ -343,7 +340,7 @@ pub async fn handle_webhook(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-        db::insert_run_quotas(&mut tx, RunId::new(run_id), 10, "1", "4Gi", "10Gi", "1h")
+        db::insert_run_quotas(&mut tx, run_id, 10, "1", "4Gi", "10Gi", "1h")
             .await
             .map_err(|e| {
                 tracing::error!(run_id = %run_id, "Failed to insert run quotas: {:?}", e);
@@ -355,7 +352,7 @@ pub async fn handle_webhook(
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
         let event = WorkflowQueuedEvent {
-            run_id: RunId::new(run_id),
+            run_id,
             event_type: "workflow_queued".to_string(),
             timestamp: Utc::now(),
             dsl: None,
