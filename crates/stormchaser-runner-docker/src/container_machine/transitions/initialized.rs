@@ -9,7 +9,7 @@ use bollard::volume::CreateVolumeOptions;
 use chrono::Utc;
 use cloudevents::EventBuilder;
 use futures::StreamExt;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 use stormchaser_model::dsl::{CommonContainerSpec, StorageMount};
 use stormchaser_model::events::StepRunningEvent;
@@ -18,7 +18,7 @@ use stormchaser_model::nats::publish_cloudevent;
 use stormchaser_model::nats::NatsSubject;
 use stormchaser_model::step::StepStatus;
 use stormchaser_model::{RunId, StepInstanceId, APPLICATION_JSON};
-use tokio::time::sleep;
+use tokio::{fs, time::sleep};
 use tracing::{error, info};
 use uuid::Uuid;
 
@@ -260,8 +260,8 @@ impl DockerContainerMachine<state::Initialized> {
         storage_names.push(mount.name.clone());
 
         let (source_name, is_bind_mount) = if let Some(host_path) = &sfs_host_path {
-            let path = format!("{}/{}/{}", host_path, self.metadata.run_id, mount.name);
-            (path, true)
+            let source_path = self.build_bind_mount_source(host_path, &mount.name).await?;
+            (source_path, true)
         } else {
             let volume_name = format!(
                 "sfs-{}-{}",
@@ -431,6 +431,49 @@ impl DockerContainerMachine<state::Initialized> {
 
         Ok(())
     }
+
+    fn validate_bind_mount_name(mount_name: &str) -> Result<()> {
+        if mount_name.is_empty() || mount_name.contains('/') || mount_name.contains('\\') {
+            anyhow::bail!(
+                "Storage mount name '{}' is not valid for bind mounts",
+                mount_name
+            );
+        }
+
+        let mut components = Path::new(mount_name).components();
+        match (components.next(), components.next()) {
+            (Some(Component::Normal(_)), None) => Ok(()),
+            _ => anyhow::bail!(
+                "Storage mount name '{}' contains illegal path components",
+                mount_name
+            ),
+        }
+    }
+
+    async fn build_bind_mount_source(&self, host_path: &str, mount_name: &str) -> Result<String> {
+        Self::validate_bind_mount_name(mount_name)?;
+
+        let run_dir = PathBuf::from(host_path).join(self.metadata.run_id.to_string());
+        let source_path = run_dir.join(mount_name);
+        if !source_path.starts_with(&run_dir) {
+            anyhow::bail!(
+                "Storage mount name '{}' escapes bind mount root '{}'",
+                mount_name,
+                run_dir.display()
+            );
+        }
+
+        fs::create_dir_all(&source_path).await.with_context(|| {
+            format!(
+                "Failed to create bind mount directory '{}' for storage '{}'",
+                source_path.display(),
+                mount_name
+            )
+        })?;
+
+        Ok(source_path.to_string_lossy().into_owned())
+    }
+
     async fn setup_storage_mounts(
         &self,
         spec: &CommonContainerSpec,
@@ -497,14 +540,19 @@ mod tests {
     use bollard::Docker;
     use std::collections::HashMap;
     use stormchaser_model::dsl::Step;
+    use tempfile::tempdir;
 
     fn create_test_metadata_with_mounts() -> ContainerMetadata {
+        create_test_metadata_with_mount_name("workspace")
+    }
+
+    fn create_test_metadata_with_mount_name(mount_name: &str) -> ContainerMetadata {
         let spec = serde_json::json!({
             "image": "alpine:latest",
             "command": ["echo", "hello"],
             "storage_mounts": [
                 {
-                    "name": "workspace",
+                    "name": mount_name,
                     "mount_path": "/workspace"
                 }
             ]
@@ -585,7 +633,8 @@ mod tests {
         let spec: CommonContainerSpec =
             serde_json::from_value(machine.metadata.step_dsl.spec.clone()).unwrap();
 
-        let sfs_host_path = Some("/tmp/stormchaser/sfs");
+        let host_path = tempdir().unwrap();
+        let sfs_host_path = Some(host_path.path().to_str().unwrap());
         let (mounts, storage_names, volumes_to_cleanup) = machine
             .setup_storage_mounts(&spec, sfs_host_path)
             .await
@@ -601,7 +650,28 @@ mod tests {
         assert_eq!(mount.target.as_deref(), Some("/workspace"));
         assert_eq!(mount.typ, Some(MountTypeEnum::BIND));
 
-        let expected_source = format!("/tmp/stormchaser/sfs/{}/workspace", run_id);
-        assert_eq!(mount.source.as_deref(), Some(expected_source.as_str()));
+        let expected_source = host_path.path().join(run_id.to_string()).join("workspace");
+        assert!(expected_source.is_dir());
+        assert_eq!(mount.source.as_deref(), expected_source.to_str());
+    }
+
+    #[tokio::test]
+    async fn test_setup_storage_mounts_host_bind_rejects_invalid_mount_name() {
+        let docker = Docker::connect_with_local_defaults().unwrap();
+        let metadata = create_test_metadata_with_mount_name("../escape");
+        let machine = DockerContainerMachine::new(docker, metadata, None);
+        let spec: CommonContainerSpec =
+            serde_json::from_value(machine.metadata.step_dsl.spec.clone()).unwrap();
+        let host_path = tempdir().unwrap();
+
+        let err = machine
+            .setup_storage_mounts(&spec, host_path.path().to_str())
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string().contains("Storage mount name '../escape'"),
+            "unexpected error: {err}"
+        );
     }
 }

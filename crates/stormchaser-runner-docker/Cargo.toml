@@ -40,3 +40,4 @@ vergen = { workspace = true }
 
 [dev-dependencies]
 mockall = "0.14.0"
+tempfile = "3.10"
