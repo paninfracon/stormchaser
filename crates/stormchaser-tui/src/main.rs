@@ -290,4 +290,10 @@ mod tests {
         assert!(cli.token.is_none());
         assert!(cli.owner.is_none());
     }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_handle_app_event_key_compiles() {
+        let _f = handle_app_event_key;
+    }
 }

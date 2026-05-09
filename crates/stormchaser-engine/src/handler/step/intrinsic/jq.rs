@@ -298,4 +298,10 @@ mod tests {
         assert_eq!(step_type, "JQ"); // Should not change
         assert_eq!(spec.get("program").unwrap(), ".foo");
     }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_dispatch_jq_internal_compiles() {
+        let _f = dispatch_jq_internal;
+    }
 }

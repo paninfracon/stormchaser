@@ -184,3 +184,34 @@ fn func_call_to_json(func: &hcl::expr::FuncCall) -> Result<Value> {
     // Otherwise, just a generic function call mapping, shouldn't be reached if valid schema
     Ok(Value::Null)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hcl::expr::{Expression, FuncCall};
+
+    #[test]
+    fn test_func_call_to_json() {
+        let func = FuncCall::builder("string").build();
+        let result = func_call_to_json(&func).unwrap();
+        assert_eq!(result.get("type").unwrap().as_str().unwrap(), "string");
+
+        let func2 = FuncCall::builder("array")
+            .arg(Expression::FuncCall(Box::new(
+                FuncCall::builder("string").build(),
+            )))
+            .build();
+        let result2 = func_call_to_json(&func2).unwrap();
+        assert_eq!(result2.get("type").unwrap().as_str().unwrap(), "array");
+        assert_eq!(
+            result2
+                .get("items")
+                .unwrap()
+                .get("type")
+                .unwrap()
+                .as_str()
+                .unwrap(),
+            "string"
+        );
+    }
+}

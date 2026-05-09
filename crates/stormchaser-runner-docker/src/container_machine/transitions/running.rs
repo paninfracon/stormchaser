@@ -554,4 +554,10 @@ mod tests {
         // Should omit put_url because host bind mounts do not park their state
         assert_eq!(urls.get("put_url"), None);
     }
+
+    #[test]
+    #[ignore]
+    fn test_run_parking_agent_compiles() {
+        let _f = DockerContainerMachine::<state::Running>::run_parking_agent;
+    }
 }

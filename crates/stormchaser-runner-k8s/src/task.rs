@@ -391,6 +391,12 @@ mod tests {
         let _f = execute_job_on_cluster;
     }
 
+    #[tokio::test]
+    #[ignore]
+    async fn test_publish_job_result_compiles() {
+        let _f = publish_job_result;
+    }
+
     use super::*;
     use serde_json::json;
 
