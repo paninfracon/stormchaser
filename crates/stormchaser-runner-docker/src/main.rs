@@ -10,7 +10,7 @@ use stormchaser_model::events::{
     EventSource, EventType, RunnerEventType, RunnerHeartbeatEvent, RunnerRegisterEvent,
     RunnerStepTypeSchema, SchemaVersion,
 };
-use stormchaser_model::nats::NatsSubject;
+use stormchaser_model::nats::{publish_cloudevent, NatsSubject};
 use stormchaser_model::runner::RunnerStatus;
 use tokio::sync::watch;
 use tokio::time;
@@ -18,7 +18,7 @@ use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use uuid::Uuid;
 
-use stormchaser_model::dsl;
+use stormchaser_model::{dsl, APPLICATION_JSON};
 
 pub mod container_machine;
 pub mod handler;
@@ -192,7 +192,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
         .source(EventSource::System.as_str())
         .time(chrono::Utc::now())
         .data(
-            stormchaser_model::APPLICATION_JSON,
+            APPLICATION_JSON,
             serde_json::to_value(registration_payload).unwrap(),
         )
         .build()
@@ -281,7 +281,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
                     state: RunnerStatus::Online,
                 };
 
-                if let Err(e) = stormchaser_model::nats::publish_cloudevent(&async_nats::jetstream::new(heartbeat_client.clone()), NatsSubject::RunnerHeartbeat, EventType::Runner(RunnerEventType::Heartbeat), EventSource::System, serde_json::to_value(heartbeat_payload).unwrap(), Some(SchemaVersion::new("1.0".to_string())), None)
+                if let Err(e) = publish_cloudevent(&async_nats::jetstream::new(heartbeat_client.clone()), NatsSubject::RunnerHeartbeat, EventType::Runner(RunnerEventType::Heartbeat), EventSource::System, serde_json::to_value(heartbeat_payload).unwrap(), Some(SchemaVersion::new("1.0".to_string())), None)
                     .await
                 {
                     error!("Failed to publish heartbeat: {:?}", e);

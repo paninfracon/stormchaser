@@ -109,3 +109,7 @@ Grafana Alloy is configured to watch the Docker socket and automatically
 scrape logs from all containers managed by Stormchaser. It labels them with
 the internal `run_id` and `step_id`, allowing you to seamlessly retrieve logs
 via the API and CLI (`stormchaser runs logs <RUN_ID>`).
+
+### Performance Optimization (Host Bind Mounts)
+
+For heavily data-intensive workflows running in this local environment, the Docker runner can be configured to bypass S3 upload/download operations using the `STORMCHASER_SFS_HOST_PATH` environment variable. By default, this is not enabled to ensure test parity with remote runners, but it can be activated in the `docker-compose.yml` to significantly speed up local execution times. See [SFS Docker Optimization](sfs_docker_optimization.md) for details.
