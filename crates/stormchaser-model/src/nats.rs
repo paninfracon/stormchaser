@@ -5,6 +5,7 @@ use async_nats::HeaderMap;
 use cloudevents::{AttributesReader, EventBuilder, EventBuilderV10};
 use schemars::schema::RootSchema;
 use serde_json::Value;
+use std::borrow::Cow;
 use tracing::error;
 
 /// Validates a JSON value against a compiled JSON Schema.
@@ -88,28 +89,29 @@ pub enum NatsSubject {
 }
 
 impl NatsSubject {
-    pub fn as_str(&self) -> String {
+    pub fn as_str(&self) -> Cow<'static, str> {
         match self {
-            NatsSubject::RunQueued => "stormchaser.v1.run.queued".to_string(),
-            NatsSubject::RunStartPending => "stormchaser.v1.run.start_pending".to_string(),
-            NatsSubject::RunDirect => "stormchaser.v1.run.direct".to_string(),
-            NatsSubject::RunRunning => "stormchaser.v1.run.running".to_string(),
-            NatsSubject::RunCompleted => "stormchaser.v1.run.completed".to_string(),
-            NatsSubject::RunFailed => "stormchaser.v1.run.failed".to_string(),
-            NatsSubject::RunAborted => "stormchaser.v1.run.aborted".to_string(),
-            NatsSubject::RunnerRegister => "stormchaser.v1.runner.register".to_string(),
-            NatsSubject::RunnerHeartbeat => "stormchaser.v1.runner.heartbeat".to_string(),
-            NatsSubject::RunnerOffline => "stormchaser.v1.runner.offline".to_string(),
-            NatsSubject::StepScheduled(ty) => {
-                format!("stormchaser.v1.step.scheduled.{}", ty.to_lowercase())
-            }
-            NatsSubject::StepRunning => "stormchaser.v1.step.running".to_string(),
-            NatsSubject::StepCompleted => "stormchaser.v1.step.completed".to_string(),
-            NatsSubject::StepFailed => "stormchaser.v1.step.failed".to_string(),
-            NatsSubject::StepQuery => "stormchaser.v1.step.query".to_string(),
-            NatsSubject::StepUnpackingSfs => "stormchaser.v1.step.unpacking_sfs".to_string(),
-            NatsSubject::StepPackingSfs => "stormchaser.v1.step.packing_sfs".to_string(),
-            NatsSubject::Custom(s) => s.clone(),
+            NatsSubject::RunQueued => Cow::Borrowed("stormchaser.v1.run.queued"),
+            NatsSubject::RunStartPending => Cow::Borrowed("stormchaser.v1.run.start_pending"),
+            NatsSubject::RunDirect => Cow::Borrowed("stormchaser.v1.run.direct"),
+            NatsSubject::RunRunning => Cow::Borrowed("stormchaser.v1.run.running"),
+            NatsSubject::RunCompleted => Cow::Borrowed("stormchaser.v1.run.completed"),
+            NatsSubject::RunFailed => Cow::Borrowed("stormchaser.v1.run.failed"),
+            NatsSubject::RunAborted => Cow::Borrowed("stormchaser.v1.run.aborted"),
+            NatsSubject::RunnerRegister => Cow::Borrowed("stormchaser.v1.runner.register"),
+            NatsSubject::RunnerHeartbeat => Cow::Borrowed("stormchaser.v1.runner.heartbeat"),
+            NatsSubject::RunnerOffline => Cow::Borrowed("stormchaser.v1.runner.offline"),
+            NatsSubject::StepScheduled(ty) => Cow::Owned(format!(
+                "stormchaser.v1.step.scheduled.{}",
+                ty.to_lowercase()
+            )),
+            NatsSubject::StepRunning => Cow::Borrowed("stormchaser.v1.step.running"),
+            NatsSubject::StepCompleted => Cow::Borrowed("stormchaser.v1.step.completed"),
+            NatsSubject::StepFailed => Cow::Borrowed("stormchaser.v1.step.failed"),
+            NatsSubject::StepQuery => Cow::Borrowed("stormchaser.v1.step.query"),
+            NatsSubject::StepUnpackingSfs => Cow::Borrowed("stormchaser.v1.step.unpacking_sfs"),
+            NatsSubject::StepPackingSfs => Cow::Borrowed("stormchaser.v1.step.packing_sfs"),
+            NatsSubject::Custom(s) => Cow::Owned(s.clone()),
         }
     }
 }
@@ -163,7 +165,7 @@ pub async fn publish_cloudevent(
     let (payload, headers) =
         build_cloudevent_and_headers(event_type, source, data, schema_version, schema_id)?;
 
-    js.publish_with_headers(subject.as_str(), headers, payload.into())
+    js.publish_with_headers(subject.as_str().into_owned(), headers, payload.into())
         .await?;
 
     Ok(())

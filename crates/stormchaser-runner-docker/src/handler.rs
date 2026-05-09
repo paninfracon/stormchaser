@@ -5,7 +5,7 @@ use async_nats::jetstream::message::{AckKind, Message};
 use bollard::container::ListContainersOptions;
 use bollard::Docker;
 use cloudevents::EventBuilder;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::time::Duration;
 use stormchaser_model::events::StepCompletedEvent;
@@ -13,7 +13,6 @@ use stormchaser_model::events::StepFailedEvent;
 use stormchaser_model::events::{EventSource, EventType, SchemaVersion, StepEventType};
 use stormchaser_model::nats::publish_cloudevent;
 use stormchaser_model::nats::NatsSubject;
-use stormchaser_model::step::StepStatus;
 use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
 use tokio::time::sleep;
@@ -210,18 +209,37 @@ pub async fn scan_for_orphans(
                     Ok(finished_machine) => match finished_machine.into_result() {
                         ContainerState::Succeeded(metrics) => {
                             info!("Adopted step {} completed successfully", step_id);
-                            let event = json!({
-                                "run_id": run_id,
-                                "step_id": step_id,
-                                "status": StepStatus::Succeeded,
-                                "runner_id": r_id,
-                                "exit_code": metrics.exit_code,
-                                "outputs": {
-                                    "docker exit code": metrics.exit_code,
-                                    "run duration": format!("{}ms", metrics.duration_ms),
-                                    "run latency": format!("{}ms", metrics.latency_ms),
-                                }
-                            });
+                            let mut outputs = std::collections::HashMap::new();
+                            outputs.insert(
+                                "docker exit code".to_string(),
+                                serde_json::json!(metrics.exit_code),
+                            );
+                            outputs.insert(
+                                "run duration".to_string(),
+                                serde_json::json!(format!("{}ms", metrics.duration_ms)),
+                            );
+                            outputs.insert(
+                                "run latency".to_string(),
+                                serde_json::json!(format!("{}ms", metrics.latency_ms)),
+                            );
+                            let event = StepCompletedEvent {
+                                run_id: RunId::new(run_id),
+                                step_id: StepInstanceId::new(step_id),
+                                event_type: EventType::Step(StepEventType::Completed),
+                                runner_id: Some(r_id.clone()),
+                                exit_code: metrics.exit_code.map(|c| c as i32),
+                                storage_hashes: metrics.storage_hashes.map(|h| {
+                                    h.into_iter()
+                                        .map(|(k, v)| (k, serde_json::json!(v)))
+                                        .collect()
+                                }),
+                                artifacts: metrics.artifacts,
+                                test_reports: metrics.test_reports.and_then(|v| {
+                                    v.as_object().map(|obj| obj.clone().into_iter().collect())
+                                }),
+                                outputs: Some(outputs),
+                                timestamp: chrono::Utc::now(),
+                            };
                             let _ = publish_cloudevent(
                                 &async_nats::jetstream::new(nats.clone()),
                                 NatsSubject::StepCompleted,
@@ -235,19 +253,38 @@ pub async fn scan_for_orphans(
                         }
                         ContainerState::Failed(reason, metrics) => {
                             warn!("Adopted step {} failed: {}", step_id, reason);
-                            let event = json!({
-                                "run_id": run_id,
-                                "step_id": step_id,
-                                "status": StepStatus::Failed,
-                                "error": reason,
-                                "runner_id": r_id,
-                                "exit_code": metrics.exit_code,
-                                "outputs": {
-                                    "docker exit code": metrics.exit_code,
-                                    "run duration": format!("{}ms", metrics.duration_ms),
-                                    "run latency": format!("{}ms", metrics.latency_ms),
-                                }
-                            });
+                            let mut outputs = std::collections::HashMap::new();
+                            outputs.insert(
+                                "docker exit code".to_string(),
+                                serde_json::json!(metrics.exit_code),
+                            );
+                            outputs.insert(
+                                "run duration".to_string(),
+                                serde_json::json!(format!("{}ms", metrics.duration_ms)),
+                            );
+                            outputs.insert(
+                                "run latency".to_string(),
+                                serde_json::json!(format!("{}ms", metrics.latency_ms)),
+                            );
+                            let event = StepFailedEvent {
+                                run_id: RunId::new(run_id),
+                                step_id: StepInstanceId::new(step_id),
+                                event_type: EventType::Step(StepEventType::Failed),
+                                error: reason,
+                                runner_id: Some(r_id.clone()),
+                                exit_code: metrics.exit_code.map(|c| c as i32),
+                                storage_hashes: metrics.storage_hashes.map(|h| {
+                                    h.into_iter()
+                                        .map(|(k, v)| (k, serde_json::json!(v)))
+                                        .collect()
+                                }),
+                                artifacts: metrics.artifacts,
+                                test_reports: metrics.test_reports.and_then(|v| {
+                                    v.as_object().map(|obj| obj.clone().into_iter().collect())
+                                }),
+                                outputs: Some(outputs),
+                                timestamp: chrono::Utc::now(),
+                            };
                             let _ = publish_cloudevent(
                                 &async_nats::jetstream::new(nats.clone()),
                                 NatsSubject::StepFailed,
@@ -410,7 +447,7 @@ pub async fn handle_task(
             let event = StepCompletedEvent {
                 run_id: RunId::new(run_id),
                 step_id: StepInstanceId::new(step_id),
-                event_type: EventType::Step(StepEventType::Failed),
+                event_type: EventType::Step(StepEventType::Completed),
                 runner_id: Some(runner_id.clone()),
                 exit_code: metrics.exit_code.map(|c| c as i32),
                 storage_hashes: metrics.storage_hashes.map(|h| {
@@ -485,13 +522,19 @@ pub async fn handle_task(
         }
         Err(e) => {
             error!("Error running container for step {}: {:?}", step_id, e);
-            let event = json!({
-                "run_id": run_id,
-                "step_id": step_id,
-                "status": StepStatus::Failed,
-                "error": format!("{:?}", e),
-                "runner_id": runner_id,
-            });
+            let event = StepFailedEvent {
+                run_id: RunId::new(run_id),
+                step_id: StepInstanceId::new(step_id),
+                event_type: EventType::Step(StepEventType::Failed),
+                error: format!("{:?}", e),
+                runner_id: Some(runner_id.clone()),
+                exit_code: None,
+                storage_hashes: None,
+                artifacts: None,
+                test_reports: None,
+                outputs: None,
+                timestamp: chrono::Utc::now(),
+            };
             use stormchaser_model::nats::NatsSubject;
             let _ = publish_cloudevent(
                 &async_nats::jetstream::new(nats_client.clone()),

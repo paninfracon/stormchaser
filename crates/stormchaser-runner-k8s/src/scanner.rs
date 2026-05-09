@@ -6,14 +6,14 @@ use kube::{
     api::{Api, ListParams},
     ResourceExt,
 };
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
+use stormchaser_model::events::StepCompletedEvent;
 use stormchaser_model::events::StepFailedEvent;
 use stormchaser_model::events::{EventSource, EventType, SchemaVersion, StepEventType};
 use stormchaser_model::nats::publish_cloudevent;
 use stormchaser_model::nats::NatsSubject;
-use stormchaser_model::step::StepStatus;
 use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
 use tracing::{error, info, warn};
@@ -247,20 +247,39 @@ pub async fn scan_for_orphans(
                         Ok(job_state) => match job_state {
                             job_machine::JobState::Succeeded(metrics) => {
                                 info!("Adopted step {} completed successfully", step_id);
-                                let event = json!({
-                                    "run_id": run_id,
-                                    "step_id": step_id,
-                                    "status": StepStatus::Succeeded,
-                                    "runner_id": r_id,
-                                    "exit_code": metrics.exit_code,
-                                    "outputs": {
-                                        "k8s exit code": metrics.exit_code,
-                                        "Number of attempts": metrics.attempts,
-                                        "run duration": format!("{}ms", metrics.duration_ms),
-                                        "run latency": format!("{}ms", metrics.latency_ms),
-                                    }
-                                });
-                                use stormchaser_model::nats::NatsSubject;
+                                let mut outputs = std::collections::HashMap::new();
+                                outputs.insert(
+                                    "k8s exit code".to_string(),
+                                    serde_json::json!(metrics.exit_code),
+                                );
+                                outputs.insert(
+                                    "Number of attempts".to_string(),
+                                    serde_json::json!(metrics.attempts),
+                                );
+                                outputs.insert(
+                                    "run duration".to_string(),
+                                    serde_json::json!(format!("{}ms", metrics.duration_ms)),
+                                );
+                                outputs.insert(
+                                    "run latency".to_string(),
+                                    serde_json::json!(format!("{}ms", metrics.latency_ms)),
+                                );
+                                let event = StepCompletedEvent {
+                                    run_id: RunId::new(run_id),
+                                    step_id: StepInstanceId::new(step_id),
+                                    event_type: EventType::Step(StepEventType::Completed),
+                                    runner_id: Some(r_id.clone()),
+                                    exit_code: metrics.exit_code,
+                                    storage_hashes: metrics.storage_hashes.map(|h| {
+                                        h.into_iter()
+                                            .map(|(k, v)| (k, serde_json::json!(v)))
+                                            .collect()
+                                    }),
+                                    artifacts: metrics.artifacts,
+                                    test_reports: metrics.test_reports,
+                                    outputs: Some(outputs),
+                                    timestamp: chrono::Utc::now(),
+                                };
                                 let _ = publish_cloudevent(
                                     &async_nats::jetstream::new(nats.clone()),
                                     NatsSubject::StepCompleted,
