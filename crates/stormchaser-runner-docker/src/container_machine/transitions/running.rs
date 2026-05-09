@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 use stormchaser_model::dsl::CommonContainerSpec;
 use stormchaser_model::step::StepStatus;
+use stormchaser_model::APPLICATION_JSON;
 use tokio::time::sleep;
 use tracing::{error, info};
 use uuid::Uuid;
@@ -63,55 +64,76 @@ impl DockerContainerMachine<state::Running> {
         let spec: Option<CommonContainerSpec> =
             serde_json::from_value(self.metadata.step_dsl.spec.clone()).ok();
 
+        let (artifacts, storage_hashes, test_reports) = self
+            .collect_metrics(
+                &container_name,
+                &storage_names,
+                mounts,
+                spec.as_ref(),
+                exit_code,
+            )
+            .await?;
+
+        if let Some(a) = artifacts {
+            metrics.artifacts = Some(a);
+        }
+        if let Some(h) = storage_hashes {
+            metrics.storage_hashes = Some(h);
+        }
+        if let Some(r) = test_reports {
+            metrics.test_reports = Some(r);
+        }
+
+        // Cleanup volume and container
+        // Wait a bit for log collector (Alloy) to catch the final logs before we delete the container
+        sleep(Duration::from_secs(15)).await;
+        let _ = self.docker.remove_container(&container_name, None).await;
+
+        for vol in volumes_to_cleanup {
+            info!("Cleaning up volume: {}", vol);
+            let _ = self.docker.remove_volume(&vol, None).await;
+        }
+
+        let result = if exit_code == Some(0) {
+            info!("Container {} completed successfully", container_name);
+            ContainerState::Succeeded(metrics)
+        } else {
+            let error_msg = format!("Container exited with code {:?}", exit_code);
+            error!("Container {} failed: {}", container_name, error_msg);
+            ContainerState::Failed(error_msg, metrics)
+        };
+
+        Ok(DockerContainerMachine {
+            nats: self.nats.clone(),
+            docker: self.docker,
+            metadata: self.metadata,
+            state: state::Finished { result },
+        })
+    }
+
+    async fn collect_metrics(
+        &self,
+        container_name: &str,
+        storage_names: &[String],
+        mounts: Vec<bollard::service::Mount>,
+        spec: Option<&CommonContainerSpec>,
+        exit_code: Option<i64>,
+    ) -> Result<(
+        Option<HashMap<String, Value>>,
+        Option<HashMap<String, String>>,
+        Option<Value>,
+    )> {
+        let mut artifacts_out = None;
+        let mut hashes_out = None;
+        let mut reports_out = None;
+
         if !storage_names.is_empty() || !self.metadata.step_dsl.reports.is_empty() {
             let agent_image = "stormchaser-agent:v1";
             let park_container_name = format!("park-{}", Uuid::new_v4());
 
-            let mut parking_urls = HashMap::new();
-            let mut mount_paths = HashMap::new();
-            let mut artifact_urls = HashMap::new();
-
-            if let Some(storage_data) = &self.metadata.storage {
-                for name in &storage_names {
-                    if let Some(urls) = storage_data.get(name) {
-                        parking_urls.insert(name.clone(), urls.clone());
-                        if let Some(artifacts) = urls.get("artifacts").and_then(|a| a.as_object()) {
-                            let allowed_artifacts = self.metadata.step_dsl.artifacts.as_ref();
-                            for (art_name, art_val) in artifacts {
-                                if let Some(allowed) = allowed_artifacts {
-                                    if !allowed.contains(art_name) {
-                                        continue;
-                                    }
-                                } else {
-                                    // If step.artifacts is not explicitly defined, we assume it publishes NO artifacts
-                                    continue;
-                                }
-
-                                let mut cloned_art = art_val.clone();
-                                if let Some(m) = spec
-                                    .as_ref()
-                                    .and_then(|s| s.storage_mounts.as_ref())
-                                    .and_then(|ms| ms.iter().find(|m| &m.name == name))
-                                {
-                                    if let Some(p) = art_val.get("path").and_then(|p| p.as_str()) {
-                                        let abs_path = std::path::Path::new(&m.mount_path).join(p);
-                                        cloned_art["path"] =
-                                            Value::String(abs_path.to_string_lossy().to_string());
-                                    }
-                                }
-                                artifact_urls.insert(art_name.clone(), cloned_art);
-                            }
-                        }
-                    }
-                    if let Some(m) = spec
-                        .as_ref()
-                        .and_then(|s| s.storage_mounts.as_ref())
-                        .and_then(|ms| ms.iter().find(|m| &m.name == name))
-                    {
-                        mount_paths.insert(name.clone(), m.mount_path.clone());
-                    }
-                }
-            }
+            let sfs_host_path = std::env::var("STORMCHASER_SFS_HOST_PATH").ok();
+            let (parking_urls, mount_paths, artifact_urls) =
+                self.build_parking_payloads(storage_names, spec, sfs_host_path.as_deref());
 
             let mut agent_args = vec![
                 "run".to_string(),
@@ -171,7 +193,7 @@ impl DockerContainerMachine<state::Running> {
                     .ty("stormchaser.v1.step.packing_sfs")
                     .source("/stormchaser/runner")
                     .time(chrono::Utc::now())
-                    .data(stormchaser_model::APPLICATION_JSON, packing_event)
+                    .data(APPLICATION_JSON, packing_event)
                     .build()
                 {
                     if let Ok(payload_bytes) = serde_json::to_vec(&ce) {
@@ -206,13 +228,13 @@ impl DockerContainerMachine<state::Running> {
             let _ = agent_wait_stream.next().await;
 
             if let Ok(Some(artifacts)) = self.get_artifact_meta(&park_container_name).await {
-                metrics.artifacts = Some(artifacts);
+                artifacts_out = Some(artifacts);
             }
             if let Ok(Some(hashes)) = self.get_storage_hashes(&park_container_name).await {
-                metrics.storage_hashes = Some(hashes);
+                hashes_out = Some(hashes);
             }
             if let Ok(Some(reports)) = self.get_test_reports(&park_container_name).await {
-                metrics.test_reports = Some(reports);
+                reports_out = Some(reports);
             }
 
             // Wait for logs
@@ -223,44 +245,19 @@ impl DockerContainerMachine<state::Running> {
                 .await;
         } else {
             // For adopted containers without parking, we still want to grab logs if possible
-            if let Ok(Some(artifacts)) = self.get_artifact_meta(&container_name).await {
-                metrics.artifacts = Some(artifacts);
+            if let Ok(Some(artifacts)) = self.get_artifact_meta(container_name).await {
+                artifacts_out = Some(artifacts);
             }
-            if let Ok(Some(hashes)) = self.get_storage_hashes(&container_name).await {
-                metrics.storage_hashes = Some(hashes);
+            if let Ok(Some(hashes)) = self.get_storage_hashes(container_name).await {
+                hashes_out = Some(hashes);
             }
-            if let Ok(Some(reports)) = self.get_test_reports(&container_name).await {
-                metrics.test_reports = Some(reports);
+            if let Ok(Some(reports)) = self.get_test_reports(container_name).await {
+                reports_out = Some(reports);
             }
         }
 
-        // Cleanup volume and container
-        // Wait a bit for log collector (Alloy) to catch the final logs before we delete the container
-        sleep(Duration::from_secs(15)).await;
-        let _ = self.docker.remove_container(&container_name, None).await;
-
-        for vol in volumes_to_cleanup {
-            info!("Cleaning up volume: {}", vol);
-            let _ = self.docker.remove_volume(&vol, None).await;
-        }
-
-        let result = if exit_code == Some(0) {
-            info!("Container {} completed successfully", container_name);
-            ContainerState::Succeeded(metrics)
-        } else {
-            let error_msg = format!("Container exited with code {:?}", exit_code);
-            error!("Container {} failed: {}", container_name, error_msg);
-            ContainerState::Failed(error_msg, metrics)
-        };
-
-        Ok(DockerContainerMachine {
-            nats: self.nats.clone(),
-            docker: self.docker,
-            metadata: self.metadata,
-            state: state::Finished { result },
-        })
+        Ok((artifacts_out, hashes_out, reports_out))
     }
-
     async fn get_artifact_meta(
         &self,
         container_name: &str,
@@ -346,5 +343,190 @@ impl DockerContainerMachine<state::Running> {
         }
 
         Ok(None)
+    }
+
+    fn build_parking_payloads(
+        &self,
+        storage_names: &[String],
+        spec: Option<&CommonContainerSpec>,
+        sfs_host_path: Option<&str>,
+    ) -> (
+        HashMap<String, Value>,
+        HashMap<String, String>,
+        HashMap<String, Value>,
+    ) {
+        let mut parking_urls = HashMap::new();
+        let mut mount_paths = HashMap::new();
+        let mut artifact_urls = HashMap::new();
+
+        if let Some(storage_data) = &self.metadata.storage {
+            for name in storage_names {
+                if let Some(urls) = storage_data.get(name) {
+                    let mut cloned_urls = urls.clone();
+                    if sfs_host_path.is_some() {
+                        if let Some(obj) = cloned_urls.as_object_mut() {
+                            obj.remove("put_url");
+                        }
+                    }
+                    parking_urls.insert(name.clone(), cloned_urls);
+                    if let Some(artifacts) = urls.get("artifacts").and_then(|a| a.as_object()) {
+                        let allowed_artifacts = self.metadata.step_dsl.artifacts.as_ref();
+                        for (art_name, art_val) in artifacts {
+                            if let Some(allowed) = allowed_artifacts {
+                                if !allowed.contains(art_name) {
+                                    continue;
+                                }
+                            } else {
+                                // If step.artifacts is not explicitly defined, we assume it publishes NO artifacts
+                                continue;
+                            }
+
+                            let mut cloned_art = art_val.clone();
+                            if let Some(m) = spec
+                                .as_ref()
+                                .and_then(|s| s.storage_mounts.as_ref())
+                                .and_then(|ms| ms.iter().find(|m| &m.name == name))
+                            {
+                                if let Some(p) = art_val.get("path").and_then(|p| p.as_str()) {
+                                    let abs_path = std::path::Path::new(&m.mount_path).join(p);
+                                    cloned_art["path"] =
+                                        Value::String(abs_path.to_string_lossy().to_string());
+                                }
+                            }
+                            artifact_urls.insert(art_name.clone(), cloned_art);
+                        }
+                    }
+                }
+                if let Some(m) = spec
+                    .as_ref()
+                    .and_then(|s| s.storage_mounts.as_ref())
+                    .and_then(|ms| ms.iter().find(|m| &m.name == name))
+                {
+                    mount_paths.insert(name.clone(), m.mount_path.clone());
+                }
+            }
+        }
+
+        (parking_urls, mount_paths, artifact_urls)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::container_machine::ContainerMetadata;
+    use bollard::Docker;
+    use stormchaser_model::dsl::Step;
+
+    fn create_test_metadata() -> ContainerMetadata {
+        let spec = serde_json::json!({
+            "image": "alpine:latest",
+            "command": ["echo", "hello"],
+            "storage_mounts": [
+                {
+                    "name": "workspace",
+                    "mount_path": "/workspace"
+                }
+            ]
+        });
+
+        let mut storage = HashMap::new();
+        storage.insert(
+            "workspace".to_string(),
+            serde_json::json!({
+                "get_url": "http://s3/get",
+                "put_url": "http://s3/put"
+            }),
+        );
+
+        ContainerMetadata {
+            run_id: Uuid::new_v4(),
+            step_id: Uuid::new_v4(),
+            step_dsl: Step {
+                name: "test_step".to_string(),
+                r#type: "RunContainer".to_string(),
+                spec,
+                condition: None,
+                params: HashMap::new(),
+                strategy: None,
+                aggregation: vec![],
+                iterate: None,
+                iterate_as: None,
+                steps: None,
+                next: vec![],
+                on_failure: None,
+                retry: None,
+                timeout: None,
+                allow_failure: None,
+                start_marker: None,
+                end_marker: None,
+                outputs: vec![],
+                reports: vec![],
+                artifacts: None,
+            },
+            received_at: chrono::Utc::now(),
+            encryption_key: None,
+            storage: Some(storage),
+            test_report_urls: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_build_parking_payloads_named_volume() {
+        let docker = Docker::connect_with_local_defaults().unwrap();
+        let metadata = create_test_metadata();
+        let init_machine = DockerContainerMachine::new(docker.clone(), metadata, None);
+        let machine = init_machine.adopt("test".to_string());
+
+        let spec: CommonContainerSpec =
+            serde_json::from_value(machine.metadata.step_dsl.spec.clone()).unwrap();
+        let storage_names = vec!["workspace".to_string()];
+
+        let (parking_urls, mount_paths, _) =
+            machine.build_parking_payloads(&storage_names, Some(&spec), None);
+
+        assert_eq!(parking_urls.len(), 1);
+        assert_eq!(mount_paths.len(), 1);
+
+        assert_eq!(mount_paths.get("workspace").unwrap(), "/workspace");
+
+        let urls = parking_urls.get("workspace").unwrap();
+        assert_eq!(
+            urls.get("put_url").and_then(|v| v.as_str()),
+            Some("http://s3/put")
+        );
+        assert_eq!(
+            urls.get("get_url").and_then(|v| v.as_str()),
+            Some("http://s3/get")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_build_parking_payloads_host_bind() {
+        let docker = Docker::connect_with_local_defaults().unwrap();
+        let metadata = create_test_metadata();
+        let init_machine = DockerContainerMachine::new(docker.clone(), metadata, None);
+        let machine = init_machine.adopt("test".to_string());
+
+        let spec: CommonContainerSpec =
+            serde_json::from_value(machine.metadata.step_dsl.spec.clone()).unwrap();
+        let storage_names = vec!["workspace".to_string()];
+
+        let sfs_host_path = Some("/tmp/stormchaser/sfs");
+        let (parking_urls, mount_paths, _) =
+            machine.build_parking_payloads(&storage_names, Some(&spec), sfs_host_path);
+
+        assert_eq!(parking_urls.len(), 1);
+        assert_eq!(mount_paths.len(), 1);
+
+        assert_eq!(mount_paths.get("workspace").unwrap(), "/workspace");
+
+        let urls = parking_urls.get("workspace").unwrap();
+        assert_eq!(
+            urls.get("get_url").and_then(|v| v.as_str()),
+            Some("http://s3/get")
+        );
+        // Should omit put_url because host bind mounts do not park their state
+        assert_eq!(urls.get("put_url"), None);
     }
 }

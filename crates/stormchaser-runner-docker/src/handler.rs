@@ -10,11 +10,14 @@ use std::collections::HashMap;
 use std::time::Duration;
 use stormchaser_model::events::StepCompletedEvent;
 use stormchaser_model::events::StepFailedEvent;
-use stormchaser_model::events::{EventSource, EventType, SchemaVersion, StepEventType};
+use stormchaser_model::events::{
+    EventSource, EventType, SchemaVersion, StepEventType, StepRunningEvent,
+};
 use stormchaser_model::nats::publish_cloudevent;
 use stormchaser_model::nats::NatsSubject;
 use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
+use stormchaser_model::APPLICATION_JSON;
 use tokio::time::sleep;
 use tracing::{error, info, warn};
 use uuid::Uuid;
@@ -39,7 +42,7 @@ fn build_cloudevent_payload(
         .ty(event_type)
         .source(source.as_str())
         .time(chrono::Utc::now())
-        .data(stormchaser_model::APPLICATION_JSON, data)
+        .data(APPLICATION_JSON, data)
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to build CloudEvent: {}", e))?;
     let payload = serde_json::to_string(&event)?;
@@ -382,7 +385,7 @@ pub async fn handle_task(
         }
     });
 
-    let running_event = stormchaser_model::events::StepRunningEvent {
+    let running_event = StepRunningEvent {
         run_id: RunId::new(run_id),
         step_id: StepInstanceId::new(step_id),
         event_type: EventType::Step(StepEventType::Running),

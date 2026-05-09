@@ -102,7 +102,15 @@ There are two main areas to consider for encryption at rest:
 1. Postgres DB - standard techniques are well documented for this
 2. NATS Jetstream - NATS documentation notes that whilst NATS supports at rest encryption, host native file system encryption is preferred
 
-## 6. MCP Server Security
+## 6. Runner Security Considerations
+
+When using the **Docker Runner** with the `STORMCHASER_SFS_HOST_PATH` optimization enabled, the runner creates direct bind mounts from the host file system into step containers.
+
+* **Host Access:** This bypasses Docker's native volume isolation. The directory specified must be securely owned by the user running the Docker daemon.
+* **Path Traversal:** The runner sanitizes `provision` destination paths to prevent traversal attacks (`../`) that might attempt to write outside the run's isolated subdirectory.
+* **Data Remnants:** Host bind mounts are not automatically garbage collected by the runner. System administrators must ensure secure, automated cleanup (e.g., via cron) to prevent sensitive workflow data from accumulating on the host disk.
+
+## 7. MCP Server Security
 
 The Model Context Protocol (MCP) server, which exposes the OpenAPI specification as tools for AI agents, is integrated with the same OPA enforcement as the rest of the system:
 
