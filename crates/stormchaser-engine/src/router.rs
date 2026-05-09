@@ -8,7 +8,7 @@ use stormchaser_tls::TlsReloader;
 use uuid::Uuid;
 
 #[allow(clippy::too_many_arguments)]
-pub async fn handle_message(
+async fn handle_run_events(
     subject: &str,
     payload: Value,
     message: async_nats::jetstream::message::Message,
@@ -17,25 +17,24 @@ pub async fn handle_message(
     opa_client: Arc<auth::OpaClient>,
     nats_client: async_nats::Client,
     tls_reloader: Arc<TlsReloader>,
-    log_backend: Arc<Option<LogBackend>>,
 ) {
+    let run_id_str = match payload["run_id"].as_str() {
+        Some(id) => id,
+        None => {
+            let _ = message.double_ack().await;
+            return;
+        }
+    };
+    let run_id = match Uuid::parse_str(run_id_str) {
+        Ok(id) => id,
+        Err(_) => {
+            let _ = message.double_ack().await;
+            return;
+        }
+    };
+
     match subject {
         "stormchaser.v1.run.queued" => {
-            let run_id_str = match payload["run_id"].as_str() {
-                Some(id) => id,
-                None => {
-                    let _ = message.double_ack().await;
-                    return;
-                }
-            };
-            let run_id = match Uuid::parse_str(run_id_str) {
-                Ok(id) => id,
-                Err(_) => {
-                    let _ = message.double_ack().await;
-                    return;
-                }
-            };
-
             tokio::spawn(async move {
                 if let Err(e) = handler::handle_workflow_queued(
                     stormchaser_model::RunId::new(run_id),
@@ -57,21 +56,6 @@ pub async fn handle_message(
             });
         }
         "stormchaser.v1.run.direct" => {
-            let run_id_str = match payload["run_id"].as_str() {
-                Some(id) => id,
-                None => {
-                    let _ = message.double_ack().await;
-                    return;
-                }
-            };
-            let run_id = match Uuid::parse_str(run_id_str) {
-                Ok(id) => id,
-                Err(_) => {
-                    let _ = message.double_ack().await;
-                    return;
-                }
-            };
-
             tokio::spawn(async move {
                 if let Err(e) =
                     handler::handle_workflow_direct(payload, pool, opa_client, nats_client).await
@@ -86,21 +70,6 @@ pub async fn handle_message(
             });
         }
         "stormchaser.v1.run.start_pending" => {
-            let run_id_str = match payload["run_id"].as_str() {
-                Some(id) => id,
-                None => {
-                    let _ = message.double_ack().await;
-                    return;
-                }
-            };
-            let run_id = match Uuid::parse_str(run_id_str) {
-                Ok(id) => id,
-                Err(_) => {
-                    let _ = message.double_ack().await;
-                    return;
-                }
-            };
-
             tokio::spawn(async move {
                 if let Err(e) = handler::handle_workflow_start_pending(
                     stormchaser_model::RunId::new(run_id),
@@ -119,6 +88,19 @@ pub async fn handle_message(
                 let _ = message.double_ack().await;
             });
         }
+        _ => {
+            let _ = message.double_ack().await;
+        }
+    }
+}
+
+async fn handle_runner_events(
+    subject: &str,
+    payload: Value,
+    message: async_nats::jetstream::message::Message,
+    pool: sqlx::PgPool,
+) {
+    match subject {
         "stormchaser.v1.runner.register" => {
             tokio::spawn(async move {
                 if let Err(e) = handler::handle_runner_registration(payload, pool).await {
@@ -143,6 +125,23 @@ pub async fn handle_message(
                 let _ = message.double_ack().await;
             });
         }
+        _ => {
+            let _ = message.double_ack().await;
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn handle_step_events(
+    subject: &str,
+    payload: Value,
+    message: async_nats::jetstream::message::Message,
+    pool: sqlx::PgPool,
+    nats_client: async_nats::Client,
+    tls_reloader: Arc<TlsReloader>,
+    log_backend: Arc<Option<LogBackend>>,
+) {
+    match subject {
         "stormchaser.v1.step.register_wasm" => {
             tokio::spawn(async move {
                 if let Err(e) = handler::handle_wasm_registration(payload, pool).await {
@@ -231,5 +230,60 @@ pub async fn handle_message(
         _ => {
             let _ = message.double_ack().await;
         }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn handle_message(
+    subject: &str,
+    payload: Value,
+    message: async_nats::jetstream::message::Message,
+    pool: sqlx::PgPool,
+    git_cache: Arc<git_cache::GitCache>,
+    opa_client: Arc<auth::OpaClient>,
+    nats_client: async_nats::Client,
+    tls_reloader: Arc<TlsReloader>,
+    log_backend: Arc<Option<LogBackend>>,
+) {
+    if subject.starts_with("stormchaser.v1.run.") {
+        handle_run_events(
+            subject,
+            payload,
+            message,
+            pool,
+            git_cache,
+            opa_client,
+            nats_client,
+            tls_reloader,
+        )
+        .await;
+    } else if subject.starts_with("stormchaser.v1.runner.") {
+        handle_runner_events(subject, payload, message, pool).await;
+    } else if subject.starts_with("stormchaser.v1.step.") {
+        handle_step_events(
+            subject,
+            payload,
+            message,
+            pool,
+            nats_client,
+            tls_reloader,
+            log_backend,
+        )
+        .await;
+    } else {
+        let _ = message.double_ack().await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_routing_helpers() {
+        let _a = handle_run_events;
+        let _b = handle_runner_events;
+        let _c = handle_step_events;
     }
 }

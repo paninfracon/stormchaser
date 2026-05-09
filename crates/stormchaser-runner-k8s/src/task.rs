@@ -49,6 +49,169 @@ pub fn fallback_step(payload: &Value, spec: serde_json::Value) -> Step {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn execute_job_on_cluster(
+    client: kube::Client,
+    cluster_version: String,
+    run_id: Uuid,
+    step_id: Uuid,
+    step_dsl: dsl::Step,
+    storage: Option<HashMap<String, Value>>,
+    test_report_urls: Option<HashMap<String, Value>>,
+    runner_id: String,
+    nats_client: async_nats::Client,
+    encryption_key: Option<String>,
+    received_at: chrono::DateTime<chrono::Utc>,
+    in_progress_handle: tokio::task::JoinHandle<()>,
+    msg: async_nats::jetstream::message::Message,
+) {
+    let namespace = std::env::var("KUBERNETES_NAMESPACE").unwrap_or_else(|_| "default".to_string());
+    let metadata = job_machine::JobMetadata {
+        run_id,
+        step_id,
+        step_dsl,
+        namespace,
+        received_at,
+        cluster_version,
+        encryption_key,
+        storage,
+        test_report_urls,
+    };
+
+    let machine = job_machine::K8sJobMachine::new(client.clone(), metadata.clone());
+
+    let result = match machine.start().await {
+        Ok(job_machine::StartResult::Running(running_machine)) => running_machine.wait().await,
+        Ok(job_machine::StartResult::Failed(finished_machine)) => {
+            Ok(finished_machine.into_result())
+        }
+        Err(e) => Err(e),
+    };
+    in_progress_handle.abort();
+    let _ = msg.double_ack().await;
+    match result {
+        Ok(job_machine::JobState::Succeeded(metrics)) => {
+            tracing::info!("Step {} (Run {}) completed successfully", step_id, run_id);
+            let mut outputs = HashMap::new();
+            outputs.insert(
+                "k8s exit code".to_string(),
+                serde_json::json!(metrics.exit_code),
+            );
+            outputs.insert(
+                "Number of attempts".to_string(),
+                serde_json::json!(metrics.attempts),
+            );
+            outputs.insert(
+                "run duration".to_string(),
+                serde_json::json!(format!("{}ms", metrics.duration_ms)),
+            );
+            outputs.insert(
+                "run latency".to_string(),
+                serde_json::json!(format!("{}ms", metrics.latency_ms)),
+            );
+            let complete_event = StepCompletedEvent {
+                run_id: RunId::new(run_id),
+                step_id: StepInstanceId::new(step_id),
+                event_type: EventType::Step(StepEventType::Completed),
+                runner_id: Some(runner_id.clone()),
+                exit_code: metrics.exit_code,
+                storage_hashes: metrics.storage_hashes.map(|h| {
+                    h.into_iter()
+                        .map(|(k, v)| (k, serde_json::json!(v)))
+                        .collect()
+                }),
+                artifacts: metrics.artifacts,
+                test_reports: metrics.test_reports,
+                outputs: Some(outputs),
+                timestamp: chrono::Utc::now(),
+            };
+            let _ = publish_cloudevent(
+                &async_nats::jetstream::new(nats_client.clone()),
+                NatsSubject::StepCompleted,
+                EventType::Step(StepEventType::Completed),
+                EventSource::System,
+                serde_json::to_value(complete_event).unwrap(),
+                Some(SchemaVersion::new("1.0".to_string())),
+                None,
+            )
+            .await;
+        }
+        Ok(job_machine::JobState::Failed(reason, metrics)) => {
+            tracing::error!("Step {} (Run {}) failed: {}", step_id, run_id, reason);
+            let mut outputs = HashMap::new();
+            outputs.insert(
+                "k8s exit code".to_string(),
+                serde_json::json!(metrics.exit_code),
+            );
+            outputs.insert(
+                "Number of attempts".to_string(),
+                serde_json::json!(metrics.attempts),
+            );
+            outputs.insert(
+                "run duration".to_string(),
+                serde_json::json!(format!("{}ms", metrics.duration_ms)),
+            );
+            outputs.insert(
+                "run latency".to_string(),
+                serde_json::json!(format!("{}ms", metrics.latency_ms)),
+            );
+            let fail_event = StepFailedEvent {
+                run_id: RunId::new(run_id),
+                step_id: StepInstanceId::new(step_id),
+                event_type: EventType::Step(StepEventType::Failed),
+                error: reason,
+                runner_id: Some(runner_id.clone()),
+                exit_code: metrics.exit_code,
+                storage_hashes: metrics.storage_hashes.map(|h| {
+                    h.into_iter()
+                        .map(|(k, v)| (k, serde_json::json!(v)))
+                        .collect()
+                }),
+                artifacts: metrics.artifacts,
+                test_reports: metrics.test_reports,
+                outputs: Some(outputs),
+                timestamp: chrono::Utc::now(),
+            };
+            let _ = publish_cloudevent(
+                &async_nats::jetstream::new(nats_client.clone()),
+                NatsSubject::StepFailed,
+                EventType::Step(StepEventType::Failed),
+                EventSource::System,
+                serde_json::to_value(fail_event).unwrap(),
+                Some(SchemaVersion::new("1.0".to_string())),
+                None,
+            )
+            .await;
+        }
+        Err(e) => {
+            tracing::error!("Error running K8s job for step {}: {:?}", step_id, e);
+            let fail_event = StepFailedEvent {
+                run_id: RunId::new(run_id),
+                step_id: StepInstanceId::new(step_id),
+                event_type: EventType::Step(StepEventType::Failed),
+                error: format!("{:?}", e),
+                runner_id: Some(runner_id.clone()),
+                exit_code: None,
+                storage_hashes: None,
+                artifacts: None,
+                test_reports: None,
+                outputs: None,
+                timestamp: chrono::Utc::now(),
+            };
+            let _ = publish_cloudevent(
+                &async_nats::jetstream::new(nats_client.clone()),
+                NatsSubject::StepFailed,
+                EventType::Step(StepEventType::Failed),
+                EventSource::System,
+                serde_json::to_value(fail_event).unwrap(),
+                Some(SchemaVersion::new("1.0".to_string())),
+                None,
+            )
+            .await;
+        }
+    }
+}
+
 pub async fn handle_task(
     msg: async_nats::jetstream::message::Message,
     cluster_pool: Arc<ClusterPool>,
@@ -156,154 +319,22 @@ pub async fn handle_task(
     let target_cluster = "local"; // In future, get from affinity/params
     match cluster_pool.get_client(target_cluster).await {
         Ok((client, cluster_version)) => {
-            let namespace =
-                std::env::var("KUBERNETES_NAMESPACE").unwrap_or_else(|_| "default".to_string());
-            let metadata = job_machine::JobMetadata {
+            execute_job_on_cluster(
+                client,
+                cluster_version,
                 run_id,
                 step_id,
                 step_dsl,
-                namespace,
-                received_at,
-                cluster_version,
-                encryption_key,
                 storage,
                 test_report_urls,
-            };
-
-            let machine = job_machine::K8sJobMachine::new(client.clone(), metadata.clone());
-
-            let result = match machine.start().await {
-                Ok(job_machine::StartResult::Running(running_machine)) => {
-                    running_machine.wait().await
-                }
-                Ok(job_machine::StartResult::Failed(finished_machine)) => {
-                    Ok(finished_machine.into_result())
-                }
-                Err(e) => Err(e),
-            };
-            in_progress_handle.abort();
-            let _ = msg.double_ack().await;
-            match result {
-                Ok(job_machine::JobState::Succeeded(metrics)) => {
-                    tracing::info!("Step {} (Run {}) completed successfully", step_id, run_id);
-                    let mut outputs = HashMap::new();
-                    outputs.insert(
-                        "k8s exit code".to_string(),
-                        serde_json::json!(metrics.exit_code),
-                    );
-                    outputs.insert(
-                        "Number of attempts".to_string(),
-                        serde_json::json!(metrics.attempts),
-                    );
-                    outputs.insert(
-                        "run duration".to_string(),
-                        serde_json::json!(format!("{}ms", metrics.duration_ms)),
-                    );
-                    outputs.insert(
-                        "run latency".to_string(),
-                        serde_json::json!(format!("{}ms", metrics.latency_ms)),
-                    );
-                    let complete_event = StepCompletedEvent {
-                        run_id: RunId::new(run_id),
-                        step_id: StepInstanceId::new(step_id),
-                        event_type: EventType::Step(StepEventType::Completed),
-                        runner_id: Some(runner_id.clone()),
-                        exit_code: metrics.exit_code,
-                        storage_hashes: metrics.storage_hashes.map(|h| {
-                            h.into_iter()
-                                .map(|(k, v)| (k, serde_json::json!(v)))
-                                .collect()
-                        }),
-                        artifacts: metrics.artifacts,
-                        test_reports: metrics.test_reports,
-                        outputs: Some(outputs),
-                        timestamp: chrono::Utc::now(),
-                    };
-                    let _ = publish_cloudevent(
-                        &async_nats::jetstream::new(nats_client.clone()),
-                        NatsSubject::StepCompleted,
-                        EventType::Step(StepEventType::Completed),
-                        EventSource::System,
-                        serde_json::to_value(complete_event).unwrap(),
-                        Some(SchemaVersion::new("1.0".to_string())),
-                        None,
-                    )
-                    .await;
-                }
-                Ok(job_machine::JobState::Failed(reason, metrics)) => {
-                    tracing::error!("Step {} (Run {}) failed: {}", step_id, run_id, reason);
-                    let mut outputs = HashMap::new();
-                    outputs.insert(
-                        "k8s exit code".to_string(),
-                        serde_json::json!(metrics.exit_code),
-                    );
-                    outputs.insert(
-                        "Number of attempts".to_string(),
-                        serde_json::json!(metrics.attempts),
-                    );
-                    outputs.insert(
-                        "run duration".to_string(),
-                        serde_json::json!(format!("{}ms", metrics.duration_ms)),
-                    );
-                    outputs.insert(
-                        "run latency".to_string(),
-                        serde_json::json!(format!("{}ms", metrics.latency_ms)),
-                    );
-                    let fail_event = StepFailedEvent {
-                        run_id: RunId::new(run_id),
-                        step_id: StepInstanceId::new(step_id),
-                        event_type: EventType::Step(StepEventType::Failed),
-                        error: reason,
-                        runner_id: Some(runner_id.clone()),
-                        exit_code: metrics.exit_code,
-                        storage_hashes: metrics.storage_hashes.map(|h| {
-                            h.into_iter()
-                                .map(|(k, v)| (k, serde_json::json!(v)))
-                                .collect()
-                        }),
-                        artifacts: metrics.artifacts,
-                        test_reports: metrics.test_reports,
-                        outputs: Some(outputs),
-                        timestamp: chrono::Utc::now(),
-                    };
-                    let _ = publish_cloudevent(
-                        &async_nats::jetstream::new(nats_client.clone()),
-                        NatsSubject::StepFailed,
-                        EventType::Step(StepEventType::Failed),
-                        EventSource::System,
-                        serde_json::to_value(fail_event).unwrap(),
-                        Some(SchemaVersion::new("1.0".to_string())),
-                        None,
-                    )
-                    .await;
-                }
-                Err(e) => {
-                    tracing::error!("Error running K8s job for step {}: {:?}", step_id, e);
-                    let fail_event = StepFailedEvent {
-                        run_id: RunId::new(run_id),
-                        step_id: StepInstanceId::new(step_id),
-                        event_type: EventType::Step(StepEventType::Failed),
-                        error: format!("{:?}", e),
-                        runner_id: Some(runner_id.clone()),
-                        exit_code: None,
-                        storage_hashes: None,
-                        artifacts: None,
-                        test_reports: None,
-                        outputs: None,
-                        timestamp: chrono::Utc::now(),
-                    };
-                    let _ = publish_cloudevent(
-                        &async_nats::jetstream::new(nats_client.clone()),
-                        NatsSubject::StepFailed,
-                        EventType::Step(StepEventType::Failed),
-                        EventSource::System,
-                        serde_json::to_value(fail_event).unwrap(),
-                        Some(SchemaVersion::new("1.0".to_string())),
-                        None,
-                    )
-                    .await;
-                }
-            }
+                runner_id,
+                nats_client,
+                encryption_key,
+                received_at,
+                in_progress_handle,
+                msg,
+            )
+            .await;
         }
         Err(e) => {
             in_progress_handle.abort();
@@ -343,6 +374,13 @@ pub async fn handle_task(
 
 #[cfg(test)]
 mod tests {
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_execute_job_on_cluster_compiles() {
+        let _f = execute_job_on_cluster;
+    }
+
     use super::*;
     use serde_json::json;
 
