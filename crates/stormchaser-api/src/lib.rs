@@ -230,8 +230,9 @@ pub fn app(state: AppState) -> Router {
 
     #[cfg(feature = "mcp")]
     {
-        authenticated_routes =
-            authenticated_routes.nest_service("/mcp", mcp_service(&state.api_base_url));
+        if let Some(service) = mcp_service(&state.api_base_url) {
+            authenticated_routes = authenticated_routes.nest_service("/mcp", service);
+        }
     }
 
     let authenticated_routes = authenticated_routes.layer(middleware::from_fn_with_state(

@@ -104,11 +104,11 @@ There are two main areas to consider for encryption at rest:
 
 ## 6. MCP Server Security
 
-The Model Context Protocol (MCP) server, which exposes the OpenAPI specification as tools for AI agents, adheres to the same core security constraints as the rest of the system:
+The Model Context Protocol (MCP) server, which exposes the OpenAPI specification as tools for AI agents, is integrated with the same OPA enforcement as the rest of the system:
 
-* **Authentication Requirement**: All MCP initial connections (`/api/v1/mcp/sse`) and subsequent JSON-RPC interactions (`/api/v1/mcp/messages`) require a standard API Bearer token.
+* **MCP Endpoint Access**: In the default policy, read-only requests remain permitted without a token. This means `GET /api/v1/mcp/sse` and `POST /api/v1/mcp/messages` are allowed to support MCP transport bootstrap and JSON-RPC messaging.
 * **Tool Call Proxying**: The MCP server dynamically invokes local API endpoints as requested by the AI agent. Because these generated internal HTTP calls do not inherently proxy the user's Bearer token, they arrive unauthenticated. *(Note: This is currently the recommended "conformant" way to use `rmcp-openapi`, but they are working on standardizing authorization passthrough in the near future).*
 * **OPA Protection**: The default `deploy/opa/policy.rego` includes explicit rules to handle MCP security:
-  * Unauthenticated calls initiated by the MCP tool logic are strictly blocked **unless** they are safe, read-only methods (`GET`, `HEAD`, `OPTIONS`) or target designated authentication/initialization endpoints.
+  * Unauthenticated calls initiated by MCP tooling are blocked when they are non-read-only (`POST`, `PATCH`, `DELETE`, etc.), except for explicit protocol/auth endpoints that must accept unauthenticated traffic.
   * Direct calls to the MCP endpoint itself that attempt non-read-only operations are blocked, except for `POST` requests to `/api/v1/mcp/messages` (which is necessary for the MCP JSON-RPC protocol to function).
-* **Fail-Closed Integration**: If an AI agent attempts to invoke an MCP tool that performs a state-modifying action (e.g., `POST`, `DELETE`) without explicit authorization handling, the internal API call will be denied by OPA with a `403 Forbidden` response.
+* **Fail-Closed Integration for Writes**: If an AI agent attempts to invoke an MCP tool that performs a state-modifying action (e.g., `POST`, `DELETE`) without explicit authorization handling, the internal API call will be denied by OPA with a `403 Forbidden` response.

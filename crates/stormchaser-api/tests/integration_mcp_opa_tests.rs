@@ -153,6 +153,17 @@ async fn test_mcp_opa_policy() {
         "Unauth POST to mcp messages should be allowed"
     );
 
+    // Unauthenticated POST to /api/v1/mcp/something_else -> deny
+    let ctx = ApiOpaContext {
+        path: "/api/v1/mcp/something_else",
+        method: "POST",
+        token: None,
+    };
+    assert!(
+        !client.check(ctx).await.unwrap(),
+        "Unauth POST to other mcp paths should be denied"
+    );
+
     // Authenticated POST to /api/v1/runs -> allow
     let ctx = ApiOpaContext {
         path: "/api/v1/runs",

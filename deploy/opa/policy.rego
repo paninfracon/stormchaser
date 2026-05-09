@@ -17,9 +17,9 @@ token_is_empty if input.token == null
 allow := false if {
 	token_is_empty
 	not input.method in read_only_methods
+	not startswith(input.path, "/api/v1/mcp")
 	input.path != "/api/v1/auth/exchange"
 	input.path != "/api/v1/auth/login"
-	input.path != "/api/v1/mcp/messages"
 }
 
 # Block calls to the MCP server that are not read-only.
