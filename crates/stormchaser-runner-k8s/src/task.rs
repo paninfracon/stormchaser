@@ -89,6 +89,16 @@ async fn execute_job_on_cluster(
     };
     in_progress_handle.abort();
     let _ = msg.double_ack().await;
+    publish_job_result(nats_client, run_id, step_id, runner_id, result).await;
+}
+
+async fn publish_job_result(
+    nats_client: async_nats::Client,
+    run_id: Uuid,
+    step_id: Uuid,
+    runner_id: String,
+    result: Result<job_machine::JobState, anyhow::Error>,
+) {
     match result {
         Ok(job_machine::JobState::Succeeded(metrics)) => {
             tracing::info!("Step {} (Run {}) completed successfully", step_id, run_id);

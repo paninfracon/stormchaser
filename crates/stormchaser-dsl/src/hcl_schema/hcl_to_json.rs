@@ -114,50 +114,7 @@ pub fn hcl_expr_to_json(expr: &Expression) -> Result<Value> {
             }
             Ok(Value::Object(map))
         }
-        Expression::FuncCall(func) => {
-            let name = func.name.name.as_str();
-
-            // Is it a type function like string(), integer()?
-            if [
-                "string", "integer", "number", "boolean", "array", "object", "map",
-            ]
-            .contains(&name)
-            {
-                let mut map = Map::new();
-                map.insert("type".to_string(), Value::String(name.to_string()));
-
-                for arg in &func.args {
-                    // Args are inner constraint or type functions, e.g. format("email"),
-                    // maxItems(5), or — when outer type is "array" — a nested type function
-                    // like string() or string(format("email")) that describes array items.
-                    if let Expression::FuncCall(inner_func) = arg {
-                        let inner_name = inner_func.name.name.as_str();
-                        let is_type_func = [
-                            "string", "integer", "number", "boolean", "array", "object", "map",
-                        ]
-                        .contains(&inner_name);
-
-                        if name == "array" && is_type_func {
-                            // A type function nested inside array(...) describes the item schema,
-                            // e.g. array(string()) or array(string(format("email"))).
-                            map.insert("items".to_string(), hcl_expr_to_json(arg)?);
-                        } else if let Some(first_arg) = inner_func.args.first() {
-                            // Constraint function with a value argument, e.g. format("email"),
-                            // maxItems(5), minimum(0).
-                            map.insert(inner_name.to_string(), hcl_expr_to_json(first_arg)?);
-                        }
-                        // else: zero-arg non-type function — nothing to map.
-                    } else if name == "array" {
-                        // Non-function argument to array() — treat as the items definition.
-                        map.insert("items".to_string(), hcl_expr_to_json(arg)?);
-                    }
-                }
-                return Ok(Value::Object(map));
-            }
-
-            // Otherwise, just a generic function call mapping, shouldn't be reached if valid schema
-            Ok(Value::Null)
-        }
+        Expression::FuncCall(func) => func_call_to_json(func),
         Expression::Traversal(traversal) => {
             // Convert definitions.Address -> { "$ref": "#/definitions/Address" }
             let mut path = String::from("#");
@@ -181,4 +138,49 @@ pub fn hcl_expr_to_json(expr: &Expression) -> Result<Value> {
         }
         _ => Ok(Value::Null),
     }
+}
+
+fn func_call_to_json(func: &hcl::expr::FuncCall) -> Result<Value> {
+    let name = func.name.name.as_str();
+
+    // Is it a type function like string(), integer()?
+    if [
+        "string", "integer", "number", "boolean", "array", "object", "map",
+    ]
+    .contains(&name)
+    {
+        let mut map = Map::new();
+        map.insert("type".to_string(), Value::String(name.to_string()));
+
+        for arg in &func.args {
+            // Args are inner constraint or type functions, e.g. format("email"),
+            // maxItems(5), or — when outer type is "array" — a nested type function
+            // like string() or string(format("email")) that describes array items.
+            if let Expression::FuncCall(inner_func) = arg {
+                let inner_name = inner_func.name.name.as_str();
+                let is_type_func = [
+                    "string", "integer", "number", "boolean", "array", "object", "map",
+                ]
+                .contains(&inner_name);
+
+                if name == "array" && is_type_func {
+                    // A type function nested inside array(...) describes the item schema,
+                    // e.g. array(string()) or array(string(format("email"))).
+                    map.insert("items".to_string(), hcl_expr_to_json(arg)?);
+                } else if let Some(first_arg) = inner_func.args.first() {
+                    // Constraint function with a value argument, e.g. format("email"),
+                    // maxItems(5), minimum(0).
+                    map.insert(inner_name.to_string(), hcl_expr_to_json(first_arg)?);
+                }
+                // else: zero-arg non-type function — nothing to map.
+            } else if name == "array" {
+                // Non-function argument to array() — treat as the items definition.
+                map.insert("items".to_string(), hcl_expr_to_json(arg)?);
+            }
+        }
+        return Ok(Value::Object(map));
+    }
+
+    // Otherwise, just a generic function call mapping, shouldn't be reached if valid schema
+    Ok(Value::Null)
 }

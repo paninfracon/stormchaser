@@ -305,114 +305,21 @@ pub async fn handle_step_completed(
     }
 
     if let Some(dsl_step) = dsl_step {
-        // 3.1 Check if this step is iterated and if we need to schedule more batches
-        let all_instances_of_this_step: Vec<&StepInstance> = all_steps
-            .iter()
-            .filter(|s| s.step_name == dsl_step.name)
-            .collect();
-
-        let finished_instances = all_instances_of_this_step
-            .iter()
-            .filter(|s| s.status == StepStatus::Succeeded || s.status == StepStatus::Skipped)
-            .count();
-
-        let total_instances = all_instances_of_this_step.len();
-
-        if finished_instances < total_instances {
-            // Some instances are still running or waiting
-            let waiting_instances: Vec<&&StepInstance> = all_instances_of_this_step
-                .iter()
-                .filter(|s| s.status == StepStatus::WaitingForEvent)
-                .collect();
-
-            if !waiting_instances.is_empty() {
-                let running_or_pending = all_instances_of_this_step
-                    .iter()
-                    .filter(|s| s.status == StepStatus::Running || s.status == StepStatus::Pending)
-                    .count();
-
-                let max_parallel = dsl_step
-                    .strategy
-                    .as_ref()
-                    .and_then(|s| s.max_parallel)
-                    .unwrap_or(u32::MAX);
-
-                if (running_or_pending as u32) < max_parallel {
-                    let to_schedule = max_parallel - (running_or_pending as u32);
-                    for next_instance in waiting_instances.iter().take(to_schedule as usize) {
-                        let machine =
-                            crate::step_machine::StepMachine::<
-                                crate::step_machine::state::WaitingForEvent,
-                            >::from_instance((**next_instance).clone());
-                        let _ = machine.reschedule(&mut *tx).await?;
-
-                        let inst_data: (Value, Value) =
-                            crate::db::get_step_spec_and_params(&mut *tx, next_instance.id).await?;
-
-                        dispatch_step_instance(
-                            run_id,
-                            next_instance.id,
-                            &dsl_step.name,
-                            &dsl_step.r#type,
-                            &inst_data.0,
-                            &inst_data.1,
-                            nats_client.clone(),
-                            pool.clone(),
-                            tls_reloader.clone(),
-                        )
-                        .await?;
-                    }
-                }
-            }
+        if !process_step_completion(
+            dsl_step,
+            &all_steps,
+            run_id,
+            &mut *tx,
+            nats_client.clone(),
+            pool.clone(),
+            tls_reloader.clone(),
+            context.inputs.clone(),
+            &workflow,
+        )
+        .await?
+        {
             tx.commit().await?;
             return Ok(());
-        }
-
-        // 4. All instances of THIS step are done, evaluate successors
-        if !dsl_step.next.is_empty() {
-            let hcl_ctx = crate::hcl_eval::create_context(
-                context.inputs.clone(),
-                run_id,
-                fetch_outputs(run_id, &mut *tx).await?,
-            );
-
-            for next_step_name in &dsl_step.next {
-                let predecessors: Vec<&ast::Step> = workflow
-                    .steps
-                    .iter()
-                    .filter(|s| s.next.contains(next_step_name))
-                    .collect();
-
-                let all_predecessors_done = predecessors.iter().all(|pred_dsl| {
-                    let pred_instances: Vec<&StepInstance> = all_steps
-                        .iter()
-                        .filter(|s| s.step_name == pred_dsl.name)
-                        .collect();
-
-                    !pred_instances.is_empty()
-                        && pred_instances.iter().all(|s| {
-                            s.status == StepStatus::Succeeded || s.status == StepStatus::Skipped
-                        })
-                });
-
-                if all_predecessors_done {
-                    if let Some(next_dsl) =
-                        workflow.steps.iter().find(|s| s.name == *next_step_name)
-                    {
-                        #[allow(clippy::explicit_auto_deref)]
-                        schedule_step(
-                            run_id,
-                            next_dsl,
-                            &mut *tx,
-                            nats_client.clone(),
-                            &hcl_ctx,
-                            pool.clone(),
-                            &workflow,
-                        )
-                        .await?;
-                    }
-                }
-            }
         }
     }
 
@@ -488,4 +395,122 @@ pub async fn handle_step_completed(
     }
 
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn process_step_completion(
+    dsl_step: ast::Step,
+    all_steps: &[StepInstance],
+    run_id: stormchaser_model::RunId,
+    tx: &mut sqlx::PgConnection,
+    nats_client: async_nats::Client,
+    pool: PgPool,
+    tls_reloader: Arc<TlsReloader>,
+    inputs: serde_json::Value,
+    workflow: &ast::Workflow,
+) -> Result<bool> {
+    // 3.1 Check if this step is iterated and if we need to schedule more batches
+    let all_instances_of_this_step: Vec<&StepInstance> = all_steps
+        .iter()
+        .filter(|s| s.step_name == dsl_step.name)
+        .collect();
+
+    let finished_instances = all_instances_of_this_step
+        .iter()
+        .filter(|s| s.status == StepStatus::Succeeded || s.status == StepStatus::Skipped)
+        .count();
+
+    let total_instances = all_instances_of_this_step.len();
+
+    if finished_instances < total_instances {
+        // Some instances are still running or waiting
+        let waiting_instances: Vec<&&StepInstance> = all_instances_of_this_step
+            .iter()
+            .filter(|s| s.status == StepStatus::WaitingForEvent)
+            .collect();
+
+        if !waiting_instances.is_empty() {
+            let running_or_pending = all_instances_of_this_step
+                .iter()
+                .filter(|s| s.status == StepStatus::Running || s.status == StepStatus::Pending)
+                .count();
+
+            let max_parallel = dsl_step
+                .strategy
+                .as_ref()
+                .and_then(|s| s.max_parallel)
+                .unwrap_or(u32::MAX);
+
+            if (running_or_pending as u32) < max_parallel {
+                let to_schedule = max_parallel - (running_or_pending as u32);
+                for next_instance in waiting_instances.iter().take(to_schedule as usize) {
+                    let machine = crate::step_machine::StepMachine::<
+                        crate::step_machine::state::WaitingForEvent,
+                    >::from_instance((**next_instance).clone());
+                    let _ = machine.reschedule(&mut *tx).await?;
+
+                    let inst_data: (Value, Value) =
+                        crate::db::get_step_spec_and_params(&mut *tx, next_instance.id).await?;
+
+                    dispatch_step_instance(
+                        run_id,
+                        next_instance.id,
+                        &dsl_step.name,
+                        &dsl_step.r#type,
+                        &inst_data.0,
+                        &inst_data.1,
+                        nats_client.clone(),
+                        pool.clone(),
+                        tls_reloader.clone(),
+                    )
+                    .await?;
+                }
+            }
+        }
+        return Ok(false);
+    }
+
+    // 4. All instances of THIS step are done, evaluate successors
+    if !dsl_step.next.is_empty() {
+        let hcl_ctx =
+            crate::hcl_eval::create_context(inputs, run_id, fetch_outputs(run_id, &mut *tx).await?);
+
+        for next_step_name in &dsl_step.next {
+            let predecessors: Vec<&ast::Step> = workflow
+                .steps
+                .iter()
+                .filter(|s| s.next.contains(next_step_name))
+                .collect();
+
+            let all_predecessors_done = predecessors.iter().all(|pred_dsl| {
+                let pred_instances: Vec<&StepInstance> = all_steps
+                    .iter()
+                    .filter(|s| s.step_name == pred_dsl.name)
+                    .collect();
+
+                !pred_instances.is_empty()
+                    && pred_instances.iter().all(|s| {
+                        s.status == StepStatus::Succeeded || s.status == StepStatus::Skipped
+                    })
+            });
+
+            if all_predecessors_done {
+                if let Some(next_dsl) = workflow.steps.iter().find(|s| s.name == *next_step_name) {
+                    #[allow(clippy::explicit_auto_deref)]
+                    schedule_step(
+                        run_id,
+                        next_dsl,
+                        &mut *tx,
+                        nats_client.clone(),
+                        &hcl_ctx,
+                        pool.clone(),
+                        workflow,
+                    )
+                    .await?;
+                }
+            }
+        }
+    }
+
+    Ok(true)
 }

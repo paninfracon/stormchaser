@@ -63,58 +63,7 @@ async fn handle_app_event<'a>(app: &mut App<'a>, event: AppEvent) -> bool {
             app.state = AppState::LoggedOut;
         }
         AppEvent::Terminal(Event::Key(key)) => {
-            if app.state == AppState::LoggedOut || app.state == AppState::LoggingIn {
-                match key.code {
-                    KeyCode::Enter if app.state == AppState::LoggedOut => {
-                        if app.auto_login_credentials.is_empty() {
-                            let _ = app.login().await;
-                        } else {
-                            if let Some((email, password)) = app
-                                .auto_login_credentials
-                                .get(app.auto_login_index)
-                                .cloned()
-                            {
-                                let _ = app.auto_login(&email, &password).await;
-                            }
-                        }
-                    }
-                    KeyCode::Char('b') if app.state == AppState::LoggedOut => {
-                        let _ = app.login().await;
-                    }
-                    KeyCode::Up
-                        if app.state == AppState::LoggedOut
-                            && !app.auto_login_credentials.is_empty()
-                            && app.auto_login_index > 0 =>
-                    {
-                        app.auto_login_index -= 1;
-                    }
-                    KeyCode::Down
-                        if app.state == AppState::LoggedOut
-                            && !app.auto_login_credentials.is_empty()
-                            && app.auto_login_index < app.auto_login_credentials.len() - 1 =>
-                    {
-                        app.auto_login_index += 1;
-                    }
-                    KeyCode::Char('q') => return true,
-                    _ => {}
-                }
-            } else if app.filter_dialog_active {
-                app.handle_filter_dialog_key(key).await;
-            } else if app.schedule_git_dialog_active {
-                app.handle_schedule_git_dialog_key(key).await;
-            } else if app.storage_backend_dialog_active {
-                app.handle_storage_backend_dialog_key(key).await;
-            } else if app.webhook_dialog_active {
-                app.handle_webhook_dialog_key(key).await;
-            } else if app.approval_dialog_active {
-                app.handle_approval_dialog_key(key).await;
-            } else if app.direct_submit_form.is_some() {
-                app.handle_direct_submit_form_key(key).await;
-            } else if app.file_browser_active {
-                app.handle_file_browser_key(key).await;
-            } else {
-                return app.handle_default_key(key).await;
-            }
+            return handle_app_event_key(app, key).await;
         }
         AppEvent::StatusUpdate(run_id, status) => {
             app.handle_status_update(run_id, status);
@@ -154,6 +103,65 @@ async fn handle_app_event<'a>(app: &mut App<'a>, event: AppEvent) -> bool {
             app.state = AppState::LoggedOut;
         }
         _ => {}
+    }
+    false
+}
+
+async fn handle_app_event_key<'a>(
+    app: &mut App<'a>,
+    key: ratatui::crossterm::event::KeyEvent,
+) -> bool {
+    if app.state == AppState::LoggedOut || app.state == AppState::LoggingIn {
+        match key.code {
+            KeyCode::Enter if app.state == AppState::LoggedOut => {
+                if app.auto_login_credentials.is_empty() {
+                    let _ = app.login().await;
+                } else {
+                    if let Some((email, password)) = app
+                        .auto_login_credentials
+                        .get(app.auto_login_index)
+                        .cloned()
+                    {
+                        let _ = app.auto_login(&email, &password).await;
+                    }
+                }
+            }
+            KeyCode::Char('b') if app.state == AppState::LoggedOut => {
+                let _ = app.login().await;
+            }
+            KeyCode::Up
+                if app.state == AppState::LoggedOut
+                    && !app.auto_login_credentials.is_empty()
+                    && app.auto_login_index > 0 =>
+            {
+                app.auto_login_index -= 1;
+            }
+            KeyCode::Down
+                if app.state == AppState::LoggedOut
+                    && !app.auto_login_credentials.is_empty()
+                    && app.auto_login_index < app.auto_login_credentials.len() - 1 =>
+            {
+                app.auto_login_index += 1;
+            }
+            KeyCode::Char('q') => return true,
+            _ => {}
+        }
+    } else if app.filter_dialog_active {
+        app.handle_filter_dialog_key(key).await;
+    } else if app.schedule_git_dialog_active {
+        app.handle_schedule_git_dialog_key(key).await;
+    } else if app.storage_backend_dialog_active {
+        app.handle_storage_backend_dialog_key(key).await;
+    } else if app.webhook_dialog_active {
+        app.handle_webhook_dialog_key(key).await;
+    } else if app.approval_dialog_active {
+        app.handle_approval_dialog_key(key).await;
+    } else if app.direct_submit_form.is_some() {
+        app.handle_direct_submit_form_key(key).await;
+    } else if app.file_browser_active {
+        app.handle_file_browser_key(key).await;
+    } else {
+        return app.handle_default_key(key).await;
     }
     false
 }

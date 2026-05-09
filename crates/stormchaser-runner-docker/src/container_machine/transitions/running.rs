@@ -128,121 +128,12 @@ impl DockerContainerMachine<state::Running> {
         let mut reports_out = None;
 
         if !storage_names.is_empty() || !self.metadata.step_dsl.reports.is_empty() {
-            let agent_image = "stormchaser-agent:v1";
-            let park_container_name = format!("park-{}", Uuid::new_v4());
-
-            let sfs_host_path = std::env::var("STORMCHASER_SFS_HOST_PATH").ok();
-            let (parking_urls, mount_paths, artifact_urls) =
-                self.build_parking_payloads(storage_names, spec, sfs_host_path.as_deref());
-
-            let mut agent_args = vec![
-                "run".to_string(),
-                "--parking-urls".to_string(),
-                serde_json::to_string(&parking_urls)?,
-                "--mount-paths".to_string(),
-                serde_json::to_string(&mount_paths)?,
-            ];
-
-            if !artifact_urls.is_empty() {
-                agent_args.push("--artifact-urls".to_string());
-                agent_args.push(serde_json::to_string(&artifact_urls)?);
-            }
-
-            if let Some(reports) = &self.metadata.test_report_urls {
-                if !reports.is_empty() {
-                    agent_args.push("--report-urls".to_string());
-                    agent_args.push(serde_json::to_string(reports)?);
-                }
-            }
-
-            if !self.metadata.step_dsl.reports.is_empty() {
-                agent_args.push("--test-reports".to_string());
-                agent_args.push(serde_json::to_string(&self.metadata.step_dsl.reports)?);
-            }
-
-            if exit_code != Some(0) {
-                // If it failed, don't fail parking
-                // (This matches original logic but might need review)
-            }
-
-            agent_args.push("--".to_string());
-            agent_args.push("/bin/true".to_string());
-
-            let agent_config = Config {
-                image: Some(agent_image.to_string()),
-                cmd: Some(agent_args),
-                entrypoint: Some(vec!["/usr/local/bin/stormchaser-agent".to_string()]),
-                host_config: Some(HostConfig {
-                    mounts: Some(mounts),
-                    network_mode: self.get_network_mode().await,
-                    ..Default::default()
-                }),
-                ..Default::default()
-            };
-
-            info!("Running agent for parking/reports: {}", park_container_name);
-            if let Some(nats) = &self.nats {
-                let packing_event = serde_json::json!({
-                    "run_id": self.metadata.run_id,
-                    "step_id": self.metadata.step_id,
-                    "status": StepStatus::PackingSfs,
-                    "timestamp": chrono::Utc::now(),
-                });
-                if let Ok(ce) = cloudevents::EventBuilderV10::new()
-                    .id(uuid::Uuid::new_v4().to_string())
-                    .ty("stormchaser.v1.step.packing_sfs")
-                    .source("/stormchaser/runner")
-                    .time(chrono::Utc::now())
-                    .data(APPLICATION_JSON, packing_event)
-                    .build()
-                {
-                    if let Ok(payload_bytes) = serde_json::to_vec(&ce) {
-                        let _ = nats
-                            .publish("stormchaser.v1.step.packing_sfs", payload_bytes.into())
-                            .await;
-                    }
-                }
-            }
-
-            self.docker
-                .create_container(
-                    Some(CreateContainerOptions {
-                        name: park_container_name.clone(),
-                        ..Default::default()
-                    }),
-                    agent_config,
-                )
+            let (a, h, r) = self
+                .run_parking_agent(storage_names, mounts, spec, exit_code)
                 .await?;
-
-            self.docker
-                .start_container(&park_container_name, None::<StartContainerOptions<String>>)
-                .await?;
-
-            let mut agent_wait_stream = self.docker.wait_container(
-                &park_container_name,
-                Some(WaitContainerOptions {
-                    condition: "not-running",
-                }),
-            );
-
-            let _ = agent_wait_stream.next().await;
-
-            if let Ok(Some(artifacts)) = self.get_artifact_meta(&park_container_name).await {
-                artifacts_out = Some(artifacts);
-            }
-            if let Ok(Some(hashes)) = self.get_storage_hashes(&park_container_name).await {
-                hashes_out = Some(hashes);
-            }
-            if let Ok(Some(reports)) = self.get_test_reports(&park_container_name).await {
-                reports_out = Some(reports);
-            }
-
-            // Wait for logs
-            sleep(Duration::from_secs(15)).await;
-            let _ = self
-                .docker
-                .remove_container(&park_container_name, None)
-                .await;
+            artifacts_out = a;
+            hashes_out = h;
+            reports_out = r;
         } else {
             // For adopted containers without parking, we still want to grab logs if possible
             if let Ok(Some(artifacts)) = self.get_artifact_meta(container_name).await {
@@ -255,6 +146,140 @@ impl DockerContainerMachine<state::Running> {
                 reports_out = Some(reports);
             }
         }
+
+        Ok((artifacts_out, hashes_out, reports_out))
+    }
+
+    async fn run_parking_agent(
+        &self,
+        storage_names: &[String],
+        mounts: Vec<bollard::service::Mount>,
+        spec: Option<&CommonContainerSpec>,
+        exit_code: Option<i64>,
+    ) -> Result<(
+        Option<HashMap<String, Value>>,
+        Option<HashMap<String, String>>,
+        Option<Value>,
+    )> {
+        let mut artifacts_out = None;
+        let mut hashes_out = None;
+        let mut reports_out = None;
+
+        let agent_image = "stormchaser-agent:v1";
+        let park_container_name = format!("park-{}", Uuid::new_v4());
+
+        let sfs_host_path = std::env::var("STORMCHASER_SFS_HOST_PATH").ok();
+        let (parking_urls, mount_paths, artifact_urls) =
+            self.build_parking_payloads(storage_names, spec, sfs_host_path.as_deref());
+
+        let mut agent_args = vec![
+            "run".to_string(),
+            "--parking-urls".to_string(),
+            serde_json::to_string(&parking_urls)?,
+            "--mount-paths".to_string(),
+            serde_json::to_string(&mount_paths)?,
+        ];
+
+        if !artifact_urls.is_empty() {
+            agent_args.push("--artifact-urls".to_string());
+            agent_args.push(serde_json::to_string(&artifact_urls)?);
+        }
+
+        if let Some(reports) = &self.metadata.test_report_urls {
+            if !reports.is_empty() {
+                agent_args.push("--report-urls".to_string());
+                agent_args.push(serde_json::to_string(reports)?);
+            }
+        }
+
+        if !self.metadata.step_dsl.reports.is_empty() {
+            agent_args.push("--test-reports".to_string());
+            agent_args.push(serde_json::to_string(&self.metadata.step_dsl.reports)?);
+        }
+
+        if exit_code != Some(0) {
+            // If it failed, don't fail parking
+            // (This matches original logic but might need review)
+        }
+
+        agent_args.push("--".to_string());
+        agent_args.push("/bin/true".to_string());
+
+        let agent_config = Config {
+            image: Some(agent_image.to_string()),
+            cmd: Some(agent_args),
+            entrypoint: Some(vec!["/usr/local/bin/stormchaser-agent".to_string()]),
+            host_config: Some(HostConfig {
+                mounts: Some(mounts),
+                network_mode: self.get_network_mode().await,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        info!("Running agent for parking/reports: {}", park_container_name);
+        if let Some(nats) = &self.nats {
+            let packing_event = serde_json::json!({
+                "run_id": self.metadata.run_id,
+                "step_id": self.metadata.step_id,
+                "status": StepStatus::PackingSfs,
+                "timestamp": chrono::Utc::now(),
+            });
+            if let Ok(ce) = cloudevents::EventBuilderV10::new()
+                .id(uuid::Uuid::new_v4().to_string())
+                .ty("stormchaser.v1.step.packing_sfs")
+                .source("/stormchaser/runner")
+                .time(chrono::Utc::now())
+                .data(APPLICATION_JSON, packing_event)
+                .build()
+            {
+                if let Ok(payload_bytes) = serde_json::to_vec(&ce) {
+                    let _ = nats
+                        .publish("stormchaser.v1.step.packing_sfs", payload_bytes.into())
+                        .await;
+                }
+            }
+        }
+
+        self.docker
+            .create_container(
+                Some(CreateContainerOptions {
+                    name: park_container_name.clone(),
+                    ..Default::default()
+                }),
+                agent_config,
+            )
+            .await?;
+
+        self.docker
+            .start_container(&park_container_name, None::<StartContainerOptions<String>>)
+            .await?;
+
+        let mut agent_wait_stream = self.docker.wait_container(
+            &park_container_name,
+            Some(WaitContainerOptions {
+                condition: "not-running",
+            }),
+        );
+
+        let _ = agent_wait_stream.next().await;
+
+        if let Ok(Some(artifacts)) = self.get_artifact_meta(&park_container_name).await {
+            artifacts_out = Some(artifacts);
+        }
+        if let Ok(Some(hashes)) = self.get_storage_hashes(&park_container_name).await {
+            hashes_out = Some(hashes);
+        }
+        if let Ok(Some(reports)) = self.get_test_reports(&park_container_name).await {
+            reports_out = Some(reports);
+        }
+
+        // Wait for logs
+        sleep(Duration::from_secs(15)).await;
+        let _ = self
+            .docker
+            .remove_container(&park_container_name, None)
+            .await;
 
         Ok((artifacts_out, hashes_out, reports_out))
     }

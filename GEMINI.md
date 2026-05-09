@@ -83,7 +83,7 @@ The project is divided into specialized crates to ensure a clear separation of c
 - **Documentation**: All public modules and non-trivial functions should have doc comments (`///`).
 - **Tests**: Every new feature must include unit tests. Use `tempfile` for any file-system-related tests to ensure isolation.
 - **Long Methods**: Don't create over long methods when they are not necessary, split them down into more focussed smaller methods.
-- **Long conditional branches**: In if, loop, switch, and other control structures factor out long conditional branches into method calls
+- **Long conditional branches**: In if, loop, switch, and other control structures factor out long conditional branches (100 lines or more) into functions
 - **Duplicate code**: Avoid c+v style duplicate code, factor out similar methods to utility functions
 - **Security**: Avoid common security errors such as path traversal, sql injection, string concat etc
 - **Re-inventing the Wheel**: Before implementing any functional block ensure that there is not an existing crate for it; if there is prefer the existing crate
