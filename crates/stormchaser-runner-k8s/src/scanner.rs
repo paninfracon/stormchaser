@@ -387,6 +387,56 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn test_reconstruct_step_encrypted_no_key() {
+        let step = reconstruct_step("test-job", true, None, Some(&"encoded_stuff".to_string()));
+        assert_eq!(step.name, "test-job");
+    }
+
+    #[test]
+    fn test_reconstruct_step_encrypted_invalid_decrypt() {
+        let key = "12345678901234567890123456789012".to_string();
+        let step = reconstruct_step(
+            "test-job",
+            true,
+            Some(&key),
+            Some(&"invalid_base64".to_string()),
+        );
+        assert_eq!(step.name, "test-job");
+    }
+
+    #[test]
+    fn test_reconstruct_step_encrypted_valid_decrypt() {
+        use crate::job_machine::crypto::encrypt_state;
+        let key = "12345678901234567890123456789012".to_string();
+        let raw_dsl = json!({
+            "name": "test-job",
+            "type": "RunContainer",
+            "spec": {}
+        });
+        let encrypted = encrypt_state(&serde_json::to_string(&raw_dsl).unwrap(), &key).unwrap();
+        let step = reconstruct_step("test-job", true, Some(&key), Some(&encrypted));
+        assert_eq!(step.name, "test-job");
+    }
+
+    #[test]
+    fn test_build_cloudevent_payload_success() {
+        let event_type = "stormchaser.test.event";
+        let source = EventSource::System;
+        let data = json!({"key": "value"});
+
+        let payload = build_cloudevent_payload(event_type, source, data).unwrap();
+
+        let json_payload: serde_json::Value = serde_json::from_slice(&payload).unwrap();
+
+        assert_eq!(json_payload["type"], "stormchaser.test.event");
+        assert_eq!(json_payload["source"], "/stormchaser");
+        assert_eq!(json_payload["datacontenttype"], "application/json");
+        assert_eq!(json_payload["data"]["key"], "value");
+        assert!(json_payload.get("id").is_some());
+        assert!(json_payload.get("time").is_some());
+    }
+
+    #[test]
     fn test_reconstruct_step_unencrypted_valid_json() {
         let raw_dsl = json!({
             "name": "test-job",

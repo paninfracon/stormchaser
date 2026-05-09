@@ -596,6 +596,27 @@ pub async fn handle_task(
 #[cfg(test)]
 mod tests_handler_ext {
     use super::*;
+    use serde_json::json;
+    use stormchaser_model::events::EventSource;
+
+    #[test]
+    fn test_build_cloudevent_payload_success() {
+        let event_type = "stormchaser.test.event";
+        let source = EventSource::System;
+        let data = json!({"key": "value"});
+
+        let payload = build_cloudevent_payload(event_type, source, data).unwrap();
+
+        // Deserialize back
+        let json_payload: serde_json::Value = serde_json::from_slice(&payload).unwrap();
+
+        assert_eq!(json_payload["type"], "stormchaser.test.event");
+        assert_eq!(json_payload["source"], "/stormchaser");
+        assert_eq!(json_payload["datacontenttype"], "application/json");
+        assert_eq!(json_payload["data"]["key"], "value");
+        assert!(json_payload.get("id").is_some());
+        assert!(json_payload.get("time").is_some());
+    }
 
     #[tokio::test]
     #[ignore]
