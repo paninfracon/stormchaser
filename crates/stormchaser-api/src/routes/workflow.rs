@@ -17,7 +17,8 @@ use chrono::Utc;
 use futures::StreamExt;
 use serde_json::Value;
 use stormchaser_model::events::WorkflowQueuedEvent;
-use stormchaser_model::nats::publish_cloudevent;
+use stormchaser_model::events::{EventSource, EventType, SchemaVersion, WorkflowEventType};
+use stormchaser_model::nats::{publish_cloudevent, NatsSubject};
 use stormchaser_model::workflow::RunStatus;
 use stormchaser_model::RunId;
 use tokio::sync::mpsc;
@@ -105,7 +106,7 @@ pub async fn enqueue_workflow(
     // Publish to NATS
     let event = WorkflowQueuedEvent {
         run_id,
-        event_type: "workflow_queued".to_string(),
+        event_type: EventType::Workflow(WorkflowEventType::Queued),
         timestamp: Utc::now(),
         dsl: None,
         inputs: None,
@@ -114,11 +115,11 @@ pub async fn enqueue_workflow(
 
     publish_cloudevent(
         &jetstream::new(state.nats.clone()),
-        "stormchaser.v1.run.queued",
-        "stormchaser.v1.run.queued",
-        "/stormchaser/api",
+        NatsSubject::RunQueued,
+        EventType::Workflow(WorkflowEventType::Queued),
+        EventSource::Api,
         serde_json::to_value(event).unwrap(),
-        Some("1.0"),
+        Some(SchemaVersion::new("1.0".to_string())),
         None,
     )
     .await
@@ -134,7 +135,7 @@ pub async fn enqueue_workflow(
 
     Ok(Json(EnqueueResponse {
         run_id,
-        status: "queued".to_string(),
+        status: stormchaser_model::RunStatus::Queued,
     }))
 }
 
@@ -354,9 +355,9 @@ pub async fn direct_run(
     let event = EventBuilderV10::new()
         .id(uuid::Uuid::new_v4().to_string())
         .ty("stormchaser.v1.run.direct")
-        .source("/stormchaser/api")
+        .source(EventSource::Api.as_str())
         .time(Utc::now())
-        .data("application/json", payload_json)
+        .data(stormchaser_model::APPLICATION_JSON, payload_json)
         .build()
         .map_err(|e| {
             tracing::error!("Failed to build CloudEvent: {}", e);
@@ -378,7 +379,7 @@ pub async fn direct_run(
 
     Ok(Json(EnqueueResponse {
         run_id,
-        status: "started".to_string(),
+        status: RunStatus::Running,
     }))
 }
 

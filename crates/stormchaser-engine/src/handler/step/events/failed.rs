@@ -1,14 +1,13 @@
 use crate::handler::{archive_workflow, dispatch_pending_steps, fetch_run, fetch_step_instance};
 use crate::workflow_machine::{state, WorkflowMachine};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use chrono::Utc;
-use serde_json::Value;
 use sqlx::PgPool;
 use std::sync::Arc;
 use stormchaser_model::events::WorkflowFailedEvent;
+use stormchaser_model::events::{EventSource, EventType, WorkflowEventType};
+use stormchaser_model::nats::publish_cloudevent;
 use stormchaser_model::step::StepStatus;
-use stormchaser_model::RunId;
-use stormchaser_model::StepInstanceId;
 use stormchaser_tls::TlsReloader;
 use tracing::{error, info};
 
@@ -16,24 +15,22 @@ use crate::handler::step::quota::release_step_quota_for_instance;
 
 use super::helpers::persist_step_test_reports;
 
-#[tracing::instrument(skip(payload, pool, nats_client, tls_reloader), fields(run_id = tracing::field::Empty, step_id = tracing::field::Empty))]
+#[tracing::instrument(skip(event, pool, nats_client, tls_reloader), fields(run_id = tracing::field::Empty, step_id = tracing::field::Empty))]
 /// Handle step failed.
 pub async fn handle_step_failed(
-    payload: Value,
+    event: stormchaser_model::events::StepFailedEvent,
     pool: PgPool,
     nats_client: async_nats::Client,
     tls_reloader: Arc<TlsReloader>,
 ) -> Result<()> {
-    let run_id_str = payload["run_id"].as_str().context("Missing run_id")?;
-    let run_id = uuid::Uuid::parse_str(run_id_str).map(RunId::new)?;
-    let step_id_str = payload["step_id"].as_str().context("Missing step_id")?;
-    let step_id = uuid::Uuid::parse_str(step_id_str).map(StepInstanceId::new)?;
+    let run_id = event.run_id;
+    let step_id = event.step_id;
 
     let span = tracing::Span::current();
     span.record("run_id", tracing::field::display(run_id));
     span.record("step_id", tracing::field::display(step_id));
-    let error_msg = payload["error"].as_str().unwrap_or("Unknown error");
-    let exit_code = payload["exit_code"].as_i64().map(|c| c as i32);
+    let error_msg = &event.error;
+    let exit_code = event.exit_code;
 
     info!("Step {} (Run {}) failed: {}", step_id, run_id, error_msg);
 
@@ -77,14 +74,23 @@ pub async fn handle_step_failed(
         crate::STEP_DURATION.record(duration.as_secs_f64(), &attributes);
     }
 
-    if let Some(outputs) = payload["outputs"].as_object() {
+    if let Some(outputs) = event
+        .outputs
+        .as_ref()
+        .map(|m| {
+            m.clone()
+                .into_iter()
+                .collect::<serde_json::Map<String, serde_json::Value>>()
+        })
+        .as_ref()
+    {
         for (key, value) in outputs {
             crate::db::upsert_step_output(&mut *tx, step_id, key, value).await?;
         }
     }
 
     // Persist test reports even on failure
-    persist_step_test_reports(&payload, &mut tx, run_id, step_id, &pool).await?;
+    persist_step_test_reports(event.test_reports.as_ref(), &mut tx, run_id, step_id, &pool).await?;
 
     let run = fetch_run(run_id, &mut *tx).await?;
     let run_machine = WorkflowMachine::<state::Running>::new_from_run(run.clone());
@@ -93,14 +99,15 @@ pub async fn handle_step_failed(
         .await?;
 
     let js = async_nats::jetstream::new(nats_client.clone());
-    if let Err(e) = stormchaser_model::nats::publish_cloudevent(
+    use stormchaser_model::nats::NatsSubject;
+    if let Err(e) = publish_cloudevent(
         &js,
-        "stormchaser.v1.run.failed",
-        "workflow_failed",
-        "stormchaser-engine",
+        NatsSubject::RunFailed,
+        EventType::Workflow(WorkflowEventType::Failed),
+        EventSource::Engine,
         serde_json::to_value(WorkflowFailedEvent {
             run_id,
-            event_type: "workflow_failed".to_string(),
+            event_type: EventType::Workflow(WorkflowEventType::Failed),
             timestamp: chrono::Utc::now(),
         })
         .unwrap(),

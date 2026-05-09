@@ -308,7 +308,8 @@ pub async fn handle_test_report_email(
 mod tests {
     use super::*;
     use serde_json::json;
-    use stormchaser_model::dsl::{EmailBackend, TestReportEmailSpec};
+    use stormchaser_model::dsl::specs::{EmailBackend, TestReportEmailSpec};
+    use stormchaser_model::test_report::TestCaseStatus;
 
     #[test]
     #[cfg(feature = "email")]
@@ -348,19 +349,19 @@ mod tests {
                         {
                             "test_suite": "suite1",
                             "test_case": "case1",
-                            "status": "passed",
+                            "status": TestCaseStatus::Passed,
                             "message": null
                         },
                         {
                             "test_suite": "suite1",
                             "test_case": "case2",
-                            "status": "failed",
+                            "status": TestCaseStatus::Failed,
                             "message": "Failure message"
                         },
                         {
                             "test_suite": "suite2",
                             "test_case": "case3",
-                            "status": "error",
+                            "status": TestCaseStatus::Error,
                             "message": "Error message"
                         }
                     ]

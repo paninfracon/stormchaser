@@ -3,7 +3,7 @@ use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
 use stormchaser_engine::handler;
 use stormchaser_model::auth::OpaClient;
-use stormchaser_model::step::StepInstance;
+use stormchaser_model::step::{StepInstance, StepStatus};
 use stormchaser_model::RunId;
 use uuid::Uuid;
 
@@ -107,8 +107,9 @@ async fn test_artifact_persistence_on_completion() {
     // 3. Mock completion with artifacts
     let completed_payload = json!({
         "run_id": run_id,
-        "step_id": step.id,
-        "status": "succeeded",
+        "step_id": step.id,"event_type": "StepCompletedEvent",
+        "timestamp": chrono::Utc::now(),
+        "status": StepStatus::Succeeded,
         "exit_code": 0,
         "artifacts": {
             "app-bin": {
@@ -121,7 +122,7 @@ async fn test_artifact_persistence_on_completion() {
 
     let log_backend = Arc::new(None);
     handler::handle_step_completed(
-        completed_payload,
+        serde_json::from_value(completed_payload).unwrap(),
         pool.clone(),
         nats_client.clone(),
         log_backend.clone(),
@@ -234,8 +235,9 @@ async fn test_test_report_persistence_on_completion() {
     // 2. Mock completion with test reports
     let completed_payload = json!({
         "run_id": run_id,
-        "step_id": step.id,
-        "status": "succeeded",
+        "step_id": step.id,"event_type": "StepCompletedEvent",
+        "timestamp": chrono::Utc::now(),
+        "status": StepStatus::Succeeded,
         "exit_code": 0,
         "test_reports": {
             "unit-tests_results.xml": {
@@ -250,7 +252,7 @@ async fn test_test_report_persistence_on_completion() {
 
     let log_backend = Arc::new(None);
     handler::handle_step_completed(
-        completed_payload,
+        serde_json::from_value(completed_payload).unwrap(),
         pool.clone(),
         nats_client.clone(),
         log_backend.clone(),

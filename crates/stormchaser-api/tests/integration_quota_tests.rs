@@ -80,8 +80,11 @@ async fn test_api_enqueue_inserts_quotas() {
             Request::builder()
                 .method("POST")
                 .uri("/api/v1/runs")
-                .header("Authorization", format!("Bearer {}", token))
-                .header("Content-Type", "application/json")
+                .header(
+                    axum::http::header::AUTHORIZATION,
+                    format!("Bearer {}", token),
+                )
+                .header("Content-Type", stormchaser_model::APPLICATION_JSON)
                 .body(Body::from(serde_json::to_vec(&payload).unwrap()))
                 .unwrap(),
         )

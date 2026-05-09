@@ -44,7 +44,7 @@ impl<'a> App<'a> {
         let client = reqwest::Client::new();
         let mut req = client.request(reqwest::Method::GET, url);
         if let Some(token) = &self.token {
-            req = req.header("Authorization", format!("Bearer {}", token));
+            req = req.header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token));
         }
         let res = req.send().await?;
 
@@ -176,7 +176,7 @@ impl<'a> App<'a> {
                     let client = reqwest::Client::new();
                     if let Ok(res) = client
                         .get(format!("{}/api/v1/runs/stream", url))
-                        .header("Authorization", format!("Bearer {}", token))
+                        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
                         .send()
                         .await
                     {

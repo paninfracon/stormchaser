@@ -7,6 +7,7 @@ use std::sync::Arc;
 use stormchaser_dsl::ast;
 use stormchaser_dsl::ast::Workflow;
 use stormchaser_model::events::WorkflowRunningEvent;
+use stormchaser_model::events::{EventSource, EventType, WorkflowEventType};
 use stormchaser_model::RunId;
 use stormchaser_tls::TlsReloader;
 use tracing::{debug, error, info};
@@ -85,14 +86,15 @@ pub async fn handle_workflow_start_pending(
     let _ = machine.start(&mut *tx).await?;
 
     let js = async_nats::jetstream::new(nats_client.clone());
+    use stormchaser_model::nats::NatsSubject;
     if let Err(e) = stormchaser_model::nats::publish_cloudevent(
         &js,
-        "stormchaser.v1.run.running",
-        "workflow_running",
-        "stormchaser-engine",
+        NatsSubject::RunRunning,
+        EventType::Workflow(WorkflowEventType::Running),
+        EventSource::Engine,
         serde_json::to_value(WorkflowRunningEvent {
             run_id,
-            event_type: "workflow_running".to_string(),
+            event_type: EventType::Workflow(WorkflowEventType::Running),
             timestamp: chrono::Utc::now(),
         })
         .unwrap(),

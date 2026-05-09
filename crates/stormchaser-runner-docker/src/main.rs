@@ -3,11 +3,15 @@ use axum::{extract::State, routing::get, Router};
 use bollard::Docker;
 use cloudevents::EventBuilder;
 use futures::StreamExt;
-use serde_json::json;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use stormchaser_model::events::RunnerHeartbeatEvent;
+use stormchaser_model::events::{
+    EventSource, EventType, RunnerEventType, RunnerHeartbeatEvent, RunnerRegisterEvent,
+    RunnerStepTypeSchema, SchemaVersion,
+};
+use stormchaser_model::nats::NatsSubject;
+use stormchaser_model::runner::RunnerStatus;
 use tokio::sync::watch;
 use tokio::time;
 use tracing::{error, info, warn};
@@ -150,7 +154,8 @@ pub async fn run_runner(config: Config) -> Result<()> {
     });
 
     // 2. Connect to NATS
-    let nats_client = async_nats::connect(nats_url)
+    let nats_options = async_nats::ConnectOptions::new().retry_on_initial_connect();
+    let nats_client = async_nats::connect_with_options(nats_url, nats_options)
         .await
         .context("Failed to connect to NATS")?;
 
@@ -161,27 +166,35 @@ pub async fn run_runner(config: Config) -> Result<()> {
     let common_schema = schemars::schema_for!(dsl::CommonContainerSpec);
     let common_schema_json = serde_json::to_value(common_schema)?;
 
-    let registration_payload = json!({
-        "runner_id": runner_id,
-        "runner_type": "docker",
-        "protocol_version": "v1",
-        "nats_subject": nats_subject,
-        "capabilities": ["docker", "linux", "container"],
-        "step_types": [
-            {
-                "step_type": "RunContainer",
-                "schema": common_schema_json,
-                "documentation": "Runs a container using Docker with a minimal common set of parameters."
-            }
-        ]
-    });
+    let registration_payload = RunnerRegisterEvent {
+        runner_id: runner_id.clone(),
+        runner_type: "docker".to_string(),
+        protocol_version: "v1".to_string(),
+        nats_subject: nats_subject.clone(),
+        capabilities: vec![
+            "docker".to_string(),
+            "linux".to_string(),
+            "container".to_string(),
+        ],
+        step_types: vec![RunnerStepTypeSchema {
+            step_type: "RunContainer".to_string(),
+            schema: Some(common_schema_json),
+            documentation: Some(
+                "Runs a container using Docker with a minimal common set of parameters."
+                    .to_string(),
+            ),
+        }],
+    };
 
     let ce = cloudevents::EventBuilderV10::new()
         .id(uuid::Uuid::new_v4().to_string())
         .ty("stormchaser.v1.runner.register")
-        .source("/stormchaser")
+        .source(EventSource::System.as_str())
         .time(chrono::Utc::now())
-        .data("application/json", registration_payload)
+        .data(
+            stormchaser_model::APPLICATION_JSON,
+            serde_json::to_value(registration_payload).unwrap(),
+        )
         .build()
         .context("Failed to build CloudEvent")?;
 
@@ -265,10 +278,10 @@ pub async fn run_runner(config: Config) -> Result<()> {
                 let heartbeat_payload = RunnerHeartbeatEvent {
                     runner_id: heartbeat_id.clone(),
                     version: env!("CARGO_PKG_VERSION").to_string(),
-                    state: "online".to_string(),
+                    state: RunnerStatus::Online,
                 };
 
-                if let Err(e) = stormchaser_model::nats::publish_cloudevent(&async_nats::jetstream::new(heartbeat_client.clone()), "stormchaser.v1.runner.heartbeat", "stormchaser.v1.runner.heartbeat", "/stormchaser", serde_json::to_value(heartbeat_payload).unwrap(), Some("1.0"), None)
+                if let Err(e) = stormchaser_model::nats::publish_cloudevent(&async_nats::jetstream::new(heartbeat_client.clone()), NatsSubject::RunnerHeartbeat, EventType::Runner(RunnerEventType::Heartbeat), EventSource::System, serde_json::to_value(heartbeat_payload).unwrap(), Some(SchemaVersion::new("1.0".to_string())), None)
                     .await
                 {
                     error!("Failed to publish heartbeat: {:?}", e);

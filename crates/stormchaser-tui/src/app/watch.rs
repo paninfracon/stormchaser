@@ -51,7 +51,7 @@ impl<'a> App<'a> {
                                 "{}/api/v1/runs/{}/steps/{}/logs?limit=5000",
                                 url, run_id, id
                             ))
-                            .header("Authorization", format!("Bearer {}", token))
+                            .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
                             .send()
                             .await
                         {
@@ -106,7 +106,7 @@ impl<'a> App<'a> {
                 let client = reqwest::Client::new();
                 if let Ok(res) = client
                     .get(&status_url)
-                    .header("Authorization", format!("Bearer {}", token))
+                    .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
                     .send()
                     .await
                 {
@@ -162,7 +162,7 @@ impl<'a> App<'a> {
                 let client = reqwest::Client::new();
                 if let Ok(res) = client
                     .get(&log_url)
-                    .header("Authorization", format!("Bearer {}", token))
+                    .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
                     .send()
                     .await
                 {

@@ -168,17 +168,35 @@ pub async fn handle_message(
             });
         }
         "stormchaser.v1.step.running" => {
+            let event: stormchaser_model::events::StepRunningEvent =
+                match serde_json::from_value(payload) {
+                    Ok(e) => e,
+                    Err(err) => {
+                        tracing::error!("Failed to parse StepRunningEvent: {}", err);
+                        let _ = message.double_ack().await;
+                        return;
+                    }
+                };
             tokio::spawn(async move {
-                if let Err(e) = handler::handle_step_running(payload, pool).await {
+                if let Err(e) = handler::handle_step_running(event, pool).await {
                     tracing::error!("Failed to handle step running event: {:?}", e);
                 }
                 let _ = message.double_ack().await;
             });
         }
         "stormchaser.v1.step.completed" => {
+            let event: stormchaser_model::events::StepCompletedEvent =
+                match serde_json::from_value(payload) {
+                    Ok(e) => e,
+                    Err(err) => {
+                        tracing::error!("Failed to parse StepCompletedEvent: {}", err);
+                        let _ = message.double_ack().await;
+                        return;
+                    }
+                };
             tokio::spawn(async move {
                 if let Err(e) = handler::handle_step_completed(
-                    payload,
+                    event,
                     pool,
                     nats_client,
                     log_backend,
@@ -192,9 +210,18 @@ pub async fn handle_message(
             });
         }
         "stormchaser.v1.step.failed" => {
+            let event: stormchaser_model::events::StepFailedEvent =
+                match serde_json::from_value(payload) {
+                    Ok(e) => e,
+                    Err(err) => {
+                        tracing::error!("Failed to parse StepFailedEvent: {}", err);
+                        let _ = message.double_ack().await;
+                        return;
+                    }
+                };
             tokio::spawn(async move {
                 if let Err(e) =
-                    handler::handle_step_failed(payload, pool, nats_client, tls_reloader).await
+                    handler::handle_step_failed(event, pool, nats_client, tls_reloader).await
                 {
                     tracing::error!("Failed to handle step failed event: {:?}", e);
                 }

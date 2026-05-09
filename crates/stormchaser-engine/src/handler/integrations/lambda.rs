@@ -11,6 +11,12 @@ use chrono::Utc;
 #[cfg(feature = "aws-lambda")]
 use stormchaser_model::dsl::{self};
 #[cfg(feature = "aws-lambda")]
+use stormchaser_model::events::{
+    EventSource, EventType, SchemaVersion, StepEventType, StepFailedEvent,
+};
+#[cfg(feature = "aws-lambda")]
+use stormchaser_model::nats::NatsSubject;
+#[cfg(feature = "aws-lambda")]
 use tracing::info;
 
 #[cfg(feature = "aws-lambda")]
@@ -18,8 +24,8 @@ use aws_sdk_lambda::primitives::Blob;
 #[cfg(feature = "aws-lambda")]
 use aws_sdk_lambda::types::InvocationType;
 
-#[cfg(feature = "aws-lambda")]
 /// Handle lambda invoke.
+#[cfg(feature = "aws-lambda")]
 pub async fn handle_lambda_invoke(
     run_id: stormchaser_model::RunId,
     step_id: stormchaser_model::StepInstanceId,
@@ -161,7 +167,7 @@ async fn handle_lambda_response(
         let event = stormchaser_model::events::StepCompletedEvent {
             run_id,
             step_id,
-            event_type: "stormchaser.v1.step.completed".to_string(),
+            event_type: EventType::Step(StepEventType::Completed),
             outputs: Some(outputs_map),
             exit_code: Some(0),
             runner_id: None,
@@ -173,11 +179,11 @@ async fn handle_lambda_response(
         let js = async_nats::jetstream::new(nats_client);
         stormchaser_model::nats::publish_cloudevent(
             &js,
-            "stormchaser.v1.step.completed",
-            "stormchaser.v1.step.completed",
-            "/stormchaser",
+            NatsSubject::StepCompleted,
+            EventType::Step(StepEventType::Completed),
+            EventSource::System,
             serde_json::to_value(event).unwrap(),
-            Some("1.0"),
+            Some(SchemaVersion::new("1.0".to_string())),
             None,
         )
         .await?;
@@ -197,21 +203,27 @@ async fn handle_lambda_response(
             .fail(error_msg.clone(), None, &mut *pool.acquire().await?)
             .await?;
 
-        let event = serde_json::json!({
-            "run_id": run_id,
-            "step_id": step_id,
-            "event_type": "step_failed",
-            "error": error_msg,
-            "timestamp": Utc::now(),
-        });
+        let event = StepFailedEvent {
+            run_id,
+            step_id,
+            event_type: EventType::Step(StepEventType::Failed),
+            error: error_msg,
+            runner_id: None,
+            exit_code: None,
+            storage_hashes: None,
+            artifacts: None,
+            test_reports: None,
+            outputs: None,
+            timestamp: Utc::now(),
+        };
         let js = async_nats::jetstream::new(nats_client);
         stormchaser_model::nats::publish_cloudevent(
             &js,
-            "stormchaser.v1.step.failed",
-            "stormchaser.v1.step.failed",
-            "/stormchaser",
+            NatsSubject::StepFailed,
+            EventType::Step(StepEventType::Failed),
+            EventSource::System,
             serde_json::to_value(event).unwrap(),
-            Some("1.0"),
+            Some(SchemaVersion::new("1.0".to_string())),
             None,
         )
         .await?;

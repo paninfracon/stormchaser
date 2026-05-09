@@ -1,7 +1,9 @@
 use anyhow::{Context, Result};
 use serde_json::Value;
 use sqlx::PgPool;
-use stormchaser_model::events::StepQueryResponseEvent;
+use stormchaser_model::events::{EventSource, SchemaVersion};
+use stormchaser_model::events::{EventType, StepEventType, StepQueryResponseEvent};
+use stormchaser_model::nats::publish_cloudevent;
 use stormchaser_model::StepInstance;
 use stormchaser_model::StepInstanceId;
 
@@ -21,12 +23,9 @@ pub async fn handle_step_query(
 
     if let Some(reply_subject) = reply {
         let response = if let Some(s) = step {
-            let status_str = serde_json::to_value(&s.status)
-                .ok()
-                .and_then(|v| v.as_str().map(str::to_string));
             StepQueryResponseEvent {
                 step_id,
-                status: status_str,
+                status: Some(s.status),
                 exists: true,
             }
         } else {
@@ -36,13 +35,14 @@ pub async fn handle_step_query(
                 exists: false,
             }
         };
-        stormchaser_model::nats::publish_cloudevent(
+        use stormchaser_model::nats::NatsSubject;
+        publish_cloudevent(
             &async_nats::jetstream::new(nats_client.clone()),
-            &reply_subject,
-            &reply_subject,
-            "/stormchaser",
+            NatsSubject::Custom(reply_subject.clone()),
+            EventType::Step(StepEventType::QueryResponse),
+            EventSource::System,
             serde_json::to_value(response).unwrap(),
-            Some("1.0"),
+            Some(SchemaVersion::new("1.0".to_string())),
             None,
         )
         .await?;

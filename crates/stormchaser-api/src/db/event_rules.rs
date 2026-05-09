@@ -15,7 +15,7 @@ pub async fn create_event_rule(
     id: RuleId,
     name: &str,
     description: &Option<String>,
-    webhook_id: Option<stormchaser_model::WebhookId>,
+    webhook_id: Option<WebhookId>,
     event_type_pattern: &str,
     condition_expr: &Option<String>,
     workflow_name: &str,

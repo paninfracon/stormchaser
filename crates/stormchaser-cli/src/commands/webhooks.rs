@@ -48,7 +48,7 @@ pub async fn handle(
             let token = require_token(token)?;
             let res = http_client
                 .get(format!("{}/api/v1/webhooks", url))
-                .header("Authorization", format!("Bearer {}", token))
+                .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
                 .send()
                 .await?;
             handle_response(res).await?;
@@ -62,7 +62,7 @@ pub async fn handle(
             let token = require_token(token)?;
             let res = http_client
                 .post(format!("{}/api/v1/webhooks", url))
-                .header("Authorization", format!("Bearer {}", token))
+                .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
                 .json(&json!({
                     "name": name,
                     "source_type": source_type,
@@ -77,7 +77,7 @@ pub async fn handle(
             let token = require_token(token)?;
             let res = http_client
                 .get(format!("{}/api/v1/webhooks/{}", url, id))
-                .header("Authorization", format!("Bearer {}", token))
+                .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
                 .send()
                 .await?;
             handle_response(res).await?;
@@ -86,7 +86,7 @@ pub async fn handle(
             let token = require_token(token)?;
             let res = http_client
                 .delete(format!("{}/api/v1/webhooks/{}", url, id))
-                .header("Authorization", format!("Bearer {}", token))
+                .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
                 .send()
                 .await?;
             handle_response(res).await?;
@@ -119,7 +119,7 @@ pub async fn handle(
 
             let res = http_client
                 .patch(format!("{}/api/v1/webhooks/{}", url, id))
-                .header("Authorization", format!("Bearer {}", token))
+                .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
                 .json(&body)
                 .send()
                 .await?;
@@ -141,7 +141,7 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/api/v1/webhooks"))
-            .and(header("Authorization", "Bearer test-token"))
+            .and(header(reqwest::header::AUTHORIZATION, "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
             .mount(&server)
             .await;
@@ -158,7 +158,7 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/api/v1/webhooks"))
-            .and(header("Authorization", "Bearer test-token"))
+            .and(header(reqwest::header::AUTHORIZATION, "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "created"})))
             .mount(&server)
             .await;
@@ -181,7 +181,7 @@ mod tests {
         let id = stormchaser_model::WebhookId::new_v4();
         Mock::given(method("GET"))
             .and(path(format!("/api/v1/webhooks/{}", id)))
-            .and(header("Authorization", "Bearer test-token"))
+            .and(header(reqwest::header::AUTHORIZATION, "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": id})))
             .mount(&server)
             .await;
@@ -199,7 +199,7 @@ mod tests {
         let id = stormchaser_model::WebhookId::new_v4();
         Mock::given(method("PATCH"))
             .and(path(format!("/api/v1/webhooks/{}", id)))
-            .and(header("Authorization", "Bearer test-token"))
+            .and(header(reqwest::header::AUTHORIZATION, "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "updated"})))
             .mount(&server)
             .await;
@@ -224,7 +224,7 @@ mod tests {
         let id = stormchaser_model::WebhookId::new_v4();
         Mock::given(method("DELETE"))
             .and(path(format!("/api/v1/webhooks/{}", id)))
-            .and(header("Authorization", "Bearer test-token"))
+            .and(header(reqwest::header::AUTHORIZATION, "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "deleted"})))
             .mount(&server)
             .await;

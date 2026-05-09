@@ -22,7 +22,10 @@ pub async fn enqueue_run(
     let token_str = require_token(token)?;
     let res = http_client
         .post(format!("{}/api/v1/runs", url))
-        .header("Authorization", format!("Bearer {}", token_str))
+        .header(
+            reqwest::header::AUTHORIZATION,
+            format!("Bearer {}", token_str),
+        )
         .json(&json!({
             "workflow_name": params.workflow_name,
             "repo_url": params.repo,
@@ -40,6 +43,7 @@ pub async fn enqueue_run(
 mod tests {
     use super::*;
     use reqwest_middleware::ClientBuilder;
+    use stormchaser_model::RunStatus;
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -48,10 +52,10 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/api/v1/runs"))
-            .and(header("Authorization", "Bearer test-token"))
+            .and(header(reqwest::header::AUTHORIZATION, "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "id": "12345678-1234-1234-1234-123456789012",
-                "status": "queued"
+                "status": RunStatus::Queued
             })))
             .mount(&server)
             .await;

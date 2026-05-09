@@ -3,6 +3,9 @@
 //! This crate provides the foundational types representing workflows, steps,
 //! executions, and other entities that make up the domain model.
 
+/// Standard MIME type for JSON data.
+pub const APPLICATION_JSON: &str = "application/json";
+
 pub mod id;
 pub use id::*;
 

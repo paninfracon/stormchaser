@@ -86,7 +86,7 @@ pub struct EnqueueResponse {
     /// The run id.
     pub run_id: stormchaser_model::RunId,
     /// The status.
-    pub status: String,
+    pub status: RunStatus,
 }
 
 #[derive(Debug, Deserialize, ToSchema, IntoParams)]

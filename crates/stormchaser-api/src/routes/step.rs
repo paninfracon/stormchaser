@@ -10,7 +10,9 @@ use futures::StreamExt;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::time::Duration;
+use stormchaser_model::step::StepStatus;
 use stormchaser_model::RunId;
+use stormchaser_model::RunStatus;
 use stormchaser_model::StepInstanceId;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -31,7 +33,7 @@ pub fn format_log_event(line: &str) -> Event {
 #[utoipa::path(
     get,
     path = "/api/v1/runs/{run_id}/steps/{step_id}/logs/stream",
-    params(("run_id" = stormchaser_model::RunId, Path, description="Run ID"), ("step_id" = stormchaser_model::StepInstanceId, Path, description="Step instance ID")),
+    params(("run_id" = RunId, Path, description="Run ID"), ("step_id" = StepInstanceId, Path, description="Step instance ID")),
     responses(
         (status = 200, description = "Success"),
         (status = 400, description = "Bad Request"),
@@ -89,8 +91,8 @@ pub async fn stream_step_logs_api(
     get,
     path = "/api/v1/runs/{run_id}/steps/{step_id}/logs",
     params(
-        ("run_id" = stormchaser_model::RunId, Path, description="Run ID"),
-        ("step_id" = stormchaser_model::StepInstanceId, Path, description="Step instance ID"),
+        ("run_id" = RunId, Path, description="Run ID"),
+        ("step_id" = StepInstanceId, Path, description="Step instance ID"),
         ("limit" = Option<usize>, Query, description="Limit log lines")
     ),
     responses(
@@ -138,7 +140,7 @@ pub async fn get_step_logs_api(
 #[utoipa::path(
     get,
     path = "/api/v1/runs/{run_id}/logs/stream",
-    params(("run_id" = stormchaser_model::RunId, Path, description="Run ID")),
+    params(("run_id" = RunId, Path, description="Run ID")),
     responses(
         (status = 200, description = "Success"),
         (status = 400, description = "Bad Request"),
@@ -175,8 +177,8 @@ pub async fn stream_run_logs_api(
                 .unwrap_or(None);
 
             let is_terminal = matches!(
-                status.as_deref(),
-                Some("succeeded") | Some("failed") | Some("cancelled")
+                status,
+                Some(RunStatus::Succeeded) | Some(RunStatus::Failed) | Some(RunStatus::Aborted)
             );
 
             let steps = db::get_step_names(&pool, run_id).await.unwrap_or_default();
@@ -274,7 +276,7 @@ pub async fn stream_run_logs_api(
     get,
     path = "/api/v1/runs/{run_id}/status/stream",
     params(
-        ("run_id" = stormchaser_model::RunId, Path, description = "Run ID")
+        ("run_id" = RunId, Path, description = "Run ID")
     ),
     responses(
         (status = 200, description = "Status stream (SSE)")
@@ -299,11 +301,9 @@ pub async fn stream_run_status_api(
     let pool = state.pool.clone();
 
     tokio::spawn(async move {
-        let mut last_run_status: Option<String> = None;
-        let mut last_step_statuses: std::collections::HashMap<
-            stormchaser_model::StepInstanceId,
-            String,
-        > = HashMap::new();
+        let mut last_run_status: Option<RunStatus> = None;
+        let mut last_step_statuses: std::collections::HashMap<StepInstanceId, StepStatus> =
+            HashMap::new();
 
         loop {
             // Check workflow run status
@@ -312,8 +312,8 @@ pub async fn stream_run_status_api(
                 .unwrap_or(None);
 
             let is_terminal = matches!(
-                current_run_status.as_deref(),
-                Some("succeeded") | Some("failed") | Some("cancelled")
+                current_run_status,
+                Some(RunStatus::Succeeded) | Some(RunStatus::Failed) | Some(RunStatus::Aborted)
             );
 
             if current_run_status != last_run_status {

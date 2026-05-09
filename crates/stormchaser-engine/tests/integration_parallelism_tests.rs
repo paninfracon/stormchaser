@@ -103,12 +103,13 @@ async fn test_dynamic_parallelism_with_batching() {
     // 3. Complete "generate" step -> should trigger "process" with 4 iterations, 2 Pending, 2 Waiting
     let completed_payload = json!({
         "run_id": run_id,
-        "step_id": generate_id,
+        "step_id": generate_id,"event_type": "StepCompletedEvent",
+        "timestamp": chrono::Utc::now(),
         "exit_code": 0
     });
     let log_backend = Arc::new(None);
     handler::handle_step_completed(
-        completed_payload,
+        serde_json::from_value(completed_payload).unwrap(),
         pool.clone(),
         nats_client.clone(),
         log_backend.clone(),
@@ -148,11 +149,12 @@ async fn test_dynamic_parallelism_with_batching() {
     // 4. Complete iteration 0 -> should trigger iteration 2
     let completed_payload = json!({
         "run_id": run_id,
-        "step_id": process_instances[0].id,
+        "step_id": process_instances[0].id,"event_type": "StepCompletedEvent",
+        "timestamp": chrono::Utc::now(),
         "exit_code": 0
     });
     handler::handle_step_completed(
-        completed_payload,
+        serde_json::from_value(completed_payload).unwrap(),
         pool.clone(),
         nats_client.clone(),
         log_backend.clone(),

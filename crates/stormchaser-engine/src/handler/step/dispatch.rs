@@ -5,7 +5,10 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
 use stormchaser_model::dsl::Step;
-use stormchaser_model::events::StepScheduledEvent;
+use stormchaser_model::events::{
+    EventSource, EventType, SchemaVersion, StepEventType, StepScheduledEvent,
+};
+use stormchaser_model::nats::publish_cloudevent;
 use stormchaser_model::storage::BackendType;
 use stormchaser_model::storage::StorageBackend;
 use stormchaser_model::RunId;
@@ -437,19 +440,20 @@ pub async fn dispatch_step_instance(
         storage: Some(storage_urls.into_iter().collect()),
         test_report_urls: Some(test_report_urls.into_iter().collect()),
         timestamp: Utc::now(),
-        event_type: "stormchaser.v1.step.scheduled".to_string(),
+        event_type: EventType::Step(StepEventType::Scheduled),
         step_dsl: dsl_step_val,
     };
 
     let js = async_nats::jetstream::new(nats_client);
     let subject = format!("stormchaser.v1.step.scheduled.{}", step_type.to_lowercase());
-    stormchaser_model::nats::publish_cloudevent(
+    use stormchaser_model::nats::NatsSubject;
+    publish_cloudevent(
         &js,
-        &subject,
-        &subject,
-        "/stormchaser",
+        NatsSubject::Custom(subject.clone()),
+        EventType::Step(StepEventType::Scheduled),
+        EventSource::System,
         serde_json::to_value(payload).unwrap(),
-        Some("1.0"),
+        Some(SchemaVersion::new("1.0".to_string())),
         None,
     )
     .await?;

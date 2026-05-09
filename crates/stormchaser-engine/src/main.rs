@@ -128,6 +128,7 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
     hcl_eval::set_secrets_backend(secret_backend);
 
     let nats_options = async_nats::ConnectOptions::new()
+        .retry_on_initial_connect()
         .tls_client_config((*tls_reloader.client_config()).clone());
 
     let nats_client = async_nats::connect_with_options(config.nats_url, nats_options).await?;

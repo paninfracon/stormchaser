@@ -117,7 +117,7 @@ async fn test_jq_step_execution() {
     }
 
     let completed_payload = step_completed_payload;
-    assert_eq!(completed_payload["event_type"], "step_completed");
+    assert_eq!(completed_payload["event_type"], "StepCompletedEvent");
 
     let expected_output = json!(["foo", "bar"]);
     assert_eq!(completed_payload["outputs"]["result"], expected_output);
@@ -125,7 +125,7 @@ async fn test_jq_step_execution() {
     // 3. Process the completion through the engine to ensure outputs are saved
     let log_backend = Arc::new(None);
     handler::handle_step_completed(
-        completed_payload,
+        serde_json::from_value(completed_payload).unwrap(),
         pool.clone(),
         nats_client.clone(),
         log_backend.clone(),

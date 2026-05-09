@@ -13,6 +13,12 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use stormchaser_model::dsl::CommonContainerSpec;
 use stormchaser_model::events::StepRunningEvent;
+use stormchaser_model::events::{EventSource, EventType, SchemaVersion, StepEventType};
+use stormchaser_model::nats::publish_cloudevent;
+use stormchaser_model::nats::NatsSubject;
+use stormchaser_model::step::StepStatus;
+use stormchaser_model::RunId;
+use stormchaser_model::StepInstanceId;
 use tokio::time::sleep;
 use tracing::{error, info};
 use uuid::Uuid;
@@ -100,7 +106,7 @@ impl DockerContainerMachine<state::Initialized> {
                                     let unpacking_event = serde_json::json!({
                                         "run_id": self.metadata.run_id,
                                         "step_id": self.metadata.step_id,
-                                        "status": "unpacking_sfs",
+                                        "status": StepStatus::UnpackingSfs,
                                         "timestamp": chrono::Utc::now(),
                                     });
                                     if let Ok(ce) = cloudevents::EventBuilderV10::new()
@@ -108,7 +114,7 @@ impl DockerContainerMachine<state::Initialized> {
                                         .ty("stormchaser.v1.step.unpacking_sfs")
                                         .source("/stormchaser/runner")
                                         .time(chrono::Utc::now())
-                                        .data("application/json", unpacking_event)
+                                        .data(stormchaser_model::APPLICATION_JSON, unpacking_event)
                                         .build()
                                     {
                                         if let Ok(payload_bytes) = serde_json::to_vec(&ce) {
@@ -147,7 +153,7 @@ impl DockerContainerMachine<state::Initialized> {
                                         let unpacking_event = serde_json::json!({
                                             "run_id": self.metadata.run_id,
                                             "step_id": self.metadata.step_id,
-                                            "status": "unpacking_sfs",
+                                            "status": StepStatus::UnpackingSfs,
                                             "timestamp": chrono::Utc::now(),
                                         });
                                         if let Ok(ce) = cloudevents::EventBuilderV10::new()
@@ -155,7 +161,10 @@ impl DockerContainerMachine<state::Initialized> {
                                             .ty("stormchaser.v1.step.unpacking_sfs")
                                             .source("/stormchaser/runner")
                                             .time(chrono::Utc::now())
-                                            .data("application/json", unpacking_event)
+                                            .data(
+                                                stormchaser_model::APPLICATION_JSON,
+                                                unpacking_event,
+                                            )
                                             .build()
                                         {
                                             if let Ok(payload_bytes) = serde_json::to_vec(&ce) {
@@ -248,18 +257,19 @@ impl DockerContainerMachine<state::Initialized> {
 
         if let Some(nats) = &self.nats {
             let running_event = StepRunningEvent {
-                run_id: stormchaser_model::RunId::new(self.metadata.run_id),
-                step_id: stormchaser_model::StepInstanceId::new(self.metadata.step_id),
-                event_type: "stormchaser.v1.step.running".to_string(),
+                run_id: RunId::new(self.metadata.run_id),
+                step_id: StepInstanceId::new(self.metadata.step_id),
+                event_type: EventType::Step(StepEventType::Running),
+                runner_id: None,
                 timestamp: chrono::Utc::now(),
             };
-            let _ = stormchaser_model::nats::publish_cloudevent(
+            let _ = publish_cloudevent(
                 &async_nats::jetstream::new(nats.clone()),
-                "stormchaser.v1.step.running",
-                "stormchaser.v1.step.running",
-                "/stormchaser",
+                NatsSubject::StepRunning,
+                EventType::Step(StepEventType::Running),
+                EventSource::System,
                 serde_json::to_value(running_event).unwrap(),
-                Some("1.0"),
+                Some(SchemaVersion::new("1.0".to_string())),
                 None,
             )
             .await;

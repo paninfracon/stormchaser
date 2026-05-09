@@ -19,7 +19,7 @@ pub async fn handle(
 
     let res = http_client
         .post(format!("{}/api/v1/runs/direct", url))
-        .header("Authorization", format!("Bearer {}", token))
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
         .json(&json!({ "dsl": dsl, "inputs": inputs }))
         .send()
         .await?;
@@ -32,6 +32,7 @@ mod tests {
     use super::*;
     use reqwest_middleware::ClientBuilder;
     use std::io::Write;
+    use stormchaser_model::RunStatus;
     use tempfile::NamedTempFile;
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -41,10 +42,10 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/api/v1/runs/direct"))
-            .and(header("Authorization", "Bearer test-token"))
+            .and(header(reqwest::header::AUTHORIZATION, "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "id": "12345678-1234-1234-1234-123456789012",
-                "status": "queued"
+                "status": RunStatus::Queued
             })))
             .mount(&server)
             .await;

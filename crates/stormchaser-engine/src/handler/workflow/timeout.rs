@@ -5,6 +5,7 @@ use chrono::Utc;
 use sqlx::PgPool;
 use std::sync::Arc;
 use stormchaser_model::events::WorkflowAbortedEvent;
+use stormchaser_model::events::{EventSource, EventType, SchemaVersion, WorkflowEventType};
 use stormchaser_model::step::{StepInstance, StepStatus};
 use stormchaser_model::workflow::RunStatus;
 use stormchaser_model::RunId;
@@ -96,17 +97,18 @@ pub async fn handle_workflow_timeout(
     // 3. Publish abort event
     let event = WorkflowAbortedEvent {
         run_id,
-        event_type: "workflow_aborted".to_string(),
+        event_type: EventType::Workflow(WorkflowEventType::Aborted),
         timestamp: Utc::now(),
     };
     let js = async_nats::jetstream::new(nats_client);
+    use stormchaser_model::nats::NatsSubject;
     stormchaser_model::nats::publish_cloudevent(
         &js,
-        "stormchaser.v1.run.aborted",
-        "stormchaser.v1.run.aborted",
-        "/stormchaser",
+        NatsSubject::RunAborted,
+        EventType::Workflow(WorkflowEventType::Aborted),
+        EventSource::System,
         serde_json::to_value(event).unwrap(),
-        Some("1.0"),
+        Some(SchemaVersion::new("1.0".to_string())),
         None,
     )
     .await?;

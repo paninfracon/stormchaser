@@ -10,7 +10,7 @@ pub async fn list_reports(
     let token = require_token(token)?;
     let res = http_client
         .get(format!("{}/api/v1/runs/{}/reports", url, id))
-        .header("Authorization", format!("Bearer {}", token))
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
         .send()
         .await?;
     handle_response(res).await
@@ -26,7 +26,7 @@ pub async fn get_report(
     let token = require_token(token)?;
     let res = http_client
         .get(format!("{}/api/v1/runs/{}/reports/{}", url, id, report_id))
-        .header("Authorization", format!("Bearer {}", token))
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
         .send()
         .await?;
     handle_response(res).await
@@ -54,7 +54,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path(format!("/api/v1/runs/{}/reports", id)))
-            .and(header("Authorization", "Bearer test_token"))
+            .and(header(reqwest::header::AUTHORIZATION, "Bearer test_token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
             .mount(&mock_server)
             .await;
@@ -81,7 +81,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path(format!("/api/v1/runs/{}/reports/{}", id, report_id)))
-            .and(header("Authorization", "Bearer test_token"))
+            .and(header(reqwest::header::AUTHORIZATION, "Bearer test_token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
             .mount(&mock_server)
             .await;
