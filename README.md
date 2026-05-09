@@ -24,6 +24,8 @@ workflows.
 
 ## 📦 Crates
 
+*For a breakdown of compilation features across these crates, see [Cargo Features](docs/cargo-features.md).*
+
 | Crate | Version | Docs |
 |---|---|---|
 | `stormchaser-cli` | [![Crates.io](https://img.shields.io/badge/crates.io-v1.3.1-orange.svg)](https://crates.io/crates/stormchaser-cli) | [![Docs.rs](https://img.shields.io/badge/docs.rs-v1.3.1-blue.svg)](https://docs.rs/stormchaser-cli) |
@@ -102,6 +104,7 @@ workflow "example_workflow" {
   with Vault and AWS Secrets Manager.
 - **Cron Workflows**: Periodic scheduling via external engines (Kubernetes
   CronJobs, Ofelia).
+- **[MCP Server](docs/mcp-server.md)**: Native Model Context Protocol (MCP) server for exposing the API to AI agents (enabled by default but can be disabled via Cargo features, and ships with a restrictive Open Policy Agent authorization policy).
 
 ### 📊 Feature Comparison Matrix
 

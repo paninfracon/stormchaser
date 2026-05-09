@@ -48,11 +48,12 @@
     workflows
 30. 🚧 Sensors for polling external systems (Jira, GitHub, DB) to emit events
 31. ✅ Reusable Workflow Templates and Sub-workflows
-32. ✅ CronWorkflows for periodic scheduling (via external systems like
+32. ✅ Native [Model Context Protocol (MCP) Server](mcp-server.md) for exposing the API to AI agents
+33. ✅ CronWorkflows for periodic scheduling (via external systems like
     Kubernetes CronJobs or Ofelia)
-33. ✅ Dynamic Parallelism (Map/Reduce) based on runtime input lists
+34. ✅ Dynamic Parallelism (Map/Reduce) based on runtime input lists
     (including 'max_parallel' batching)
-34. 🚧 Step Memoization/Caching to skip execution if inputs/code are unchanged
+35. 🚧 Step Memoization/Caching to skip execution if inputs/code are unchanged
 35. 🚧 Concurrency Limits (global/per-workflow) to prevent resource exhaustion
 36. ✅ Advanced Retry Policies with exponential backoff and jitter
 37. ✅ Error Handling Hooks (On-Failure/Finally blocks) for resource cleanup

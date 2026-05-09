@@ -65,6 +65,8 @@ pub struct Config {
     pub oidc_client_id: Option<String>,
     /// The oidc client secret.
     pub oidc_client_secret: Option<String>,
+    /// The API base URL for MCP callback.
+    pub api_base_url: String,
 }
 
 impl Config {
@@ -92,6 +94,7 @@ impl Config {
         let mut oidc_external_issuer = None;
         let mut oidc_client_id = None;
         let mut oidc_client_secret = None;
+        let mut api_base_url = "http://localhost:3000".to_string();
 
         for (k, v) in env {
             match k.as_ref() {
@@ -112,6 +115,7 @@ impl Config {
                 "OIDC_EXTERNAL_ISSUER" => oidc_external_issuer = Some(v.as_ref().to_string()),
                 "OIDC_CLIENT_ID" => oidc_client_id = Some(v.as_ref().to_string()),
                 "OIDC_CLIENT_SECRET" => oidc_client_secret = Some(v.as_ref().to_string()),
+                "API_BASE_URL" => api_base_url = v.as_ref().to_string(),
                 _ => {}
             }
         }
@@ -134,6 +138,7 @@ impl Config {
             oidc_external_issuer,
             oidc_client_id,
             oidc_client_secret,
+            api_base_url,
         })
     }
 }
@@ -272,6 +277,7 @@ pub async fn run_server(config: Config) -> anyhow::Result<()> {
         oidc_config,
         jwks: Arc::new(sync::RwLock::new(jwks)),
         log_backend,
+        api_base_url: config.api_base_url,
     };
 
     let app = app(state);

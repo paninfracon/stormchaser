@@ -65,6 +65,7 @@ async fn test_storage_backend_crud() {
         oidc_config: None,
         jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
+        api_base_url: "http://localhost:3000".to_string(),
     };
 
     let app = app(state.clone());
@@ -205,6 +206,7 @@ async fn test_artifact_listing() {
         oidc_config: None,
         jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
+        api_base_url: "http://localhost:3000".to_string(),
     };
 
     let app = app(state.clone());

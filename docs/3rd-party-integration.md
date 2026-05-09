@@ -23,17 +23,17 @@ Stormchaser uses subject-based routing with version tokens. This allows you to f
 You can use NATS wildcards to listen to broader categories:
 
 * `stormchaser.v1.run.>` : Listen to all workflow run events. Currently published subjects:
-  - `stormchaser.v1.run.queued` — A workflow run was submitted.
-  - `stormchaser.v1.run.direct` — A run started from an inline DSL payload.
-  - `stormchaser.v1.run.start_pending` — The engine is preparing to start a run.
-  - `stormchaser.v1.run.aborted` — A run was aborted (e.g. timeout).
+  * `stormchaser.v1.run.queued` — A workflow run was submitted.
+  * `stormchaser.v1.run.direct` — A run started from an inline DSL payload.
+  * `stormchaser.v1.run.start_pending` — The engine is preparing to start a run.
+  * `stormchaser.v1.run.aborted` — A run was aborted (e.g. timeout).
 * `stormchaser.v1.step.>` : Listen to all step events. Currently published subjects:
-  - `stormchaser.v1.step.scheduled.<type>` — A step was dispatched to a runner (e.g. `stormchaser.v1.step.scheduled.runcontainer`).
-  - `stormchaser.v1.step.running` — A runner has picked up the step.
-  - `stormchaser.v1.step.completed` — A step finished successfully.
-  - `stormchaser.v1.step.failed` — A step failed.
+  * `stormchaser.v1.step.scheduled.<type>` — A step was dispatched to a runner (e.g. `stormchaser.v1.step.scheduled.runcontainer`).
+  * `stormchaser.v1.step.running` — A runner has picked up the step.
+  * `stormchaser.v1.step.completed` — A step finished successfully.
+  * `stormchaser.v1.step.failed` — A step failed.
 * `stormchaser.v1.runner.>` : Listen to runner lifecycle events.
-  - `stormchaser.v1.runner.register` — A runner has registered with the engine.
+  * `stormchaser.v1.runner.register` — A runner has registered with the engine.
 
 ### The Message Payload
 
