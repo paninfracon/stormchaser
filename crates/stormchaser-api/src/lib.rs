@@ -50,6 +50,8 @@ use utoipa::OpenApi;
 use routes::auth::*;
 use routes::cron::*;
 use routes::event_rule::*;
+#[cfg(feature = "mcp")]
+use routes::mcp::*;
 use routes::step::*;
 use routes::storage::*;
 use routes::webhook::*;
@@ -156,6 +158,8 @@ pub struct AppState {
     pub jwks: Arc<RwLock<auth::jwks::JwksCache>>,
     /// Optional backend for logging
     pub log_backend: Option<LogBackend>,
+    /// API base URL for MCP tool callback
+    pub api_base_url: String,
 }
 
 /// Constructs the Axum application router with all routes and middleware
@@ -176,7 +180,8 @@ pub fn app(state: AppState) -> Router {
         burst_size,
     });
 
-    let authenticated_routes = Router::new()
+    #[allow(unused_mut)]
+    let mut authenticated_routes = Router::new()
         .route("/runs", get(list_workflow_runs).post(enqueue_workflow))
         .route("/runs/stream", get(stream_workflow_runs_api))
         .route(
@@ -221,11 +226,18 @@ pub fn app(state: AppState) -> Router {
             get(get_storage_backend)
                 .patch(update_storage_backend)
                 .delete(delete_storage_backend),
-        )
-        .layer(middleware::from_fn_with_state(
-            state.clone(),
-            opa_middleware,
-        ));
+        );
+
+    #[cfg(feature = "mcp")]
+    {
+        authenticated_routes =
+            authenticated_routes.nest_service("/mcp", mcp_service(&state.api_base_url));
+    }
+
+    let authenticated_routes = authenticated_routes.layer(middleware::from_fn_with_state(
+        state.clone(),
+        opa_middleware,
+    ));
 
     let api_v1 = Router::new()
         .merge(authenticated_routes)

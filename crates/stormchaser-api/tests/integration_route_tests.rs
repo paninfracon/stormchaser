@@ -59,6 +59,7 @@ async fn setup_app() -> Option<axum::Router> {
         log_backend: std::env::var("LOKI_URL")
             .ok()
             .map(|url| LogBackend::Loki { url }),
+        api_base_url: "http://localhost:3000".to_string(),
     }))
 }
 

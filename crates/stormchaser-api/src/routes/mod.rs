@@ -7,6 +7,9 @@ pub mod auth;
 pub mod cron;
 /// Module for event rule.
 pub mod event_rule;
+/// Module for MCP (Model Context Protocol).
+#[cfg(feature = "mcp")]
+pub mod mcp;
 /// Module for schema.
 pub mod schema;
 /// Module for step.

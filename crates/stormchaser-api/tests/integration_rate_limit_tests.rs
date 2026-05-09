@@ -41,6 +41,7 @@ async fn test_rate_limiting() {
         oidc_config: None,
         jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
+        api_base_url: "http://localhost:3000".to_string(),
     });
 
     let mut rng = rand::thread_rng();

@@ -44,6 +44,7 @@ async fn test_webhook_trigger() {
         oidc_config: None,
         jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
+        api_base_url: "http://localhost:3000".to_string(),
     };
 
     let app = app(state);
@@ -167,6 +168,7 @@ async fn test_github_webhook_signature() {
         oidc_config: None,
         jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
+        api_base_url: "http://localhost:3000".to_string(),
     };
 
     let app = app(state);

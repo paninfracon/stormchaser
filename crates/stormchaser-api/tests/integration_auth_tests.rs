@@ -123,6 +123,7 @@ async fn setup_app(mock_server_url: String) -> Option<axum::Router> {
         }),
         jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
+        api_base_url: "http://localhost:3000".to_string(),
     }))
 }
 
@@ -342,6 +343,7 @@ async fn test_auth_exchange_network_error() {
         }),
         jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
+        api_base_url: "http://localhost:3000".to_string(),
     });
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
@@ -657,6 +659,7 @@ async fn test_auth_refresh_network_error() {
         }),
         jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
+        api_base_url: "http://localhost:3000".to_string(),
     });
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
