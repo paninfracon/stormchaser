@@ -50,13 +50,19 @@ impl<'a> App<'a> {
 
         if res.status().is_success() {
             self.runs = res.json::<Vec<crate::app::WorkflowRunDetail>>().await?;
-            if !self.runs.is_empty() {
-                if self.runs_state.selected().is_none() {
-                    self.runs_state.select(Some(0));
-                }
+            if self.runs.is_empty() {
+                self.runs_state.select(None);
+                self.selected_run = None;
+            } else {
+                let selected_index = self
+                    .runs_state
+                    .selected()
+                    .map_or(0, |selected| selected.min(self.runs.len() - 1));
+                self.runs_state.select(Some(selected_index));
+
                 if self.selected_run.is_none() {
-                    if let Some(i) = self.runs_state.selected() {
-                        let id = self.runs[i].id;
+                    if let Some(run) = self.runs.get(selected_index) {
+                        let id = run.id;
                         let _ = self.fetch_run_detail(id).await;
                         self.start_watching(id).await;
                     }
@@ -112,13 +118,13 @@ impl<'a> App<'a> {
 
                 if res.status().is_success() {
                     self.error = None;
-                    self.refresh_runs().await?;
-                    if self.runs.is_empty() {
-                        self.runs_state.select(None);
-                        self.selected_run = None;
-                    } else if i >= self.runs.len() {
-                        self.runs_state.select(Some(self.runs.len() - 1));
+                    if !self.runs.is_empty() {
+                        self.runs_state.select(Some(i.saturating_sub(1)));
                     }
+                    self.selected_run = None;
+                    self.selected_step_index = 0;
+                    self.run_logs.clear();
+                    self.refresh_runs().await?;
                 } else {
                     self.error = Some(format!("Failed to delete run: {}", res.status()));
                 }
@@ -395,5 +401,124 @@ mod tests {
         } else {
             panic!("Did not receive WorkflowUpdate event from SSE stream in time");
         }
+    }
+
+    #[tokio::test]
+    async fn test_refresh_runs_clamps_out_of_range_selection() {
+        let server = MockServer::start().await;
+        let run_id = RunId::new_v4();
+
+        let run_detail = crate::app::WorkflowRunDetail {
+            id: run_id,
+            workflow_name: "test".to_string(),
+            initiating_user: "user".to_string(),
+            status: RunStatus::Running,
+            created_at: Utc::now(),
+            finished_at: None,
+        };
+
+        let full_detail = crate::app::WorkflowRunFullDetail {
+            detail: run_detail.clone(),
+            steps: vec![],
+            artifacts: vec![],
+            test_summaries: vec![],
+            test_cases: vec![],
+        };
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/runs"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(vec![run_detail]))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v1/runs/{}", run_id)))
+            .respond_with(ResponseTemplate::new(200).set_body_json(full_detail))
+            .mount(&server)
+            .await;
+
+        let (tx, _rx) = mpsc::channel(1);
+        let mut app = App::new(server.uri(), Some("token".to_string()), tx);
+        app.runs_state.select(Some(5));
+
+        let result = app.refresh_runs().await;
+        assert!(result.is_ok());
+        assert_eq!(app.runs_state.selected(), Some(0));
+    }
+
+    #[tokio::test]
+    async fn test_delete_selected_run_clears_stale_selection_and_refreshes_details() {
+        let server = MockServer::start().await;
+        let first_run_id = RunId::new_v4();
+        let second_run_id = RunId::new_v4();
+
+        let first_run = crate::app::WorkflowRunDetail {
+            id: first_run_id,
+            workflow_name: "workflow-1".to_string(),
+            initiating_user: "user".to_string(),
+            status: RunStatus::Running,
+            created_at: Utc::now(),
+            finished_at: None,
+        };
+
+        let second_run = crate::app::WorkflowRunDetail {
+            id: second_run_id,
+            workflow_name: "workflow-2".to_string(),
+            initiating_user: "user".to_string(),
+            status: RunStatus::Queued,
+            created_at: Utc::now(),
+            finished_at: None,
+        };
+
+        let first_detail = crate::app::WorkflowRunFullDetail {
+            detail: first_run.clone(),
+            steps: vec![],
+            artifacts: vec![],
+            test_summaries: vec![],
+            test_cases: vec![],
+        };
+
+        let second_detail = crate::app::WorkflowRunFullDetail {
+            detail: second_run.clone(),
+            steps: vec![],
+            artifacts: vec![],
+            test_summaries: vec![],
+            test_cases: vec![],
+        };
+
+        Mock::given(method("DELETE"))
+            .and(path(format!("/api/v1/runs/{}", second_run_id)))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/runs"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(vec![first_run.clone()]))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v1/runs/{}", first_run_id)))
+            .respond_with(ResponseTemplate::new(200).set_body_json(first_detail))
+            .mount(&server)
+            .await;
+
+        let (tx, _rx) = mpsc::channel(8);
+        let mut app = App::new(server.uri(), Some("token".to_string()), tx);
+        app.runs = vec![first_run, second_run];
+        app.runs_state.select(Some(1));
+        app.selected_run = Some(second_detail);
+
+        let result = app.delete_selected_run().await;
+
+        assert!(result.is_ok());
+        assert_eq!(app.runs.len(), 1);
+        assert_eq!(app.runs_state.selected(), Some(0));
+        assert_eq!(
+            app.selected_run.as_ref().map(|run| run.detail.id),
+            Some(first_run_id)
+        );
+        assert!(app.error.is_none());
     }
 }

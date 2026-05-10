@@ -239,7 +239,7 @@ pub(crate) fn render_delete_run_dialog(f: &mut Frame, app: &App) {
     );
 
     f.render_widget(
-        Paragraph::new("Press 'y' to Confirm, 'n' or Esc to Cancel")
+        Paragraph::new("Press Enter or 'y' to Confirm, 'n' or Esc to Cancel")
             .style(Style::default().fg(Color::Red)),
         chunks[1],
     );

@@ -158,10 +158,10 @@ async fn handle_app_event_key<'a>(
         app.handle_event_rule_dialog_key(key).await;
     } else if app.cron_dialog_active {
         app.handle_cron_dialog_key(key).await;
-    } else if app.approval_dialog_active {
-        app.handle_approval_dialog_key(key).await;
     } else if app.delete_run_dialog_active {
         app.handle_delete_run_dialog_key(key).await;
+    } else if app.approval_dialog_active {
+        app.handle_approval_dialog_key(key).await;
     } else if app.file_browser_active {
         app.handle_file_browser_key(key).await;
     } else {
@@ -229,7 +229,11 @@ async fn main() -> Result<()> {
             let result = schemaui::SchemaUI::new(schema).run_tui();
 
             enable_raw_mode()?;
-            execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
+            execute!(
+                terminal.backend_mut(),
+                EnterAlternateScreen,
+                EnableMouseCapture
+            )?;
             terminal.clear()?;
 
             if let Ok(value) = result {
@@ -319,5 +323,24 @@ mod tests {
     #[ignore]
     async fn test_handle_app_event_key_compiles() {
         let _f = handle_app_event_key;
+    }
+
+    #[tokio::test]
+    async fn test_handle_app_event_key_prioritizes_delete_dialog() {
+        let (tx, _rx) = mpsc::channel(1);
+        let mut app = App::new("http://paninfracon.net".to_string(), None, tx);
+        app.state = AppState::LoggedIn;
+        app.delete_run_dialog_active = true;
+        app.approval_dialog_active = true;
+
+        let should_quit = handle_app_event_key(
+            &mut app,
+            ratatui::crossterm::event::KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+        )
+        .await;
+
+        assert!(!should_quit);
+        assert!(!app.delete_run_dialog_active);
+        assert!(app.approval_dialog_active);
     }
 }
