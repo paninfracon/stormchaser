@@ -1,5 +1,5 @@
 use crate::handler::{fetch_outputs, fetch_run_context, fetch_step_instance};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde_json::Value;
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -290,16 +290,20 @@ async fn execute_request(
     match parse_response(status.is_success(), &body_bytes, spec, run_id, step_id) {
         Ok(event) => {
             let js = async_nats::jetstream::new(nats_client);
-            let _ = stormchaser_model::nats::publish_cloudevent(
+            let event_payload = serde_json::to_value(event)
+                .context("failed to serialize RestApi completion event")?;
+
+            stormchaser_model::nats::publish_cloudevent(
                 &js,
                 NatsSubject::StepCompleted,
                 EventType::Step(StepEventType::Completed),
                 EventSource::System,
-                serde_json::to_value(event).unwrap(),
+                event_payload,
                 Some(SchemaVersion::new("1.0".to_string())),
                 None,
             )
-            .await;
+            .await
+            .context("failed to publish RestApi completion event")?;
             Ok(())
         }
         Err(e) => {
