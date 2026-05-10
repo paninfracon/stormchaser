@@ -221,22 +221,6 @@ impl<'a> App<'a> {
         }
     }
 
-    pub async fn handle_direct_submit_form_key(&mut self, key: KeyEvent) {
-        if let Some(ref mut form) = self.direct_submit_form {
-            form.handle_input(key);
-            match form.result() {
-                ratatui_form::FormResult::Submitted => {
-                    let _ = self.submit_direct_form().await;
-                }
-                ratatui_form::FormResult::Cancelled => {
-                    self.direct_submit_form = None;
-                    self.direct_submit_dsl = None;
-                }
-                _ => {}
-            }
-        }
-    }
-
     pub async fn handle_file_browser_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Esc => {

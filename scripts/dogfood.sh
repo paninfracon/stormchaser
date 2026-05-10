@@ -27,9 +27,6 @@ echo -e "${BLUE}>>> Creating repository tarball (respecting .gitignore)...${NC}"
 TEMP_TAR="/tmp/stormchaser-dogfood.tar.gz"
 (cd "$REPO_ROOT" && {
     git ls-files -z
-    if [ -d .tmp/ratatui-form ]; then
-        find .tmp/ratatui-form -type f -print0
-    fi
     if [ -d tests/certs ]; then
         find tests/certs -type f -print0
     fi

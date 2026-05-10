@@ -85,10 +85,6 @@ pub fn ui(f: &mut Frame, app: &mut App) {
         render_cron_dialog(f, app);
     } else if app.approval_dialog_active {
         render_approval_dialog(f, app);
-    } else if let Some(form) = &mut app.direct_submit_form {
-        let area = centered_rect(60, 60, f.area());
-        f.render_widget(Clear, area);
-        form.render(area, f.buffer_mut());
     } else if app.file_browser_active {
         render_file_browser(f, app);
     }

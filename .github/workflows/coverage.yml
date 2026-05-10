@@ -46,8 +46,7 @@ jobs:
       - name: Start Infrastructure (NATS, Postgres)
         run: docker compose up -d --wait nats postgres
 
-      - name: Patch ratatui-form
-        run: ./scripts/patch-ratatui-form.sh
+
 
       - name: Generate Certificates
         run: ./scripts/generate-certs.sh

@@ -331,23 +331,32 @@ impl<'a> App<'a> {
 
             if let Ok(workflow) = StormchaserParser.parse(&dsl) {
                 if !workflow.inputs.is_empty() {
-                    let mut builder = ratatui_form::Form::builder().title("Workflow Inputs");
+                    let mut properties = serde_json::Map::new();
                     for input in workflow.inputs {
-                        let mut field = builder.text(
-                            &input.name,
-                            input.description.as_deref().unwrap_or(&input.name),
+                        let mut prop = serde_json::Map::new();
+                        prop.insert("type".to_string(), serde_json::json!("string"));
+                        prop.insert(
+                            "description".to_string(),
+                            serde_json::json!(input.description.as_deref().unwrap_or(&input.name)),
                         );
                         if let Some(default) = &input.default {
                             if let Some(s) = default.as_str() {
-                                field = field.placeholder(s);
+                                prop.insert("default".to_string(), serde_json::json!(s));
                             } else {
-                                field = field.placeholder(default.to_string());
+                                prop.insert(
+                                    "default".to_string(),
+                                    serde_json::json!(default.to_string()),
+                                );
                             }
                         }
-                        builder = field.done();
+                        properties.insert(input.name, serde_json::Value::Object(prop));
                     }
-                    self.direct_submit_form = Some(builder.build());
-                    self.direct_submit_dsl = Some(dsl);
+                    let schema = serde_json::json!({
+                        "type": "object",
+                        "title": "Workflow Inputs",
+                        "properties": properties
+                    });
+                    self.pending_schema_ui = Some((schema, dsl));
                     self.file_browser_active = false;
                     return Ok(());
                 }
@@ -372,12 +381,8 @@ impl<'a> App<'a> {
     }
 
     /// Submits the dynamically generated form with inputs for a local workflow file.
-    pub async fn submit_direct_form(&mut self) -> Result<()> {
-        if let (Some(form), Some(dsl)) = (
-            self.direct_submit_form.take(),
-            self.direct_submit_dsl.take(),
-        ) {
-            let inputs_json = form.to_json();
+    pub async fn submit_direct_form(&mut self, inputs_json: serde_json::Value) -> Result<()> {
+        if let Some(dsl) = self.direct_submit_dsl.take() {
             let res = self
                 .api_request(
                     reqwest::Method::POST,

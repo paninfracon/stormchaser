@@ -34,7 +34,7 @@ jobs:
 
       - name: Build Workspace
         run: |
-          ./scripts/patch-ratatui-form.sh
+
           SQLX_OFFLINE=true cargo build --release --workspace
           SQLX_OFFLINE=true cargo build --release -p stormchaser-agent --target x86_64-unknown-linux-musl
 
@@ -136,9 +136,7 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Patch ratatui-form
-        shell: bash
-        run: ./scripts/patch-ratatui-form.sh
+
 
       - name: Build and Upload CLI
         uses: taiki-e/upload-rust-binary-action@v1
