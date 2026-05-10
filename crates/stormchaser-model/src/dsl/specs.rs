@@ -203,6 +203,40 @@ pub struct WebhookInvokeSpec {
     pub timeout: Option<String>,
 }
 
+/// Specification for making a REST API call.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct RestApiResponseExtractor {
+    /// Output key name.
+    pub name: String,
+    /// Data format (e.g., 'json', 'regex').
+    pub format: Option<String>,
+    /// JSON Pointer (or dot-notation path) used for JSON response extraction.
+    pub json_pointer: Option<String>,
+    /// Regular expression to match against the response body.
+    pub regex: Option<String>,
+    /// Regex capture group index.
+    pub group: Option<u32>,
+    /// Whether the extracted output is sensitive.
+    pub sensitive: Option<bool>,
+}
+
+/// Specification for making a REST API call.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct RestApiSpec {
+    /// REST API URL.
+    pub url: String,
+    /// HTTP method.
+    pub method: Option<String>, // Default to GET
+    /// HTTP headers.
+    pub headers: Option<HashMap<String, String>>,
+    /// Request body template.
+    pub body: Option<String>, // MiniJinja template
+    /// Request timeout.
+    pub timeout: Option<String>,
+    /// Rules for extracting outputs from the response.
+    pub extractors: Option<Vec<RestApiResponseExtractor>>,
+}
+
 /// Supported email backends.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

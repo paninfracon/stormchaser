@@ -185,6 +185,10 @@ pub fn generate_dsl_schema() -> RootSchema {
         "WebhookInvoke".to_string(),
         generator.subschema_for::<WebhookInvokeSpec>(),
     );
+    spec_schemas.insert(
+        "RestApi".to_string(),
+        generator.subschema_for::<RestApiSpec>(),
+    );
     spec_schemas.insert("Email".to_string(), generator.subschema_for::<EmailSpec>());
     spec_schemas.insert(
         "JinjaRender".to_string(),
@@ -203,4 +207,33 @@ pub fn generate_dsl_schema() -> RootSchema {
     // Remove the OpenAPI meta-schema to avoid jsonschema validation errors on unrecognized drafts
     root_schema.meta_schema = None;
     root_schema
+}
+
+#[cfg(test)]
+mod tests {
+    use super::generate_dsl_schema;
+
+    #[test]
+    fn test_generate_dsl_schema_registers_rest_api_spec() {
+        let schema = generate_dsl_schema();
+        let rest_api_schema = schema
+            .definitions
+            .get("RestApiSpec")
+            .expect("generated DSL schema should include the RestApiSpec definition");
+        let rest_api_schema_json = serde_json::to_value(rest_api_schema)
+            .expect("RestApiSpec schema should serialize to JSON value");
+        let properties = rest_api_schema_json
+            .get("properties")
+            .and_then(serde_json::Value::as_object)
+            .expect("RestApiSpec schema should expose object properties");
+
+        assert!(
+            properties.contains_key("url"),
+            "RestApiSpec schema should include the url property"
+        );
+        assert!(
+            properties.contains_key("extractors"),
+            "RestApiSpec schema should include the extractors property"
+        );
+    }
 }

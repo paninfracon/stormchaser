@@ -1,6 +1,8 @@
 use sqlx::PgPool;
 use std::sync::Arc;
-use stormchaser_engine::handler::step::intrinsic::{jinja, test_report_email, wasm, webhook};
+use stormchaser_engine::handler::step::intrinsic::{
+    jinja, rest_api, test_report_email, wasm, webhook,
+};
 use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
 use stormchaser_tls::{TlsConfig, TlsReloader};
@@ -68,6 +70,32 @@ async fn test_intrinsic_steps_dispatch() {
     .unwrap();
     assert!(dispatched);
     let dispatched = webhook::try_dispatch(
+        run_id,
+        step_id,
+        "Other",
+        &spec,
+        pool.clone(),
+        nats_client.clone(),
+        tls_reloader.clone(),
+    )
+    .await
+    .unwrap();
+    assert!(!dispatched);
+
+    // Test RestApi
+    let dispatched = rest_api::try_dispatch(
+        run_id,
+        step_id,
+        "RestApi",
+        &spec,
+        pool.clone(),
+        nats_client.clone(),
+        tls_reloader.clone(),
+    )
+    .await
+    .unwrap();
+    assert!(dispatched);
+    let dispatched = rest_api::try_dispatch(
         run_id,
         step_id,
         "Other",

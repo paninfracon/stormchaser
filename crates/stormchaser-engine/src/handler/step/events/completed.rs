@@ -11,14 +11,14 @@ use serde_json::Value;
 use sqlx::PgPool;
 use std::sync::Arc;
 use stormchaser_dsl::ast::{self, Workflow};
-use stormchaser_model::dsl::OutputExtraction;
+use stormchaser_model::dsl::{OutputExtraction, RestApiSpec};
 use stormchaser_model::events::WorkflowCompletedEvent;
 use stormchaser_model::events::{EventSource, EventType, WorkflowEventType};
 use stormchaser_model::nats::publish_cloudevent;
 use stormchaser_model::step::StepStatus;
 use stormchaser_model::LogBackend;
 use stormchaser_tls::TlsReloader;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::handler::step::dispatch::{dispatch_step_instance, find_step};
@@ -92,6 +92,17 @@ pub async fn handle_step_completed(
     let all_steps: Vec<StepInstance> =
         crate::db::get_step_instances_by_run_id(&mut *tx, run_id).await?;
 
+    let context = fetch_run_context(run_id, &mut *tx).await?;
+    let workflow: Workflow = serde_json::from_value(context.workflow_definition)
+        .context("Failed to parse workflow definition from DB")?;
+
+    let current_step_instance = all_steps
+        .iter()
+        .find(|s| s.id.into_inner() == step_id.into_inner())
+        .context("Completed step not found in DB")?;
+
+    let mut dsl_step = find_step(&workflow.steps, &current_step_instance.step_name).cloned();
+
     // 3. Persist outputs
     if let Some(outputs) = event
         .outputs
@@ -103,9 +114,7 @@ pub async fn handle_step_completed(
         })
         .as_ref()
     {
-        for (key, value) in outputs {
-            crate::db::upsert_step_output(&mut *tx, step_id, key, value).await?;
-        }
+        persist_step_outputs(&mut *tx, step_id, outputs, dsl_step.as_ref()).await?;
     }
 
     // 3.5 Persist storage hashes if provided
@@ -138,10 +147,6 @@ pub async fn handle_step_completed(
         })
         .as_ref()
     {
-        let context = fetch_run_context(run_id, &mut *tx).await?;
-        let workflow: Workflow = serde_json::from_value(context.workflow_definition)
-            .context("Failed to parse workflow definition from DB")?;
-
         for (name, meta) in artifacts {
             // Find which storage this artifact belongs to
             let storage = workflow
@@ -174,21 +179,6 @@ pub async fn handle_step_completed(
 
     // 3.8 Persist test reports if provided
     persist_step_test_reports(event.test_reports.as_ref(), &mut tx, run_id, step_id, &pool).await?;
-
-    // 2.5 Scrape outputs from logs if configured
-    let context = fetch_run_context(run_id, &mut *tx).await?;
-    let workflow: Workflow = serde_json::from_value(context.workflow_definition)
-        .context("Failed to parse workflow definition from DB")?;
-
-    let all_steps_initial: Vec<StepInstance> =
-        crate::db::get_step_instances_by_run_id(&mut *tx, run_id).await?;
-
-    let current_step_instance = all_steps_initial
-        .iter()
-        .find(|s| s.id.into_inner() == step_id.into_inner())
-        .context("Completed step not found in DB")?;
-
-    let mut dsl_step = find_step(&workflow.steps, &current_step_instance.step_name).cloned();
 
     if let Some(step) = &mut dsl_step {
         if step.r#type == "TerraformApply" {
@@ -397,6 +387,57 @@ pub async fn handle_step_completed(
     Ok(())
 }
 
+async fn persist_step_outputs(
+    tx: &mut sqlx::PgConnection,
+    step_id: stormchaser_model::StepInstanceId,
+    outputs: &serde_json::Map<String, serde_json::Value>,
+    dsl_step: Option<&ast::Step>,
+) -> Result<()> {
+    let rest_api_sensitivity = rest_api_output_sensitivity(dsl_step);
+
+    for (key, value) in outputs {
+        crate::db::upsert_step_output_with_sensitivity(
+            &mut *tx,
+            step_id,
+            key,
+            value,
+            rest_api_sensitivity.get(key).copied().unwrap_or(false),
+        )
+        .await?;
+    }
+
+    Ok(())
+}
+
+fn rest_api_output_sensitivity(
+    dsl_step: Option<&ast::Step>,
+) -> std::collections::HashMap<String, bool> {
+    let Some(step) = dsl_step else {
+        return std::collections::HashMap::new();
+    };
+
+    if step.r#type != "RestApi" {
+        return std::collections::HashMap::new();
+    }
+
+    match serde_json::from_value::<RestApiSpec>(step.spec.clone()) {
+        Ok(spec) => spec
+            .extractors
+            .unwrap_or_default()
+            .into_iter()
+            .map(|extractor| (extractor.name, extractor.sensitive.unwrap_or(false)))
+            .collect(),
+        Err(error) => {
+            warn!(
+                step_name = %step.name,
+                ?error,
+                "Failed to parse RestApi spec while determining output sensitivity"
+            );
+            std::collections::HashMap::new()
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn process_step_completion(
     dsl_step: ast::Step,
@@ -518,10 +559,64 @@ async fn process_step_completion(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+    use std::collections::HashMap;
+    use stormchaser_model::dsl::RestApiResponseExtractor;
 
     #[tokio::test]
     #[ignore]
     async fn test_process_step_completion_compiles() {
         let _f = process_step_completion;
+    }
+
+    #[test]
+    fn test_rest_api_output_sensitivity_reads_extractor_flags() {
+        let step = ast::Step {
+            name: "fetch_data".to_string(),
+            r#type: "RestApi".to_string(),
+            condition: None,
+            params: HashMap::new(),
+            spec: json!({
+                "url": "https://api.example.com",
+                "extractors": [
+                    RestApiResponseExtractor {
+                        name: "token".to_string(),
+                        format: Some("json".to_string()),
+                        json_pointer: Some("/data/token".to_string()),
+                        regex: None,
+                        group: None,
+                        sensitive: Some(true),
+                    },
+                    RestApiResponseExtractor {
+                        name: "id".to_string(),
+                        format: Some("json".to_string()),
+                        json_pointer: Some("/data/id".to_string()),
+                        regex: None,
+                        group: None,
+                        sensitive: Some(false),
+                    }
+                ]
+            }),
+            strategy: None,
+            aggregation: Vec::new(),
+            iterate: None,
+            iterate_as: None,
+            steps: None,
+            next: Vec::new(),
+            on_failure: None,
+            retry: None,
+            timeout: None,
+            allow_failure: None,
+            start_marker: None,
+            end_marker: None,
+            outputs: Vec::new(),
+            reports: Vec::new(),
+            artifacts: None,
+        };
+
+        let sensitivity = rest_api_output_sensitivity(Some(&step));
+
+        assert_eq!(sensitivity.get("token"), Some(&true));
+        assert_eq!(sensitivity.get("id"), Some(&false));
     }
 }

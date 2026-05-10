@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add the intrinsic `RestApi` step for engine-side HTTP calls with templated requests and response extraction.
+
+### Changed
+
+- Prepare `stormchaser-tui` for publishing by removing the `publish = false` directive.
+
 ## [1.3.2] - 2026-05-09
 
 ### Added
