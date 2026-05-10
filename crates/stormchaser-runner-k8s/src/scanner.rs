@@ -466,9 +466,32 @@ mod tests {
     }
 
     #[test]
+    fn test_reconstruct_step_unencrypted_invalid_shape() {
+        let raw_dsl = json!({"unexpected": "shape"}).to_string();
+
+        let step = reconstruct_step("test-job", false, None, Some(&raw_dsl));
+        assert_eq!(step.name, "test-job");
+        assert_eq!(step.r#type, "RunContainer");
+        assert_eq!(step.spec, Value::Null);
+    }
+
+    #[test]
     fn test_reconstruct_step_no_raw_dsl() {
         let step = reconstruct_step("test-job", false, None, None);
         assert_eq!(step.name, "test-job");
+        assert_eq!(step.spec, Value::Null);
+    }
+
+    #[test]
+    fn test_reconstruct_step_encrypted_valid_decrypt_but_invalid_json() {
+        use crate::job_machine::crypto::encrypt_state;
+
+        let key = "12345678901234567890123456789012".to_string();
+        let encrypted = encrypt_state("not-json", &key).unwrap();
+        let step = reconstruct_step("test-job", true, Some(&key), Some(&encrypted));
+
+        assert_eq!(step.name, "test-job");
+        assert_eq!(step.r#type, "RunContainer");
         assert_eq!(step.spec, Value::Null);
     }
 }

@@ -100,94 +100,23 @@ async fn publish_job_result(
     result: Result<job_machine::JobState, anyhow::Error>,
 ) {
     match result {
-        Ok(job_machine::JobState::Succeeded(metrics)) => {
-            tracing::info!("Step {} (Run {}) completed successfully", step_id, run_id);
-            let mut outputs = HashMap::new();
-            outputs.insert(
-                "k8s exit code".to_string(),
-                serde_json::json!(metrics.exit_code),
-            );
-            outputs.insert(
-                "Number of attempts".to_string(),
-                serde_json::json!(metrics.attempts),
-            );
-            outputs.insert(
-                "run duration".to_string(),
-                serde_json::json!(format!("{}ms", metrics.duration_ms)),
-            );
-            outputs.insert(
-                "run latency".to_string(),
-                serde_json::json!(format!("{}ms", metrics.latency_ms)),
-            );
-            let complete_event = StepCompletedEvent {
-                run_id: RunId::new(run_id),
-                step_id: StepInstanceId::new(step_id),
-                event_type: EventType::Step(StepEventType::Completed),
-                runner_id: Some(runner_id.clone()),
-                exit_code: metrics.exit_code,
-                storage_hashes: metrics.storage_hashes.map(|h| {
-                    h.into_iter()
-                        .map(|(k, v)| (k, serde_json::json!(v)))
-                        .collect()
-                }),
-                artifacts: metrics.artifacts,
-                test_reports: metrics.test_reports,
-                outputs: Some(outputs),
-                timestamp: chrono::Utc::now(),
-            };
+        Ok(state) => {
+            match &state {
+                job_machine::JobState::Succeeded(_) => {
+                    tracing::info!("Step {} (Run {}) completed successfully", step_id, run_id);
+                }
+                job_machine::JobState::Failed(reason, _) => {
+                    tracing::error!("Step {} (Run {}) failed: {}", step_id, run_id, reason);
+                }
+            }
+            let (subject, event_type, event) =
+                build_job_result_event(state, run_id, step_id, runner_id.clone());
             let _ = publish_cloudevent(
                 &async_nats::jetstream::new(nats_client.clone()),
-                NatsSubject::StepCompleted,
-                EventType::Step(StepEventType::Completed),
+                subject,
+                event_type,
                 EventSource::System,
-                serde_json::to_value(complete_event).unwrap(),
-                Some(SchemaVersion::new("1.0".to_string())),
-                None,
-            )
-            .await;
-        }
-        Ok(job_machine::JobState::Failed(reason, metrics)) => {
-            tracing::error!("Step {} (Run {}) failed: {}", step_id, run_id, reason);
-            let mut outputs = HashMap::new();
-            outputs.insert(
-                "k8s exit code".to_string(),
-                serde_json::json!(metrics.exit_code),
-            );
-            outputs.insert(
-                "Number of attempts".to_string(),
-                serde_json::json!(metrics.attempts),
-            );
-            outputs.insert(
-                "run duration".to_string(),
-                serde_json::json!(format!("{}ms", metrics.duration_ms)),
-            );
-            outputs.insert(
-                "run latency".to_string(),
-                serde_json::json!(format!("{}ms", metrics.latency_ms)),
-            );
-            let fail_event = StepFailedEvent {
-                run_id: RunId::new(run_id),
-                step_id: StepInstanceId::new(step_id),
-                event_type: EventType::Step(StepEventType::Failed),
-                error: reason,
-                runner_id: Some(runner_id.clone()),
-                exit_code: metrics.exit_code,
-                storage_hashes: metrics.storage_hashes.map(|h| {
-                    h.into_iter()
-                        .map(|(k, v)| (k, serde_json::json!(v)))
-                        .collect()
-                }),
-                artifacts: metrics.artifacts,
-                test_reports: metrics.test_reports,
-                outputs: Some(outputs),
-                timestamp: chrono::Utc::now(),
-            };
-            let _ = publish_cloudevent(
-                &async_nats::jetstream::new(nats_client.clone()),
-                NatsSubject::StepFailed,
-                EventType::Step(StepEventType::Failed),
-                EventSource::System,
-                serde_json::to_value(fail_event).unwrap(),
+                event,
                 Some(SchemaVersion::new("1.0".to_string())),
                 None,
             )
@@ -195,31 +124,122 @@ async fn publish_job_result(
         }
         Err(e) => {
             tracing::error!("Error running K8s job for step {}: {:?}", step_id, e);
-            let fail_event = StepFailedEvent {
-                run_id: RunId::new(run_id),
-                step_id: StepInstanceId::new(step_id),
-                event_type: EventType::Step(StepEventType::Failed),
-                error: format!("{:?}", e),
-                runner_id: Some(runner_id.clone()),
-                exit_code: None,
-                storage_hashes: None,
-                artifacts: None,
-                test_reports: None,
-                outputs: None,
-                timestamp: chrono::Utc::now(),
-            };
             let _ = publish_cloudevent(
                 &async_nats::jetstream::new(nats_client.clone()),
                 NatsSubject::StepFailed,
                 EventType::Step(StepEventType::Failed),
                 EventSource::System,
-                serde_json::to_value(fail_event).unwrap(),
+                build_job_error_event(run_id, step_id, runner_id.clone(), &e),
                 Some(SchemaVersion::new("1.0".to_string())),
                 None,
             )
             .await;
         }
     }
+}
+
+fn build_job_outputs(metrics: &job_machine::JobMetrics) -> HashMap<String, Value> {
+    let mut outputs = HashMap::new();
+    outputs.insert(
+        "k8s exit code".to_string(),
+        serde_json::json!(metrics.exit_code),
+    );
+    outputs.insert(
+        "Number of attempts".to_string(),
+        serde_json::json!(metrics.attempts),
+    );
+    outputs.insert(
+        "run duration".to_string(),
+        serde_json::json!(format!("{}ms", metrics.duration_ms)),
+    );
+    outputs.insert(
+        "run latency".to_string(),
+        serde_json::json!(format!("{}ms", metrics.latency_ms)),
+    );
+    outputs
+}
+
+fn build_job_result_event(
+    state: job_machine::JobState,
+    run_id: Uuid,
+    step_id: Uuid,
+    runner_id: String,
+) -> (NatsSubject, EventType, Value) {
+    match state {
+        job_machine::JobState::Succeeded(metrics) => {
+            let event_type = EventType::Step(StepEventType::Completed);
+            let outputs = build_job_outputs(&metrics);
+            let event = StepCompletedEvent {
+                run_id: RunId::new(run_id),
+                step_id: StepInstanceId::new(step_id),
+                event_type: event_type.clone(),
+                runner_id: Some(runner_id),
+                exit_code: metrics.exit_code,
+                storage_hashes: metrics.storage_hashes.map(|h| {
+                    h.into_iter()
+                        .map(|(k, v)| (k, serde_json::json!(v)))
+                        .collect()
+                }),
+                artifacts: metrics.artifacts,
+                test_reports: metrics.test_reports,
+                outputs: Some(outputs),
+                timestamp: chrono::Utc::now(),
+            };
+            (
+                NatsSubject::StepCompleted,
+                event_type,
+                serde_json::to_value(event).unwrap(),
+            )
+        }
+        job_machine::JobState::Failed(reason, metrics) => {
+            let event_type = EventType::Step(StepEventType::Failed);
+            let outputs = build_job_outputs(&metrics);
+            let event = StepFailedEvent {
+                run_id: RunId::new(run_id),
+                step_id: StepInstanceId::new(step_id),
+                event_type: event_type.clone(),
+                error: reason,
+                runner_id: Some(runner_id),
+                exit_code: metrics.exit_code,
+                storage_hashes: metrics.storage_hashes.map(|h| {
+                    h.into_iter()
+                        .map(|(k, v)| (k, serde_json::json!(v)))
+                        .collect()
+                }),
+                artifacts: metrics.artifacts,
+                test_reports: metrics.test_reports,
+                outputs: Some(outputs),
+                timestamp: chrono::Utc::now(),
+            };
+            (
+                NatsSubject::StepFailed,
+                event_type,
+                serde_json::to_value(event).unwrap(),
+            )
+        }
+    }
+}
+
+fn build_job_error_event(
+    run_id: Uuid,
+    step_id: Uuid,
+    runner_id: String,
+    error: &anyhow::Error,
+) -> Value {
+    serde_json::to_value(StepFailedEvent {
+        run_id: RunId::new(run_id),
+        step_id: StepInstanceId::new(step_id),
+        event_type: EventType::Step(StepEventType::Failed),
+        error: format!("{:?}", error),
+        runner_id: Some(runner_id),
+        exit_code: None,
+        storage_hashes: None,
+        artifacts: None,
+        test_reports: None,
+        outputs: None,
+        timestamp: chrono::Utc::now(),
+    })
+    .unwrap()
 }
 
 pub async fn handle_task(
@@ -398,7 +418,10 @@ mod tests {
     }
 
     use super::*;
+    use crate::job_machine::JobMetrics;
     use serde_json::json;
+    use stormchaser_model::nats::NatsSubject;
+    use uuid::Uuid;
 
     #[test]
     fn test_fallback_step() {
@@ -416,5 +439,101 @@ mod tests {
         assert_eq!(step.r#type, "K8sJob");
         assert_eq!(step.spec, spec);
         assert_eq!(step.params.get("image").unwrap(), "nginx");
+    }
+
+    #[test]
+    fn test_fallback_step_defaults_when_fields_missing_or_invalid() {
+        let payload = json!({
+            "step_name": null,
+            "step_type": null,
+            "params": "invalid"
+        });
+        let step = fallback_step(&payload, Value::Null);
+        assert_eq!(step.name, "");
+        assert_eq!(step.r#type, "");
+        assert!(step.params.is_empty());
+    }
+
+    #[test]
+    fn test_build_job_result_event_success() {
+        let run_id = Uuid::new_v4();
+        let step_id = Uuid::new_v4();
+        let metrics = JobMetrics {
+            exit_code: Some(0),
+            attempts: 2,
+            duration_ms: 500,
+            latency_ms: 12,
+            storage_hashes: Some(HashMap::from([("out".to_string(), "abc".to_string())])),
+            artifacts: Some(HashMap::from([("file".to_string(), json!("artifact.txt"))])),
+            test_reports: Some(HashMap::from([(
+                "junit".to_string(),
+                json!({"url": "https://paninfracon.net/junit.xml"}),
+            )])),
+        };
+
+        let (subject, event_type, event) = build_job_result_event(
+            job_machine::JobState::Succeeded(metrics),
+            run_id,
+            step_id,
+            "runner-k8s".to_string(),
+        );
+
+        assert_eq!(subject, NatsSubject::StepCompleted);
+        assert_eq!(event_type, EventType::Step(StepEventType::Completed));
+        assert_eq!(event["run_id"], run_id.to_string());
+        assert_eq!(event["step_id"], step_id.to_string());
+        assert_eq!(event["outputs"]["Number of attempts"], 2);
+        assert_eq!(
+            event["test_reports"]["junit"]["url"],
+            "https://paninfracon.net/junit.xml"
+        );
+    }
+
+    #[test]
+    fn test_build_job_result_event_failed() {
+        let run_id = Uuid::new_v4();
+        let step_id = Uuid::new_v4();
+        let metrics = JobMetrics {
+            exit_code: Some(1),
+            attempts: 1,
+            duration_ms: 10,
+            latency_ms: 3,
+            storage_hashes: None,
+            artifacts: None,
+            test_reports: None,
+        };
+
+        let (subject, event_type, event) = build_job_result_event(
+            job_machine::JobState::Failed("boom".to_string(), metrics),
+            run_id,
+            step_id,
+            "runner-k8s".to_string(),
+        );
+
+        assert_eq!(subject, NatsSubject::StepFailed);
+        assert_eq!(event_type, EventType::Step(StepEventType::Failed));
+        assert_eq!(event["error"], "boom");
+        assert_eq!(event["outputs"]["run latency"], "3ms");
+    }
+
+    #[test]
+    fn test_build_job_error_event() {
+        let run_id = Uuid::new_v4();
+        let step_id = Uuid::new_v4();
+        let event = build_job_error_event(
+            run_id,
+            step_id,
+            "runner-k8s".to_string(),
+            &anyhow::anyhow!("job exploded"),
+        );
+
+        assert_eq!(event["run_id"], run_id.to_string());
+        assert_eq!(event["step_id"], step_id.to_string());
+        assert!(event["exit_code"].is_null());
+        assert!(event["outputs"].is_null());
+        assert!(event["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("job exploded"));
     }
 }
