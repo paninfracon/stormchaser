@@ -225,6 +225,9 @@ impl<'a> App<'a> {
                 Pane::CronWorkflowsList | Pane::CronWorkflowDetail => {
                     let _ = self.delete_selected_cron_workflow().await;
                 }
+                Pane::RunsList | Pane::RunDetail => {
+                    let _ = self.delete_selected_run().await;
+                }
                 _ => {}
             },
             KeyCode::Char('r') => {

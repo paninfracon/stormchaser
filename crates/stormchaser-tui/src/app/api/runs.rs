@@ -97,6 +97,36 @@ impl<'a> App<'a> {
         Ok(())
     }
 
+    /// Deletes the currently selected workflow run.
+    pub async fn delete_selected_run(&mut self) -> Result<()> {
+        if let Some(i) = self.runs_state.selected() {
+            if let Some(run) = self.runs.get(i) {
+                let id = run.id;
+                let res = self
+                    .api_request(
+                        reqwest::Method::DELETE,
+                        &format!("/api/v1/runs/{}", id),
+                        None,
+                    )
+                    .await?;
+
+                if res.status().is_success() {
+                    self.error = None;
+                    self.refresh_runs().await?;
+                    if self.runs.is_empty() {
+                        self.runs_state.select(None);
+                        self.selected_run = None;
+                    } else if i >= self.runs.len() {
+                        self.runs_state.select(Some(self.runs.len() - 1));
+                    }
+                } else {
+                    self.error = Some(format!("Failed to delete run: {}", res.status()));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Approves the currently selected step in the active run.
     pub async fn approve_selected_step(&mut self, inputs: serde_json::Value) -> Result<()> {
         if let Some(run) = &self.selected_run {
