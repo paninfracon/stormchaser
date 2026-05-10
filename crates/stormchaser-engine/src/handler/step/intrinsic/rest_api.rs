@@ -88,7 +88,7 @@ async fn handle_rest_api_invoke(
     pool: PgPool,
     nats_client: async_nats::Client,
 ) -> Result<()> {
-    let spec: RestApiSpec = serde_json::from_value(spec)?;
+    let spec: RestApiSpec = serde_json::from_value(spec.get("spec").unwrap_or(&spec).clone())?;
 
     info!("Invoking REST API {} for run {}", spec.url, run_id);
 
