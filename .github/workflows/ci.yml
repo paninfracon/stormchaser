@@ -20,8 +20,7 @@ jobs:
       uses: dtolnay/rust-toolchain@stable
       with:
         components: rustfmt
-    - name: Patch ratatui-form
-      run: ./scripts/patch-ratatui-form.sh
+
     - name: Run cargo fmt
       run: cargo fmt --all -- --check
 
@@ -39,8 +38,7 @@ jobs:
       uses: dtolnay/rust-toolchain@stable
       with:
         components: clippy
-    - name: Patch ratatui-form
-      run: ./scripts/patch-ratatui-form.sh
+
     - name: Generate Certificates
       run: ./scripts/generate-certs.sh
     - name: Cache dependencies
@@ -67,8 +65,7 @@ jobs:
       uses: dtolnay/rust-toolchain@stable
       with:
         components: clippy
-    - name: Patch ratatui-form
-      run: ./scripts/patch-ratatui-form.sh
+
     - name: Cache dependencies
       uses: Swatinem/rust-cache@v2
     - name: Install sqlx-cli

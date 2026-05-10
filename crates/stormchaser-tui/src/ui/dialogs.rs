@@ -198,3 +198,49 @@ pub(crate) fn render_approval_dialog(f: &mut Frame, app: &mut App) {
         chunks[1],
     );
 }
+
+pub(crate) fn render_delete_run_dialog(f: &mut Frame, app: &App) {
+    let area = centered_rect(40, 20, f.area());
+    f.render_widget(Clear, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Confirm Deletion ")
+        .border_style(Style::default().fg(Color::Red));
+    f.render_widget(block, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .margin(2)
+        .constraints(
+            [
+                Constraint::Min(3),    // Message
+                Constraint::Length(3), // Help text
+            ]
+            .as_ref(),
+        )
+        .split(area);
+
+    let run_id = app
+        .runs_state
+        .selected()
+        .and_then(|i| app.runs.get(i))
+        .map(|r| r.id.to_string())
+        .unwrap_or_default();
+
+    let msg = format!(
+        "\nAre you sure you want to permanently delete run \n\n{}\n\nThis cannot be undone.",
+        run_id
+    );
+
+    f.render_widget(
+        Paragraph::new(msg).style(Style::default().fg(Color::White)),
+        chunks[0],
+    );
+
+    f.render_widget(
+        Paragraph::new("Press Enter or 'y' to Confirm, 'n' or Esc to Cancel")
+            .style(Style::default().fg(Color::Red)),
+        chunks[1],
+    );
+}

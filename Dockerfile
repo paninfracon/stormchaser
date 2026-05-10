@@ -17,8 +17,7 @@ WORKDIR /app
 # Copy the entire workspace
 COPY . .
 
-# Run the ratatui-form patch script
-RUN ./scripts/patch-ratatui-form.sh
+
 
 # Build argument to specify which binary to build
 ARG BINARY=stormchaser-engine

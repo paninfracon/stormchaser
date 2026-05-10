@@ -58,8 +58,8 @@ If the automated GitHub Actions CI (`release.yml`) fails, follow these steps to 
 ### Step 1: Build the Release Binaries
 
 ```bash
-# 1. Apply UI patches required before building (e.g. ratatui-form)
-./scripts/patch-ratatui-form.sh
+# 1. Apply UI patches required before building
+
 
 # 2. Build the standard dynamic binaries across the workspace
 SQLX_OFFLINE=true cargo build --release --workspace

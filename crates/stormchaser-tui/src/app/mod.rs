@@ -261,14 +261,16 @@ pub struct App<'a> {
     pub cron_edit_id: Option<CronWorkflowId>,
     /// Whether the approval dialog is active.
     pub approval_dialog_active: bool,
+    /// Whether the delete run dialog is active.
+    pub delete_run_dialog_active: bool,
     /// Text area for JSON inputs for step approval.
     pub approval_inputs: ratatui_textarea::TextArea<'a>,
     /// Whether the file browser dialog is active.
     pub file_browser_active: bool,
     /// The state of the file explorer widget.
     pub file_explorer: tui_file_explorer::FileExplorer,
-    /// Form for direct submission of a workflow DSL.
-    pub direct_submit_form: Option<ratatui_form::Form>,
+    /// Schema and DSL for pending schemaui run.
+    pub pending_schema_ui: Option<(serde_json::Value, String)>,
     /// The loaded DSL content for direct submission.
     pub direct_submit_dsl: Option<String>,
     /// Credentials loaded from deploy/dex/credentials.generated
@@ -397,9 +399,10 @@ impl<'a> App<'a> {
             cron_is_active: false,
             cron_edit_id: None,
             approval_dialog_active: false,
+            delete_run_dialog_active: false,
             approval_inputs: ratatui_textarea::TextArea::default(),
             file_browser_active: false,
-            direct_submit_form: None,
+            pending_schema_ui: None,
             direct_submit_dsl: None,
             auto_login_credentials,
             auto_login_index: 0,

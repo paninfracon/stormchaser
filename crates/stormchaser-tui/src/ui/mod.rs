@@ -59,7 +59,7 @@ pub fn ui(f: &mut Frame, app: &mut App) {
     let status_text = if let Some(err) = &app.error {
         format!("Error: {}", err)
     } else {
-        "Tabs: 1-Runs 2-Backends 3-Webhooks 4-Rules 5-Cron | Panes: Tab/h/l | Nav: j/k | Scroll: [/]/PgUp/PgDn | Actions: c(reate)/e(dit)/d(elete) | Filter: f | Quit: q"
+        "Tabs: 1-Runs 2-Backends 3-Webhooks 4-Rules 5-Cron | Panes: Tab/h/l | Nav: j/k | Scroll: [/]/PgUp/PgDn | Actions: c(reate)/e(dit)/d(elete)/r(un local) | Filter: f | Quit: q"
             .to_string()
     };
     let status_bar = Paragraph::new(status_text)
@@ -83,12 +83,10 @@ pub fn ui(f: &mut Frame, app: &mut App) {
         render_event_rule_dialog(f, app);
     } else if app.cron_dialog_active {
         render_cron_dialog(f, app);
+    } else if app.delete_run_dialog_active {
+        render_delete_run_dialog(f, app);
     } else if app.approval_dialog_active {
         render_approval_dialog(f, app);
-    } else if let Some(form) = &mut app.direct_submit_form {
-        let area = centered_rect(60, 60, f.area());
-        f.render_widget(Clear, area);
-        form.render(area, f.buffer_mut());
     } else if app.file_browser_active {
         render_file_browser(f, app);
     }

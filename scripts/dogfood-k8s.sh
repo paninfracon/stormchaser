@@ -13,7 +13,7 @@ TOKEN=$(python3 "$REPO_ROOT/scripts/generate_dev_token.py")
 
 echo -e "${BLUE}>>> Creating repository tarball...${NC}"
 TEMP_TAR="/tmp/stormchaser-dogfood.tar.gz"
-(cd "$REPO_ROOT" && { git ls-files -z; printf "%s\0" ".tmp/ratatui-form"; } | tar -czf "$TEMP_TAR" --null -T -)
+(cd "$REPO_ROOT" && { git ls-files -z; } | tar -czf "$TEMP_TAR" --null -T -)
 
 echo -e "${BLUE}>>> Uploading tarball to MinIO...${NC}"
 MINIO_IP=$(microk8s kubectl get svc -n stormchaser stormchaser-minio -o jsonpath='{.spec.clusterIP}')

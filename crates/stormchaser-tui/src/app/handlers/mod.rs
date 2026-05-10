@@ -200,6 +200,7 @@ impl<'a> App<'a> {
                 Pane::WebhooksList | Pane::WebhookDetail => self.open_webhook_dialog(false),
                 Pane::EventRulesList | Pane::EventRuleDetail => self.open_event_rule_dialog(false),
                 Pane::CronWorkflowsList | Pane::CronWorkflowDetail => self.open_cron_dialog(false),
+                Pane::RunsList | Pane::RunDetail => self.open_schedule_git_dialog(),
                 _ => {}
             },
             KeyCode::Char('e') => match self.active_pane {
@@ -209,7 +210,7 @@ impl<'a> App<'a> {
                 Pane::WebhooksList | Pane::WebhookDetail => self.open_webhook_dialog(true),
                 Pane::EventRulesList | Pane::EventRuleDetail => self.open_event_rule_dialog(true),
                 Pane::CronWorkflowsList | Pane::CronWorkflowDetail => self.open_cron_dialog(true),
-                _ => self.open_file_browser(),
+                _ => {}
             },
             KeyCode::Char('d') => match self.active_pane {
                 Pane::StorageBackendsList | Pane::StorageBackendDetail => {
@@ -223,6 +224,9 @@ impl<'a> App<'a> {
                 }
                 Pane::CronWorkflowsList | Pane::CronWorkflowDetail => {
                     let _ = self.delete_selected_cron_workflow().await;
+                }
+                Pane::RunsList | Pane::RunDetail => {
+                    self.open_delete_run_dialog();
                 }
                 _ => {}
             },
@@ -692,5 +696,59 @@ mod tests {
         app.handle_default_key(KeyEvent::new(KeyCode::Char('>'), KeyModifiers::NONE))
             .await;
         assert_eq!(app.log_scroll_x, 1);
+    }
+
+    #[tokio::test]
+    async fn test_handle_action_keys() {
+        let mut app = setup_app();
+
+        // r opens file browser
+        app.active_pane = Pane::RunsList;
+        app.handle_action_keys(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE))
+            .await;
+        assert!(app.file_browser_active);
+        app.file_browser_active = false;
+
+        // c on RunsList opens schedule_git_dialog
+        app.handle_action_keys(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE))
+            .await;
+        assert!(app.schedule_git_dialog_active);
+        app.schedule_git_dialog_active = false;
+
+        // d on RunsList opens delete_run_dialog_active if a run is selected
+        let run_id = RunId::new_v4();
+        let run = mock_run_detail(run_id, RunStatus::Succeeded);
+        app.runs.push(run);
+        app.runs_state.select(Some(0));
+        app.handle_action_keys(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE))
+            .await;
+        assert!(app.delete_run_dialog_active);
+        app.delete_run_dialog_active = false;
+
+        // e on RunsList does nothing
+        app.handle_action_keys(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE))
+            .await;
+        assert!(!app.schedule_git_dialog_active);
+        assert!(!app.file_browser_active);
+        assert!(!app.delete_run_dialog_active);
+
+        // c on StorageBackendsList opens storage_backend_dialog in create mode
+        app.active_pane = Pane::StorageBackendsList;
+        app.handle_action_keys(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE))
+            .await;
+        assert!(app.storage_backend_dialog_active);
+        assert_eq!(app.storage_backend_edit_id, None);
+        app.storage_backend_dialog_active = false;
+
+        // e on StorageBackendsList opens storage_backend_dialog in edit mode
+        app.handle_action_keys(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE))
+            .await;
+        assert!(app.storage_backend_dialog_active);
+        app.storage_backend_dialog_active = false;
+
+        // d on StorageBackendsList deletes selected (just check no crash since we can't easily mock the API call in this unit test without server mock)
+        // Note: the delete method requires the selected item to exist to make API calls, so if none is selected, it should safely do nothing.
+        app.handle_action_keys(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE))
+            .await;
     }
 }

@@ -83,8 +83,7 @@ if [ "$CLEANUP" = true ]; then
     cleanup_k8s
 fi
 
-# 0. Setup patched ratatui-form locally
-"$REPO_ROOT/scripts/patch-ratatui-form.sh"
+
 
 # 1. Generate TLS Certificates
 "$REPO_ROOT/scripts/generate-certs.sh"
