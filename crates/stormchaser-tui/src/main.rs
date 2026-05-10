@@ -93,7 +93,7 @@ async fn handle_app_event<'a>(app: &mut App<'a>, event: AppEvent) -> bool {
             app.error = None;
             app.start_listening_for_workflows().await;
             let _ = app.refresh_runs().await;
-            let _ = app.refresh_storage_backends().await;
+            let _ = app.refresh_connections().await;
             let _ = app.refresh_webhooks().await;
             let _ = app.refresh_event_rules().await;
             let _ = app.refresh_cron_workflows().await;
@@ -150,8 +150,8 @@ async fn handle_app_event_key<'a>(
         app.handle_filter_dialog_key(key).await;
     } else if app.schedule_git_dialog_active {
         app.handle_schedule_git_dialog_key(key).await;
-    } else if app.storage_backend_dialog_active {
-        app.handle_storage_backend_dialog_key(key).await;
+    } else if app.connection_dialog_active {
+        app.handle_connection_dialog_key(key).await;
     } else if app.webhook_dialog_active {
         app.handle_webhook_dialog_key(key).await;
     } else if app.event_rule_dialog_active {
@@ -197,7 +197,7 @@ async fn main() -> Result<()> {
     if app.token.is_some() {
         app.start_listening_for_workflows().await;
         let _ = app.refresh_runs().await;
-        let _ = app.refresh_storage_backends().await;
+        let _ = app.refresh_connections().await;
         let _ = app.refresh_webhooks().await;
         let _ = app.refresh_event_rules().await;
         let _ = app.refresh_cron_workflows().await;

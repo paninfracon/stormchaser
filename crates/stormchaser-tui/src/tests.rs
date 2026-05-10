@@ -36,7 +36,7 @@ fn create_test_app<'a>() -> App<'a> {
 #[test]
 fn render_connections_tab() {
     let mut app = create_test_app();
-    app.active_pane = Pane::StorageBackendsList;
+    app.active_pane = Pane::ConnectionsList;
 
     let created_at = Utc.timestamp_opt(1609459200, 0).unwrap();
     let updated_at = Utc.timestamp_opt(1609459200, 0).unwrap();
@@ -56,7 +56,7 @@ fn render_connections_tab() {
         created_at,
         updated_at,
     }];
-    app.selected_storage_backend = app.connections.first().cloned();
+    app.selected_connection = app.connections.first().cloned();
 
     let backend = TestBackend::new(100, 30);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -68,17 +68,17 @@ fn render_connections_tab() {
 #[test]
 fn render_connection_dialog() {
     let mut app = create_test_app();
-    app.active_pane = Pane::StorageBackendsList;
-    app.storage_backend_dialog_active = true;
-    app.storage_backend_inputs = vec![
+    app.active_pane = Pane::ConnectionsList;
+    app.connection_dialog_active = true;
+    app.connection_inputs = vec![
         ratatui_textarea::TextArea::default(),
         ratatui_textarea::TextArea::default(),
         ratatui_textarea::TextArea::default(),
         ratatui_textarea::TextArea::default(),
     ];
-    app.storage_backend_inputs[0].insert_str("new-sfs");
-    app.storage_backend_inputs[1].insert_str("Desc");
-    app.storage_backend_inputs[2].insert_str("{}");
+    app.connection_inputs[0].insert_str("new-sfs");
+    app.connection_inputs[1].insert_str("Desc");
+    app.connection_inputs[2].insert_str("{}");
 
     let backend = TestBackend::new(100, 30);
     let mut terminal = Terminal::new(backend).unwrap();

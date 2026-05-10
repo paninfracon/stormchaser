@@ -212,6 +212,8 @@ pub async fn mutate_if_terraform(
             .map(|s| s.to_string());
 
         let container_spec = CommonContainerSpec {
+            registry_connection: None,
+            connections: None,
             image: "hashicorp/terraform:latest".to_string(),
             command: Some(vec!["sh".to_string(), "-c".to_string(), script]),
             args: None,

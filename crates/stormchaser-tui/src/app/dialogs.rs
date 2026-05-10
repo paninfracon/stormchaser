@@ -54,14 +54,14 @@ impl<'a> App<'a> {
     }
 
     /// Opens the storage backend create/edit dialog.
-    pub fn open_storage_backend_dialog(&mut self, edit: bool) {
-        self.storage_backend_dialog_active = true;
-        self.storage_backend_focus = 0;
+    pub fn open_connection_dialog(&mut self, edit: bool) {
+        self.connection_dialog_active = true;
+        self.connection_focus = 0;
 
         if edit {
-            if let Some(backend) = &self.selected_storage_backend {
-                self.storage_backend_edit_id = Some(backend.id);
-                self.storage_backend_inputs = vec![
+            if let Some(backend) = &self.selected_connection {
+                self.connection_edit_id = Some(backend.id);
+                self.connection_inputs = vec![
                     ratatui_textarea::TextArea::from(vec![backend.name.clone()]),
                     ratatui_textarea::TextArea::from(
                         backend
@@ -95,24 +95,24 @@ impl<'a> App<'a> {
                     ConnectionType::HttpApi => "HttpApi",
                     ConnectionType::Git => "Git",
                 };
-                self.storage_backend_type_index = crate::app::BACKEND_TYPE_OPTIONS
+                self.connection_type_index = crate::app::BACKEND_TYPE_OPTIONS
                     .iter()
                     .position(|&s| s == type_str)
                     .unwrap_or(0);
-                self.storage_backend_is_default = backend.is_default_sfs;
+                self.connection_is_default = backend.is_default_sfs;
                 return;
             }
         }
 
-        self.storage_backend_edit_id = None;
-        self.storage_backend_inputs = vec![
+        self.connection_edit_id = None;
+        self.connection_inputs = vec![
             ratatui_textarea::TextArea::default(), // name
             ratatui_textarea::TextArea::default(), // description
             ratatui_textarea::TextArea::from(vec!["{}".to_string()]), // config
             ratatui_textarea::TextArea::default(), // assume role arn
         ];
-        self.storage_backend_type_index = 0;
-        self.storage_backend_is_default = false;
+        self.connection_type_index = 0;
+        self.connection_is_default = false;
     }
 
     /// Opens the webhook create/edit dialog.
@@ -579,16 +579,16 @@ mod tests {
     }
 
     #[test]
-    fn test_open_storage_backend_dialog_new() {
+    fn test_open_connection_dialog_new() {
         let mut app = setup_app();
-        app.open_storage_backend_dialog(false);
-        assert!(app.storage_backend_dialog_active);
-        assert_eq!(app.storage_backend_edit_id, None);
-        assert_eq!(app.storage_backend_inputs.len(), 4);
+        app.open_connection_dialog(false);
+        assert!(app.connection_dialog_active);
+        assert_eq!(app.connection_edit_id, None);
+        assert_eq!(app.connection_inputs.len(), 4);
     }
 
     #[test]
-    fn test_open_storage_backend_dialog_edit() {
+    fn test_open_connection_dialog_edit() {
         let mut app = setup_app();
         let backend = Connection {
             id: ConnectionId::new_v4(),
@@ -605,14 +605,14 @@ mod tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
-        app.selected_storage_backend = Some(backend.clone());
+        app.selected_connection = Some(backend.clone());
 
-        app.open_storage_backend_dialog(true);
-        assert!(app.storage_backend_dialog_active);
-        assert_eq!(app.storage_backend_edit_id, Some(backend.id));
-        assert_eq!(app.storage_backend_inputs[0].lines()[0], "test_backend");
-        assert_eq!(app.storage_backend_type_index, 0);
-        assert!(app.storage_backend_is_default);
+        app.open_connection_dialog(true);
+        assert!(app.connection_dialog_active);
+        assert_eq!(app.connection_edit_id, Some(backend.id));
+        assert_eq!(app.connection_inputs[0].lines()[0], "test_backend");
+        assert_eq!(app.connection_type_index, 0);
+        assert!(app.connection_is_default);
     }
 
     #[test]

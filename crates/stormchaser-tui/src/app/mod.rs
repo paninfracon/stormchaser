@@ -102,9 +102,9 @@ pub enum Pane {
     /// The pane displaying test results for a selected run.
     TestResults,
     /// The pane displaying the list of storage backends.
-    StorageBackendsList,
+    ConnectionsList,
     /// The pane displaying detailed information for a selected storage backend.
-    StorageBackendDetail,
+    ConnectionDetail,
     /// The pane displaying the list of webhooks.
     WebhooksList,
     /// The pane displaying detailed information for a selected webhook.
@@ -152,9 +152,9 @@ pub struct App<'a> {
     /// The current list of storage backends.
     pub connections: Vec<connections::Connection>,
     /// The state of the storage backends list widget.
-    pub storage_backends_state: ListState,
+    pub connections_state: ListState,
     /// The currently selected storage backend.
-    pub selected_storage_backend: Option<connections::Connection>,
+    pub selected_connection: Option<connections::Connection>,
     /// The current list of webhooks.
     pub webhooks: Vec<event_rules::WebhookConfig>,
     /// The state of the webhooks list widget.
@@ -216,17 +216,17 @@ pub struct App<'a> {
     /// The text area inputs for the schedule git dialog.
     pub schedule_git_inputs: Vec<ratatui_textarea::TextArea<'a>>,
     /// Whether the storage backend dialog is active.
-    pub storage_backend_dialog_active: bool,
+    pub connection_dialog_active: bool,
     /// The index of the focused input in the storage backend dialog.
-    pub storage_backend_focus: usize,
+    pub connection_focus: usize,
     /// The text area inputs for the storage backend dialog.
-    pub storage_backend_inputs: Vec<ratatui_textarea::TextArea<'a>>,
+    pub connection_inputs: Vec<ratatui_textarea::TextArea<'a>>,
     /// The index of the selected backend type.
-    pub storage_backend_type_index: usize,
+    pub connection_type_index: usize,
     /// Whether the backend is the default SFS.
-    pub storage_backend_is_default: bool,
+    pub connection_is_default: bool,
     /// The ID of the storage backend being edited, or None for creating a new one.
-    pub storage_backend_edit_id: Option<ConnectionId>,
+    pub connection_edit_id: Option<ConnectionId>,
     /// Whether the webhook dialog is active.
     pub webhook_dialog_active: bool,
     /// The index of the focused input in the webhook dialog.
@@ -346,8 +346,8 @@ impl<'a> App<'a> {
             runs_state: ListState::default(),
             selected_run: None,
             connections: Vec::new(),
-            storage_backends_state: ListState::default(),
-            selected_storage_backend: None,
+            connections_state: ListState::default(),
+            selected_connection: None,
             webhooks: Vec::new(),
             webhooks_state: ListState::default(),
             selected_webhook: None,
@@ -378,12 +378,12 @@ impl<'a> App<'a> {
             schedule_git_dialog_active: false,
             schedule_git_focus: 0,
             schedule_git_inputs: Vec::new(),
-            storage_backend_dialog_active: false,
-            storage_backend_focus: 0,
-            storage_backend_inputs: Vec::new(),
-            storage_backend_type_index: 0,
-            storage_backend_is_default: false,
-            storage_backend_edit_id: None,
+            connection_dialog_active: false,
+            connection_focus: 0,
+            connection_inputs: Vec::new(),
+            connection_type_index: 0,
+            connection_is_default: false,
+            connection_edit_id: None,
             webhook_dialog_active: false,
             webhook_focus: 0,
             webhook_inputs: Vec::new(),

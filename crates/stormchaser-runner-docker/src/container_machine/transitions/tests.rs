@@ -49,6 +49,7 @@ fn create_test_metadata(image: &str, cmd: Vec<&str>) -> ContainerMetadata {
         encryption_key: None,
         storage: None,
         test_report_urls: None,
+        registry_auth: None,
     }
 }
 

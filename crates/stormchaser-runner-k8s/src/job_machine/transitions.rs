@@ -87,6 +87,60 @@ impl K8sJobMachine<state::Initialized> {
         let job =
             k8s_utils::do_build_job_spec(&job_name, &self.metadata, agent_image, sfs_pvc_name)?;
 
+        if let Some(auth) = &self.metadata.registry_auth {
+            use base64::{engine::general_purpose, Engine as _};
+            use k8s_openapi::api::core::v1::Secret;
+            use std::collections::BTreeMap;
+
+            let secret_name = format!("{}-auth", job_name);
+            let username = auth.get("username").and_then(|v| v.as_str()).unwrap_or("");
+            let password = auth.get("password").and_then(|v| v.as_str()).unwrap_or("");
+            let url = auth
+                .get("url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("https://index.docker.io/v1/");
+            let url = if url.is_empty() {
+                "https://index.docker.io/v1/"
+            } else {
+                url
+            };
+
+            let auth_string = format!("{}:{}", username, password);
+            let auth_base64 = general_purpose::STANDARD.encode(auth_string);
+
+            let dockerconfigjson = serde_json::json!({
+                "auths": {
+                    url: {
+                        "username": username,
+                        "password": password,
+                        "auth": auth_base64
+                    }
+                }
+            });
+
+            let mut secret = Secret::default();
+            secret.metadata.name = Some(secret_name.clone());
+            secret.type_ = Some("kubernetes.io/dockerconfigjson".to_string());
+            let mut data = BTreeMap::new();
+            data.insert(
+                ".dockerconfigjson".to_string(),
+                k8s_openapi::ByteString(serde_json::to_vec(&dockerconfigjson).unwrap()),
+            );
+            secret.data = Some(data);
+
+            let secrets: Api<Secret> =
+                Api::namespaced(self.client.clone(), &self.metadata.namespace);
+            if let Err(e) = secrets.create(&PostParams::default(), &secret).await {
+                if let kube::Error::Api(ref err) = e {
+                    if err.code != 409 {
+                        warn!("Failed to create image pull secret {}: {}", secret_name, e);
+                    }
+                } else {
+                    warn!("Failed to create image pull secret {}: {}", secret_name, e);
+                }
+            }
+        }
+
         let jobs: Api<Job> = Api::namespaced(self.client.clone(), &self.metadata.namespace);
 
         match jobs.create(&PostParams::default(), &job).await {

@@ -79,6 +79,7 @@ pub use routes::*;
         routes::connections::get_connection,
         routes::connections::update_connection,
         routes::connections::delete_connection,
+        routes::connections::test_connection,
         routes::connections::list_run_artifacts,
         routes::connections::list_run_test_reports,
         routes::connections::list_run_test_summaries,

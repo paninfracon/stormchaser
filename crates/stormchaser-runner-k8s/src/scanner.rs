@@ -203,6 +203,7 @@ async fn handle_orphaned_job(
                             encryption_key: key_clone,
                             storage: None,
                             test_report_urls: None,
+                            registry_auth: None,
                         },
                     );
                     let _ = machine.clean_up(&job_name).await;
@@ -227,6 +228,7 @@ async fn handle_orphaned_job(
             encryption_key: key_clone,
             storage: None,
             test_report_urls: None,
+            registry_auth: None,
         };
 
         let machine = job_machine::K8sJobMachine::new(client_clone, metadata);
