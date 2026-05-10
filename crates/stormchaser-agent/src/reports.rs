@@ -19,7 +19,7 @@ struct UploadReportParams<'a> {
     matched_files: &'a [PathBuf],
     url: &'a str,
     remote_path: Option<&'a str>,
-    backend_id: Option<&'a str>,
+    connection_id: Option<&'a str>,
     client: &'a Client,
 }
 
@@ -67,7 +67,7 @@ async fn upload_report(
                 "format": params.format,
                 "hash": hash,
                 "remote_path": params.remote_path,
-                "backend_id": params.backend_id,
+                "connection_id": params.connection_id,
                 "is_claim": true,
             }),
         );
@@ -157,10 +157,10 @@ pub async fn collect_test_reports(
                     .and_then(|r| r.get("remote_path"))
                     .and_then(|v| v.as_str());
 
-                let backend_id = urls
+                let connection_id = urls
                     .as_ref()
                     .and_then(|u| u.get(name))
-                    .and_then(|r| r.get("backend_id"))
+                    .and_then(|r| r.get("connection_id"))
                     .and_then(|v| v.as_str());
 
                 if let Some(url) = put_url {
@@ -171,7 +171,7 @@ pub async fn collect_test_reports(
                             matched_files: &matched_files,
                             url,
                             remote_path,
-                            backend_id,
+                            connection_id,
                             client: &client,
                         },
                         &mut collected,
@@ -244,7 +244,7 @@ mod tests {
             "api-tests": {
                 "put_url": format!("{}/upload/report.tar.gz", mock_server.uri()),
                 "remote_path": "path/to/report.tar.gz",
-                "backend_id": "backend-id"
+                "connection_id": "backend-id"
             }
         });
 

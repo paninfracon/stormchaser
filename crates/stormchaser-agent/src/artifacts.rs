@@ -125,8 +125,8 @@ pub async fn park_artifacts(artifacts: Value) -> Result<HashMap<String, Value>> 
 
     if let Some(artifact_map) = artifacts.as_object() {
         for (name, artifact_val) in artifact_map {
-            let backend_type = artifact_val
-                .get("backend_type")
+            let connection_type = artifact_val
+                .get("connection_type")
                 .and_then(|t| t.as_str())
                 .unwrap_or("s3");
 
@@ -158,7 +158,7 @@ pub async fn park_artifacts(artifacts: Value) -> Result<HashMap<String, Value>> 
             }
             let hash = hex::encode(hasher.finalize());
 
-            if backend_type == "s3" {
+            if connection_type == "s3" {
                 upload_to_s3(
                     name,
                     artifact_val,
@@ -169,10 +169,10 @@ pub async fn park_artifacts(artifacts: Value) -> Result<HashMap<String, Value>> 
                     &mut metadata_map,
                 )
                 .await;
-            } else if backend_type == "oci" {
+            } else if connection_type == "oci" {
                 upload_to_oci(name, artifact_val, path, file_size, hash, &mut metadata_map).await;
             } else {
-                warn!("Unsupported artifact backend_type '{}'", backend_type);
+                warn!("Unsupported artifact connection_type '{}'", connection_type);
             }
         }
     }
@@ -203,7 +203,7 @@ mod tests {
 
         let artifacts = json!({
             "my-artifact": {
-                "backend_type": "s3",
+                "connection_type": "s3",
                 "path": artifact_path.to_str().unwrap(),
                 "put_url": format!("{}/artifacts/artifact.bin", mock_server.uri())
             }

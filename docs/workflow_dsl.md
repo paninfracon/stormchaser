@@ -128,29 +128,43 @@ If the checksum is missing or mismatched, the workflow compilation will fail dur
 
 ### 3. Inputs and Schemas
 
-Inputs define the contract for triggering the workflow.
+Inputs define the contract for triggering the workflow. Stormchaser uses embedded JSON Schema to define and validate inputs. This enables rich type safety, default value hydration, and dynamic query capabilities when generating forms in the TUI or Web UI via `schemaui`.
 
 ```hcl
 inputs {
-    input "service_name" {
-        type = "string"
-        description = "Name of the microservice"
-        validation = "regex('^[a-z-]+$')"
-    }
+    type = "object"
+    title = "Deploy Parameters"
+    properties {
+        service_name {
+            type = "string"
+            description = "Name of the microservice"
+            pattern = "^[a-z-]+$"
+        }
 
-    input "replica_count" {
-        type = "int"
-        default = 3
-        range = [1, 10]
-    }
+        replica_count {
+            type = "integer"
+            default = 3
+            minimum = 1
+            maximum = 10
+        }
 
-    input "environment" {
-        type = "enum"
-        options = ["staging", "production"]
-        query = "sql('SELECT name FROM envs WHERE active = true')"
+        environment {
+            type = "string"
+            description = "Deployment environment"
+            query = "sql://SELECT name FROM envs WHERE active = true"
+        }
     }
+    required = ["service_name", "environment"]
 }
 ```
+
+#### 3.1 Dynamic Options via Queries
+
+Stormchaser supports dynamic options populated via external systems (e.g., Rundeck-style). You can add a `query` property to any field in the schema. When the TUI or Web UI requests the schema, the API (`/api/v1/schema/hydrate`) dynamically resolves the query (e.g., `sql://...`, `api://...`) and converts the result into an `enum` list, replacing the `query` field before returning it to the UI.
+
+#### 3.2 TUI Integration
+
+The Stormchaser TUI utilizes the `schemaui` crate to dynamically render interactive, schema-driven forms for workflow inputs. It reads the hydrated JSON Schema and provides immediate visual feedback, dropdown lists for enums, and comprehensive validation before execution.
 
 #### 3.1 Type System
 

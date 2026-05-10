@@ -13,11 +13,11 @@ pub async fn list_run_test_reports(
     sqlx::query_as(
         r#"
             WITH combined_reports AS (
-                SELECT id, run_id, report_name, file_name, format, checksum, created_at, backend_id, remote_path FROM step_test_reports
+                SELECT id, run_id, report_name, file_name, format, checksum, created_at, connection_id, remote_path FROM step_test_reports
                 UNION ALL
-                SELECT id, run_id, report_name, file_name, format, checksum, created_at, backend_id, remote_path FROM archived_step_test_reports
+                SELECT id, run_id, report_name, file_name, format, checksum, created_at, connection_id, remote_path FROM archived_step_test_reports
             )
-            SELECT id, report_name, file_name, format, checksum, created_at, backend_id, remote_path FROM combined_reports WHERE run_id = $1 ORDER BY created_at ASC
+            SELECT id, report_name, file_name, format, checksum, created_at, connection_id, remote_path FROM combined_reports WHERE run_id = $1 ORDER BY created_at ASC
             "#,
     )
     .bind(run_id)

@@ -1,0 +1,23 @@
+workflow "dynamic-query" {
+  description = "A test workflow to validate dynamic query capabilities"
+
+  inputs {
+    type = "object"
+    properties {
+      environment {
+        type  = "string"
+        query = "sql://SELECT 'dev' UNION SELECT 'staging' UNION SELECT 'prod'"
+      }
+    }
+    required = ["environment"]
+  }
+
+  steps {
+    step "echo-env" "docker" {
+      spec {
+        image   = "alpine"
+        command = ["sh", "-c", "echo 'Deploying to ${inputs.environment}'"]
+      }
+    }
+  }
+}

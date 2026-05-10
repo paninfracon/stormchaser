@@ -79,6 +79,7 @@ tar = { workspace = true }
 flate2 = { workspace = true }
 rustls-native-certs = { version = "0.8.3", optional = true }
 cloudevents-sdk = "0.9.0"
+jsonschema.workspace = true
 
 [dev-dependencies]
 dotenvy = "0.15"

@@ -175,8 +175,8 @@ impl_id_traits!(WebhookId);
     Display,
     FromStr
 ))]
-pub struct BackendId(Uuid);
-impl_id_traits!(BackendId);
+pub struct ConnectionId(Uuid);
+impl_id_traits!(ConnectionId);
 
 #[nutype(derive(
     Debug,

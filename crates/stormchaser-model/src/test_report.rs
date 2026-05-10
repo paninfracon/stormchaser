@@ -21,9 +21,9 @@ pub struct TestReport {
     pub format: String,
     /// Raw content of the report, if small enough to be inlined.
     pub content: Option<String>,
-    /// Storage backend ID where the full report is stored.
-    pub backend_id: Option<BackendId>,
-    /// Path to the report in the remote storage backend.
+    /// Connection ID where the full report is stored.
+    pub connection_id: Option<ConnectionId>,
+    /// Path to the report in the remote connection.
     pub remote_path: Option<String>,
     /// Checksum of the report content.
     pub checksum: String,

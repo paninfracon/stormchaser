@@ -1,6 +1,6 @@
 use super::*;
-use stormchaser_model::storage::BackendType;
-use stormchaser_model::storage::StorageBackend;
+use stormchaser_model::connections::Connection;
+use stormchaser_model::connections::ConnectionType;
 
 impl<'a> App<'a> {
     /// Fetches the latest list of storage backends from the API.
@@ -14,14 +14,14 @@ impl<'a> App<'a> {
             .await?;
 
         if res.status().is_success() {
-            self.storage_backends = res.json::<Vec<StorageBackend>>().await?;
-            if !self.storage_backends.is_empty() {
+            self.connections = res.json::<Vec<Connection>>().await?;
+            if !self.connections.is_empty() {
                 if self.storage_backends_state.selected().is_none() {
                     self.storage_backends_state.select(Some(0));
                 }
                 if self.selected_storage_backend.is_none() {
                     if let Some(i) = self.storage_backends_state.selected() {
-                        self.selected_storage_backend = Some(self.storage_backends[i].clone());
+                        self.selected_storage_backend = Some(self.connections[i].clone());
                     }
                 }
             } else {
@@ -63,13 +63,13 @@ impl<'a> App<'a> {
         };
 
         let backend_type_str = crate::app::BACKEND_TYPE_OPTIONS[self.storage_backend_type_index];
-        let backend_type = match backend_type_str {
-            "S3" => BackendType::S3,
-            "Oci" => BackendType::Oci,
-            "Jfrog" => BackendType::Jfrog,
-            "Gcs" => BackendType::Gcs,
-            "Azure" => BackendType::Azure,
-            _ => BackendType::S3, // Fallback
+        let connection_type = match backend_type_str {
+            "S3" => ConnectionType::S3,
+            "Oci" => ConnectionType::Oci,
+            "Jfrog" => ConnectionType::Jfrog,
+            "Gcs" => ConnectionType::Gcs,
+            "Azure" => ConnectionType::Azure,
+            _ => ConnectionType::S3, // Fallback
         };
 
         let (method, path) = if let Some(id) = self.storage_backend_edit_id {
@@ -93,7 +93,7 @@ impl<'a> App<'a> {
         let payload = serde_json::json!({
             "name": name,
             "description": if description.trim().is_empty() { None::<String> } else { Some(description) },
-            "backend_type": backend_type,
+            "connection_type": connection_type,
             "config": config,
             "aws_assume_role_arn": aws_assume_role_arn,
             "is_default_sfs": self.storage_backend_is_default
@@ -143,7 +143,7 @@ mod tests {
     use chrono::Utc;
     use ratatui_textarea::TextArea;
     use serde_json::json;
-    use stormchaser_model::storage::{BackendType, StorageBackend};
+    use stormchaser_model::connections::{Connection, ConnectionType};
     use tokio::sync::mpsc;
 
     use wiremock::matchers::{method, path};
@@ -153,14 +153,15 @@ mod tests {
     async fn test_refresh_storage_backends_success() {
         let server = MockServer::start().await;
 
-        let backend = StorageBackend {
-            id: BackendId::new_v4(),
+        let backend = Connection {
+            id: ConnectionId::new_v4(),
             name: "test-backend".to_string(),
             description: None,
-            backend_type: BackendType::S3,
+            connection_type: ConnectionType::S3,
             config: json!({}),
             aws_assume_role_arn: None,
             is_default_sfs: true,
+            encrypted_credentials: None,
             ca_cert: None,
             client_cert: None,
             client_key: None,
@@ -179,8 +180,8 @@ mod tests {
 
         let result = app.refresh_storage_backends().await;
         assert!(result.is_ok());
-        assert_eq!(app.storage_backends.len(), 1);
-        assert_eq!(app.storage_backends[0].id, backend.id);
+        assert_eq!(app.connections.len(), 1);
+        assert_eq!(app.connections[0].id, backend.id);
         assert!(app.error.is_none());
     }
 
@@ -196,7 +197,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/api/v1/storage-backends"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(Vec::<StorageBackend>::new()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(Vec::<Connection>::new()))
             .mount(&server)
             .await;
 
@@ -240,31 +241,32 @@ mod tests {
     #[tokio::test]
     async fn test_delete_selected_storage_backend() {
         let server = MockServer::start().await;
-        let backend_id = BackendId::new_v4();
+        let connection_id = ConnectionId::new_v4();
 
         Mock::given(method("DELETE"))
-            .and(path(format!("/api/v1/storage-backends/{}", backend_id)))
+            .and(path(format!("/api/v1/storage-backends/{}", connection_id)))
             .respond_with(ResponseTemplate::new(204))
             .mount(&server)
             .await;
 
         Mock::given(method("GET"))
             .and(path("/api/v1/storage-backends"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(Vec::<StorageBackend>::new()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(Vec::<Connection>::new()))
             .mount(&server)
             .await;
 
         let (tx, _rx) = mpsc::channel(1);
         let mut app = App::new(server.uri(), Some("token".to_string()), tx);
 
-        let backend = StorageBackend {
-            id: backend_id,
+        let backend = Connection {
+            id: connection_id,
             name: "test-backend".to_string(),
             description: None,
-            backend_type: BackendType::S3,
+            connection_type: ConnectionType::S3,
             config: json!({}),
             aws_assume_role_arn: None,
             is_default_sfs: true,
+            encrypted_credentials: None,
             ca_cert: None,
             client_cert: None,
             client_key: None,

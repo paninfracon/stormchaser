@@ -151,15 +151,92 @@ pub async fn handle_workflow_queued(
         includes_to_process.extend(inc_workflow.includes);
     }
 
-    // 5. OPA Policy Check after Parsing
-    // We send the full context: AST, user, and inputs
-    let inputs = fetch_inputs(run_id, &pool).await?;
+    // 5. Schema Validation and Default Value Hydration
+    let mut inputs = fetch_inputs(run_id, &pool).await?;
 
+    // Evaluate dynamic queries
+    let mut query_results = serde_json::Map::new();
+    for query in &parsed_workflow.queries {
+        let hcl_ctx =
+            crate::hcl_eval::create_context(inputs.clone(), run_id, serde_json::json!({}));
+        let mut resolved_params = serde_json::to_value(&query.params)?;
+        if let Err(e) = crate::hcl_eval::resolve_expressions(&mut resolved_params, &hcl_ctx) {
+            let err_msg = format!(
+                "Failed to evaluate parameters for query {}: {}",
+                query.name, e
+            );
+            let _ = machine
+                .fail(err_msg.clone(), &mut *pool.acquire().await?)
+                .await?;
+            return Err(anyhow::anyhow!(err_msg));
+        }
+
+        // Execute the query
+        let result = {
+            debug!(
+                "Query execution for type '{}' is not implemented yet",
+                query.r#type
+            );
+            serde_json::json!([]) // Stub implementation
+        };
+
+        query_results.insert(query.name.clone(), result);
+    }
+
+    if let Some(mut schema_val) = parsed_workflow.inputs_schema.clone() {
+        // Resolve dynamic expressions (like query results) inside the schema
+        let mut schema_ctx =
+            crate::hcl_eval::create_context(inputs.clone(), run_id, serde_json::json!({}));
+        schema_ctx.declare_var(
+            "queries",
+            crate::hcl_eval::json_to_hcl(serde_json::Value::Object(query_results)),
+        );
+
+        if let Err(e) = crate::hcl_eval::resolve_expressions(&mut schema_val, &schema_ctx) {
+            let err_msg = format!("Failed to evaluate expressions in inputs schema: {}", e);
+            let _ = machine
+                .fail(err_msg.clone(), &mut *pool.acquire().await?)
+                .await?;
+            return Err(anyhow::anyhow!(err_msg));
+        }
+
+        // Hydrate defaults
+        if let Some(properties) = schema_val.get("properties").and_then(|p| p.as_object()) {
+            let mut inputs_obj = match inputs {
+                serde_json::Value::Object(obj) => obj,
+                _ => serde_json::Map::new(),
+            };
+
+            for (key, prop) in properties {
+                if !inputs_obj.contains_key(key) {
+                    if let Some(default_val) = prop.get("default") {
+                        inputs_obj.insert(key.clone(), default_val.clone());
+                    }
+                }
+            }
+            inputs = serde_json::Value::Object(inputs_obj);
+        }
+
+        // Validate
+        let compiled_schema = jsonschema::validator_for(&schema_val)
+            .map_err(|e| anyhow::anyhow!("Failed to compile input schema: {}", e))?;
+
+        if let Err(e) = compiled_schema.validate(&inputs) {
+            let full_err = format!("Input validation failed: {}", e);
+            let _ = machine
+                .fail(full_err.clone(), &mut *pool.acquire().await?)
+                .await?;
+            return Err(anyhow::anyhow!(full_err));
+        }
+    }
+
+    // 6. OPA Policy Check after Parsing
+    // We send the full context: AST, user, and inputs
     let opa_context = EngineOpaContext {
         run_id,
         initiating_user: machine.run.initiating_user.clone(),
         workflow_ast: serde_json::to_value(&parsed_workflow)?,
-        inputs,
+        inputs: inputs.clone(),
     };
 
     match opa_client.check_context(opa_context).await {
@@ -178,18 +255,19 @@ pub async fn handle_workflow_queued(
         }
     }
 
-    // 6. Update RunContext with the definition and source code
+    // 7. Update RunContext with the definition and source code
     crate::db::update_run_context(
         &pool,
         serde_json::to_value(&parsed_workflow)?,
         Some(&workflow_content).map(|s| s.as_str()),
         &parsed_workflow.dsl_version,
+        inputs,
         run_id,
     )
     .await
     .with_context(|| format!("Failed to update run context for {}", run_id))?;
 
-    // 7. Transition to StartPending
+    // 8. Transition to StartPending
     let machine = machine.start_pending(&mut *pool.acquire().await?).await?;
 
     // Emit event for transition to StartPending

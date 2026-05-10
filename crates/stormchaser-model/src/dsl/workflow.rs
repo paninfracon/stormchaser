@@ -35,6 +35,12 @@ pub struct Workflow {
     pub storage: Vec<Storage>,
     /// Expected inputs for the workflow.
     pub inputs: Vec<Input>,
+    /// Dynamic queries.
+    #[serde(default)]
+    pub queries: Vec<Query>,
+    /// Compiled JSON schema for inputs.
+    #[serde(default)]
+    pub inputs_schema: Option<serde_json::Value>,
     /// Outputs to be produced by the workflow.
     pub outputs: Vec<Output>,
     /// Event handlers for system or custom events.
@@ -138,8 +144,18 @@ pub struct Input {
     pub validation: Option<String>,
     /// Allowed options for enum-like inputs.
     pub options: Option<Vec<String>>,
-    /// Dynamic query to fetch options.
-    pub query: Option<String>,
+}
+
+/// Dynamic query definition.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+pub struct Query {
+    /// Name of the query variable.
+    pub name: String,
+    /// Type of the query.
+    pub r#type: String,
+    /// Parameters for the query.
+    #[serde(default)]
+    pub params: HashMap<String, String>,
 }
 
 /// Workflow output value definition.

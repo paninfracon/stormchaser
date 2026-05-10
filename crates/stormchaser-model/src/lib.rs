@@ -11,6 +11,8 @@ pub use id::*;
 
 /// Authentication and authorization models.
 pub mod auth;
+/// Storage backend and artifact registry models.
+pub mod connections;
 /// Cron scheduling definitions.
 pub mod cron;
 /// Domain-Specific Language (DSL) abstract syntax tree and types.
@@ -37,14 +39,13 @@ pub mod schema_cache;
 pub mod schema_gen;
 /// Workflow step execution models and state.
 pub mod step;
-/// Storage backend and artifact registry models.
-pub mod storage;
 /// Test reporting and summary models.
 pub mod test_report;
 /// Core workflow run and state management types.
 pub mod workflow;
 
 pub use auth::{ApiOpaContext, Claims, EngineOpaContext, OpaClient};
+pub use connections::{Connection, ConnectionType};
 pub use dsl::{ApprovalSpec, WaitEventSpec};
 pub use event::{ApprovalRegistry, EventCorrelation};
 pub use event_rules::{EventRule, WebhookConfig};
@@ -52,7 +53,6 @@ pub use logging::LogBackend;
 pub use outbox::OutboxMessage;
 pub use runner::{Runner, RunnerStatus, StepDefinition};
 pub use step::{StepInstance, StepOutput, StepStatus};
-pub use storage::{BackendType, StorageBackend};
 pub use test_report::{TestCase, TestCaseStatus, TestReport, TestSummary};
 pub use workflow::{AuditLog, RunContext, RunQuotas, RunStatus, WorkflowRun};
 

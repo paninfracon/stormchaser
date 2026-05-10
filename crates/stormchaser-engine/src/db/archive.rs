@@ -93,10 +93,10 @@ pub async fn archive_and_delete_workflow_run(
     sqlx::query(
         r#"
         INSERT INTO archived_step_test_reports (
-            id, run_id, step_instance_id, report_name, file_name, format, content, checksum, created_at, backend_id, remote_path
+            id, run_id, step_instance_id, report_name, file_name, format, content, checksum, created_at, connection_id, remote_path
         )
         SELECT
-            r.id, si.run_id, r.step_instance_id, r.report_name, r.file_name, r.format, r.content, r.checksum, r.created_at, r.backend_id, r.remote_path
+            r.id, si.run_id, r.step_instance_id, r.report_name, r.file_name, r.format, r.content, r.checksum, r.created_at, r.connection_id, r.remote_path
         FROM step_test_reports r
         JOIN step_instances si ON r.step_instance_id = si.id
         WHERE si.run_id = $1
@@ -144,10 +144,10 @@ pub async fn archive_and_delete_workflow_run(
     sqlx::query(
         r#"
         INSERT INTO archived_artifact_registry (
-            id, run_id, step_instance_id, artifact_name, backend_id, remote_path, metadata, created_at
+            id, run_id, step_instance_id, artifact_name, connection_id, remote_path, metadata, created_at
         )
         SELECT
-            id, run_id, step_instance_id, artifact_name, backend_id, remote_path, metadata, created_at
+            id, run_id, step_instance_id, artifact_name, connection_id, remote_path, metadata, created_at
         FROM artifact_registry WHERE run_id = $1
         "#,
     )

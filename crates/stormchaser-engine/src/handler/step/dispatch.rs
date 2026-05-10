@@ -4,13 +4,13 @@ use serde_json::Value;
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
+use stormchaser_model::connections::Connection;
+use stormchaser_model::connections::ConnectionType;
 use stormchaser_model::dsl::Step;
 use stormchaser_model::events::{
     EventSource, EventType, SchemaVersion, StepEventType, StepScheduledEvent,
 };
 use stormchaser_model::nats::publish_cloudevent;
-use stormchaser_model::storage::BackendType;
-use stormchaser_model::storage::StorageBackend;
 use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
 use stormchaser_tls::TlsReloader;
@@ -57,7 +57,7 @@ async fn resolve_storage_provision(
     for prov in &storage.provision {
         let mut prov_clone = prov.clone();
         if prov_clone.resource_type == "artifact" {
-            let (backend_id, remote_path) =
+            let (connection_id, remote_path) =
                 crate::db::get_artifact_by_name(pool, run_id.into_inner(), &prov_clone.name)
                     .await?
                     .with_context(|| {
@@ -67,17 +67,17 @@ async fn resolve_storage_provision(
                         )
                     })?;
 
-            let backend_info: StorageBackend =
-                crate::db::get_storage_backend_by_id(pool, backend_id)
+            let backend_info: Connection =
+                crate::db::get_storage_backend_by_id(pool, connection_id)
                     .await?
                     .with_context(|| {
                         format!(
                             "Storage backend {} not found for artifact '{}'",
-                            backend_id, prov_clone.name
+                            connection_id, prov_clone.name
                         )
                     })?;
 
-            if backend_info.backend_type != BackendType::S3 {
+            if backend_info.connection_type != ConnectionType::S3 {
                 anyhow::bail!(
                     "Artifact '{}' requires an S3 backend for provisioning; backend '{}' is not S3",
                     prov_clone.name,
@@ -151,7 +151,7 @@ async fn setup_storage_urls(
             continue;
         }
 
-        let backend: Option<StorageBackend> = if let Some(ref backend_name) = storage.backend {
+        let backend: Option<Connection> = if let Some(ref backend_name) = storage.backend {
             crate::db::get_storage_backend_by_name(pool, backend_name).await?
         } else {
             crate::db::get_default_sfs_backend(pool).await?
@@ -161,7 +161,7 @@ async fn setup_storage_urls(
             let mut get_url = None;
             let mut put_url = None;
 
-            if backend.backend_type == BackendType::S3 {
+            if backend.connection_type == ConnectionType::S3 {
                 let client = crate::s3::get_s3_client(&backend).await?;
                 let bucket = backend.config["bucket"]
                     .as_str()
@@ -386,7 +386,7 @@ async fn setup_test_report_urls(
                     serde_json::json!({
                         "put_url": put_url,
                         "remote_path": report_key,
-                        "backend_id": backend.id,
+                        "connection_id": backend.id,
                     }),
                 );
             }

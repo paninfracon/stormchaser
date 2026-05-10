@@ -15,7 +15,7 @@ pub enum StorageCommands {
         name: String,
         /// The type of storage backend (e.g., s3, oci)
         #[arg(long)]
-        backend_type: String,
+        connection_type: String,
         /// Path to JSON configuration file
         #[arg(long)]
         config: PathBuf,
@@ -28,10 +28,10 @@ pub enum StorageCommands {
         aws_assume_role_arn: Option<String>,
     },
     /// Get storage backend details
-    Get { id: stormchaser_model::BackendId },
+    Get { id: stormchaser_model::ConnectionId },
     /// Update a storage backend
     Update {
-        id: stormchaser_model::BackendId,
+        id: stormchaser_model::ConnectionId,
         #[arg(long)]
         name: Option<String>,
         /// Path to JSON configuration file
@@ -46,7 +46,7 @@ pub enum StorageCommands {
         aws_assume_role_arn: Option<String>,
     },
     /// Delete a storage backend
-    Delete { id: stormchaser_model::BackendId },
+    Delete { id: stormchaser_model::ConnectionId },
 }
 
 pub async fn handle(
@@ -67,7 +67,7 @@ pub async fn handle(
         }
         StorageCommands::Create {
             name,
-            backend_type,
+            connection_type,
             config,
             default_sfs,
             description,
@@ -80,7 +80,7 @@ pub async fn handle(
                 .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
                 .json(&json!({
                     "name": name,
-                    "backend_type": backend_type,
+                    "connection_type": connection_type,
                     "config": config_json,
                     "is_default_sfs": default_sfs,
                     "description": description,
@@ -188,7 +188,7 @@ mod tests {
         let client = ClientBuilder::new(reqwest::Client::new()).build();
         let cmd = StorageCommands::Create {
             name: "test-storage".to_string(),
-            backend_type: "s3".to_string(),
+            connection_type: "s3".to_string(),
             config: temp_file.path().to_path_buf(),
             default_sfs: true,
             description: None,
@@ -202,7 +202,7 @@ mod tests {
     #[tokio::test]
     async fn test_storage_delete() {
         let server = MockServer::start().await;
-        let id = stormchaser_model::BackendId::new_v4();
+        let id = stormchaser_model::ConnectionId::new_v4();
         Mock::given(method("DELETE"))
             .and(path(format!("/api/v1/storage-backends/{}", id)))
             .and(header(reqwest::header::AUTHORIZATION, "Bearer test-token"))

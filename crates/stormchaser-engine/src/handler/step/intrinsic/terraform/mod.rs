@@ -258,7 +258,6 @@ pub fn mutate_if_terraform_approval(step_type: &mut String, resolved_spec: &mut 
             default: Some(serde_json::json!("Approve")),
             validation: None,
             options: Some(vec!["Approve".to_string(), "Reject".to_string()]),
-            query: None,
         };
 
         let mut notify_spec: Option<EmailSpec> = actual_spec

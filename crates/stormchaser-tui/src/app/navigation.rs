@@ -64,12 +64,12 @@ impl<'a> App<'a> {
 
     /// Selects the next storage backend in the list.
     pub fn next_storage_backend(&mut self) {
-        if self.storage_backends.is_empty() {
+        if self.connections.is_empty() {
             return;
         }
         let i = match self.storage_backends_state.selected() {
             Some(i) => {
-                if i >= self.storage_backends.len() - 1 {
+                if i >= self.connections.len() - 1 {
                     0
                 } else {
                     i + 1
@@ -78,18 +78,18 @@ impl<'a> App<'a> {
             None => 0,
         };
         self.storage_backends_state.select(Some(i));
-        self.selected_storage_backend = Some(self.storage_backends[i].clone());
+        self.selected_storage_backend = Some(self.connections[i].clone());
     }
 
     /// Selects the previous storage backend in the list.
     pub fn previous_storage_backend(&mut self) {
-        if self.storage_backends.is_empty() {
+        if self.connections.is_empty() {
             return;
         }
         let i = match self.storage_backends_state.selected() {
             Some(i) => {
                 if i == 0 {
-                    self.storage_backends.len() - 1
+                    self.connections.len() - 1
                 } else {
                     i - 1
                 }
@@ -97,7 +97,7 @@ impl<'a> App<'a> {
             None => 0,
         };
         self.storage_backends_state.select(Some(i));
-        self.selected_storage_backend = Some(self.storage_backends[i].clone());
+        self.selected_storage_backend = Some(self.connections[i].clone());
     }
 
     /// Selects the next webhook in the list.

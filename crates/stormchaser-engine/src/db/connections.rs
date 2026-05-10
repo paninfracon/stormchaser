@@ -1,6 +1,6 @@
 use serde_json::Value;
 use sqlx::{Executor, Postgres};
-use stormchaser_model::{BackendId, RunId, StepInstanceId, TestSummary};
+use stormchaser_model::{ConnectionId, RunId, StepInstanceId, TestSummary};
 use uuid::Uuid;
 
 use stormchaser_model::test_report;
@@ -41,7 +41,7 @@ where
     O: Send + Unpin,
     (O,): for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,
 {
-    sqlx::query_scalar::<_, O>("SELECT id FROM storage_backends WHERE name = $1")
+    sqlx::query_scalar::<_, O>("SELECT id FROM connections WHERE name = $1")
         .bind(name)
         .fetch_optional(executor)
         .await
@@ -55,11 +55,9 @@ where
     O: Send + Unpin,
     (O,): for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,
 {
-    sqlx::query_scalar::<_, O>(
-        "SELECT id FROM storage_backends WHERE is_default_sfs = TRUE LIMIT 1",
-    )
-    .fetch_optional(executor)
-    .await
+    sqlx::query_scalar::<_, O>("SELECT id FROM connections WHERE is_default_sfs = TRUE LIMIT 1")
+        .fetch_optional(executor)
+        .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -69,7 +67,7 @@ pub async fn insert_artifact_registry<'a, E>(
     run_id: RunId,
     step_instance_id: StepInstanceId,
     artifact_name: &str,
-    backend_id: BackendId,
+    connection_id: ConnectionId,
     remote_path: String,
     metadata: Value,
 ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
@@ -78,14 +76,14 @@ where
 {
     sqlx::query(
         r#"
-                        INSERT INTO artifact_registry (run_id, step_instance_id, artifact_name, backend_id, remote_path, metadata)
+                        INSERT INTO artifact_registry (run_id, step_instance_id, artifact_name, connection_id, remote_path, metadata)
                         VALUES ($1, $2, $3, $4, $5, $6)
                         "#,
     )
     .bind(run_id)
     .bind(step_instance_id)
     .bind(artifact_name)
-    .bind(backend_id)
+    .bind(connection_id)
     .bind(remote_path)
     .bind(metadata)
     .execute(executor)
@@ -103,7 +101,7 @@ pub async fn insert_step_test_report<'a, E>(
     format: &str,
     content: Option<&str>,
     checksum: &str,
-    backend_id: Option<Uuid>,
+    connection_id: Option<Uuid>,
     remote_path: Option<&str>,
 ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
 where
@@ -111,7 +109,7 @@ where
 {
     sqlx::query(
         r#"
-                    INSERT INTO step_test_reports (run_id, step_instance_id, report_name, file_name, format, content, checksum, backend_id, remote_path)
+                    INSERT INTO step_test_reports (run_id, step_instance_id, report_name, file_name, format, content, checksum, connection_id, remote_path)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                     "#,
     )
@@ -122,7 +120,7 @@ where
     .bind(format)
     .bind(content)
     .bind(checksum)
-    .bind(backend_id)
+    .bind(connection_id)
     .bind(remote_path)
     .execute(executor)
     .await
@@ -198,7 +196,7 @@ where
     E: Executor<'a, Database = Postgres>,
     O: Send + Unpin + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,
 {
-    sqlx::query_as::<_, O>("SELECT * FROM storage_backends WHERE name = $1")
+    sqlx::query_as::<_, O>("SELECT * FROM connections WHERE name = $1")
         .bind(name)
         .fetch_optional(executor)
         .await
@@ -211,7 +209,7 @@ where
     E: Executor<'a, Database = Postgres>,
     O: Send + Unpin + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,
 {
-    sqlx::query_as::<_, O>("SELECT * FROM storage_backends WHERE is_default_sfs = TRUE LIMIT 1")
+    sqlx::query_as::<_, O>("SELECT * FROM connections WHERE is_default_sfs = TRUE LIMIT 1")
         .fetch_optional(executor)
         .await
 }
@@ -245,7 +243,7 @@ where
     E: Executor<'a, Database = Postgres>,
     O: Send + Unpin + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,
 {
-    sqlx::query_as::<_, O>("SELECT * FROM storage_backends WHERE id = $1")
+    sqlx::query_as::<_, O>("SELECT * FROM connections WHERE id = $1")
         .bind(id)
         .fetch_optional(executor)
         .await
@@ -261,7 +259,7 @@ where
 {
     let record = sqlx::query(
         r#"
-        SELECT backend_id, remote_path
+        SELECT connection_id, remote_path
         FROM artifact_registry
         WHERE run_id = $1 AND artifact_name = $2
         ORDER BY created_at DESC
@@ -275,6 +273,6 @@ where
 
     Ok(record.map(|r| {
         use sqlx::Row;
-        (r.get("backend_id"), r.get("remote_path"))
+        (r.get("connection_id"), r.get("remote_path"))
     }))
 }

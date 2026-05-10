@@ -1,14 +1,14 @@
 use crate::UpdateStorageBackendRequest;
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
-use stormchaser_model::BackendId;
+use stormchaser_model::ConnectionId;
 
-use stormchaser_model::storage;
+use stormchaser_model::connections;
 
 /// Unsets the default Stormchaser File System.
 /// Unset default sfs.
 pub async fn unset_default_sfs(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE storage_backends SET is_default_sfs = FALSE WHERE is_default_sfs = TRUE")
+    sqlx::query("UPDATE connections SET is_default_sfs = FALSE WHERE is_default_sfs = TRUE")
         .execute(&mut **tx)
         .await?;
     Ok(())
@@ -17,26 +17,26 @@ pub async fn unset_default_sfs(tx: &mut Transaction<'_, Postgres>) -> Result<(),
 /// Creates a new storage backend.
 /// Create storage backend.
 #[allow(clippy::too_many_arguments)]
-pub async fn create_storage_backend(
+pub async fn create_connection(
     tx: &mut Transaction<'_, Postgres>,
-    id: BackendId,
+    id: ConnectionId,
     name: &str,
     description: &Option<String>,
-    backend_type: &storage::BackendType,
+    connection_type: &connections::ConnectionType,
     config: &Value,
     aws_assume_role_arn: &Option<String>,
     is_default_sfs: bool,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"
-        INSERT INTO storage_backends (id, name, description, backend_type, config, aws_assume_role_arn, is_default_sfs)
+        INSERT INTO connections (id, name, description, connection_type, config, aws_assume_role_arn, is_default_sfs)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
         "#,
     )
     .bind(id)
     .bind(name)
     .bind(description)
-    .bind(backend_type)
+    .bind(connection_type)
     .bind(config)
     .bind(aws_assume_role_arn)
     .bind(is_default_sfs)
@@ -47,21 +47,19 @@ pub async fn create_storage_backend(
 
 /// Retrieves all storage backends.
 /// List storage backends.
-pub async fn list_storage_backends(
-    pool: &PgPool,
-) -> Result<Vec<storage::StorageBackend>, sqlx::Error> {
-    sqlx::query_as("SELECT * FROM storage_backends ORDER BY name ASC")
+pub async fn list_connections(pool: &PgPool) -> Result<Vec<connections::Connection>, sqlx::Error> {
+    sqlx::query_as("SELECT * FROM connections ORDER BY name ASC")
         .fetch_all(pool)
         .await
 }
 
 /// Retrieves a storage backend by ID.
 /// Get storage backend.
-pub async fn get_storage_backend(
+pub async fn get_connection(
     pool: &PgPool,
-    id: BackendId,
-) -> Result<Option<storage::StorageBackend>, sqlx::Error> {
-    sqlx::query_as("SELECT * FROM storage_backends WHERE id = $1")
+    id: ConnectionId,
+) -> Result<Option<connections::Connection>, sqlx::Error> {
+    sqlx::query_as("SELECT * FROM connections WHERE id = $1")
         .bind(id)
         .fetch_optional(pool)
         .await
@@ -69,12 +67,12 @@ pub async fn get_storage_backend(
 
 /// Updates an existing storage backend.
 /// Update storage backend.
-pub async fn update_storage_backend(
+pub async fn update_connection(
     tx: &mut Transaction<'_, Postgres>,
-    id: BackendId,
+    id: ConnectionId,
     payload: &UpdateStorageBackendRequest,
 ) -> Result<(), sqlx::Error> {
-    let mut query = sqlx::QueryBuilder::new("UPDATE storage_backends SET ");
+    let mut query = sqlx::QueryBuilder::new("UPDATE connections SET ");
     let mut separated = query.separated(", ");
 
     if let Some(name) = &payload.name {
@@ -83,8 +81,10 @@ pub async fn update_storage_backend(
     if let Some(desc) = &payload.description {
         separated.push("description = ").push_bind_unseparated(desc);
     }
-    if let Some(bt) = &payload.backend_type {
-        separated.push("backend_type = ").push_bind_unseparated(bt);
+    if let Some(bt) = &payload.connection_type {
+        separated
+            .push("connection_type = ")
+            .push_bind_unseparated(bt);
     }
     if let Some(cfg) = &payload.config {
         separated.push("config = ").push_bind_unseparated(cfg);
@@ -114,8 +114,8 @@ pub async fn update_storage_backend(
 
 /// Deletes a storage backend from the database.
 /// Delete storage backend.
-pub async fn delete_storage_backend(pool: &PgPool, id: BackendId) -> Result<(), sqlx::Error> {
-    sqlx::query("DELETE FROM storage_backends WHERE id = $1")
+pub async fn delete_connection(pool: &PgPool, id: ConnectionId) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM connections WHERE id = $1")
         .bind(id)
         .execute(pool)
         .await?;

@@ -101,6 +101,7 @@ async fn test_db_layer_functions() {
         serde_json::json!({}),
         Some("new code"),
         "2.0",
+        serde_json::json!({}),
         run_id,
     )
     .await
@@ -170,7 +171,7 @@ async fn test_db_layer_functions() {
         .unwrap();
 
     // Storage
-    db::storage::insert_step_test_report(
+    db::connections::insert_step_test_report(
         &pool,
         run_id.into_inner(),
         step_id.into_inner(),
@@ -198,7 +199,7 @@ async fn test_db_layer_functions() {
         duration_ms: 500,
         created_at: Utc::now(),
     };
-    db::storage::insert_step_test_summary(
+    db::connections::insert_step_test_summary(
         &pool,
         run_id.into_inner(),
         step_id.into_inner(),
@@ -220,7 +221,7 @@ async fn test_db_layer_functions() {
         message: None,
         created_at: Utc::now(),
     };
-    db::storage::insert_step_test_case(
+    db::connections::insert_step_test_case(
         &pool,
         run_id.into_inner(),
         step_id.into_inner(),

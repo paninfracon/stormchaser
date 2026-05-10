@@ -6,19 +6,19 @@ use ratatui::{
     Frame,
 };
 
+pub mod connections;
 pub mod cron;
 pub mod dialogs;
 pub mod event_rules;
 pub mod runs;
-pub mod storage;
 pub mod utils;
 pub mod webhooks;
 
+use connections::*;
 use cron::*;
 use dialogs::*;
 use event_rules::*;
 use runs::*;
-use storage::*;
 use utils::*;
 use webhooks::*;
 
@@ -38,7 +38,7 @@ pub fn ui(f: &mut Frame, app: &mut App) {
     if app.active_pane == crate::app::Pane::StorageBackendsList
         || app.active_pane == crate::app::Pane::StorageBackendDetail
     {
-        render_storage_backends_tab(f, chunks[0], app);
+        render_connections_tab(f, chunks[0], app);
     } else if app.active_pane == crate::app::Pane::WebhooksList
         || app.active_pane == crate::app::Pane::WebhookDetail
     {
@@ -76,7 +76,7 @@ pub fn ui(f: &mut Frame, app: &mut App) {
     } else if app.schedule_git_dialog_active {
         render_schedule_git_dialog(f, app);
     } else if app.storage_backend_dialog_active {
-        render_storage_backend_dialog(f, app);
+        render_connection_dialog(f, app);
     } else if app.webhook_dialog_active {
         render_webhook_dialog(f, app);
     } else if app.event_rule_dialog_active {
@@ -89,6 +89,8 @@ pub fn ui(f: &mut Frame, app: &mut App) {
         render_approval_dialog(f, app);
     } else if app.file_browser_active {
         render_file_browser(f, app);
+    } else if let Some(dialog) = &mut app.pending_schema_ui {
+        crate::app::schema_dialog::draw_schema_dialog(f, dialog);
     }
 }
 
