@@ -83,6 +83,8 @@ pub fn ui(f: &mut Frame, app: &mut App) {
         render_event_rule_dialog(f, app);
     } else if app.cron_dialog_active {
         render_cron_dialog(f, app);
+    } else if app.delete_run_dialog_active {
+        render_delete_run_dialog(f, app);
     } else if app.approval_dialog_active {
         render_approval_dialog(f, app);
     } else if app.file_browser_active {

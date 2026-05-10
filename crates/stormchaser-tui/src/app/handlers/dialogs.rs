@@ -221,6 +221,19 @@ impl<'a> App<'a> {
         }
     }
 
+    pub async fn handle_delete_run_dialog_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+                self.delete_run_dialog_active = false;
+            }
+            KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => {
+                let _ = self.delete_selected_run().await;
+                self.delete_run_dialog_active = false;
+            }
+            _ => {}
+        }
+    }
+
     pub async fn handle_file_browser_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Esc => {

@@ -261,6 +261,8 @@ pub struct App<'a> {
     pub cron_edit_id: Option<CronWorkflowId>,
     /// Whether the approval dialog is active.
     pub approval_dialog_active: bool,
+    /// Whether the delete run dialog is active.
+    pub delete_run_dialog_active: bool,
     /// Text area for JSON inputs for step approval.
     pub approval_inputs: ratatui_textarea::TextArea<'a>,
     /// Whether the file browser dialog is active.
@@ -397,6 +399,7 @@ impl<'a> App<'a> {
             cron_is_active: false,
             cron_edit_id: None,
             approval_dialog_active: false,
+            delete_run_dialog_active: false,
             approval_inputs: ratatui_textarea::TextArea::default(),
             file_browser_active: false,
             pending_schema_ui: None,

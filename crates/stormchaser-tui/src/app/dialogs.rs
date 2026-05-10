@@ -166,6 +166,13 @@ impl<'a> App<'a> {
         self.approval_inputs = ratatui_textarea::TextArea::from(vec!["{}".to_string()]);
     }
 
+    /// Opens the delete run dialog.
+    pub fn open_delete_run_dialog(&mut self) {
+        if self.runs_state.selected().is_some() {
+            self.delete_run_dialog_active = true;
+        }
+    }
+
     /// Opens the event rule create/edit dialog.
     pub fn open_event_rule_dialog(&mut self, edit: bool) {
         self.event_rule_dialog_active = true;

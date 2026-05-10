@@ -226,7 +226,7 @@ impl<'a> App<'a> {
                     let _ = self.delete_selected_cron_workflow().await;
                 }
                 Pane::RunsList | Pane::RunDetail => {
-                    let _ = self.delete_selected_run().await;
+                    self.open_delete_run_dialog();
                 }
                 _ => {}
             },

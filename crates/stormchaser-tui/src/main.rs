@@ -160,6 +160,8 @@ async fn handle_app_event_key<'a>(
         app.handle_cron_dialog_key(key).await;
     } else if app.approval_dialog_active {
         app.handle_approval_dialog_key(key).await;
+    } else if app.delete_run_dialog_active {
+        app.handle_delete_run_dialog_key(key).await;
     } else if app.file_browser_active {
         app.handle_file_browser_key(key).await;
     } else {
