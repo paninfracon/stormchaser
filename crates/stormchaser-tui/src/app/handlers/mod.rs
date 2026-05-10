@@ -200,6 +200,7 @@ impl<'a> App<'a> {
                 Pane::WebhooksList | Pane::WebhookDetail => self.open_webhook_dialog(false),
                 Pane::EventRulesList | Pane::EventRuleDetail => self.open_event_rule_dialog(false),
                 Pane::CronWorkflowsList | Pane::CronWorkflowDetail => self.open_cron_dialog(false),
+                Pane::RunsList | Pane::RunDetail => self.open_schedule_git_dialog(),
                 _ => {}
             },
             KeyCode::Char('e') => match self.active_pane {
@@ -209,7 +210,7 @@ impl<'a> App<'a> {
                 Pane::WebhooksList | Pane::WebhookDetail => self.open_webhook_dialog(true),
                 Pane::EventRulesList | Pane::EventRuleDetail => self.open_event_rule_dialog(true),
                 Pane::CronWorkflowsList | Pane::CronWorkflowDetail => self.open_cron_dialog(true),
-                _ => self.open_file_browser(),
+                _ => {}
             },
             KeyCode::Char('d') => match self.active_pane {
                 Pane::StorageBackendsList | Pane::StorageBackendDetail => {

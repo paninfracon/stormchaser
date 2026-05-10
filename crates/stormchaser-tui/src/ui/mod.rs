@@ -59,7 +59,7 @@ pub fn ui(f: &mut Frame, app: &mut App) {
     let status_text = if let Some(err) = &app.error {
         format!("Error: {}", err)
     } else {
-        "Tabs: 1-Runs 2-Backends 3-Webhooks 4-Rules 5-Cron | Panes: Tab/h/l | Nav: j/k | Scroll: [/]/PgUp/PgDn | Actions: c(reate)/e(dit)/d(elete) | Filter: f | Quit: q"
+        "Tabs: 1-Runs 2-Backends 3-Webhooks 4-Rules 5-Cron | Panes: Tab/h/l | Nav: j/k | Scroll: [/]/PgUp/PgDn | Actions: c(reate)/e(dit)/d(elete)/r(un local) | Filter: f | Quit: q"
             .to_string()
     };
     let status_bar = Paragraph::new(status_text)
