@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-05-09
+
+### Added
+
+- feat(runner-docker): Implement SFS optimization via Host Bind Mounts (#23)
+- feat: Add MCP Server support (#22)
+
+### Changed
+
+- Replace ratatui form (#25)
+- Refactor long branches (#24)
+
+### Fixed
+
+- Fix/string literals (#21)
+
 ## [1.3.1] - 2026-05-08
 
 ### Added

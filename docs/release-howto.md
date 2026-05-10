@@ -25,10 +25,7 @@ Before cutting a new release tag, ensure the following steps are meticulously fo
 5. **Update GitHub Issue Templates:**
     * In `.github/ISSUE_TEMPLATE/bug_report.md`, bump the version placeholder (e.g., `- Stormchaser Version: [e.g. X.Y.Z]`).
 
-6. **Update README Badges:**
-    * In `README.md`, update the `Crates.io` and `Docs.rs` static badges to reflect the new `"vX.Y.Z"` version.
-
-7. **Verify Project Integrity (Crucial before check-in):**
+6. **Verify Project Integrity (Crucial before check-in):**
     * Format code: `cargo fmt`
     * Linting: `cargo clippy --workspace --all-targets --all-features -- -D warnings`
     * Unit Tests: `./scripts/test-unit.sh`
