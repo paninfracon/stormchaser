@@ -205,6 +205,23 @@ pub struct WebhookInvokeSpec {
 
 /// Specification for making a REST API call.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct RestApiResponseExtractor {
+    /// Output key name.
+    pub name: String,
+    /// Data format (e.g., 'json', 'regex').
+    pub format: Option<String>,
+    /// JSON Pointer (or dot-notation path) used for JSON response extraction.
+    pub json_pointer: Option<String>,
+    /// Regular expression to match against the response body.
+    pub regex: Option<String>,
+    /// Regex capture group index.
+    pub group: Option<u32>,
+    /// Whether the extracted output is sensitive.
+    pub sensitive: Option<bool>,
+}
+
+/// Specification for making a REST API call.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct RestApiSpec {
     /// REST API URL.
     pub url: String,
@@ -217,7 +234,7 @@ pub struct RestApiSpec {
     /// Request timeout.
     pub timeout: Option<String>,
     /// Rules for extracting outputs from the response.
-    pub extractors: Option<Vec<crate::dsl::OutputExtraction>>,
+    pub extractors: Option<Vec<RestApiResponseExtractor>>,
 }
 
 /// Supported email backends.

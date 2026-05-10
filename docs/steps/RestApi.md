@@ -21,10 +21,10 @@ An extractor object has the following fields:
 
 * `name` (string, required): The name of the output variable to create.
 * `format` (string, optional): The format of the extraction. Can be `"json"` or `"regex"`.
-* `regex` (string, optional):
-  * If `format` is `"json"`, this field acts as a **JSON Pointer** (e.g., `"/data/items/0/id"`) or dot-notation path (e.g., `"data.items.0.id"`).
-  * If `format` is `"regex"`, this field is the regular expression to match against the response body.
+* `json_pointer` (string, optional): If `format` is `"json"`, this field acts as a **JSON Pointer** (e.g., `"/data/items/0/id"`) or dot-notation path (e.g., `"data.items.0.id"`).
+* `regex` (string, optional): If `format` is `"regex"`, this field is the regular expression to match against the response body.
 * `group` (number, optional): If `format` is `"regex"`, the capture group index to extract (defaults to 1).
+* `sensitive` (boolean, optional): Marks the extracted output as sensitive when it is persisted.
 
 If no extractors are provided, or regardless of the extractors, the entire parsed response body is automatically captured in an output named `response`.
 
@@ -43,15 +43,16 @@ step "fetch_user_data" "RestApi" {
 
     extractors = [
       {
-        name   = "user_email"
-        format = "json"
-        regex  = "/data/email"
+        name         = "user_email"
+        format       = "json"
+        json_pointer = "/data/email"
       },
       {
-        name   = "session_token"
-        format = "regex"
-        regex  = "Token is ([A-Z0-9]+)"
-        group  = 1
+        name      = "session_token"
+        format    = "regex"
+        regex     = "Token is ([A-Z0-9]+)"
+        group     = 1
+        sensitive = true
       }
     ]
   }

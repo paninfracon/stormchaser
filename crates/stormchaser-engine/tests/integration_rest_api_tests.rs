@@ -73,15 +73,13 @@ async fn test_rest_api_step_execution() {
                         extractors = [
                             {{
                                 name = "my_token"
-                                source = "body"
                                 format = "json"
-                                regex = "/data/token"
+                                json_pointer = "/data/token"
                             }},
                             {{
                                 name = "my_id"
-                                source = "body"
                                 format = "json"
-                                regex = "data.id"
+                                json_pointer = "data.id"
                             }}
                         ]
                     }}

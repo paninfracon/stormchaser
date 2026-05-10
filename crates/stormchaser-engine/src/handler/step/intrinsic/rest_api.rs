@@ -4,8 +4,10 @@ use serde_json::Value;
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
-use stormchaser_model::dsl::RestApiSpec;
-use stormchaser_model::events::{EventSource, EventType, StepCompletedEvent, StepEventType};
+use stormchaser_model::dsl::{RestApiResponseExtractor, RestApiSpec};
+use stormchaser_model::events::{
+    EventSource, EventType, SchemaVersion, StepCompletedEvent, StepEventType,
+};
 use stormchaser_model::nats::NatsSubject;
 use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
@@ -152,35 +154,60 @@ fn apply_extractors(
 ) {
     if let Some(extractors) = &spec.extractors {
         for ext in extractors {
-            if ext.format.as_deref() == Some("json") {
-                if let Some(path) = &ext.regex {
-                    // Use JSON pointer for field extraction
-                    let pointer_path = if path.starts_with('/') {
-                        path.clone()
+            match extractor_mode(ext) {
+                ExtractorMode::Json => {
+                    if let Some(path) = &ext.json_pointer {
+                        let pointer_path = normalize_json_pointer(path);
+                        if let Some(val) = body_val.pointer(&pointer_path) {
+                            final_outputs.insert(ext.name.clone(), val.clone());
+                        }
                     } else {
-                        format!("/{}", path.replace(".", "/"))
-                    };
-                    if let Some(val) = body_val.pointer(&pointer_path) {
-                        final_outputs.insert(ext.name.clone(), val.clone());
+                        final_outputs.insert(ext.name.clone(), body_val.clone());
                     }
-                } else {
-                    final_outputs.insert(ext.name.clone(), body_val.clone());
                 }
-            } else if ext.format.as_deref() == Some("regex") {
-                if let Some(regex_str) = &ext.regex {
-                    if let Ok(re) = regex::Regex::new(regex_str) {
-                        if let Some(caps) = re.captures(body_text) {
-                            if let Some(val) = caps
-                                .get(ext.group.unwrap_or(1) as usize)
-                                .map(|m| m.as_str().to_string())
-                            {
-                                final_outputs.insert(ext.name.clone(), serde_json::json!(val));
+                ExtractorMode::Regex => {
+                    if let Some(regex_str) = &ext.regex {
+                        if let Ok(re) = regex::Regex::new(regex_str) {
+                            if let Some(caps) = re.captures(body_text) {
+                                if let Some(val) = caps
+                                    .get(ext.group.unwrap_or(1) as usize)
+                                    .map(|m| m.as_str().to_string())
+                                {
+                                    final_outputs.insert(ext.name.clone(), serde_json::json!(val));
+                                }
                             }
                         }
                     }
                 }
+                ExtractorMode::Unsupported => {}
             }
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ExtractorMode {
+    Json,
+    Regex,
+    Unsupported,
+}
+
+fn extractor_mode(extractor: &RestApiResponseExtractor) -> ExtractorMode {
+    match extractor.format.as_deref() {
+        Some("json") => ExtractorMode::Json,
+        Some("regex") => ExtractorMode::Regex,
+        Some(_) => ExtractorMode::Unsupported,
+        None if extractor.json_pointer.is_some() => ExtractorMode::Json,
+        None if extractor.regex.is_some() => ExtractorMode::Regex,
+        None => ExtractorMode::Json,
+    }
+}
+
+fn normalize_json_pointer(path: &str) -> String {
+    if path.starts_with('/') {
+        path.to_string()
+    } else {
+        format!("/{}", path.replace(".", "/"))
     }
 }
 
@@ -261,7 +288,7 @@ async fn execute_request(
                 EventType::Step(StepEventType::Completed),
                 EventSource::System,
                 serde_json::to_value(event).unwrap(),
-                None,
+                Some(SchemaVersion::new("1.0".to_string())),
                 None,
             )
             .await;
@@ -277,7 +304,6 @@ async fn execute_request(
 mod tests {
     use super::*;
     use serde_json::json;
-    use stormchaser_model::dsl::OutputExtraction;
 
     #[test]
     fn test_render_request_body() {
@@ -335,30 +361,27 @@ mod tests {
             body: None,
             timeout: None,
             extractors: Some(vec![
-                OutputExtraction {
+                RestApiResponseExtractor {
                     name: "full_body".to_string(),
-                    source: "stdout".to_string(),
-                    marker: None,
                     format: Some("json".to_string()),
+                    json_pointer: None,
                     regex: None,
                     group: None,
                     sensitive: None,
                 },
-                OutputExtraction {
+                RestApiResponseExtractor {
                     name: "nested_value".to_string(),
-                    source: "stdout".to_string(),
-                    marker: None,
                     format: Some("json".to_string()),
-                    regex: Some("data.items.0.id".to_string()), // Test dot notation
+                    json_pointer: Some("data.items.0.id".to_string()),
+                    regex: None,
                     group: None,
                     sensitive: None,
                 },
-                OutputExtraction {
+                RestApiResponseExtractor {
                     name: "pointer_value".to_string(),
-                    source: "stdout".to_string(),
-                    marker: None,
                     format: Some("json".to_string()),
-                    regex: Some("/data/items/1/id".to_string()), // Test JSON pointer notation
+                    json_pointer: Some("/data/items/1/id".to_string()),
+                    regex: None,
                     group: None,
                     sensitive: None,
                 },
@@ -392,20 +415,18 @@ mod tests {
             body: None,
             timeout: None,
             extractors: Some(vec![
-                OutputExtraction {
+                RestApiResponseExtractor {
                     name: "token".to_string(),
-                    source: "stdout".to_string(),
-                    marker: None,
                     format: Some("regex".to_string()),
+                    json_pointer: None,
                     regex: Some(r"Token is ([A-Z0-9]+)".to_string()),
                     group: Some(1),
                     sensitive: None,
                 },
-                OutputExtraction {
+                RestApiResponseExtractor {
                     name: "no_group".to_string(),
-                    source: "stdout".to_string(),
-                    marker: None,
                     format: Some("regex".to_string()),
+                    json_pointer: None,
                     regex: Some(r"Status: \d+".to_string()),
                     group: Some(0),
                     sensitive: None,
@@ -424,6 +445,20 @@ mod tests {
             final_outputs.get("no_group").unwrap(),
             &json!("Status: 200")
         );
+    }
+
+    #[test]
+    fn test_extractor_mode_defaults_json_pointer_extractors_to_json() {
+        let extractor = RestApiResponseExtractor {
+            name: "token".to_string(),
+            format: None,
+            json_pointer: Some("/data/token".to_string()),
+            regex: None,
+            group: None,
+            sensitive: Some(true),
+        };
+
+        assert_eq!(extractor_mode(&extractor), ExtractorMode::Json);
     }
 
     #[test]

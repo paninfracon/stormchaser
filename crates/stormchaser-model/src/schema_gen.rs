@@ -185,6 +185,10 @@ pub fn generate_dsl_schema() -> RootSchema {
         "WebhookInvoke".to_string(),
         generator.subschema_for::<WebhookInvokeSpec>(),
     );
+    spec_schemas.insert(
+        "RestApi".to_string(),
+        generator.subschema_for::<RestApiSpec>(),
+    );
     spec_schemas.insert("Email".to_string(), generator.subschema_for::<EmailSpec>());
     spec_schemas.insert(
         "JinjaRender".to_string(),
@@ -203,4 +207,21 @@ pub fn generate_dsl_schema() -> RootSchema {
     // Remove the OpenAPI meta-schema to avoid jsonschema validation errors on unrecognized drafts
     root_schema.meta_schema = None;
     root_schema
+}
+
+#[cfg(test)]
+mod tests {
+    use super::generate_dsl_schema;
+
+    #[test]
+    fn test_generate_dsl_schema_registers_rest_api_spec() {
+        let schema = generate_dsl_schema();
+        let schema_json =
+            serde_json::to_value(schema).expect("DSL schema should serialize to JSON value");
+
+        assert!(
+            schema_json.to_string().contains("\"RestApi\""),
+            "generated DSL schema should include the RestApi intrinsic step mapping"
+        );
+    }
 }
