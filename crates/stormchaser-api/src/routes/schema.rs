@@ -103,12 +103,13 @@ pub async fn hydrate_schema(
 
     let (tx, rx) = tokio::sync::mpsc::channel(100);
 
+    let state_clone = state.clone();
     tokio::spawn(async move {
         run_hydration_loop(
             payload.schema,
             payload.inputs,
             queries,
-            Some(state.pool),
+            Some(state_clone),
             tx,
         )
         .await;
@@ -332,8 +333,7 @@ async fn run_hydration_loop(
     mut schema: Value,
     inputs: Value,
     queries: Vec<stormchaser_model::dsl::Query>,
-    // Stormchaser internal pool, used only for looking up defined connections.
-    stormchaser_pool: Option<sqlx::PgPool>,
+    state: Option<crate::AppState>,
     tx: tokio::sync::mpsc::Sender<HydrationEvent>,
 ) {
     let mut tasks = Vec::new();
@@ -364,8 +364,8 @@ async fn run_hydration_loop(
     // Fetch the list of configured connections once so tasks can resolve named
     // connections without ever touching the stormchaser database themselves.
     let connections: Vec<stormchaser_model::connections::Connection> =
-        if let Some(ref p) = stormchaser_pool {
-            crate::db::list_connections(p).await.unwrap_or_default()
+        if let Some(ref s) = state {
+            crate::db::list_connections(&s.pool).await.unwrap_or_default()
         } else {
             Vec::new()
         };
@@ -391,12 +391,13 @@ async fn run_hydration_loop(
             }
         }
 
+        let state_for_query = state.clone();
         let query_type = task.query_type.clone();
         let params_clone = resolved_params.clone();
         let connections_clone = connections.clone();
 
         join_set.spawn(async move {
-            let res = execute_query(&query_type, &params_clone, &connections_clone).await;
+            let res = execute_query(&query_type, &params_clone, &connections_clone, state_for_query.as_ref()).await;
             (idx, res)
         });
     }
@@ -445,7 +446,27 @@ async fn execute_query(
     query_type: &str,
     params: &std::collections::HashMap<String, String>,
     connections: &[stormchaser_model::connections::Connection],
+    state: Option<&crate::AppState>,
 ) -> Result<Vec<Value>, anyhow::Error> {
+    if let Some(conn_name) = params.get("connection") {
+        if let Some(app_state) = state {
+            if app_state.opa.is_configured() {
+                let opa_ctx = stormchaser_model::auth::ConnectionOpaContext {
+                    connection_name: conn_name,
+                    // In a real scenario we extract the username from JWT claims.
+                    // For hydration, we'd need to thread the claims down here.
+                    initiating_user: "schema_hydration_service",
+                };
+                if !app_state.opa.check_connection(opa_ctx).await? {
+                    return Err(anyhow::anyhow!(
+                        "Access to connection '{}' denied by OPA",
+                        conn_name
+                    ));
+                }
+            }
+        }
+    }
+
     match query_type {
         "sql" => execute_sql_query(params, connections).await,
         "api" => execute_api_query(params, connections).await,
@@ -616,7 +637,7 @@ mod tests {
     async fn test_execute_query_mock() {
         let mut params = std::collections::HashMap::new();
         params.insert("items".to_string(), "a,b,c".to_string());
-        let res = execute_query("mock", &params, &[]).await.unwrap();
+        let res = execute_query("mock", &params, &[], None).await.unwrap();
         assert_eq!(res, vec![json!("a"), json!("b"), json!("c")]);
     }
 
@@ -722,7 +743,7 @@ mod tests {
         let mut params = std::collections::HashMap::new();
         params.insert("connection".to_string(), "mydb".to_string());
         params.insert("query".to_string(), "DROP TABLE users".to_string());
-        let err = execute_query("sql", &params, &[]).await.unwrap_err();
+        let err = execute_query("sql", &params, &[], None).await.unwrap_err();
         assert!(
             err.to_string().contains("Only SELECT"),
             "expected SELECT-only error, got: {}",
@@ -734,7 +755,7 @@ mod tests {
     async fn test_execute_sql_query_rejects_missing_connection() {
         let mut params = std::collections::HashMap::new();
         params.insert("query".to_string(), "SELECT 1".to_string());
-        let err = execute_query("sql", &params, &[]).await.unwrap_err();
+        let err = execute_query("sql", &params, &[], None).await.unwrap_err();
         assert!(
             err.to_string().contains("Missing 'connection'"),
             "expected missing connection error, got: {}",
@@ -747,7 +768,7 @@ mod tests {
         let mut params = std::collections::HashMap::new();
         params.insert("connection".to_string(), "unknown".to_string());
         params.insert("query".to_string(), "SELECT 1".to_string());
-        let err = execute_query("sql", &params, &[]).await.unwrap_err();
+        let err = execute_query("sql", &params, &[], None).await.unwrap_err();
         assert!(
             err.to_string().contains("not found"),
             "expected not-found error, got: {}",
@@ -758,7 +779,7 @@ mod tests {
     #[tokio::test]
     async fn test_execute_api_query_rejects_missing_connection() {
         let params = std::collections::HashMap::new();
-        let err = execute_query("api", &params, &[]).await.unwrap_err();
+        let err = execute_query("api", &params, &[], None).await.unwrap_err();
         assert!(
             err.to_string().contains("Missing 'connection'"),
             "expected missing connection error, got: {}",
@@ -789,7 +810,7 @@ mod tests {
 
         let mut params = std::collections::HashMap::new();
         params.insert("connection".to_string(), "myconn".to_string());
-        let err = execute_query("api", &params, &[conn]).await.unwrap_err();
+        let err = execute_query("api", &params, &[conn], None).await.unwrap_err();
         assert!(
             err.to_string().contains("not an HTTP API connection"),
             "expected wrong-type error, got: {}",

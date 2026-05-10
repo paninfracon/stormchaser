@@ -218,11 +218,11 @@ pub fn app(state: AppState) -> Router {
         .route("/rules", get(list_event_rules).post(create_event_rule))
         .route("/rules/:id", delete(delete_event_rule))
         .route(
-            "/storage-backends",
+            "/connections",
             get(list_connections).post(create_connection),
         )
         .route(
-            "/storage-backends/:id",
+            "/connections/:id",
             get(get_connection)
                 .patch(update_connection)
                 .delete(delete_connection),

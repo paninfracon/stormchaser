@@ -342,7 +342,7 @@ if command -v python3 >/dev/null 2>&1 && [ -f "$REPO_ROOT/scripts/generate_dev_t
             MINIO_PASSWORD=$(microk8s kubectl get secret -n stormchaser stormchaser-minio -o jsonpath='{.data.root-password}' | base64 -d)
             API_URL="http://localhost:${PORT_API}"
 
-            curl -s -X POST "$API_URL/api/v1/storage-backends" \
+            curl -s -X POST "$API_URL/api/v1/connections" \
               -H "Authorization: Bearer $STORMCHASER_TOKEN" \
               -H "Content-Type: application/json" \
               -d '{

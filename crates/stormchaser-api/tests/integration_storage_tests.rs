@@ -89,7 +89,7 @@ async fn test_storage_backend_crud() {
         .oneshot(
             Request::builder()
                 .method(http::Method::POST)
-                .uri("/api/v1/storage-backends")
+                .uri("/api/v1/connections")
                 .header(http::header::AUTHORIZATION, format!("Bearer {}", token))
                 .header(
                     http::header::CONTENT_TYPE,
@@ -110,7 +110,7 @@ async fn test_storage_backend_crud() {
         .oneshot(
             Request::builder()
                 .method(http::Method::GET)
-                .uri("/api/v1/storage-backends")
+                .uri("/api/v1/connections")
                 .header(http::header::AUTHORIZATION, format!("Bearer {}", token))
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())
@@ -140,7 +140,7 @@ async fn test_storage_backend_crud() {
         .oneshot(
             Request::builder()
                 .method(http::Method::PATCH)
-                .uri(format!("/api/v1/storage-backends/{}", connection_id))
+                .uri(format!("/api/v1/connections/{}", connection_id))
                 .header(http::header::AUTHORIZATION, format!("Bearer {}", token))
                 .header(
                     http::header::CONTENT_TYPE,
@@ -161,7 +161,7 @@ async fn test_storage_backend_crud() {
         .oneshot(
             Request::builder()
                 .method(http::Method::DELETE)
-                .uri(format!("/api/v1/storage-backends/{}", connection_id))
+                .uri(format!("/api/v1/connections/{}", connection_id))
                 .header(http::header::AUTHORIZATION, format!("Bearer {}", token))
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())

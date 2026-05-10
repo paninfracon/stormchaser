@@ -144,9 +144,11 @@ impl OpaClient {
 pub trait OpaAuthorizer: Send + Sync {
     /// Checks the given context against the OPA policy.
     async fn check(&self, context: ApiOpaContext<'_>) -> Result<bool>;
-    /// Checks an approval context against the OPA policy.
+    /// Checks if a workflow approval is authorized by OPA.
     async fn check_approval(&self, context: ApprovalOpaContext<'_>) -> Result<bool>;
-    /// Returns true if the authorizer is properly configured.
+    /// Checks if a connection usage is authorized by OPA.
+    async fn check_connection(&self, context: ConnectionOpaContext<'_>) -> Result<bool>;
+    /// Returns true if an OPA URL is configured.
     fn is_configured(&self) -> bool;
 }
 
@@ -156,6 +158,9 @@ impl OpaAuthorizer for OpaClient {
         self.check_context(context).await
     }
     async fn check_approval(&self, context: ApprovalOpaContext<'_>) -> Result<bool> {
+        self.check_context(context).await
+    }
+    async fn check_connection(&self, context: ConnectionOpaContext<'_>) -> Result<bool> {
         self.check_context(context).await
     }
     fn is_configured(&self) -> bool {
@@ -186,7 +191,6 @@ pub struct EngineOpaContext {
     /// JSON inputs for the workflow run.
     pub inputs: Value,
 }
-
 /// Context for OPA checks during HITL Approvals
 #[derive(Debug, Serialize)]
 pub struct ApprovalOpaContext<'a> {
@@ -202,6 +206,15 @@ pub struct ApprovalOpaContext<'a> {
     pub run_outputs: Value,
     /// The optional authentication token of the approver.
     pub token: Option<&'a str>,
+}
+
+/// Context for OPA checks during connection usage
+#[derive(Debug, Serialize)]
+pub struct ConnectionOpaContext<'a> {
+    /// The name of the connection.
+    pub connection_name: &'a str,
+    /// Identifier of the user who initiated the request.
+    pub initiating_user: &'a str,
 }
 
 #[cfg(test)]

@@ -83,9 +83,11 @@ pub async fn list_connections(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let backends = db::list_connections(&state.pool)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let backends = db::list_connections(&state.pool).await.map_err(|e| {
+        println!("list_connections error: {:?}", e);
+        tracing::error!("list_connections error: {:?}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     Ok(Json(backends))
 }
