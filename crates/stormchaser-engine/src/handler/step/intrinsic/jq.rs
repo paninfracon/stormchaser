@@ -72,150 +72,161 @@ pub async fn try_dispatch(
         let spec = resolved_spec.clone();
 
         tokio::spawn(async move {
-            // 1. Transition to running
-            if let Ok(instance) = fetch_step_instance(step_instance_id, &pool).await {
-                let machine = crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::from_instance(instance);
-                if let Ok(mut conn) = pool.acquire().await {
-                    let _ = machine.start("intrinsic-jq".to_string(), &mut *conn).await;
-                }
-            }
-
-            let actual_spec = spec.get("spec").unwrap_or(&spec).clone();
-            let jq_spec: Result<dsl::JqSpec, _> = serde_json::from_value(actual_spec.clone());
-
-            let result = match jq_spec {
-                Ok(jq) => {
-                    use jaq_core::load::{Arena, File, Loader};
-                    use jaq_core::{Ctx, RcIter};
-                    use jaq_json::Val;
-
-                    let input_value = jq.input.unwrap_or(Value::Null);
-
-                    let loader = Loader::new(jaq_std::defs().chain(jaq_json::defs()));
-                    let arena = Arena::default();
-                    let program = File {
-                        code: jq.program.as_str(),
-                        path: (),
-                    };
-
-                    let modules = loader.load(&arena, program);
-
-                    match modules {
-                        Ok(mods) => {
-                            let filter = jaq_core::Compiler::default()
-                                .with_funs(jaq_std::funs().chain(jaq_json::funs()))
-                                .compile(mods);
-
-                            match filter {
-                                Ok(f) => {
-                                    let input = Val::from(input_value);
-                                    let inputs = RcIter::new(core::iter::empty());
-                                    let out = f.run((Ctx::new([], &inputs), input));
-
-                                    let mut results = Vec::new();
-                                    let mut execution_err = None;
-
-                                    for res in out {
-                                        match res {
-                                            Ok(v) => {
-                                                results.push(Value::from(v));
-                                            }
-                                            Err(e) => {
-                                                execution_err = Some(anyhow::anyhow!(
-                                                    "JQ execution error: {:?}",
-                                                    e
-                                                ));
-                                                break;
-                                            }
-                                        }
-                                    }
-
-                                    if let Some(e) = execution_err {
-                                        Err(e)
-                                    } else {
-                                        let final_result = if results.len() == 1 {
-                                            results.remove(0)
-                                        } else {
-                                            Value::Array(results)
-                                        };
-
-                                        Ok(final_result)
-                                    }
-                                }
-                                Err(e) => Err(anyhow::anyhow!("JQ compile error: {:?}", e)),
-                            }
-                        }
-                        Err(e) => Err(anyhow::anyhow!("JQ load/parse error: {:?}", e)),
-                    }
-                }
-                Err(e) => Err(anyhow::anyhow!("Invalid JQ spec: {:?}", e)),
-            };
-
-            match result {
-                Ok(outputs) => {
-                    use std::collections::HashMap;
-                    use stormchaser_model::events::{EventType, StepCompletedEvent, StepEventType};
-                    let mut outputs_map = HashMap::new();
-                    outputs_map.insert("result".to_string(), outputs);
-                    let event = StepCompletedEvent {
-                        run_id,
-                        step_id: step_instance_id,
-                        event_type: EventType::Step(StepEventType::Completed),
-                        runner_id: None,
-                        exit_code: Some(0),
-                        storage_hashes: None,
-                        artifacts: None,
-                        test_reports: None,
-                        outputs: Some(outputs_map),
-                        timestamp: Utc::now(),
-                    };
-                    let js = async_nats::jetstream::new(nats_client);
-                    use stormchaser_model::nats::NatsSubject;
-                    let _ = stormchaser_model::nats::publish_cloudevent(
-                        &js,
-                        NatsSubject::StepCompleted,
-                        EventType::Step(StepEventType::Completed),
-                        EventSource::System,
-                        serde_json::to_value(event).unwrap(),
-                        Some(SchemaVersion::new("1.0".to_string())),
-                        None,
-                    )
-                    .await;
-                }
-                Err(e) => {
-                    let event = StepFailedEvent {
-                        run_id,
-                        step_id: step_instance_id,
-                        event_type: EventType::Step(StepEventType::Failed),
-                        error: format!("JQ execution failed: {:?}", e),
-                        runner_id: None,
-                        exit_code: None,
-                        storage_hashes: None,
-                        artifacts: None,
-                        test_reports: None,
-                        outputs: None,
-                        timestamp: Utc::now(),
-                    };
-                    let js = async_nats::jetstream::new(nats_client);
-                    let _ = stormchaser_model::nats::publish_cloudevent(
-                        &js,
-                        NatsSubject::StepFailed,
-                        EventType::Step(StepEventType::Failed),
-                        EventSource::System,
-                        serde_json::to_value(event).unwrap(),
-                        Some(SchemaVersion::new("1.0".to_string())),
-                        None,
-                    )
-                    .await;
-                }
-            }
-
-            Ok::<(), anyhow::Error>(())
+            let _ = dispatch_jq_internal(run_id, step_instance_id, spec, pool, nats_client).await;
         });
         return Ok(true);
     }
 
     Ok(false)
+}
+
+async fn dispatch_jq_internal(
+    run_id: RunId,
+    step_instance_id: StepInstanceId,
+    spec: Value,
+    pool: PgPool,
+    nats_client: async_nats::Client,
+) -> Result<()> {
+    // 1. Transition to running
+    if let Ok(instance) = fetch_step_instance(step_instance_id, &pool).await {
+        let machine =
+            crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::from_instance(
+                instance,
+            );
+        if let Ok(mut conn) = pool.acquire().await {
+            let _ = machine.start("intrinsic-jq".to_string(), &mut *conn).await;
+        }
+    }
+
+    let actual_spec = spec.get("spec").unwrap_or(&spec).clone();
+    let jq_spec: Result<dsl::JqSpec, _> = serde_json::from_value(actual_spec.clone());
+
+    let result = match jq_spec {
+        Ok(jq) => {
+            use jaq_core::load::{Arena, File, Loader};
+            use jaq_core::{Ctx, RcIter};
+            use jaq_json::Val;
+
+            let input_value = jq.input.unwrap_or(Value::Null);
+
+            let loader = Loader::new(jaq_std::defs().chain(jaq_json::defs()));
+            let arena = Arena::default();
+            let program = File {
+                code: jq.program.as_str(),
+                path: (),
+            };
+
+            let modules = loader.load(&arena, program);
+
+            match modules {
+                Ok(mods) => {
+                    let filter = jaq_core::Compiler::default()
+                        .with_funs(jaq_std::funs().chain(jaq_json::funs()))
+                        .compile(mods);
+
+                    match filter {
+                        Ok(f) => {
+                            let input = Val::from(input_value);
+                            let inputs = RcIter::new(core::iter::empty());
+                            let out = f.run((Ctx::new([], &inputs), input));
+
+                            let mut results = Vec::new();
+                            let mut execution_err = None;
+
+                            for res in out {
+                                match res {
+                                    Ok(v) => {
+                                        results.push(Value::from(v));
+                                    }
+                                    Err(e) => {
+                                        execution_err =
+                                            Some(anyhow::anyhow!("JQ execution error: {:?}", e));
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if let Some(e) = execution_err {
+                                Err(e)
+                            } else {
+                                let final_result = if results.len() == 1 {
+                                    results.remove(0)
+                                } else {
+                                    Value::Array(results)
+                                };
+
+                                Ok(final_result)
+                            }
+                        }
+                        Err(e) => Err(anyhow::anyhow!("JQ compile error: {:?}", e)),
+                    }
+                }
+                Err(e) => Err(anyhow::anyhow!("JQ load/parse error: {:?}", e)),
+            }
+        }
+        Err(e) => Err(anyhow::anyhow!("Invalid JQ spec: {:?}", e)),
+    };
+
+    match result {
+        Ok(outputs) => {
+            use std::collections::HashMap;
+            use stormchaser_model::events::{EventType, StepCompletedEvent, StepEventType};
+            let mut outputs_map = HashMap::new();
+            outputs_map.insert("result".to_string(), outputs);
+            let event = StepCompletedEvent {
+                run_id,
+                step_id: step_instance_id,
+                event_type: EventType::Step(StepEventType::Completed),
+                runner_id: None,
+                exit_code: Some(0),
+                storage_hashes: None,
+                artifacts: None,
+                test_reports: None,
+                outputs: Some(outputs_map),
+                timestamp: Utc::now(),
+            };
+            let js = async_nats::jetstream::new(nats_client);
+            use stormchaser_model::nats::NatsSubject;
+            let _ = stormchaser_model::nats::publish_cloudevent(
+                &js,
+                NatsSubject::StepCompleted,
+                EventType::Step(StepEventType::Completed),
+                EventSource::System,
+                serde_json::to_value(event).unwrap(),
+                Some(SchemaVersion::new("1.0".to_string())),
+                None,
+            )
+            .await;
+        }
+        Err(e) => {
+            let event = StepFailedEvent {
+                run_id,
+                step_id: step_instance_id,
+                event_type: EventType::Step(StepEventType::Failed),
+                error: format!("JQ execution failed: {:?}", e),
+                runner_id: None,
+                exit_code: None,
+                storage_hashes: None,
+                artifacts: None,
+                test_reports: None,
+                outputs: None,
+                timestamp: Utc::now(),
+            };
+            let js = async_nats::jetstream::new(nats_client);
+            let _ = stormchaser_model::nats::publish_cloudevent(
+                &js,
+                NatsSubject::StepFailed,
+                EventType::Step(StepEventType::Failed),
+                EventSource::System,
+                serde_json::to_value(event).unwrap(),
+                Some(SchemaVersion::new("1.0".to_string())),
+                None,
+            )
+            .await;
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -286,5 +297,11 @@ mod tests {
 
         assert_eq!(step_type, "JQ"); // Should not change
         assert_eq!(spec.get("program").unwrap(), ".foo");
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_dispatch_jq_internal_compiles() {
+        let _f = dispatch_jq_internal;
     }
 }
