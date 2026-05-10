@@ -18,7 +18,7 @@ use stormchaser_model::nats::publish_cloudevent;
 use stormchaser_model::step::StepStatus;
 use stormchaser_model::LogBackend;
 use stormchaser_tls::TlsReloader;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::handler::step::dispatch::{dispatch_step_instance, find_step};
@@ -420,13 +420,22 @@ fn rest_api_output_sensitivity(
         return std::collections::HashMap::new();
     }
 
-    serde_json::from_value::<RestApiSpec>(step.spec.clone())
-        .ok()
-        .and_then(|spec| spec.extractors)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|extractor| (extractor.name, extractor.sensitive.unwrap_or(false)))
-        .collect()
+    match serde_json::from_value::<RestApiSpec>(step.spec.clone()) {
+        Ok(spec) => spec
+            .extractors
+            .unwrap_or_default()
+            .into_iter()
+            .map(|extractor| (extractor.name, extractor.sensitive.unwrap_or(false)))
+            .collect(),
+        Err(error) => {
+            warn!(
+                step_name = %step.name,
+                ?error,
+                "Failed to parse RestApi spec while determining output sensitivity"
+            );
+            std::collections::HashMap::new()
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

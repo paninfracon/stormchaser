@@ -12,7 +12,7 @@ use stormchaser_model::nats::NatsSubject;
 use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
 use stormchaser_tls::TlsReloader;
-use tracing::info;
+use tracing::{info, warn};
 
 /// Attempts to dispatch a REST API step instance.
 pub async fn try_dispatch(
@@ -179,7 +179,12 @@ fn apply_extractors(
                         }
                     }
                 }
-                ExtractorMode::Unsupported => {}
+                ExtractorMode::Unsupported => {
+                    warn!(
+                        extractor = %ext.name,
+                        "Skipping RestApi extractor with an unsupported or ambiguous configuration"
+                    );
+                }
             }
         }
     }
@@ -195,11 +200,14 @@ enum ExtractorMode {
 fn extractor_mode(extractor: &RestApiResponseExtractor) -> ExtractorMode {
     match extractor.format.as_deref() {
         Some("json") => ExtractorMode::Json,
-        Some("regex") => ExtractorMode::Regex,
+        Some("regex") if extractor.regex.is_some() => ExtractorMode::Regex,
+        Some("regex") => ExtractorMode::Unsupported,
         Some(_) => ExtractorMode::Unsupported,
-        None if extractor.json_pointer.is_some() => ExtractorMode::Json,
-        None if extractor.regex.is_some() => ExtractorMode::Regex,
-        None => ExtractorMode::Json,
+        None => match (extractor.json_pointer.is_some(), extractor.regex.is_some()) {
+            (true, false) => ExtractorMode::Json,
+            (false, true) => ExtractorMode::Regex,
+            _ => ExtractorMode::Unsupported,
+        },
     }
 }
 
@@ -459,6 +467,20 @@ mod tests {
         };
 
         assert_eq!(extractor_mode(&extractor), ExtractorMode::Json);
+    }
+
+    #[test]
+    fn test_extractor_mode_rejects_ambiguous_extractors() {
+        let extractor = RestApiResponseExtractor {
+            name: "token".to_string(),
+            format: None,
+            json_pointer: Some("/data/token".to_string()),
+            regex: Some("Token is ([A-Z0-9]+)".to_string()),
+            group: Some(1),
+            sensitive: None,
+        };
+
+        assert_eq!(extractor_mode(&extractor), ExtractorMode::Unsupported);
     }
 
     #[test]

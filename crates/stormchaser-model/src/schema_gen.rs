@@ -216,12 +216,24 @@ mod tests {
     #[test]
     fn test_generate_dsl_schema_registers_rest_api_spec() {
         let schema = generate_dsl_schema();
-        let schema_json =
-            serde_json::to_value(schema).expect("DSL schema should serialize to JSON value");
+        let rest_api_schema = schema
+            .definitions
+            .get("RestApiSpec")
+            .expect("generated DSL schema should include the RestApiSpec definition");
+        let rest_api_schema_json = serde_json::to_value(rest_api_schema)
+            .expect("RestApiSpec schema should serialize to JSON value");
+        let properties = rest_api_schema_json
+            .get("properties")
+            .and_then(serde_json::Value::as_object)
+            .expect("RestApiSpec schema should expose object properties");
 
         assert!(
-            schema_json.to_string().contains("\"RestApi\""),
-            "generated DSL schema should include the RestApi intrinsic step mapping"
+            properties.contains_key("url"),
+            "RestApiSpec schema should include the url property"
+        );
+        assert!(
+            properties.contains_key("extractors"),
+            "RestApiSpec schema should include the extractors property"
         );
     }
 }
