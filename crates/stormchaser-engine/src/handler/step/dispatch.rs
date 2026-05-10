@@ -272,6 +272,19 @@ async fn try_dispatch_intrinsic(
     {
         return Ok(true);
     }
+    if super::intrinsic::rest_api::try_dispatch(
+        run_id,
+        step_instance_id,
+        step_type,
+        resolved_spec,
+        pool.clone(),
+        nats_client.clone(),
+        tls_reloader.clone(),
+    )
+    .await?
+    {
+        return Ok(true);
+    }
     if super::intrinsic::webhook::try_dispatch(
         run_id,
         step_instance_id,

@@ -203,6 +203,23 @@ pub struct WebhookInvokeSpec {
     pub timeout: Option<String>,
 }
 
+/// Specification for making a REST API call.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct RestApiSpec {
+    /// REST API URL.
+    pub url: String,
+    /// HTTP method.
+    pub method: Option<String>, // Default to GET
+    /// HTTP headers.
+    pub headers: Option<HashMap<String, String>>,
+    /// Request body template.
+    pub body: Option<String>, // MiniJinja template
+    /// Request timeout.
+    pub timeout: Option<String>,
+    /// Rules for extracting outputs from the response.
+    pub extractors: Option<Vec<crate::dsl::OutputExtraction>>,
+}
+
 /// Supported email backends.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
