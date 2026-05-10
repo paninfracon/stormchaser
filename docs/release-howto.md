@@ -147,6 +147,8 @@ sleep 15
 cargo publish -p stormchaser-agent
 sleep 15
 
-# Publish top-level CLI
+# Publish top-level CLI and TUI
 cargo publish -p stormchaser-cli
+sleep 15
+cargo publish -p stormchaser-tui
 ```
