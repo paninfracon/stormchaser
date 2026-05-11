@@ -3,7 +3,6 @@ use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
 use std::time::Duration;
-use stormchaser_engine::handler;
 use stormchaser_model::auth::OpaClient;
 use stormchaser_model::RunId;
 use tokio::time::sleep;
@@ -36,7 +35,7 @@ async fn test_rest_api_with_httpapi_connection() {
 
     let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
-    let opa_client = Arc::new(OpaClient::new(None, None));
+    let _opa_client = Arc::new(OpaClient::new(None, None));
 
     let mock_server = MockServer::start().await;
 
@@ -113,28 +112,84 @@ async fn test_rest_api_with_httpapi_connection() {
         .await
         .unwrap();
 
-    let payload = json!({
-        "run_id": run_id,
-        "dsl": dsl,
-        "inputs": {
-            "test_value": "hello"
-        },
-        "initiating_user": "test"
-    });
-    handler::handle_workflow_direct(
-        payload,
-        pool.clone(),
-        opa_client.clone(),
-        nats_client.clone(),
+    let mut tx = pool.begin().await.unwrap();
+    let run = stormchaser_model::workflow::WorkflowRun {
+        id: run_id,
+        workflow_name: "rest-api-test".to_string(),
+        initiating_user: "test".to_string(),
+        repo_url: "direct://".to_string(),
+        workflow_path: "inline.storm".to_string(),
+        git_ref: "HEAD".to_string(),
+        status: stormchaser_model::workflow::RunStatus::Running,
+        version: 1,
+        fencing_token: chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0),
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+        started_resolving_at: Some(chrono::Utc::now()),
+        started_at: Some(chrono::Utc::now()),
+        finished_at: None,
+        error: None,
+    };
+    stormchaser_engine::db::insert_full_workflow_run(
+        &mut *tx,
+        &run,
+        "v1",
+        serde_json::json!({}),
+        Some(&dsl),
+        json!({"test_value": "hello"}),
+        10,
+        "1",
+        "4Gi",
+        "10Gi",
+        "1h",
     )
     .await
     .unwrap();
 
-    handler::handle_workflow_start_pending(
+    let step_id = stormchaser_model::StepInstanceId::new_v4();
+    let spec = json!({
+        "connection": backend_name,
+        "url": "/api/secure-test",
+        "method": "POST",
+        "headers": {
+            "Content-Type": "application/json"
+        },
+        "extractors": [
+            {
+                "name": "my_token",
+                "format": "json",
+                "json_pointer": "/data/token"
+            }
+        ]
+    });
+
+    stormchaser_engine::db::insert_step_instance_with_spec(
+        &mut *tx,
+        step_id,
         run_id,
+        "fetch_data",
+        "RestApi",
+        stormchaser_model::step::StepStatus::Pending,
+        None,
+        spec.clone(),
+        json!({}),
+        chrono::Utc::now(),
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+
+    let tls_config = TlsConfig::default();
+    let tls_reloader = Arc::new(TlsReloader::new(tls_config).await.unwrap());
+
+    stormchaser_engine::handler::step::intrinsic::rest_api::try_dispatch(
+        run_id,
+        step_id,
+        "RestApi",
+        &spec,
         pool.clone(),
         nats_client.clone(),
-        Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
+        tls_reloader.clone(),
     )
     .await
     .unwrap();

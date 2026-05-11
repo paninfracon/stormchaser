@@ -171,14 +171,28 @@ pub async fn handle_workflow_queued(
             return Err(anyhow::anyhow!(err_msg));
         }
 
+        let resolved_params_map: std::collections::HashMap<String, String> =
+            serde_json::from_value(resolved_params)?;
+
         // Execute the query
-        let result = {
-            debug!(
-                "Query execution for type '{}' is not implemented yet",
-                query.r#type
-            );
-            serde_json::json!([]) // Stub implementation
+        let result_vec = match crate::query::execute_query(
+            &query.r#type,
+            &resolved_params_map,
+            Some(&pool),
+            None,
+        )
+        .await
+        {
+            Ok(res) => res,
+            Err(e) => {
+                let err_msg = format!("Failed to execute query {}: {}", query.name, e);
+                let _ = machine
+                    .fail(err_msg.clone(), &mut *pool.acquire().await?)
+                    .await?;
+                return Err(anyhow::anyhow!(err_msg));
+            }
         };
+        let result = serde_json::Value::Array(result_vec);
 
         query_results.insert(query.name.clone(), result);
     }

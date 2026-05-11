@@ -41,6 +41,84 @@ pub async fn handle_workflow_direct(
         }
     };
 
+    // 1.5 Schema Validation and Default Value Hydration
+    let mut query_results = serde_json::Map::new();
+    for query in &parsed_workflow.queries {
+        let hcl_ctx =
+            crate::hcl_eval::create_context(inputs.clone(), run_id, serde_json::json!({}));
+        let mut resolved_params = serde_json::to_value(&query.params)?;
+        if let Err(e) = crate::hcl_eval::resolve_expressions(&mut resolved_params, &hcl_ctx) {
+            let err_msg = format!(
+                "Failed to evaluate parameters for query {}: {}",
+                query.name, e
+            );
+            error!("Direct run {}: {}", run_id, err_msg);
+            return Err(anyhow::anyhow!(err_msg));
+        }
+
+        let resolved_params_map: std::collections::HashMap<String, String> =
+            serde_json::from_value(resolved_params)?;
+
+        let result_vec = match crate::query::execute_query(
+            &query.r#type,
+            &resolved_params_map,
+            Some(&pool),
+            None,
+        )
+        .await
+        {
+            Ok(res) => res,
+            Err(e) => {
+                let err_msg = format!("Failed to execute query {}: {}", query.name, e);
+                error!("Direct run {}: {}", run_id, err_msg);
+                return Err(anyhow::anyhow!(err_msg));
+            }
+        };
+        let result = serde_json::Value::Array(result_vec);
+        query_results.insert(query.name.clone(), result);
+    }
+
+    let mut inputs_to_save = inputs.clone();
+
+    if let Some(mut schema_val) = parsed_workflow.inputs_schema.clone() {
+        let mut schema_ctx =
+            crate::hcl_eval::create_context(inputs.clone(), run_id, serde_json::json!({}));
+        schema_ctx.declare_var(
+            "queries",
+            crate::hcl_eval::json_to_hcl(serde_json::Value::Object(query_results)),
+        );
+
+        if let Err(e) = crate::hcl_eval::resolve_expressions(&mut schema_val, &schema_ctx) {
+            let err_msg = format!("Failed to evaluate expressions in inputs schema: {}", e);
+            error!("Direct run {}: {}", run_id, err_msg);
+            return Err(anyhow::anyhow!(err_msg));
+        }
+
+        if let Some(properties) = schema_val.get("properties").and_then(|p| p.as_object()) {
+            let mut inputs_obj = match inputs_to_save {
+                serde_json::Value::Object(obj) => obj,
+                _ => serde_json::Map::new(),
+            };
+
+            for (key, prop) in properties {
+                if !inputs_obj.contains_key(key) {
+                    if let Some(default_val) = prop.get("default") {
+                        inputs_obj.insert(key.clone(), default_val.clone());
+                    }
+                }
+            }
+            inputs_to_save = serde_json::Value::Object(inputs_obj);
+        }
+
+        let compiled_schema = jsonschema::validator_for(&schema_val)
+            .map_err(|e| anyhow::anyhow!("Failed to compile input schema: {}", e))?;
+
+        if let Err(e) = compiled_schema.validate(&inputs_to_save) {
+            let full_err = format!("Input validation failed: {}", e);
+            return Err(anyhow::anyhow!(full_err));
+        }
+    }
+
     // 2. OPA Policy Check
     let opa_context = EngineOpaContext {
         run_id,

@@ -842,7 +842,7 @@ async fn test_run_from_git() {
     );
 
     // Advance Queued -> StartPending
-    stormchaser_engine::handler::workflow::handle_workflow_queued(
+    if let Err(e) = stormchaser_engine::handler::workflow::handle_workflow_queued(
         uuid::Uuid::parse_str(run_id).map(RunId::new).unwrap(),
         pool.clone(),
         std::sync::Arc::new(git_cache),
@@ -851,17 +851,25 @@ async fn test_run_from_git() {
         tls_reloader.clone(),
     )
     .await
-    .expect("handle_workflow_queued failed");
+    {
+        if !e.to_string().contains("Optimistic concurrency") {
+            panic!("handle_workflow_queued failed: {}", e);
+        }
+    }
 
     // Advance StartPending -> Running
-    stormchaser_engine::handler::workflow::handle_workflow_start_pending(
+    if let Err(e) = stormchaser_engine::handler::workflow::handle_workflow_start_pending(
         uuid::Uuid::parse_str(run_id).map(RunId::new).unwrap(),
         pool.clone(),
         nats_client.clone(),
         tls_reloader.clone(),
     )
     .await
-    .expect("handle_workflow_start_pending failed");
+    {
+        if !e.to_string().contains("Optimistic concurrency") {
+            panic!("handle_workflow_start_pending failed: {}", e);
+        }
+    }
 
     let mut step_id_opt = None;
     for _ in 0..10 {

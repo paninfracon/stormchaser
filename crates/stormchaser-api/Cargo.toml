@@ -19,6 +19,7 @@ path = "src/lib.rs"
 stormchaser-model = { workspace = true }
 stormchaser-tls = { workspace = true }
 stormchaser-opa = { version = "1.3.2", path = "../stormchaser-opa" }
+stormchaser-engine = { path = "../stormchaser-engine" }
 tokio = { workspace = true }
 rustls = { version = "0.23", features = ["ring"] }
 axum = { workspace = true }
@@ -81,7 +82,6 @@ mime = "0.3"
 chrono = { workspace = true }
 serde_json = { workspace = true }
 dotenvy = "0.15.7"
-stormchaser-engine = { path = "../stormchaser-engine" }
 tempfile = "3.27.0"
 walkdir = "2.5.0"
 rsa = { version = "0.9.10", features = ["getrandom", "pem"] }

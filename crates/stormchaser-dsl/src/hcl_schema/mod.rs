@@ -248,4 +248,25 @@ mod tests {
             Some(&Value::String("string".into()))
         );
     }
+
+    #[test]
+    fn test_hcl_to_json_schema_multiline_template() {
+        let hcl_str = r#"
+            script = string(default(<<EOF
+#!/bin/bash
+echo "hello"
+EOF
+            ))
+        "#;
+        let body: hcl::Body = hcl::from_str(hcl_str).unwrap();
+        let schema = super::hcl_to_json_schema(&body).unwrap();
+
+        let props = schema.get("properties").unwrap();
+        let script_prop = props.get("script").unwrap();
+        assert_eq!(script_prop.get("type").unwrap().as_str().unwrap(), "string");
+        assert_eq!(
+            script_prop.get("default").unwrap().as_str().unwrap(),
+            "#!/bin/bash\necho \"hello\"\n"
+        );
+    }
 }
