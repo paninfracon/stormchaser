@@ -28,6 +28,9 @@ An extractor object has the following fields:
 
 If no extractors are provided, or regardless of the extractors, the entire parsed response body is automatically captured in an output named `response`.
 
+> [!WARNING]
+> The `response` output always includes the full parsed body and is not automatically marked sensitive. If the response may include secrets, avoid persisting/printing `response` directly and use `extractors` with `sensitive = true` for the specific fields that need to flow to later steps.
+
 ## Example
 
 ```hcl
