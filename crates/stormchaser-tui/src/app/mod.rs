@@ -1,9 +1,11 @@
 use crate::AppEvent;
 use chrono::{DateTime, Utc};
 use ratatui::widgets::ListState;
+use ratatui_textarea::TextArea;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::marker::PhantomData;
 use stormchaser_model::workflow::RunStatus;
 use stormchaser_model::ConnectionId;
 use stormchaser_model::CronWorkflowId;
@@ -123,6 +125,8 @@ pub enum Pane {
 pub struct App<'a> {
     /// The base URL of the Stormchaser API.
     pub url: String,
+    /// The base URL of the Stormchaser Query API.
+    pub query_url: String,
     /// The current authentication state.
     pub state: AppState,
     /// The current access token, if logged in.
@@ -197,6 +201,7 @@ pub struct App<'a> {
     pub status_tx: mpsc::Sender<AppEvent>,
     /// Handle for the background task watching run status.
     pub watcher_handle: Option<tokio::task::JoinHandle<()>>,
+    pub force_select_run_id: Option<RunId>,
     /// Handle for the background task streaming logs.
     pub log_handle: Option<tokio::task::JoinHandle<()>>,
     /// Handle for the background task watching workflow details.
@@ -206,7 +211,7 @@ pub struct App<'a> {
     /// The index of the currently focused input field in the filter dialog.
     pub filter_focus: usize,
     /// The text area inputs for the filter dialog.
-    pub filter_inputs: Vec<ratatui_textarea::TextArea<'a>>,
+    pub filter_inputs: Vec<TextArea<'a>>,
     /// The selected index for the status dropdown in the filter dialog.
     pub filter_status_index: usize,
     /// Whether the schedule git workflow dialog is active.
@@ -214,13 +219,13 @@ pub struct App<'a> {
     /// The index of the focused input in the schedule git dialog.
     pub schedule_git_focus: usize,
     /// The text area inputs for the schedule git dialog.
-    pub schedule_git_inputs: Vec<ratatui_textarea::TextArea<'a>>,
+    pub schedule_git_inputs: Vec<TextArea<'a>>,
     /// Whether the storage backend dialog is active.
     pub connection_dialog_active: bool,
     /// The index of the focused input in the storage backend dialog.
     pub connection_focus: usize,
     /// The text area inputs for the storage backend dialog.
-    pub connection_inputs: Vec<ratatui_textarea::TextArea<'a>>,
+    pub connection_inputs: Vec<TextArea<'a>>,
     /// The index of the selected backend type.
     pub connection_type_index: usize,
     /// Whether the backend is the default SFS.
@@ -232,7 +237,7 @@ pub struct App<'a> {
     /// The index of the focused input in the webhook dialog.
     pub webhook_focus: usize,
     /// The text area inputs for the webhook dialog.
-    pub webhook_inputs: Vec<ratatui_textarea::TextArea<'a>>,
+    pub webhook_inputs: Vec<TextArea<'a>>,
     /// The index of the selected webhook source type.
     pub webhook_source_type_index: usize,
     /// Whether the webhook is active.
@@ -244,7 +249,7 @@ pub struct App<'a> {
     /// The index of the focused input in the event rule dialog.
     pub event_rule_focus: usize,
     /// The text area inputs for the event rule dialog.
-    pub event_rule_inputs: Vec<ratatui_textarea::TextArea<'a>>,
+    pub event_rule_inputs: Vec<TextArea<'a>>,
     /// Whether the event rule is active.
     pub event_rule_is_active: bool,
     /// The ID of the event rule being edited, or None for creating a new one.
@@ -254,7 +259,7 @@ pub struct App<'a> {
     /// The index of the focused input in the cron dialog.
     pub cron_focus: usize,
     /// The text area inputs for the cron dialog.
-    pub cron_inputs: Vec<ratatui_textarea::TextArea<'a>>,
+    pub cron_inputs: Vec<TextArea<'a>>,
     /// Whether the cron workflow is active.
     pub cron_is_active: bool,
     /// The ID of the cron workflow being edited, or None for creating a new one.
@@ -264,7 +269,7 @@ pub struct App<'a> {
     /// Whether the delete run dialog is active.
     pub delete_run_dialog_active: bool,
     /// Text area for JSON inputs for step approval.
-    pub approval_inputs: ratatui_textarea::TextArea<'a>,
+    pub approval_inputs: TextArea<'a>,
     /// Whether the file browser dialog is active.
     pub file_browser_active: bool,
     /// The state of the file explorer widget.
@@ -282,7 +287,7 @@ pub struct App<'a> {
     /// A set of step instance IDs for which full logs have been fetched.
     pub fetched_steps: std::collections::HashSet<StepInstanceId>,
     /// Marker to satisfy lifetime requirements for the struct.
-    pub _marker: std::marker::PhantomData<&'a ()>,
+    pub _marker: PhantomData<&'a ()>,
 }
 
 /// The available options for filtering by workflow run status.
@@ -317,7 +322,12 @@ pub mod watch;
 
 impl<'a> App<'a> {
     /// Creates a new instance of the TUI application state.
-    pub fn new(url: String, token: Option<String>, status_tx: mpsc::Sender<AppEvent>) -> Self {
+    pub fn new(
+        url: String,
+        query_url: String,
+        token: Option<String>,
+        status_tx: mpsc::Sender<AppEvent>,
+    ) -> Self {
         let mut auto_login_credentials = Vec::new();
         if let Ok(content) = std::fs::read_to_string("deploy/dex/credentials.generated") {
             for line in content.lines() {
@@ -330,9 +340,16 @@ impl<'a> App<'a> {
             }
         }
 
+        let state = if token.is_some() {
+            AppState::LoggedIn
+        } else {
+            AppState::LoggedOut
+        };
+
         Self {
             url,
-            state: AppState::LoggedOut,
+            query_url,
+            state,
             token,
             refresh_token: None,
             filter_owner: None,
@@ -369,6 +386,7 @@ impl<'a> App<'a> {
             last_refresh_time: None,
             status_tx,
             watcher_handle: None,
+            force_select_run_id: None,
             log_handle: None,
             workflow_handle: None,
             filter_dialog_active: false,
@@ -402,7 +420,7 @@ impl<'a> App<'a> {
             cron_edit_id: None,
             approval_dialog_active: false,
             delete_run_dialog_active: false,
-            approval_inputs: ratatui_textarea::TextArea::default(),
+            approval_inputs: TextArea::default(),
             file_browser_active: false,
             pending_schema_ui: None,
             direct_submit_dsl: None,
@@ -414,7 +432,7 @@ impl<'a> App<'a> {
                 std::env::current_dir().unwrap_or_default(),
                 vec!["storm".to_string()],
             ),
-            _marker: std::marker::PhantomData,
+            _marker: PhantomData,
         }
     }
 }
@@ -427,11 +445,17 @@ mod tests {
     #[test]
     fn test_app_new() {
         let (tx, _rx) = mpsc::channel(1);
-        let app = App::new("http://test".to_string(), Some("token".to_string()), tx);
+        let app = App::new(
+            "http://test".to_string(),
+            "http://test:3001".to_string(),
+            Some("token".to_string()),
+            tx,
+        );
 
         assert_eq!(app.url, "http://test");
+        assert_eq!(app.query_url, "http://test:3001");
         assert_eq!(app.token, Some("token".to_string()));
-        assert_eq!(app.state, AppState::LoggedOut);
+        assert_eq!(app.state, AppState::LoggedIn);
         assert_eq!(app.active_pane, Pane::RunsList);
         assert!(app.run_logs.is_empty());
         assert_eq!(app.runs.len(), 0);

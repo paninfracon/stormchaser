@@ -1,6 +1,8 @@
 use super::*;
+use crate::app::WorkflowRunDetail;
 use eventsource_stream::Eventsource;
 use futures::StreamExt;
+use reqwest::header::AUTHORIZATION;
 use std::time::Duration;
 use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
@@ -44,23 +46,42 @@ impl<'a> App<'a> {
         let client = reqwest::Client::new();
         let mut req = client.request(reqwest::Method::GET, url);
         if let Some(token) = &self.token {
-            req = req.header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token));
+            req = req.header(AUTHORIZATION, format!("Bearer {}", token));
         }
         let res = req.send().await?;
 
         if res.status().is_success() {
-            self.runs = res.json::<Vec<crate::app::WorkflowRunDetail>>().await?;
+            self.runs = res.json::<Vec<WorkflowRunDetail>>().await?;
             if self.runs.is_empty() {
                 self.runs_state.select(None);
                 self.selected_run = None;
             } else {
-                let selected_index = self
+                let mut selected_index = self
                     .runs_state
                     .selected()
                     .map_or(0, |selected| selected.min(self.runs.len() - 1));
+
+                if let Some(forced_id) = self.force_select_run_id {
+                    if let Some(idx) = self.runs.iter().position(|r| r.id == forced_id) {
+                        selected_index = idx;
+                        self.force_select_run_id = None; // Successfully found and selected
+                    }
+                }
+
                 self.runs_state.select(Some(selected_index));
 
-                if self.selected_run.is_none() {
+                let needs_fetch = match &self.selected_run {
+                    Some(run) => {
+                        if let Some(current_run) = self.runs.get(selected_index) {
+                            run.detail.id != current_run.id
+                        } else {
+                            false
+                        }
+                    }
+                    None => true,
+                };
+
+                if needs_fetch {
                     if let Some(run) = self.runs.get(selected_index) {
                         let id = run.id;
                         let _ = self.fetch_run_detail(id).await;
@@ -212,7 +233,7 @@ impl<'a> App<'a> {
                     let client = reqwest::Client::new();
                     if let Ok(res) = client
                         .get(format!("{}/api/v1/runs/stream", url))
-                        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
+                        .header(AUTHORIZATION, format!("Bearer {}", token))
                         .send()
                         .await
                     {
@@ -225,9 +246,7 @@ impl<'a> App<'a> {
                         while let Some(event) = stream.next().await {
                             if let Ok(event) = event {
                                 if event.event == "workflow_run" {
-                                    match serde_json::from_str::<crate::app::WorkflowRunDetail>(
-                                        &event.data,
-                                    ) {
+                                    match serde_json::from_str::<WorkflowRunDetail>(&event.data) {
                                         Ok(run) => {
                                             let _ = tx.send(AppEvent::WorkflowUpdate(run)).await;
                                         }
@@ -259,7 +278,7 @@ mod tests {
     async fn test_refresh_runs_success() {
         let server = MockServer::start().await;
 
-        let run_detail = crate::app::WorkflowRunDetail {
+        let run_detail = WorkflowRunDetail {
             id: RunId::new_v4(),
             workflow_name: "test".to_string(),
             initiating_user: "user".to_string(),
@@ -275,7 +294,12 @@ mod tests {
             .await;
 
         let (tx, _rx) = mpsc::channel(1);
-        let mut app = App::new(server.uri(), Some("token".to_string()), tx);
+        let mut app = App::new(
+            server.uri(),
+            "http://localhost:3001".to_string(),
+            Some("token".to_string()),
+            tx,
+        );
 
         let result = app.refresh_runs().await;
         assert!(result.is_ok());
@@ -290,15 +314,17 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/api/v1/runs"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(Vec::<crate::app::WorkflowRunDetail>::new()),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(Vec::<WorkflowRunDetail>::new()))
             .mount(&server)
             .await;
 
         let (tx, _rx) = mpsc::channel(1);
-        let mut app = App::new(server.uri(), Some("token".to_string()), tx);
+        let mut app = App::new(
+            server.uri(),
+            "http://localhost:3001".to_string(),
+            Some("token".to_string()),
+            tx,
+        );
         app.filter_owner = Some("test_user".to_string());
         app.filter_status = Some("failed".to_string());
 
@@ -321,7 +347,7 @@ mod tests {
         let run_id = RunId::new_v4();
 
         let full_detail = crate::app::WorkflowRunFullDetail {
-            detail: crate::app::WorkflowRunDetail {
+            detail: WorkflowRunDetail {
                 id: run_id,
                 workflow_name: "test".to_string(),
                 initiating_user: "user".to_string(),
@@ -342,7 +368,12 @@ mod tests {
             .await;
 
         let (tx, _rx) = mpsc::channel(1);
-        let mut app = App::new(server.uri(), Some("token".to_string()), tx);
+        let mut app = App::new(
+            server.uri(),
+            "http://localhost:3001".to_string(),
+            Some("token".to_string()),
+            tx,
+        );
         app.runs.push(full_detail.detail.clone());
         app.runs_state.select(Some(0));
 
@@ -356,7 +387,7 @@ mod tests {
     async fn test_start_listening_for_workflows_sse_success() {
         let server = MockServer::start().await;
 
-        let run_detail = crate::app::WorkflowRunDetail {
+        let run_detail = WorkflowRunDetail {
             id: RunId::new_v4(),
             workflow_name: "test-workflow".to_string(),
             initiating_user: "user".to_string(),
@@ -381,7 +412,12 @@ mod tests {
             .await;
 
         let (tx, mut rx) = mpsc::channel(100);
-        let mut app = App::new(server.uri(), Some("token".to_string()), tx);
+        let mut app = App::new(
+            server.uri(),
+            "http://localhost:3001".to_string(),
+            Some("token".to_string()),
+            tx,
+        );
 
         app.start_listening_for_workflows().await;
 
@@ -408,7 +444,7 @@ mod tests {
         let server = MockServer::start().await;
         let run_id = RunId::new_v4();
 
-        let run_detail = crate::app::WorkflowRunDetail {
+        let run_detail = WorkflowRunDetail {
             id: run_id,
             workflow_name: "test".to_string(),
             initiating_user: "user".to_string(),
@@ -438,7 +474,12 @@ mod tests {
             .await;
 
         let (tx, _rx) = mpsc::channel(1);
-        let mut app = App::new(server.uri(), Some("token".to_string()), tx);
+        let mut app = App::new(
+            server.uri(),
+            "http://localhost:3001".to_string(),
+            Some("token".to_string()),
+            tx,
+        );
         app.runs_state.select(Some(5));
 
         let result = app.refresh_runs().await;
@@ -452,7 +493,7 @@ mod tests {
         let first_run_id = RunId::new_v4();
         let second_run_id = RunId::new_v4();
 
-        let first_run = crate::app::WorkflowRunDetail {
+        let first_run = WorkflowRunDetail {
             id: first_run_id,
             workflow_name: "workflow-1".to_string(),
             initiating_user: "user".to_string(),
@@ -461,7 +502,7 @@ mod tests {
             finished_at: None,
         };
 
-        let second_run = crate::app::WorkflowRunDetail {
+        let second_run = WorkflowRunDetail {
             id: second_run_id,
             workflow_name: "workflow-2".to_string(),
             initiating_user: "user".to_string(),
@@ -505,7 +546,12 @@ mod tests {
             .await;
 
         let (tx, _rx) = mpsc::channel(8);
-        let mut app = App::new(server.uri(), Some("token".to_string()), tx);
+        let mut app = App::new(
+            server.uri(),
+            "http://localhost:3001".to_string(),
+            Some("token".to_string()),
+            tx,
+        );
         app.runs = vec![first_run, second_run];
         app.runs_state.select(Some(1));
         app.selected_run = Some(second_detail);

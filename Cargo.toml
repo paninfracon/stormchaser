@@ -11,7 +11,7 @@ members = [
     "crates/stormchaser-agent",
     "crates/stormchaser-tls",
     "crates/stormchaser-opa",
-    "crates/stormchaser-tui",
+    "crates/stormchaser-tui", "crates/stormchaser-query",
 ]
 
 [workspace.package]
@@ -31,7 +31,7 @@ tokio = { version = "1", features = ["full"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json", "macros", "migrate"] }
 axum = "0.7"
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde_json = { version = "1.0", features = ["preserve_order"] }
 async-nats = "0.47"
 async-trait = "0.1"
 uuid = { version = "1", features = ["v4", "serde"] }
@@ -39,7 +39,7 @@ chrono = { version = "0.4", features = ["serde"] }
 log = "0.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 anyhow = "1.0"
 thiserror = "2.0"
 futures = "0.3"
