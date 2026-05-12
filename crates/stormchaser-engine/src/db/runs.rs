@@ -27,6 +27,34 @@ where
     .await
 }
 
+/// Get runs stuck in the 'resolving' state.
+pub async fn get_stalled_resolving_runs<'e, E>(
+    executor: E,
+    timeout_minutes: i64,
+) -> Result<Vec<RunId>, sqlx::Error>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    #[derive(sqlx::FromRow)]
+    struct IdRow {
+        id: uuid::Uuid,
+    }
+
+    let rows: Vec<IdRow> = sqlx::query_as(
+        r#"
+        SELECT id
+        FROM workflow_runs
+        WHERE status = 'resolving'
+          AND started_resolving_at < NOW() - INTERVAL '1 minute' * $1
+        "#,
+    )
+    .bind(timeout_minutes)
+    .fetch_all(executor)
+    .await?;
+
+    Ok(rows.into_iter().map(|r| RunId::new(r.id)).collect())
+}
+
 #[allow(clippy::too_many_arguments)]
 /// Insert full workflow run.
 pub async fn insert_full_workflow_run(

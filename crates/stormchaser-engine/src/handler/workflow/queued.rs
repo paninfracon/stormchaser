@@ -164,14 +164,16 @@ pub async fn handle_workflow_queued(
                 *next_ref = format!("{}{}", prefix, next_ref);
             }
 
-            // Very naive input substitution using HCL templates/variables
-            // In a real engine, we'd use hcl_eval, but for AST merging we can inject param overrides
+            // Substitute include inputs into the step parameters using a word-boundary aware regex
+            // to avoid matching similarly named variables (e.g. replacing 'inputs.id' shouldn't affect 'my_inputs.id')
             for (k, v) in &inc.inputs {
-                let var_pattern = format!("inputs.{}", k);
-                let val_str = v.to_string();
+                let var_pattern = format!(r"\binputs\.{}\b", regex::escape(k));
+                if let Ok(re) = regex::Regex::new(&var_pattern) {
+                    let val_str = v.to_string();
 
-                for param_val in step.params.values_mut() {
-                    *param_val = param_val.replace(&var_pattern, &val_str);
+                    for param_val in step.params.values_mut() {
+                        *param_val = re.replace_all(param_val, val_str.as_str()).to_string();
+                    }
                 }
             }
 
@@ -353,4 +355,38 @@ pub async fn handle_workflow_queued(
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn test_include_input_substitution_regex() {
+        let mut params = std::collections::HashMap::new();
+        params.insert("cmd".to_string(), "echo ${inputs.id}".to_string());
+        params.insert(
+            "other".to_string(),
+            "${my_inputs.id} and ${inputs.identity}".to_string(),
+        );
+
+        let mut inputs = std::collections::HashMap::new();
+        inputs.insert("id".to_string(), serde_json::json!("123"));
+
+        for (k, v) in &inputs {
+            let var_pattern = format!(r"\binputs\.{}\b", regex::escape(k));
+            if let Ok(re) = regex::Regex::new(&var_pattern) {
+                let val_str = match v {
+                    serde_json::Value::String(s) => s.to_string(),
+                    _ => v.to_string(),
+                };
+
+                for param_val in params.values_mut() {
+                    *param_val = re.replace_all(param_val, val_str.as_str()).to_string();
+                }
+            }
+        }
+
+        assert_eq!(params["cmd"], "echo ${123}");
+        assert_eq!(params["other"], "${my_inputs.id} and ${inputs.identity}");
+    }
 }

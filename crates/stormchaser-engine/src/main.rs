@@ -224,6 +224,57 @@ fn start_timeout_worker(
     });
 }
 
+fn start_resolver_crash_recovery_worker(pool: sqlx::PgPool, nats_client: async_nats::Client) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+
+            match db::get_stalled_resolving_runs(&pool, 5).await {
+                Ok(run_ids) => {
+                    for run_id in run_ids {
+                        tracing::warn!("Recovering crashed resolution for run {}", run_id);
+                        if let Ok(run) = handler::fetch_run(run_id, &pool).await {
+                            if run.status == RunStatus::Resolving {
+                                let machine = stormchaser_engine::workflow_machine::WorkflowMachine::<
+                                    stormchaser_engine::workflow_machine::state::Resolving,
+                                >::new_from_run(run);
+                                if let Ok(mut tx) = pool.begin().await {
+                                    let result = machine
+                                        .fail(
+                                            "Engine crashed during resolution".to_string(),
+                                            &mut tx,
+                                        )
+                                        .await;
+                                    if result.is_ok() && tx.commit().await.is_ok() {
+                                        // Emit failed event
+                                        let event = stormchaser_model::events::WorkflowFailedEvent {
+                                            run_id,
+                                            event_type: stormchaser_model::events::EventType::Workflow(stormchaser_model::events::WorkflowEventType::Failed),
+                                            timestamp: chrono::Utc::now(),
+                                        };
+                                        let js = async_nats::jetstream::new(nats_client.clone());
+                                        let _ = stormchaser_model::nats::publish_cloudevent(
+                                            &js,
+                                            stormchaser_model::nats::NatsSubject::RunFailed,
+                                            stormchaser_model::events::EventType::Workflow(stormchaser_model::events::WorkflowEventType::Failed),
+                                            stormchaser_model::events::EventSource::System,
+                                            serde_json::to_value(event).unwrap(),
+                                            Some(stormchaser_model::events::SchemaVersion::new("1.0".to_string())),
+                                            None,
+                                        ).await;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => tracing::error!("Failed to fetch stalled resolving runs: {:?}", e),
+            }
+        }
+    });
+}
+
 async fn setup_nats_consumers(
     nats_client: &async_nats::Client,
 ) -> anyhow::Result<(
@@ -411,6 +462,7 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
 
     start_liveness_worker(pool.clone());
     start_timeout_worker(pool.clone(), nats_client.clone(), tls_reloader.clone());
+    start_resolver_crash_recovery_worker(pool.clone(), nats_client.clone());
 
     let (messages, query_subscriber) = setup_nats_consumers(&nats_client).await?;
 
