@@ -25,34 +25,32 @@ Sleep 500ms
 Tab
 Sleep 500ms
 
-Type "25"
-Sleep 500ms
-Tab
-Sleep 500ms
-
 Down
-Sleep 2s
-Tab
-Sleep 500ms
-
+Sleep 250ms
 Down
 Sleep 500ms
-Tab
-Sleep 500ms
-
-Type "false"
-Sleep 500ms
-Tab
-Sleep 500ms
-
-Down
-Sleep 500ms
-Down
-Sleep 2s
 Tab
 Sleep 500ms
 
 Type "testuser"
+Sleep 500ms
+Tab
+Sleep 500ms
+
+Down
+Sleep 500ms
+Tab
+Sleep 500ms
+
+Down
+Sleep 500ms
+Tab
+Sleep 500ms
+
+Tab
+Sleep 500ms
+
+Type "25"
 Sleep 500ms
 
 Enter

@@ -139,10 +139,15 @@ pub async fn schedule_step(
             iteration_ctx.declare_var(iter_var_name, crate::hcl_eval::json_to_hcl(item));
 
             let mut resolved_spec_iter = resolved_spec.clone();
-            let _ = crate::hcl_eval::resolve_expressions(&mut resolved_spec_iter, &iteration_ctx);
+            let _ =
+                crate::hcl_eval::resolve_expressions(&mut resolved_spec_iter, &iteration_ctx, true);
 
             let mut resolved_params_iter = resolved_params.clone();
-            let _ = crate::hcl_eval::resolve_expressions(&mut resolved_params_iter, &iteration_ctx);
+            let _ = crate::hcl_eval::resolve_expressions(
+                &mut resolved_params_iter,
+                &iteration_ctx,
+                true,
+            );
 
             crate::db::insert_step_instance_with_spec(
                 &mut *executor,
@@ -175,8 +180,8 @@ pub async fn schedule_step(
             }
         }
     } else {
-        let _ = crate::hcl_eval::resolve_expressions(&mut resolved_spec, hcl_ctx);
-        let _ = crate::hcl_eval::resolve_expressions(&mut resolved_params, hcl_ctx);
+        let _ = crate::hcl_eval::resolve_expressions(&mut resolved_spec, hcl_ctx, true);
+        let _ = crate::hcl_eval::resolve_expressions(&mut resolved_params, hcl_ctx, true);
 
         let step_instance_id = StepInstanceId::new(Uuid::new_v4());
         let initial_status = match resolved_type.as_str() {

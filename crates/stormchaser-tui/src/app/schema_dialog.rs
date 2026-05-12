@@ -32,7 +32,9 @@ impl<'a> SchemaDialog<'a> {
     pub fn new(schema: Value, dsl: String, inputs: Value) -> Self {
         let mut fields = Vec::new();
 
-        let required_fields: Vec<String> = schema
+        let flat_schema = stormchaser_model::schema_gen::flatten_schema_for_ui(&schema, &inputs);
+
+        let required_fields: Vec<String> = flat_schema
             .get("required")
             .and_then(|v| v.as_array())
             .map(|arr| {
@@ -42,7 +44,7 @@ impl<'a> SchemaDialog<'a> {
             })
             .unwrap_or_default();
 
-        if let Some(properties) = schema.get("properties").and_then(|v| v.as_object()) {
+        if let Some(properties) = flat_schema.get("properties").and_then(|v| v.as_object()) {
             for (key, prop) in properties {
                 let description = prop
                     .get("description")
@@ -62,6 +64,12 @@ impl<'a> SchemaDialog<'a> {
                         input.insert_str(s);
                     } else {
                         input.insert_str(val.to_string());
+                    }
+                } else if let Some(def) = prop.get("default") {
+                    if let Some(s) = def.as_str() {
+                        input.insert_str(s);
+                    } else {
+                        input.insert_str(def.to_string());
                     }
                 }
 
@@ -164,28 +172,31 @@ impl<'a> SchemaDialog<'a> {
         }
 
         if let Some(properties) = schema.get("properties").and_then(|v| v.as_object()) {
+            let mut new_fields = Vec::with_capacity(properties.len());
             for (key, prop) in properties {
-                let mut exists = false;
-                for field in &mut self.fields {
+                let mut existing_field = None;
+                for (i, field) in self.fields.iter().enumerate() {
                     if field.name == *key {
-                        exists = true;
-                        field.required = required_fields.contains(key);
-                        if let Some(enum_vals) = prop.get("enum").and_then(|v| v.as_array()) {
-                            field.is_enum = true;
-                            field.options.clear();
-                            for v in enum_vals {
-                                if let Some(s) = v.as_str() {
-                                    field.options.push(s.to_string());
-                                } else {
-                                    field.options.push(v.to_string());
-                                }
-                            }
-                        }
+                        existing_field = Some(self.fields.remove(i));
                         break;
                     }
                 }
 
-                if !exists {
+                if let Some(mut field) = existing_field {
+                    field.required = required_fields.contains(key);
+                    if let Some(enum_vals) = prop.get("enum").and_then(|v| v.as_array()) {
+                        field.is_enum = true;
+                        field.options.clear();
+                        for v in enum_vals {
+                            if let Some(s) = v.as_str() {
+                                field.options.push(s.to_string());
+                            } else {
+                                field.options.push(v.to_string());
+                            }
+                        }
+                    }
+                    new_fields.push(field);
+                } else {
                     let description = prop
                         .get("description")
                         .and_then(|v| v.as_str())
@@ -198,6 +209,14 @@ impl<'a> SchemaDialog<'a> {
                             .borders(Borders::ALL)
                             .title(format!(" {} ", key)),
                     );
+
+                    if let Some(def) = prop.get("default") {
+                        if let Some(s) = def.as_str() {
+                            input.insert_str(s);
+                        } else {
+                            input.insert_str(def.to_string());
+                        }
+                    }
 
                     let mut options = Vec::new();
                     let mut is_enum = false;
@@ -212,7 +231,7 @@ impl<'a> SchemaDialog<'a> {
                         }
                     }
 
-                    self.fields.push(SchemaField {
+                    new_fields.push(SchemaField {
                         name: key.clone(),
                         description,
                         required: required_fields.contains(key),
@@ -229,6 +248,7 @@ impl<'a> SchemaDialog<'a> {
                     });
                 }
             }
+            self.fields = new_fields;
         }
         self.is_hydrating = false;
     }

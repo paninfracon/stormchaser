@@ -304,6 +304,60 @@ pub fn flatten_schema_for_ui(schema: &Value, inputs: &Value) -> Value {
                 }
             }
 
+            // Apply ui:order if present
+            let mut order_strings = Vec::new();
+            let order_array = obj
+                .get("ui:order")
+                .or_else(|| obj.get("ui_order"))
+                .and_then(|v| v.as_array());
+            if let Some(order) = order_array {
+                for v in order {
+                    if let Some(s) = v.as_str() {
+                        order_strings.push(s.to_string());
+                    }
+                }
+            }
+
+            if !order_strings.is_empty() {
+                if let Some(props_val) = obj.get_mut("properties") {
+                    if let Some(props) = props_val.as_object_mut() {
+                        let mut new_props = serde_json::Map::new();
+
+                        let remaining_keys: Vec<String> = props
+                            .keys()
+                            .filter(|&k| !order_strings.contains(k))
+                            .cloned()
+                            .collect();
+
+                        for s in &order_strings {
+                            if s == "*" {
+                                for k in &remaining_keys {
+                                    if let Some(v) = props.remove(k) {
+                                        new_props.insert(k.clone(), v);
+                                    }
+                                }
+                            } else if let Some(v) = props.remove(s) {
+                                new_props.insert(s.clone(), v);
+                            }
+                        }
+
+                        // Append any remaining keys if wildcard wasn't used
+                        for k in remaining_keys {
+                            if let Some(v) = props.remove(&k) {
+                                new_props.insert(k, v);
+                            }
+                        }
+
+                        // Catch-all for safety
+                        for (k, v) in std::mem::take(props) {
+                            new_props.insert(k, v);
+                        }
+
+                        *props = new_props;
+                    }
+                }
+            }
+
             // Optionally, strip allOf to keep it completely flat for the UI
             // obj.remove("allOf");
         }
@@ -404,5 +458,27 @@ mod tests {
             .as_object()
             .unwrap();
         assert!(!properties_no_match.contains_key("spec"));
+    }
+
+    #[test]
+    fn test_ui_order_flattening() {
+        use super::flatten_schema_for_ui;
+        let schema = serde_json::json!({
+            "type": "object",
+            "ui:order": ["b", "*", "a"],
+            "properties": {
+                "a": { "type": "string" },
+                "b": { "type": "string" },
+                "c": { "type": "string" },
+                "d": { "type": "string" }
+            }
+        });
+
+        let inputs = serde_json::json!({});
+        let flat = flatten_schema_for_ui(&schema, &inputs);
+
+        let props = flat.get("properties").unwrap().as_object().unwrap();
+        let keys: Vec<String> = props.keys().cloned().collect();
+        assert_eq!(keys, vec!["b", "c", "d", "a"]);
     }
 }

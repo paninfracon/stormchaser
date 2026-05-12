@@ -7,21 +7,25 @@ use regex::Regex;
 use serde_json::Value;
 
 /// Resolves HCL expressions embedded in strings via `${...}` syntax within a JSON Value.
-pub fn resolve_expressions(value: &mut Value, ctx: &HclContext) -> Result<()> {
+pub fn resolve_expressions(value: &mut Value, ctx: &HclContext, strict: bool) -> Result<()> {
     match value {
-        Value::String(s) => {
-            if let Some(new_val) = evaluate_string(s, ctx)? {
+        Value::String(s) => match evaluate_string(s, ctx) {
+            Ok(Some(new_val)) => {
                 *value = new_val;
             }
-        }
+            Err(e) if strict => {
+                return Err(e);
+            }
+            _ => {}
+        },
         Value::Array(arr) => {
             for v in arr {
-                resolve_expressions(v, ctx)?;
+                resolve_expressions(v, ctx, strict)?;
             }
         }
         Value::Object(map) => {
             for v in map.values_mut() {
-                resolve_expressions(v, ctx)?;
+                resolve_expressions(v, ctx, strict)?;
             }
         }
         _ => {}
@@ -192,7 +196,7 @@ mod tests {
             }
         });
 
-        resolve_expressions(&mut val, &ctx).unwrap();
+        resolve_expressions(&mut val, &ctx, true).unwrap();
 
         assert_eq!(val["service"], "api-prod");
         assert_eq!(val["tags"][1], "prod");

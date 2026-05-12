@@ -405,7 +405,7 @@ async fn run_hydration_loop(
         stormchaser_model::hcl_eval::json_to_hcl(Value::Object(query_results)),
     );
 
-    let _ = stormchaser_model::hcl_eval::resolve_expressions(&mut schema, &schema_ctx);
+    let _ = stormchaser_model::hcl_eval::resolve_expressions(&mut schema, &schema_ctx, false);
     let _ = emit_event(&schema, &inputs, &tasks, &tx).await;
 }
 

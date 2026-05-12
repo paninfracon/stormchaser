@@ -301,6 +301,7 @@ impl<'a> App<'a> {
     /// Handles a partial summary update for a workflow run, usually from the global run list stream.
     pub fn handle_workflow_update(&mut self, run_detail: WorkflowRunDetail) {
         let is_forced = self.force_select_run_id == Some(run_detail.id);
+        let id = run_detail.id;
 
         if let Some(run) = self.runs.iter_mut().find(|r| r.id == run_detail.id) {
             *run = run_detail.clone();
@@ -308,6 +309,17 @@ impl<'a> App<'a> {
                 if let Some(pos) = self.runs.iter().position(|r| r.id == run_detail.id) {
                     self.runs_state.select(Some(pos));
                     self.force_select_run_id = None;
+
+                    let tx = self.status_tx.clone();
+                    tokio::spawn(async move {
+                        let _ = tx
+                            .send(crate::AppEvent::StatusUpdate(
+                                id,
+                                "force_refresh".to_string(),
+                            ))
+                            .await;
+                        let _ = tx.send(crate::AppEvent::StartWatching(id)).await;
+                    });
                 }
             }
         } else {
@@ -315,6 +327,17 @@ impl<'a> App<'a> {
             if is_forced {
                 self.runs_state.select(Some(0));
                 self.force_select_run_id = None;
+
+                let tx = self.status_tx.clone();
+                tokio::spawn(async move {
+                    let _ = tx
+                        .send(crate::AppEvent::StatusUpdate(
+                            id,
+                            "force_refresh".to_string(),
+                        ))
+                        .await;
+                    let _ = tx.send(crate::AppEvent::StartWatching(id)).await;
+                });
             } else if let Some(selected) = self.runs_state.selected() {
                 self.runs_state.select(Some(selected + 1));
             }

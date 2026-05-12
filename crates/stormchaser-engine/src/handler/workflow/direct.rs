@@ -47,7 +47,7 @@ pub async fn handle_workflow_direct(
         let hcl_ctx =
             crate::hcl_eval::create_context(inputs.clone(), run_id, serde_json::json!({}));
         let mut resolved_params = serde_json::to_value(&query.params)?;
-        if let Err(e) = crate::hcl_eval::resolve_expressions(&mut resolved_params, &hcl_ctx) {
+        if let Err(e) = crate::hcl_eval::resolve_expressions(&mut resolved_params, &hcl_ctx, true) {
             let err_msg = format!(
                 "Failed to evaluate parameters for query {}: {}",
                 query.name, e
@@ -88,7 +88,7 @@ pub async fn handle_workflow_direct(
             crate::hcl_eval::json_to_hcl(serde_json::Value::Object(query_results)),
         );
 
-        if let Err(e) = crate::hcl_eval::resolve_expressions(&mut schema_val, &schema_ctx) {
+        if let Err(e) = crate::hcl_eval::resolve_expressions(&mut schema_val, &schema_ctx, true) {
             let err_msg = format!("Failed to evaluate expressions in inputs schema: {}", e);
             error!("Direct run {}: {}", run_id, err_msg);
             return Err(anyhow::anyhow!(err_msg));
