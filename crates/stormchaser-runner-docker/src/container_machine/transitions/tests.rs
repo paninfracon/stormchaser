@@ -36,6 +36,7 @@ fn create_test_metadata(image: &str, cmd: Vec<&str>) -> ContainerMetadata {
             steps: None,
             next: vec![],
             on_failure: None,
+            aliases: std::collections::HashMap::new(),
             retry: None,
             timeout: None,
             allow_failure: None,

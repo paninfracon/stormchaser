@@ -164,7 +164,9 @@ Stormchaser supports dynamic options populated via external systems (e.g., Runde
 When the TUI or Web UI requests the schema, the Query microservice (`/api/v1/schema/hydrate`) dynamically resolves these queries and converts the result into an `enum` list, embedding it back into the schema before returning it to the UI.
 
 ##### Mock Data
+
 Useful for testing or static lists.
+
 ```hcl
 query "env_options" {
     type = "mock"
@@ -179,7 +181,9 @@ inputs {
 ```
 
 ##### SQL Database
+
 Fetch options directly from a database configured as a storage backend in Stormchaser.
+
 ```hcl
 query "db_envs" {
     type = "sql"
@@ -191,7 +195,9 @@ query "db_envs" {
 ```
 
 ##### REST API
+
 Fetch options from an HTTP endpoint. You can optionally use `jq_filter` to extract a list of strings if the API returns a complex object.
+
 ```hcl
 query "api_options" {
     type = "api"
@@ -205,7 +211,9 @@ query "api_options" {
 ```
 
 ##### AWS Cloud Control
+
 Query AWS resources dynamically via the AWS API.
+
 ```hcl
 query "aws_vpcs" {
     type = "aws_cloudcontrol"
@@ -916,7 +924,9 @@ You can mark a workflow as a template by using the `workflow_template` block ins
 
 ```hcl
 workflow_template "standard_build" {
-  input "repo" { type = "string" }
+  inputs {
+    repo = string()
+  }
 
   step "build" "RunContainer" {
     // ...

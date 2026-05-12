@@ -199,3 +199,28 @@ fn test_parse_wasm_step() {
     assert_eq!(spec["args"]["timeout"], 60);
     assert_eq!(spec["args"]["retries"], 3);
 }
+
+#[test]
+fn test_parse_inputs_view() {
+    let dsl = r#"
+        stormchaser_dsl_version = "0.1"
+        workflow "test_view" {
+            inputs {
+                ui_order = ["field_b", "field_a", "*"]
+                type = "object"
+                properties = {
+                    field_a = { type = "string" }
+                    field_b = { type = "string" }
+                }
+            }
+            steps {}
+        }
+    "#;
+
+    let parser = StormchaserParser::new();
+    let workflow = parser.parse(dsl).expect("Failed to parse DSL");
+
+    assert!(workflow.inputs_view.is_some());
+    let view = workflow.inputs_view.unwrap();
+    assert_eq!(view.ui_order, vec!["field_b", "field_a", "*"]);
+}

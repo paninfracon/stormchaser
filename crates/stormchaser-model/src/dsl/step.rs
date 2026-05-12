@@ -25,10 +25,10 @@ pub struct Step {
     pub name: String,
     /// Type of the step.
     pub r#type: String, // e.g., "GitCheckout", "RunContainer", "Parallel", etc.
-    /// CEL condition controlling whether the step runs.
+    /// HCL condition controlling whether the step runs.
     pub condition: Option<String>,
     /// Evaluated parameters for the step.
-    pub params: HashMap<String, String>, // CEL Expressions
+    pub params: HashMap<String, String>, // HCL Expressions
 
     /// Step-specific specification.
     /// This allows each step type to define its own structured parameters.
@@ -50,6 +50,9 @@ pub struct Step {
     pub next: Vec<String>,
     /// Steps to execute if this step fails.
     pub on_failure: Option<Box<Step>>,
+    /// Aliases defined explicitly for this step.
+    #[serde(default)]
+    pub aliases: HashMap<String, String>,
     /// Retry policy for this step.
     pub retry: Option<RetryPolicy>,
     /// Timeout duration.
@@ -88,8 +91,8 @@ pub struct Aggregation {
     pub name: String,
     /// Optional description.
     pub description: Option<String>,
-    /// CEL Expression for aggregation.
-    pub value: String, // CEL Expression
+    /// HCL Expression for aggregation.
+    pub value: String, // HCL Expression
 }
 
 /// Rule for extracting outputs from logs or files.

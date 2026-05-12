@@ -47,7 +47,7 @@ pub struct EventRule {
     pub webhook_id: Option<WebhookId>,
     /// Pattern matching the type of event to handle.
     pub event_type_pattern: String,
-    /// CEL expression used to filter matching events.
+    /// HCL expression used to filter matching events.
     pub condition_expr: Option<String>,
     /// Name of the workflow to trigger when the rule matches.
     pub workflow_name: String,
@@ -57,8 +57,8 @@ pub struct EventRule {
     pub workflow_path: String,
     /// Git reference (branch, tag, or commit) to execute.
     pub git_ref: String,
-    /// JSON mapping of workflow inputs to CEL expressions evaluated against the event.
-    pub input_mappings: Value, // Map of name -> CEL expr
+    /// JSON mapping of workflow inputs to HCL expressions evaluated against the event.
+    pub input_mappings: Value, // Map of name -> HCL expr
     /// Whether this rule is actively being evaluated.
     pub is_active: bool,
     /// Timestamp when the rule was created.
@@ -68,7 +68,7 @@ pub struct EventRule {
 }
 
 impl EventRule {
-    /// Returns the parsed input mappings as a hash map of string keys to CEL expressions.
+    /// Returns the parsed input mappings as a hash map of string keys to HCL expressions.
     pub fn get_input_mappings(&self) -> HashMap<String, String> {
         serde_json::from_value(self.input_mappings.clone()).unwrap_or_default()
     }

@@ -529,3 +529,35 @@ fn render_run_detail_with_artifacts() {
     terminal.draw(|f| ui(f, &mut app)).unwrap();
     assert_debug_snapshot!(terminal.backend());
 }
+
+#[test]
+fn render_schema_dialog_invalid_inputs() {
+    let mut app = create_test_app();
+
+    let schema = serde_json::json!({
+        "type": "object",
+        "properties": {
+            "required_string": { "type": "string" },
+            "number_field": { "type": "number" }
+        },
+        "required": ["required_string"]
+    });
+
+    let mut dialog = crate::app::schema_dialog::SchemaDialog::new(
+        schema,
+        "".to_string(),
+        serde_json::json!({"number_field": "not_a_number"}),
+        None,
+    );
+
+    // Call validate to trigger the error population
+    dialog.validate();
+
+    app.pending_schema_ui = Some(dialog);
+
+    let backend = TestBackend::new(100, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    terminal.draw(|f| ui(f, &mut app)).unwrap();
+    assert_debug_snapshot!(terminal.backend());
+}

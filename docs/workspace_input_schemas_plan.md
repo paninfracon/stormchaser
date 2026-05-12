@@ -1,6 +1,6 @@
 # Plan: Workspace Input Schemas
 
-This is a complete plan to implement workspace input schemas using the existing HCL embedded schema format. This approach leverages the `hcl_to_json_schema` parser already present in the DSL, validates payloads using the `jsonschema` crate, integrates with the `schemaui` crate for the TUI, and introduces dynamic query capabilities.
+This is a complete plan to implement workspace input schemas using the existing HCL embedded schema format. This approach leverages the `hcl_to_json_schema` parser already present in the DSL, validates payloads using the `jsonschema` crate, integrates with a native reactive dependency graph in the Ratatui TUI, and introduces dynamic query capabilities.
 
 ## Phase 1: Model Updates (`stormchaser-model`)
 
@@ -75,18 +75,17 @@ Similar to Rundeck, we need the ability to populate dynamic dropdowns or validat
 2. **Schema Hydration Endpoint**:
    Create a new API route in `stormchaser-api` (e.g. `GET /api/v1/workflows/:id/schema/hydrated`) that executes these queries dynamically and rewrites the returned `inputs_schema` `enum` arrays with the fetched results. This ensures UIs don't have to perform the queries directly.
 
-## Phase 5: TUI Integration with `schemaui` (`stormchaser-tui`)
+## Phase 5: TUI Integration with Native Reactive Graph (`stormchaser-tui`)
 
-We will replace basic text boxes in the TUI workflow start screen with intelligent, schema-driven forms.
+We will replace basic text boxes in the TUI workflow start screen with intelligent, schema-driven forms using a native reactive dependency graph.
 
-1. **Include Dependency**: Add the `schemaui` crate to the `stormchaser-tui` `Cargo.toml`.
-2. **Render the Form**:
+1. **Render the Form**:
    When prompting the user for workflow inputs in the TUI, retrieve the `inputs_schema` (ideally via the hydrated API endpoint mentioned in Phase 4 so dynamic queries are resolved).
-3. **Map Schema to TUI Controls**:
-   Use `schemaui` to dynamically generate the form elements:
+2. **Map Schema to TUI Controls**:
+   Use a native reactive dependency graph within Ratatui to dynamically generate the form elements:
    - Map `type: "string"` and `format: "email"` to specialized input boxes.
    - Map `enum` lists to Dropdowns/Select lists.
-   - Handle conditional rendering (e.g., `oneOf`, `anyOf`, or `dependencies` if supported by `schemaui`).
+   - Handle conditional rendering (e.g., `allOf`, `anyOf`, or `dependencies` using `petgraph` to resolve visibility).
    - Run local validation against the user's input before submission to provide immediate visual feedback.
 
 ## Phase 6: Testing & Documentation
@@ -106,4 +105,4 @@ We will replace basic text boxes in the TUI workflow start screen with intellige
 2. **Engine & UI Integration Tests**:
    Create `schema-validation.storm` and `dynamic-query.storm` execution tests.
 3. **Documentation Updates**:
-   Update `docs/workflow_dsl.md` to showcase the new `inputs` schema format, TUI `schemaui` integration, and Rundeck-style dynamic queries.
+   Update `docs/workflow_dsl.md` to showcase the new `inputs` schema format, native TUI reactive graph integration, and Rundeck-style dynamic queries.

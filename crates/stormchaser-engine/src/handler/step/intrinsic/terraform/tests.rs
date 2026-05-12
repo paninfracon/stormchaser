@@ -190,10 +190,12 @@ fn test_terraform_approval_destructive_changes_adds_warning() {
 
     assert_eq!(step_type, "Approval");
     // The approval input description should contain the WARNING banner
-    let inputs = spec.get("inputs").and_then(|v| v.as_array()).unwrap();
-    let description = inputs[0]
-        .get("description")
-        .and_then(|v| v.as_str())
+    let inputs = spec.get("inputs").and_then(|v| v.as_object()).unwrap();
+    let description = inputs
+        .get("properties")
+        .and_then(|p| p.get("approval_decision"))
+        .and_then(|a| a.get("description"))
+        .and_then(|d| d.as_str())
         .unwrap();
     assert!(
         description.contains("DESTRUCTIVE CHANGES"),

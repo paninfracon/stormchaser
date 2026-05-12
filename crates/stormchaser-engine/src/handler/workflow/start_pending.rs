@@ -63,9 +63,14 @@ pub async fn handle_workflow_start_pending(
         return Err(anyhow::anyhow!("No initial steps found in workflow"));
     }
 
-    // 4. Create CelContext for resolving expressions
-    let hcl_ctx =
-        crate::hcl_eval::create_context(context.inputs.clone(), run_id, serde_json::json!({}));
+    // 4. Create HCL Context for resolving expressions
+    let hcl_ctx = crate::hcl_eval::create_context(
+        context.inputs.clone(),
+        run_id,
+        serde_json::json!({}),
+        Some(&workflow),
+        None,
+    );
 
     // 5. Create StepInstances for initial steps and schedule them
     for step_dsl in initial_steps {

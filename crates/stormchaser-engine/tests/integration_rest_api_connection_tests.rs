@@ -1,3 +1,4 @@
+#![allow(clippy::explicit_auto_deref)]
 use chrono::Utc;
 use futures::StreamExt;
 use serde_json::json;

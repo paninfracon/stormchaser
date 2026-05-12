@@ -375,3 +375,61 @@ impl<'a> App<'a> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::app::handlers::test_utils::{
+        mock_full_detail, mock_run_detail, mock_step_detail, setup_app,
+    };
+    use stormchaser_model::workflow::RunStatus;
+    use stormchaser_model::RunId;
+    use uuid::Uuid;
+
+    #[test]
+    fn test_handle_status_update_basic() {
+        let mut app = setup_app();
+        let run_id = RunId::new(Uuid::new_v4());
+
+        let run = mock_run_detail(run_id, RunStatus::Running);
+        app.runs.push(run.clone());
+
+        app.handle_status_update(run_id, "succeeded".to_string());
+        assert_eq!(app.runs[0].status, RunStatus::Succeeded);
+    }
+
+    #[test]
+    fn test_handle_status_update_prevent_downgrade() {
+        let mut app = setup_app();
+        let run_id = RunId::new(Uuid::new_v4());
+
+        let run = mock_run_detail(run_id, RunStatus::Succeeded);
+        app.runs.push(run.clone());
+
+        app.handle_status_update(run_id, "running".to_string());
+        assert_eq!(app.runs[0].status, RunStatus::Succeeded);
+    }
+
+    #[test]
+    fn test_handle_full_run_update_preserves_logs() {
+        let mut app = setup_app();
+        let run_id = RunId::new(Uuid::new_v4());
+
+        let mut old_step = mock_step_detail("build", "running");
+        old_step.logs = vec!["compiling...".to_string()];
+
+        let old_detail = mock_full_detail(run_id, RunStatus::Running, vec![old_step]);
+        app.runs.push(old_detail.detail.clone());
+        app.selected_run = Some(old_detail);
+        app.runs_state.select(Some(0));
+
+        let new_step = mock_step_detail("build", "running");
+        let new_detail = mock_full_detail(run_id, RunStatus::Running, vec![new_step]);
+
+        app.handle_full_run_update(new_detail);
+
+        assert_eq!(
+            app.selected_run.as_ref().unwrap().steps[0].logs,
+            vec!["compiling..."]
+        );
+    }
+}

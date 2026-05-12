@@ -1,28 +1,27 @@
-# Replacing ratatui-form
+# TUI Improvements
 
-We need to replace ratatui-form as both it is unmaintained and we have outgrown the capabilities
+## Replacing ratatui-form (Completed)
 
-## Area 1: Simple Forms (Storage Backends, Static Config)
+We have successfully replaced `ratatui-form` as it was unmaintained and we had outgrown its capabilities. This transition was completed in two main areas:
 
-This is where you deploy `schemaui`. You have a fixed set of fields, known validation rules, and zero need for dynamic data fetching during the input process.
+### Area 1: Simple Forms (Completed)
 
-Instead of writing custom Ratatui widget layouts for every new storage backend or integration you add, you just write a static JSON Schema draft-07 file. When the user hits "Add Storage," your main loop suspends, hands the schema to the `schemaui` blocking runner, and waits for the validated `serde_json::Value` to come back. It’s zero-maintenance UI.
+`schemaui` has been deployed for forms with a fixed set of fields, known validation rules, and no need for dynamic data fetching (e.g., Storage Backends, Static Config).
 
-### Area 2: Workflow Inputs (The Reactive DAG)
+Instead of custom Ratatui widget layouts, we now use static JSON Schema draft-07 files. When adding storage, the main loop suspends, hands the schema to the `schemaui` blocking runner, and waits for the validated `serde_json::Value`. This provides a zero-maintenance UI.
 
-This is the core of the engine's execution UX and where you abandon static schemas. Because you have SSE streams, AWS list fetches, and inter-field dependencies, this must be built as a **Reactive Dependency Graph** running entirely inside your asynchronous Tokio loop.
+### Area 2: Workflow Inputs (Completed)
 
-You define your fields as nodes (`Loading`, `Ready`, `Resolved`). The UI is completely dumb—it just renders whatever state the graph is currently in on every tick. If an AWS fetch takes two seconds, the UI thread doesn't care; it just draws a spinner for that specific node while the user continues typing into a regex-validated text field on another node. This guarantees the terminal never locks up and your SSE connections never drop.
+To handle SSE streams, external data fetches, and inter-field dependencies without blocking the UI, workflow inputs have been implemented as a **Reactive Dependency Graph** running within the Tokio event loop.
 
-This set of forms will be defined by a modified JSON schema using embedded HCL schema (which we already support converting to and from json schema) and a combination of input directives in the DSL
-DSL will support a domain specific and limited form of schema with the ability to fetch data from external sources for validation and dropdowns (a la Rundeck)
+Fields act as nodes (`Loading`, `Ready`, `Resolved`), and the UI renders the current state of the graph. This prevents the terminal from locking up during asynchronous operations (like AWS list fetches) and ensures SSE connections remain stable. These forms are driven by an embedded HCL schema and input directives defined in the DSL.
 
-## Area 3: The HCL Editor
+## Upcoming Work
 
-Using ratatui-code-editor in the TUI
+### Area 3: The HCL Editor (Pending)
 
-Add the Dependency: Pull the tree-sitter-hcl crate into your Cargo.toml.
+**Goal:** Implement `ratatui-code-editor` in the TUI to provide syntax-highlighted editing of `.storm` files.
 
-Grab the Queries: Go to the official tree-sitter-hcl GitHub repository, navigate to their queries folder, and copy the highlights.scm file. This file contains the Scheme-like syntax that tells Tree-sitter which AST nodes are "keywords," "strings," or "variables."
-
-Inject at Initialization: When you instantiate the Editor struct in your application, you will pass it the tree-sitter-hcl::language() function and the contents of that highlights.scm file using the custom highlights API.
+1. **Add Dependency:** Pull the `tree-sitter-hcl` crate into `Cargo.toml`.
+2. **Grab Queries:** Navigate to the official `tree-sitter-hcl` GitHub repository's queries folder and copy the `highlights.scm` file. This file contains the Scheme-like syntax that maps AST nodes to highlight categories ("keywords", "strings", "variables").
+3. **Inject at Initialization:** When instantiating the `Editor` struct, pass it the `tree-sitter-hcl::language()` function and the contents of `highlights.scm` using the custom highlights API.

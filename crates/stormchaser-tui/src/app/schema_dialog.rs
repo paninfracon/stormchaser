@@ -22,14 +22,47 @@ pub struct SchemaDialog<'a> {
     pub focus: usize,
     pub scroll_offset: usize,
     pub base_schema: Value,
+    pub current_schema: Value,
     pub dsl: String,
+    pub inputs_view: Option<stormchaser_model::dsl::InputView>,
     pub is_hydrating: bool,
     pub hydration_status: String,
     pub global_errors: Vec<String>,
 }
 
+fn sort_fields<'a>(
+    fields: &mut Vec<SchemaField<'a>>,
+    inputs_view: &Option<stormchaser_model::dsl::InputView>,
+) {
+    if let Some(view) = inputs_view {
+        let mut ordered_fields = Vec::new();
+        let mut remaining_fields = std::mem::take(fields);
+
+        let ui_order = &view.ui_order;
+        let has_wildcard = ui_order.contains(&"*".to_string());
+
+        for order_key in ui_order {
+            if order_key == "*" {
+                ordered_fields.append(&mut remaining_fields);
+            } else if let Some(idx) = remaining_fields.iter().position(|f| &f.name == order_key) {
+                ordered_fields.push(remaining_fields.remove(idx));
+            }
+        }
+
+        if !has_wildcard {
+            ordered_fields.append(&mut remaining_fields);
+        }
+        *fields = ordered_fields;
+    }
+}
+
 impl<'a> SchemaDialog<'a> {
-    pub fn new(schema: Value, dsl: String, inputs: Value) -> Self {
+    pub fn new(
+        schema: Value,
+        dsl: String,
+        inputs: Value,
+        inputs_view: Option<stormchaser_model::dsl::InputView>,
+    ) -> Self {
         let mut fields = Vec::new();
 
         let flat_schema = stormchaser_model::schema_gen::flatten_schema_for_ui(&schema, &inputs);
@@ -104,16 +137,63 @@ impl<'a> SchemaDialog<'a> {
             }
         }
 
+        sort_fields(&mut fields, &inputs_view);
+
         Self {
             fields,
             focus: 0,
             scroll_offset: 0,
-            base_schema: schema,
+            base_schema: schema.clone(),
+            current_schema: flat_schema,
             dsl,
+            inputs_view,
             is_hydrating: false,
             hydration_status: "Ready".to_string(),
             global_errors: Vec::new(),
         }
+    }
+
+    pub fn validate(&mut self) -> bool {
+        for field in &mut self.fields {
+            field.error = None;
+        }
+
+        let inputs = self.get_inputs();
+        let mut is_valid = true;
+
+        if let Ok(validator) = jsonschema::validator_for(&self.current_schema) {
+            for error in validator.iter_errors(&inputs) {
+                let path = error.instance_path().to_string();
+                let field_name = if let Some(stripped) = path.strip_prefix('/') {
+                    stripped.to_string()
+                } else {
+                    path.clone()
+                };
+
+                // For 'required' errors, path is empty but we can get it from the message or details if possible.
+                // But jsonschema crate uses error.instance_path for the parent object in 'required' errors.
+                // Let's parse the error string or check error kind.
+                let error_msg = error.to_string();
+                if let jsonschema::error::ValidationErrorKind::Required { property } = error.kind()
+                {
+                    for field in &mut self.fields {
+                        if field.name == property.to_string().trim_matches('"') {
+                            field.error = Some(error_msg.clone());
+                            is_valid = false;
+                        }
+                    }
+                } else {
+                    for field in &mut self.fields {
+                        if field.name == field_name {
+                            field.error = Some(error_msg.clone());
+                            is_valid = false;
+                        }
+                    }
+                }
+            }
+        }
+
+        is_valid
     }
 
     pub fn get_inputs(&self) -> Value {
@@ -141,6 +221,7 @@ impl<'a> SchemaDialog<'a> {
     pub fn apply_hydrated_schema(&mut self, schema: Value, errors: Vec<String>, status: String) {
         self.hydration_status = status;
         self.global_errors = errors;
+        self.current_schema = schema.clone();
 
         let required_fields: Vec<String> = schema
             .get("required")
@@ -249,6 +330,7 @@ impl<'a> SchemaDialog<'a> {
                 }
             }
             self.fields = new_fields;
+            sort_fields(&mut self.fields, &self.inputs_view);
         }
         self.is_hydrating = false;
     }
@@ -364,17 +446,23 @@ pub fn draw_schema_dialog(f: &mut Frame, dialog: &mut SchemaDialog) {
         let field_rect = Rect::new(chunks[0].x, field_y, chunks[0].width, 3);
         field_y += 3;
 
-        let style = if i == dialog.focus {
+        let style = if field.error.is_some() {
+            Style::default().fg(Color::Red)
+        } else if i == dialog.focus {
             Style::default().fg(Color::Yellow)
         } else {
             Style::default().fg(Color::DarkGray)
         };
 
-        let title = if field.required {
+        let mut title = if field.required {
             format!(" {}* ", field.name)
         } else {
             format!(" {} ", field.name)
         };
+
+        if let Some(err) = &field.error {
+            title = format!("{} [{}] ", title.trim_end(), err);
+        }
 
         let mut b = Block::default()
             .borders(Borders::ALL)
@@ -445,7 +533,7 @@ mod tests {
             }
         });
 
-        let mut dialog = SchemaDialog::new(base_schema, "".to_string(), json!({}));
+        let mut dialog = SchemaDialog::new(base_schema, "".to_string(), json!({}), None);
         assert_eq!(dialog.fields.len(), 1);
         assert_eq!(dialog.fields[0].name, "type");
 
@@ -465,5 +553,67 @@ mod tests {
         assert_eq!(dialog.fields[1].name, "spec");
         assert_eq!(dialog.fields[1].description, "The spec");
         assert!(dialog.fields[1].required);
+    }
+
+    fn create_dummy_field(name: &str) -> SchemaField<'static> {
+        SchemaField {
+            name: name.to_string(),
+            description: "".to_string(),
+            required: false,
+            input: TextArea::default(),
+            options: vec![],
+            error: None,
+            is_enum: false,
+            schema_type: "string".to_string(),
+            list_state: ListState::default(),
+        }
+    }
+
+    #[test]
+    fn test_sort_fields_with_ui_order_and_wildcard() {
+        let mut fields = vec![
+            create_dummy_field("field_a"),
+            create_dummy_field("field_b"),
+            create_dummy_field("field_c"),
+            create_dummy_field("field_d"),
+        ];
+
+        let inputs_view = Some(stormchaser_model::dsl::InputView {
+            ui_order: vec![
+                "field_c".to_string(),
+                "field_a".to_string(),
+                "*".to_string(),
+                "field_d".to_string(),
+            ],
+        });
+
+        sort_fields(&mut fields, &inputs_view);
+
+        assert_eq!(fields.len(), 4);
+        assert_eq!(fields[0].name, "field_c");
+        assert_eq!(fields[1].name, "field_a");
+        assert_eq!(fields[2].name, "field_b"); // wildcard picks up remaining
+        assert_eq!(fields[3].name, "field_d");
+    }
+
+    #[test]
+    fn test_sort_fields_with_ui_order_no_wildcard() {
+        let mut fields = vec![
+            create_dummy_field("field_a"),
+            create_dummy_field("field_b"),
+            create_dummy_field("field_c"),
+        ];
+
+        let inputs_view = Some(stormchaser_model::dsl::InputView {
+            ui_order: vec!["field_b".to_string()],
+        });
+
+        sort_fields(&mut fields, &inputs_view);
+
+        assert_eq!(fields.len(), 3);
+        assert_eq!(fields[0].name, "field_b");
+        // Remaining appended to the end when there is no wildcard
+        assert_eq!(fields[1].name, "field_a");
+        assert_eq!(fields[2].name, "field_c");
     }
 }

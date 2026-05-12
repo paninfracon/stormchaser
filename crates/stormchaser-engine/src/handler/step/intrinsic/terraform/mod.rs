@@ -3,7 +3,6 @@ use stormchaser_model::dsl::ApprovalSpec;
 use stormchaser_model::dsl::CommonContainerSpec;
 use stormchaser_model::dsl::EmailSpec;
 use stormchaser_model::dsl::EnvVar;
-use stormchaser_model::dsl::Input;
 use stormchaser_model::dsl::StorageMount;
 
 #[cfg(feature = "aws-sdk-sts")]
@@ -253,14 +252,18 @@ pub fn mutate_if_terraform_approval(step_type: &mut String, resolved_spec: &mut 
             );
         }
 
-        let input = Input {
-            name: "approval_decision".to_string(),
-            r#type: "string".to_string(),
-            description: Some(plan_description),
-            default: Some(serde_json::json!("Approve")),
-            validation: None,
-            options: Some(vec!["Approve".to_string(), "Reject".to_string()]),
-        };
+        let input_schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "approval_decision": {
+                    "type": "string",
+                    "description": plan_description,
+                    "default": "Approve",
+                    "enum": ["Approve", "Reject"]
+                }
+            },
+            "required": ["approval_decision"]
+        });
 
         let mut notify_spec: Option<EmailSpec> = actual_spec
             .get("notify")
@@ -284,7 +287,7 @@ pub fn mutate_if_terraform_approval(step_type: &mut String, resolved_spec: &mut 
 
         let approval_spec = ApprovalSpec {
             approvers: approvers.and_then(|a| serde_json::from_value(a).ok()),
-            inputs: Some(vec![input]),
+            inputs: Some(input_schema),
             notify: notify_spec,
             timeout: actual_spec
                 .get("timeout")

@@ -13,7 +13,9 @@ impl<'a> App<'a> {
                     return;
                 }
                 KeyCode::Enter => {
-                    should_submit = true;
+                    if dialog.validate() {
+                        should_submit = true;
+                    }
                 }
                 KeyCode::Tab => {
                     dialog.next_field();
@@ -69,15 +71,23 @@ impl<'a> App<'a> {
                         self.direct_submit_dsl = Some(dsl);
                         let _ = self.submit_direct_form(inputs).await;
                     } else {
-                        let mut new_dialog =
-                            crate::app::schema_dialog::SchemaDialog::new(new_schema, dsl, inputs);
+                        let mut new_dialog = crate::app::schema_dialog::SchemaDialog::new(
+                            new_schema,
+                            dsl,
+                            inputs,
+                            dialog.inputs_view,
+                        );
                         new_dialog.hydration_status = status;
                         new_dialog.focus = dialog.focus;
                         self.pending_schema_ui = Some(new_dialog);
                     }
                 } else {
-                    let mut new_dialog =
-                        crate::app::schema_dialog::SchemaDialog::new(schema, dsl, inputs);
+                    let mut new_dialog = crate::app::schema_dialog::SchemaDialog::new(
+                        schema,
+                        dsl,
+                        inputs,
+                        dialog.inputs_view,
+                    );
                     new_dialog
                         .global_errors
                         .push("Validation/Hydration failed".to_string());

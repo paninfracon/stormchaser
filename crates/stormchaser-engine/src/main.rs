@@ -293,6 +293,7 @@ fn build_subject_schema_map() -> std::collections::HashMap<&'static str, &'stati
     .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_event_loop(
     mut messages: async_nats::jetstream::consumer::pull::Stream,
     mut query_subscriber: async_nats::Subscriber,

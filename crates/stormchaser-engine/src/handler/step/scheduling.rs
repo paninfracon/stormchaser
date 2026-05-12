@@ -134,6 +134,8 @@ pub async fn schedule_step(
                 run_context.inputs.clone(),
                 run_id,
                 steps_outputs.clone(),
+                Some(workflow),
+                Some(step_dsl),
             );
             let iter_var_name = step_dsl.iterate_as.as_deref().unwrap_or("item");
             iteration_ctx.declare_var(iter_var_name, crate::hcl_eval::json_to_hcl(item));

@@ -594,6 +594,7 @@ mod tests {
                 steps: None,
                 next: vec![],
                 on_failure: None,
+                aliases: std::collections::HashMap::new(),
                 retry: None,
                 timeout: None,
                 allow_failure: None,

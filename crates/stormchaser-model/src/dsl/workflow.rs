@@ -31,6 +31,9 @@ pub struct Workflow {
     pub strategy: Option<Strategy>,
     /// Resource quotas applied to the entire workflow run.
     pub quotas: Option<Quotas>,
+    /// Aliases defined for the workflow.
+    #[serde(default)]
+    pub aliases: HashMap<String, String>,
     /// Storage configurations to provision.
     pub storage: Vec<Storage>,
     /// Expected inputs for the workflow.
@@ -41,6 +44,9 @@ pub struct Workflow {
     /// Compiled JSON schema for inputs.
     #[serde(default)]
     pub inputs_schema: Option<serde_json::Value>,
+    /// View configuration for inputs.
+    #[serde(default)]
+    pub inputs_view: Option<InputView>,
     /// Outputs to be produced by the workflow.
     pub outputs: Vec<Output>,
     /// Event handlers for system or custom events.
@@ -163,6 +169,14 @@ pub struct Query {
 pub struct Output {
     /// Name of the output variable.
     pub name: String,
-    /// CEL Expression to evaluate the output value.
-    pub value: String, // CEL Expression
+    /// HCL Expression to evaluate the output value.
+    pub value: String, // HCL Expression
+}
+
+/// Describes the visual layout and presentation of inputs.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+pub struct InputView {
+    /// Explicit ordering of input fields. Fields not listed are appended.
+    #[serde(default)]
+    pub ui_order: Vec<String>,
 }

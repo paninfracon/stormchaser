@@ -29,6 +29,7 @@ humantime = "2.1"
 ratatui-textarea = "0.9.1"
 stormchaser-dsl = { version = "1.3.2", path = "../stormchaser-dsl" }
 tui-file-explorer = "0.1.3"
+jsonschema = { workspace = true }
 
 [dev-dependencies]
 insta = { version = "1.34", features = ["json"] }

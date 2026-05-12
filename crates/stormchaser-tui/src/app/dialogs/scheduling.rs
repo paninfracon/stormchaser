@@ -154,6 +154,7 @@ impl<'a> crate::app::App<'a> {
                         hydrated_schema,
                         dsl,
                         initial_inputs,
+                        workflow.inputs_view,
                     );
                     dialog.hydration_status = status;
                     self.pending_schema_ui = Some(dialog);
@@ -189,6 +190,7 @@ impl<'a> crate::app::App<'a> {
                         schema,
                         dsl,
                         serde_json::json!({}),
+                        None,
                     ));
                     self.file_browser_active = false;
                     return Ok(());

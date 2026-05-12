@@ -39,6 +39,7 @@ pub fn fallback_step(payload: &Value, spec: serde_json::Value) -> Step {
         steps: None,
         next: Vec::new(),
         on_failure: None,
+        aliases: std::collections::HashMap::new(),
         retry: None,
         timeout: None,
         allow_failure: None,

@@ -60,6 +60,7 @@ pub fn reconstruct_step(
         steps: None,
         next: Vec::new(),
         on_failure: None,
+        aliases: std::collections::HashMap::new(),
         retry: None,
         timeout: None,
         allow_failure: None,

@@ -229,19 +229,22 @@ pub fn flatten_schema_for_ui(schema: &Value, inputs: &Value) -> Value {
 
             // Now handle allOf at this level
             if let Some(all_of) = obj.get("allOf").and_then(|v| v.as_array()) {
-                let mut merged_props = serde_json::Map::new();
+                let mut splices: Vec<(Option<String>, serde_json::Map<String, Value>)> = Vec::new();
                 let mut merged_required = Vec::new();
 
                 for condition in all_of {
                     // Check if condition matches current inputs.
                     // This is a naive evaluation: if all const properties in `if` match `inputs`.
                     let mut matches = true;
+                    let mut last_trigger_field = None;
+
                     if let Some(if_props) = condition
                         .get("if")
                         .and_then(|i| i.get("properties"))
                         .and_then(|p| p.as_object())
                     {
                         for (k, v) in if_props {
+                            last_trigger_field = Some(k.clone());
                             if let Some(const_val) = v.get("const") {
                                 if current_inputs.get(k) != Some(const_val) {
                                     matches = false;
@@ -263,9 +266,7 @@ pub fn flatten_schema_for_ui(schema: &Value, inputs: &Value) -> Value {
                             .and_then(|t| t.get("properties"))
                             .and_then(|p| p.as_object())
                         {
-                            for (k, v) in then_props {
-                                merged_props.insert(k.clone(), v.clone());
-                            }
+                            splices.push((last_trigger_field, then_props.clone()));
                         }
                         if let Some(then_req) = condition
                             .get("then")
@@ -281,12 +282,39 @@ pub fn flatten_schema_for_ui(schema: &Value, inputs: &Value) -> Value {
                     }
                 }
 
-                if !merged_props.is_empty() {
+                if !splices.is_empty() {
                     if let Some(props) = obj.get_mut("properties").and_then(|v| v.as_object_mut()) {
-                        for (k, v) in merged_props {
-                            props.insert(k, v);
+                        let mut new_props = serde_json::Map::new();
+                        let mut processed_splices = vec![false; splices.len()];
+
+                        for (k, v) in props.iter() {
+                            new_props.insert(k.clone(), v.clone());
+                            for (i, (trigger, then_props)) in splices.iter().enumerate() {
+                                if !processed_splices[i] && trigger.as_ref() == Some(k) {
+                                    for (tk, tv) in then_props {
+                                        new_props.insert(tk.clone(), tv.clone());
+                                    }
+                                    processed_splices[i] = true;
+                                }
+                            }
                         }
+
+                        // Fallback: apply splices whose trigger field wasn't found
+                        for (i, (_, then_props)) in splices.iter().enumerate() {
+                            if !processed_splices[i] {
+                                for (tk, tv) in then_props {
+                                    new_props.insert(tk.clone(), tv.clone());
+                                }
+                            }
+                        }
+                        *props = new_props;
                     } else {
+                        let mut merged_props = serde_json::Map::new();
+                        for (_, then_props) in splices {
+                            for (tk, tv) in then_props {
+                                merged_props.insert(tk, tv);
+                            }
+                        }
                         obj.insert("properties".to_string(), Value::Object(merged_props));
                     }
                 }
@@ -300,60 +328,6 @@ pub fn flatten_schema_for_ui(schema: &Value, inputs: &Value) -> Value {
                         }
                     } else {
                         obj.insert("required".to_string(), Value::Array(merged_required));
-                    }
-                }
-            }
-
-            // Apply ui:order if present
-            let mut order_strings = Vec::new();
-            let order_array = obj
-                .get("ui:order")
-                .or_else(|| obj.get("ui_order"))
-                .and_then(|v| v.as_array());
-            if let Some(order) = order_array {
-                for v in order {
-                    if let Some(s) = v.as_str() {
-                        order_strings.push(s.to_string());
-                    }
-                }
-            }
-
-            if !order_strings.is_empty() {
-                if let Some(props_val) = obj.get_mut("properties") {
-                    if let Some(props) = props_val.as_object_mut() {
-                        let mut new_props = serde_json::Map::new();
-
-                        let remaining_keys: Vec<String> = props
-                            .keys()
-                            .filter(|&k| !order_strings.contains(k))
-                            .cloned()
-                            .collect();
-
-                        for s in &order_strings {
-                            if s == "*" {
-                                for k in &remaining_keys {
-                                    if let Some(v) = props.remove(k) {
-                                        new_props.insert(k.clone(), v);
-                                    }
-                                }
-                            } else if let Some(v) = props.remove(s) {
-                                new_props.insert(s.clone(), v);
-                            }
-                        }
-
-                        // Append any remaining keys if wildcard wasn't used
-                        for k in remaining_keys {
-                            if let Some(v) = props.remove(&k) {
-                                new_props.insert(k, v);
-                            }
-                        }
-
-                        // Catch-all for safety
-                        for (k, v) in std::mem::take(props) {
-                            new_props.insert(k, v);
-                        }
-
-                        *props = new_props;
                     }
                 }
             }
@@ -461,24 +435,34 @@ mod tests {
     }
 
     #[test]
-    fn test_ui_order_flattening() {
+    fn test_flatten_schema_for_ui_ordering() {
         use super::flatten_schema_for_ui;
-        let schema = serde_json::json!({
-            "type": "object",
-            "ui:order": ["b", "*", "a"],
+        use serde_json::json;
+
+        let schema = json!({
             "properties": {
-                "a": { "type": "string" },
-                "b": { "type": "string" },
-                "c": { "type": "string" },
-                "d": { "type": "string" }
-            }
+                "first_field": { "type": "string" },
+                "trigger_field": { "type": "string" },
+                "last_field": { "type": "string" }
+            },
+            "allOf": [
+                {
+                    "if": { "properties": { "trigger_field": { "const": "show_more" } } },
+                    "then": { "properties": { "cond_field1": { "type": "string" } } }
+                }
+            ]
         });
 
-        let inputs = serde_json::json!({});
-        let flat = flatten_schema_for_ui(&schema, &inputs);
+        let inputs = json!({
+            "trigger_field": "show_more"
+        });
 
+        let flat = flatten_schema_for_ui(&schema, &inputs);
         let props = flat.get("properties").unwrap().as_object().unwrap();
-        let keys: Vec<String> = props.keys().cloned().collect();
-        assert_eq!(keys, vec!["b", "c", "d", "a"]);
+        let keys: Vec<_> = props.keys().map(|s| s.as_str()).collect();
+        assert_eq!(
+            keys,
+            vec!["first_field", "trigger_field", "cond_field1", "last_field"]
+        );
     }
 }

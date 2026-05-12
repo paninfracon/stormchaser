@@ -44,8 +44,13 @@ pub async fn handle_workflow_direct(
     // 1.5 Schema Validation and Default Value Hydration
     let mut query_results = serde_json::Map::new();
     for query in &parsed_workflow.queries {
-        let hcl_ctx =
-            crate::hcl_eval::create_context(inputs.clone(), run_id, serde_json::json!({}));
+        let hcl_ctx = crate::hcl_eval::create_context(
+            inputs.clone(),
+            run_id,
+            serde_json::json!({}),
+            Some(&parsed_workflow),
+            None,
+        );
         let mut resolved_params = serde_json::to_value(&query.params)?;
         if let Err(e) = crate::hcl_eval::resolve_expressions(&mut resolved_params, &hcl_ctx, true) {
             let err_msg = format!(
@@ -81,8 +86,13 @@ pub async fn handle_workflow_direct(
     let mut inputs_to_save = inputs.clone();
 
     if let Some(mut schema_val) = parsed_workflow.inputs_schema.clone() {
-        let mut schema_ctx =
-            crate::hcl_eval::create_context(inputs.clone(), run_id, serde_json::json!({}));
+        let mut schema_ctx = crate::hcl_eval::create_context(
+            inputs.clone(),
+            run_id,
+            serde_json::json!({}),
+            Some(&parsed_workflow),
+            None,
+        );
         schema_ctx.declare_var(
             "queries",
             crate::hcl_eval::json_to_hcl(serde_json::Value::Object(query_results)),

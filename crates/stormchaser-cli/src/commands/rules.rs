@@ -25,7 +25,7 @@ pub enum RuleCommands {
         git_ref: String,
         #[arg(long)]
         description: Option<String>,
-        /// Input mappings in name=CEL_EXPR format
+        /// Input mappings in name=HCL_EXPR format
         #[arg(short, long)]
         mapping: Vec<String>,
     },
