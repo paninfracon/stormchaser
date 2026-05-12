@@ -86,7 +86,11 @@ impl<'a> SchemaDialog<'a> {
                     options,
                     error: None,
                     is_enum,
-                    schema_type: prop.get("type").and_then(|v| v.as_str()).unwrap_or("string").to_string(),
+                    schema_type: prop
+                        .get("type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("string")
+                        .to_string(),
                     list_state: ListState::default(),
                 });
             }
@@ -140,14 +144,15 @@ impl<'a> SchemaDialog<'a> {
             })
             .unwrap_or_default();
 
-        let valid_keys: std::collections::HashSet<String> = if let Some(properties) = schema.get("properties").and_then(|v| v.as_object()) {
-            properties.keys().cloned().collect()
-        } else {
-            std::collections::HashSet::new()
-        };
+        let valid_keys: std::collections::HashSet<String> =
+            if let Some(properties) = schema.get("properties").and_then(|v| v.as_object()) {
+                properties.keys().cloned().collect()
+            } else {
+                std::collections::HashSet::new()
+            };
 
         self.fields.retain(|field| valid_keys.contains(&field.name));
-        
+
         if self.focus >= self.fields.len() && !self.fields.is_empty() {
             self.focus = self.fields.len() - 1;
         } else if self.fields.is_empty() {
@@ -215,7 +220,11 @@ impl<'a> SchemaDialog<'a> {
                         options,
                         error: None,
                         is_enum,
-                        schema_type: prop.get("type").and_then(|v| v.as_str()).unwrap_or("string").to_string(),
+                        schema_type: prop
+                            .get("type")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("string")
+                            .to_string(),
                         list_state: ratatui::widgets::ListState::default(),
                     });
                 }
@@ -351,7 +360,7 @@ pub fn draw_schema_dialog(f: &mut Frame, dialog: &mut SchemaDialog) {
             .borders(Borders::ALL)
             .title(title)
             .border_style(style);
-        
+
         if i == start_idx && start_idx > 0 {
             b = b.title_top("↑ More");
         }
@@ -435,6 +444,6 @@ mod tests {
         assert_eq!(dialog.fields[0].name, "type");
         assert_eq!(dialog.fields[1].name, "spec");
         assert_eq!(dialog.fields[1].description, "The spec");
-        assert_eq!(dialog.fields[1].required, true);
+        assert!(dialog.fields[1].required);
     }
 }

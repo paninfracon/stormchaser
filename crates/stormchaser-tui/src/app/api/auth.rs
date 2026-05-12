@@ -275,7 +275,7 @@ mod tests {
             .await;
 
         let (tx, _rx) = mpsc::channel(1);
-        let mut app = App::new(server.uri(), None, tx);
+        let mut app = App::new(server.uri(), "http://localhost:3001".to_string(), None, tx);
         app.refresh_token = Some("old_refresh_token".to_string());
 
         let result = app.refresh_session().await.unwrap();
@@ -296,7 +296,7 @@ mod tests {
             .await;
 
         let (tx, _rx) = mpsc::channel(1);
-        let mut app = App::new(server.uri(), None, tx);
+        let mut app = App::new(server.uri(), "http://localhost:3001".to_string(), None, tx);
         app.refresh_token = Some("old_refresh_token".to_string());
 
         let result = app.refresh_session().await.unwrap();

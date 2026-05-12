@@ -1,5 +1,6 @@
 use crate::logging::LogBackend;
 use anyhow::Result;
+use chrono::Utc;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
@@ -90,15 +91,15 @@ pub(crate) async fn fetch_loki_logs(
 
     let mut start_time = started_at
         .map(|t| t - chrono::Duration::minutes(1))
-        .unwrap_or_else(|| chrono::Utc::now() - chrono::Duration::days(30))
+        .unwrap_or_else(|| Utc::now() - chrono::Duration::days(30))
         .timestamp_nanos_opt()
         .unwrap_or(0);
 
     let end_time = finished_at
-        .unwrap_or_else(chrono::Utc::now)
+        .unwrap_or_else(Utc::now)
         // Add a small buffer to end time to ensure we get the final logs
         .checked_add_signed(chrono::Duration::minutes(5))
-        .unwrap_or_else(chrono::Utc::now)
+        .unwrap_or_else(Utc::now)
         .timestamp_nanos_opt()
         .unwrap_or(0)
         .to_string();

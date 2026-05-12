@@ -2,6 +2,7 @@ use anyhow::Result;
 use bollard::container::ListContainersOptions;
 use bollard::volume::ListVolumesOptions;
 use bollard::Docker;
+use chrono::Utc;
 use std::collections::HashMap;
 use std::time::Duration;
 use tokio::time;
@@ -28,10 +29,10 @@ pub async fn run_reaper(docker: Docker) -> Result<()> {
             .await
         {
             for container in containers {
-                let now = chrono::Utc::now();
+                let now = Utc::now();
                 let created_ts = container.created.unwrap_or(0);
-                let created = chrono::DateTime::from_timestamp(created_ts, 0)
-                    .unwrap_or_else(chrono::Utc::now);
+                let created =
+                    chrono::DateTime::from_timestamp(created_ts, 0).unwrap_or_else(Utc::now);
 
                 let age = now - created;
                 if age.num_hours() >= 24 {

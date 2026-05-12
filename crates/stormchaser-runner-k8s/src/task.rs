@@ -1,3 +1,4 @@
+use chrono::Utc;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -185,7 +186,7 @@ fn build_job_result_event(
                 artifacts: metrics.artifacts,
                 test_reports: metrics.test_reports,
                 outputs: Some(outputs),
-                timestamp: chrono::Utc::now(),
+                timestamp: Utc::now(),
             };
             (
                 NatsSubject::StepCompleted,
@@ -211,7 +212,7 @@ fn build_job_result_event(
                 artifacts: metrics.artifacts,
                 test_reports: metrics.test_reports,
                 outputs: Some(outputs),
-                timestamp: chrono::Utc::now(),
+                timestamp: Utc::now(),
             };
             (
                 NatsSubject::StepFailed,
@@ -239,7 +240,7 @@ fn build_job_error_event(
         artifacts: None,
         test_reports: None,
         outputs: None,
-        timestamp: chrono::Utc::now(),
+        timestamp: Utc::now(),
     })
     .unwrap()
 }
@@ -251,7 +252,7 @@ pub async fn handle_task(
     runner_id: String,
     encryption_key: Option<String>,
 ) {
-    let received_at = chrono::Utc::now();
+    let received_at = Utc::now();
     tracing::info!("Received task message: {:?}", msg.subject);
 
     let ce: cloudevents::Event = match serde_json::from_slice(&msg.payload) {
@@ -337,7 +338,7 @@ pub async fn handle_task(
         step_id: StepInstanceId::new(step_id),
         event_type: EventType::Step(StepEventType::Running),
         runner_id: Some(runner_id.clone()),
-        timestamp: chrono::Utc::now(),
+        timestamp: Utc::now(),
     };
     let _ = publish_cloudevent(
         &async_nats::jetstream::new(nats_client.clone()),
@@ -385,7 +386,7 @@ pub async fn handle_task(
                 artifacts: None,
                 test_reports: None,
                 outputs: None,
-                timestamp: chrono::Utc::now(),
+                timestamp: Utc::now(),
             };
             let _ = publish_cloudevent(
                 &async_nats::jetstream::new(nats_client.clone()),

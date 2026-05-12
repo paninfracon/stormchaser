@@ -213,6 +213,106 @@ pub fn generate_dsl_schema() -> RootSchema {
     root_schema
 }
 
+/// Flattens conditional `allOf` blocks into the current node's properties based on current inputs.
+/// This allows UI clients to easily render active conditional fields without complex parsing.
+pub fn flatten_schema_for_ui(schema: &Value, inputs: &Value) -> Value {
+    let mut flat = schema.clone();
+
+    fn recursive_flatten(node: &mut Value, current_inputs: &Value) {
+        if let Some(obj) = node.as_object_mut() {
+            // First, recurse into properties
+            if let Some(props) = obj.get_mut("properties").and_then(|v| v.as_object_mut()) {
+                for v in props.values_mut() {
+                    recursive_flatten(v, current_inputs);
+                }
+            }
+
+            // Now handle allOf at this level
+            if let Some(all_of) = obj.get("allOf").and_then(|v| v.as_array()) {
+                let mut merged_props = serde_json::Map::new();
+                let mut merged_required = Vec::new();
+
+                for condition in all_of {
+                    // Check if condition matches current inputs.
+                    // This is a naive evaluation: if all const properties in `if` match `inputs`.
+                    let mut matches = true;
+                    if let Some(if_props) = condition
+                        .get("if")
+                        .and_then(|i| i.get("properties"))
+                        .and_then(|p| p.as_object())
+                    {
+                        for (k, v) in if_props {
+                            if let Some(const_val) = v.get("const") {
+                                if current_inputs.get(k) != Some(const_val) {
+                                    matches = false;
+                                    break;
+                                }
+                            } else {
+                                // If it's not a const check, we conservatively don't match or assume false for this basic UI flattener.
+                                matches = false;
+                                break;
+                            }
+                        }
+                    } else {
+                        matches = false; // No if properties
+                    }
+
+                    if matches {
+                        if let Some(then_props) = condition
+                            .get("then")
+                            .and_then(|t| t.get("properties"))
+                            .and_then(|p| p.as_object())
+                        {
+                            for (k, v) in then_props {
+                                merged_props.insert(k.clone(), v.clone());
+                            }
+                        }
+                        if let Some(then_req) = condition
+                            .get("then")
+                            .and_then(|t| t.get("required"))
+                            .and_then(|r| r.as_array())
+                        {
+                            for r in then_req {
+                                if let Some(rs) = r.as_str() {
+                                    merged_required.push(Value::String(rs.to_string()));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if !merged_props.is_empty() {
+                    if let Some(props) = obj.get_mut("properties").and_then(|v| v.as_object_mut()) {
+                        for (k, v) in merged_props {
+                            props.insert(k, v);
+                        }
+                    } else {
+                        obj.insert("properties".to_string(), Value::Object(merged_props));
+                    }
+                }
+
+                if !merged_required.is_empty() {
+                    if let Some(reqs) = obj.get_mut("required").and_then(|v| v.as_array_mut()) {
+                        for r in merged_required {
+                            if !reqs.contains(&r) {
+                                reqs.push(r);
+                            }
+                        }
+                    } else {
+                        obj.insert("required".to_string(), Value::Array(merged_required));
+                    }
+                }
+            }
+
+            // Optionally, strip allOf to keep it completely flat for the UI
+            // obj.remove("allOf");
+        }
+    }
+
+    recursive_flatten(&mut flat, inputs);
+    flat
+}
+
 #[cfg(test)]
 mod tests {
     use super::generate_dsl_schema;
@@ -263,5 +363,46 @@ mod tests {
             properties.contains_key("query"),
             "SqlExecuteSpec schema should include the query property"
         );
+    }
+
+    #[test]
+    fn test_flatten_schema_for_ui() {
+        use super::flatten_schema_for_ui;
+        use serde_json::json;
+
+        let schema = json!({
+            "properties": {
+                "type": { "type": "string" }
+            },
+            "allOf": [
+                {
+                    "if": { "properties": { "type": { "const": "RunK8sJob" } } },
+                    "then": { "properties": { "spec": { "type": "object" } }, "required": ["spec"] }
+                }
+            ]
+        });
+
+        let inputs = json!({
+            "type": "RunK8sJob"
+        });
+
+        let flat = flatten_schema_for_ui(&schema, &inputs);
+        let properties = flat.get("properties").unwrap().as_object().unwrap();
+        assert!(properties.contains_key("spec"));
+
+        let required = flat.get("required").unwrap().as_array().unwrap();
+        assert!(required.contains(&json!("spec")));
+
+        let inputs_no_match = json!({
+            "type": "Other"
+        });
+
+        let flat_no_match = flatten_schema_for_ui(&schema, &inputs_no_match);
+        let properties_no_match = flat_no_match
+            .get("properties")
+            .unwrap()
+            .as_object()
+            .unwrap();
+        assert!(!properties_no_match.contains_key("spec"));
     }
 }

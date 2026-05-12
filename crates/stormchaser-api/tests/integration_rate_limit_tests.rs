@@ -4,6 +4,7 @@ use axum::{
 };
 use sqlx::postgres::PgPoolOptions;
 use std::collections::HashMap;
+use std::env::var;
 use std::sync::Arc;
 use stormchaser_api::{app, AppState};
 use stormchaser_model::OpaClient;
@@ -17,15 +18,15 @@ async fn test_rate_limiting() {
     std::env::set_var("API_RATE_LIMIT_PER_SECOND", "5");
     std::env::set_var("API_RATE_LIMIT_BURST_SIZE", "10");
 
-    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = async_nats::connect(nats_url)
         .await
         .expect("Failed to connect to NATS");
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD")
+            var("STORMCHASER_DEV_PASSWORD")
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });

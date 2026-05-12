@@ -3,11 +3,13 @@ use axum::{
     body::Body,
     http::{self, Request, StatusCode},
 };
+use chrono::Utc;
 use jsonwebtoken::{encode, EncodingKey, Header};
 use serde_json::json;
 use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
 use std::collections::HashMap;
+use std::env::var;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use stormchaser_api::{app, AppState, Claims, JWT_SECRET};
@@ -22,7 +24,7 @@ fn get_token() -> String {
     let claims = Claims {
         sub: "test-user".to_string(),
         email: Some("test-user@paninfracon.net".to_string()),
-        exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
+        exp: (Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
     };
     encode(
         &Header::default(),
@@ -36,16 +38,16 @@ fn get_token() -> String {
 async fn test_storage_backend_crud() {
     std::env::set_var("API_RATE_LIMIT_PER_SECOND", "1000");
     std::env::set_var("API_RATE_LIMIT_BURST_SIZE", "1000");
-    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = match async_nats::connect(nats_url).await {
         Ok(c) => c,
         Err(_) => return,
     };
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD")
+            var("STORMCHASER_DEV_PASSWORD")
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
@@ -177,16 +179,16 @@ async fn test_storage_backend_crud() {
 async fn test_artifact_listing() {
     std::env::set_var("API_RATE_LIMIT_PER_SECOND", "1000");
     std::env::set_var("API_RATE_LIMIT_BURST_SIZE", "1000");
-    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = match async_nats::connect(nats_url).await {
         Ok(c) => c,
         Err(_) => return,
     };
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD")
+            var("STORMCHASER_DEV_PASSWORD")
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
@@ -221,7 +223,7 @@ async fn test_artifact_listing() {
         .bind(&workflow_name)
         .bind("test-user")
         .bind(RunStatus::Running)
-        .bind(chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0))
+        .bind(Utc::now().timestamp_nanos_opt().unwrap_or(0))
         .bind("http://example.com")
         .bind("test.storm")
         .bind("main")

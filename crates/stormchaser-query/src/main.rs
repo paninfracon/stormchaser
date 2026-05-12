@@ -1,9 +1,4 @@
-use axum::{
-    extract::State,
-    response::IntoResponse,
-    routing::post,
-    middleware, Json, Router,
-};
+use axum::{extract::State, middleware, response::IntoResponse, routing::post, Json, Router};
 use serde_json::Value;
 use std::env;
 use std::net::SocketAddr;
@@ -250,9 +245,10 @@ async fn execute_query(
 
     if let Some(conn_name) = params.get("connection") {
         if let Some(app_state) = state {
-            let conn = stormchaser_engine::db::get_storage_backend_by_name::<_, stormchaser_model::connections::Connection>(
-                &app_state.pool, conn_name
-            )
+            let conn = stormchaser_engine::db::get_storage_backend_by_name::<
+                _,
+                stormchaser_model::connections::Connection,
+            >(&app_state.pool, conn_name)
             .await?
             .ok_or_else(|| anyhow::anyhow!("Connection '{}' not found", conn_name))?;
 
@@ -308,8 +304,29 @@ async fn run_hydration_loop(
         }
     }
 
-    if emit_event(&schema, &inputs, &tasks, &tx).await.is_err() {
-        return;
+    let any_running_initial = tasks.iter().any(|t| t.status == "Running");
+    if any_running_initial {
+        // Skip validation on initial emit before queries are resolved since schemas with unrendered templates will fail
+        let status = HydrationStatus::UpdatePending;
+        let hydrated_schema =
+            stormchaser_model::schema_gen::flatten_schema_for_ui(&schema, &inputs);
+        let mut query_status = std::collections::HashMap::new();
+        for task in &tasks {
+            query_status.insert(task.field_name.clone(), task.status.clone());
+        }
+        let event = HydrationEvent {
+            status,
+            hydrated_schema,
+            query_status,
+            validation_errors: vec![],
+        };
+        if tx.send(event).await.is_err() {
+            return;
+        }
+    } else {
+        if emit_event(&schema, &inputs, &tasks, &tx).await.is_err() {
+            return;
+        }
     }
 
     let mut hcl_ctx = hcl::eval::Context::new();
@@ -357,8 +374,24 @@ async fn run_hydration_loop(
             Err(_) => {}
         }
 
-        if emit_event(&schema, &inputs, &tasks, &tx).await.is_err() {
-            break;
+        let any_running = tasks.iter().any(|t| t.status == "Running");
+        if any_running {
+            let status = HydrationStatus::UpdatePending;
+            let hydrated_schema =
+                stormchaser_model::schema_gen::flatten_schema_for_ui(&schema, &inputs);
+            let mut query_status = std::collections::HashMap::new();
+            for task in &tasks {
+                query_status.insert(task.field_name.clone(), task.status.clone());
+            }
+            let event = HydrationEvent {
+                status,
+                hydrated_schema,
+                query_status,
+                validation_errors: vec![],
+            };
+            if tx.send(event).await.is_err() {
+                break;
+            }
         }
     }
 
@@ -418,7 +451,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Stormchaser Query Microservice starting");
 
     let config = Config::from_env(env::vars())?;
-    
+
     // Uses the exact same state builder as stormchaser-api to guarantee TLS, DB, NATS,
     // OIDC, and OPA configuration parity.
     let state = build_app_state(config).await?;
@@ -435,7 +468,7 @@ async fn main() -> anyhow::Result<()> {
 
     let port = env::var("PORT").unwrap_or_else(|_| "3001".to_string());
     let addr: SocketAddr = format!("0.0.0.0:{}", port).parse()?;
-    
+
     tracing::info!("Stormchaser Query Microservice listening on {}", addr);
     let listener = TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;

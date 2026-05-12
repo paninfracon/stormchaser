@@ -12,11 +12,14 @@ cd "$REPO_ROOT"
 echo -e "${BLUE}>>> Generating test token...${NC}"
 TOKEN=$(python3 "$REPO_ROOT/scripts/generate_dev_token.py")
 
-echo -e "${BLUE}>>> Discovering API endpoint...${NC}"
+echo -e "${BLUE}>>> Discovering API and Query endpoints...${NC}"
 API_IP=$(microk8s kubectl get svc -n stormchaser stormchaser-stormchaser-orchestration-api -o jsonpath='{.spec.clusterIP}')
 API_URL="http://${API_IP}:3000"
 
-echo -e "${BLUE}>>> Checking Service Health (API, Engine, Loki, Tempo, MinIO, Grafana, Prometheus)...${NC}"
+QUERY_IP=$(microk8s kubectl get svc -n stormchaser stormchaser-stormchaser-orchestration-query -o jsonpath='{.spec.clusterIP}')
+QUERY_URL="http://${QUERY_IP}:3001"
+
+echo -e "${BLUE}>>> Checking Service Health (API, Query, Engine, Loki, Tempo, MinIO, Grafana, Prometheus)...${NC}"
 LOKI_IP=$(microk8s kubectl get svc -n stormchaser stormchaser-loki -o jsonpath='{.spec.clusterIP}')
 TEMPO_IP=$(microk8s kubectl get svc -n stormchaser stormchaser-tempo -o jsonpath='{.spec.clusterIP}')
 MINIO_IP=$(microk8s kubectl get svc -n stormchaser stormchaser-minio -o jsonpath='{.spec.clusterIP}')
@@ -26,6 +29,7 @@ PROM_IP=$(microk8s kubectl get svc -n stormchaser stormchaser-prometheus-server 
 ALL_READY=false
 for i in {1..24}; do
     API_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/api/health" || echo "000")
+    QUERY_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$QUERY_URL/healthz" || echo "000")
     LOKI_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://$LOKI_IP:3100/ready" || echo "000")
     TEMPO_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://$TEMPO_IP:3100/ready" || echo "000")
     MINIO_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://$MINIO_IP:9000/minio/health/live" || echo "000")
@@ -37,12 +41,12 @@ for i in {1..24}; do
         ENGINE_STATUS="200"
     fi
 
-    if [ "$API_STATUS" = "200" ] && [ "$LOKI_STATUS" = "200" ] && [ "$TEMPO_STATUS" = "200" ] && [ "$MINIO_STATUS" = "200" ] && [ "$GRAFANA_STATUS" = "200" ] && [ "$PROM_STATUS" = "200" ] && [ "$ENGINE_STATUS" = "200" ]; then
+    if [ "$API_STATUS" = "200" ] && [ "$QUERY_STATUS" = "200" ] && [ "$LOKI_STATUS" = "200" ] && [ "$TEMPO_STATUS" = "200" ] && [ "$MINIO_STATUS" = "200" ] && [ "$GRAFANA_STATUS" = "200" ] && [ "$PROM_STATUS" = "200" ] && [ "$ENGINE_STATUS" = "200" ]; then
         ALL_READY=true
         echo -e "${GREEN}>>> All core services are healthy!${NC}"
         break
     fi
-    echo "Waiting for services to become ready (API: $API_STATUS, Engine: $ENGINE_STATUS, Loki: $LOKI_STATUS, Tempo: $TEMPO_STATUS, MinIO: $MINIO_STATUS, Grafana: $GRAFANA_STATUS, Prom: $PROM_STATUS) (attempt $i/24)..."
+    echo "Waiting for services to become ready (API: $API_STATUS, Query: $QUERY_STATUS, Engine: $ENGINE_STATUS, Loki: $LOKI_STATUS, Tempo: $TEMPO_STATUS, MinIO: $MINIO_STATUS, Grafana: $GRAFANA_STATUS, Prom: $PROM_STATUS) (attempt $i/24)..."
     sleep 5
 done
 

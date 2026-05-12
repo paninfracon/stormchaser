@@ -76,8 +76,10 @@ pub async fn build_app_state(config: Config) -> anyhow::Result<AppState> {
     if let Some(url) = config.loki_url.clone() {
         tracing::info!("Configuring Loki log backend: {}", url);
         log_backend = Some(LogBackend::Loki { url });
-    } else if let (Some(url), Some(index)) = (config.elasticsearch_url.clone(), config.elasticsearch_index.clone())
-    {
+    } else if let (Some(url), Some(index)) = (
+        config.elasticsearch_url.clone(),
+        config.elasticsearch_index.clone(),
+    ) {
         tracing::info!(
             "Configuring Elasticsearch log backend: {} (index: {})",
             url,

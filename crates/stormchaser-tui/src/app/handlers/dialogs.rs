@@ -1,4 +1,4 @@
-use super::*;
+use crate::app::App;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 impl<'a> App<'a> {
@@ -45,10 +45,26 @@ impl<'a> App<'a> {
         if should_submit {
             if let Some(dialog) = self.pending_schema_ui.take() {
                 let inputs = dialog.get_inputs();
+                std::fs::write(
+                    "debug_inputs.txt",
+                    serde_json::to_string_pretty(&inputs).unwrap_or_default(),
+                )
+                .ok();
                 let dsl = dialog.dsl.clone();
                 let schema = dialog.base_schema.clone();
-                let res = self.hydrate_schema_blocking(&schema, &inputs).await;
+                let mut queries_val = None;
+                if let Ok(workflow) = stormchaser_dsl::StormchaserParser.parse(&dsl) {
+                    queries_val = serde_json::to_value(&workflow.queries).ok();
+                }
+                let res = self
+                    .hydrate_schema_blocking(&schema, &inputs, queries_val.as_ref())
+                    .await;
                 if let Ok((new_schema, status)) = res {
+                    std::fs::write(
+                        "debug_status.txt",
+                        format!("Status: {}\nSchema: {}", status, new_schema),
+                    )
+                    .ok();
                     if status == "Completed" {
                         self.direct_submit_dsl = Some(dsl);
                         let _ = self.submit_direct_form(inputs).await;
@@ -74,14 +90,20 @@ impl<'a> App<'a> {
             // Ideally we do this async, but `hydrate_schema_blocking` streams out until it's done.
             let mut schema = serde_json::Value::Null;
             let mut inputs = serde_json::Value::Null;
+            let mut queries_val = None;
             if let Some(dialog) = &mut self.pending_schema_ui {
                 dialog.hydration_status = "Updating...".to_string();
                 dialog.is_hydrating = true;
                 schema = dialog.base_schema.clone();
                 inputs = dialog.get_inputs();
+                if let Ok(workflow) = stormchaser_dsl::StormchaserParser.parse(&dialog.dsl) {
+                    queries_val = serde_json::to_value(&workflow.queries).ok();
+                }
             }
 
-            let res = self.hydrate_schema_blocking(&schema, &inputs).await;
+            let res = self
+                .hydrate_schema_blocking(&schema, &inputs, queries_val.as_ref())
+                .await;
 
             if let Some(dialog) = &mut self.pending_schema_ui {
                 if let Ok((hydrated, status)) = res {

@@ -23,6 +23,13 @@ struct Cli {
     )]
     url: String,
 
+    #[arg(
+        long,
+        env = "STORMCHASER_QUERY_URL",
+        default_value = "http://localhost:3001"
+    )]
+    query_url: String,
+
     #[arg(short, long, env = "STORMCHASER_TOKEN")]
     token: Option<String>,
 
@@ -185,7 +192,7 @@ async fn main() -> Result<()> {
 
     // Setup app state
     let (tx, mut rx) = mpsc::channel(100);
-    let mut app = App::new(cli.url, cli.token, tx.clone());
+    let mut app = App::new(cli.url, cli.query_url, cli.token, tx.clone());
     app.filter_owner = cli.owner;
     app.filter_name = cli.name;
     app.filter_repo_url = cli.repo_url;
@@ -306,7 +313,12 @@ mod tests {
     #[tokio::test]
     async fn test_handle_app_event_key_prioritizes_delete_dialog() {
         let (tx, _rx) = mpsc::channel(1);
-        let mut app = App::new("http://paninfracon.net".to_string(), None, tx);
+        let mut app = App::new(
+            "http://paninfracon.net".to_string(),
+            "http://paninfracon.net:3001".to_string(),
+            None,
+            tx,
+        );
         app.state = AppState::LoggedIn;
         app.delete_run_dialog_active = true;
         app.approval_dialog_active = true;

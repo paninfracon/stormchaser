@@ -15,6 +15,7 @@ use axum::{
 };
 use chrono::Utc;
 use futures::StreamExt;
+use opentelemetry::KeyValue;
 use serde_json::Value;
 use stormchaser_model::events::WorkflowQueuedEvent;
 use stormchaser_model::events::{EventSource, EventType, SchemaVersion, WorkflowEventType};
@@ -44,7 +45,7 @@ pub async fn enqueue_workflow(
     State(state): State<AppState>,
     Json(payload): Json<EnqueueRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let run_id = stormchaser_model::RunId::new_v4();
+    let run_id = RunId::new_v4();
     let user_id = claims.email.clone().unwrap_or(claims.sub.clone());
 
     let span = tracing::Span::current();
@@ -128,8 +129,8 @@ pub async fn enqueue_workflow(
     RUNS_ENQUEUED.add(
         1,
         &[
-            opentelemetry::KeyValue::new("workflow_name", payload.workflow_name.clone()),
-            opentelemetry::KeyValue::new("initiating_user", user_id.clone()),
+            KeyValue::new("workflow_name", payload.workflow_name.clone()),
+            KeyValue::new("initiating_user", user_id.clone()),
         ],
     );
 
@@ -336,7 +337,7 @@ pub async fn direct_run(
     State(state): State<AppState>,
     Json(payload): Json<DirectRunRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let run_id = stormchaser_model::RunId::new_v4();
+    let run_id = RunId::new_v4();
     let user_id = claims.email.clone().unwrap_or(claims.sub.clone());
 
     let span = tracing::Span::current();

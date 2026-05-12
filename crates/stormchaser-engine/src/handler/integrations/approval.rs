@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde_json::Value;
 use sqlx::PgPool;
+use std::env::var;
 
 #[cfg(feature = "email")]
 #[cfg(feature = "email")]
@@ -22,9 +23,8 @@ pub async fn handle_approval_notification(
         use tracing::info;
 
         let spec: stormchaser_model::dsl::EmailSpec = serde_json::from_value(spec)?;
-        let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "test-secret".to_string());
-        let base_url =
-            std::env::var("SYSTEM_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
+        let secret = var("JWT_SECRET").unwrap_or_else(|_| "test-secret".to_string());
+        let base_url = var("SYSTEM_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
 
         // 1. Generate Tokens
         let (approve_link, reject_link) =
@@ -105,11 +105,12 @@ fn generate_approval_links(
 #[cfg(feature = "email")]
 fn build_approval_mailer(spec: &stormchaser_model::dsl::EmailSpec) -> lettre::SmtpTransport {
     use lettre::SmtpTransport;
-    let smtp_server = spec.smtp_server.clone().unwrap_or_else(|| {
-        std::env::var("SMTP_SERVER").unwrap_or_else(|_| "localhost".to_string())
-    });
+    let smtp_server = spec
+        .smtp_server
+        .clone()
+        .unwrap_or_else(|| var("SMTP_SERVER").unwrap_or_else(|_| "localhost".to_string()));
     let smtp_port = spec.smtp_port.unwrap_or_else(|| {
-        std::env::var("SMTP_PORT")
+        var("SMTP_PORT")
             .ok()
             .and_then(|p| p.parse().ok())
             .unwrap_or(25)
@@ -120,10 +121,10 @@ fn build_approval_mailer(spec: &stormchaser_model::dsl::EmailSpec) -> lettre::Sm
     if let (Some(user), Some(pass)) = (
         spec.smtp_username
             .clone()
-            .or_else(|| std::env::var("SMTP_USERNAME").ok()),
+            .or_else(|| var("SMTP_USERNAME").ok()),
         spec.smtp_password
             .clone()
-            .or_else(|| std::env::var("SMTP_PASSWORD").ok()),
+            .or_else(|| var("SMTP_PASSWORD").ok()),
     ) {
         let credentials = lettre::transport::smtp::authentication::Credentials::new(user, pass);
         mailer_builder = mailer_builder.credentials(credentials);

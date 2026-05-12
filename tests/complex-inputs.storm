@@ -34,10 +34,6 @@ workflow "complex-input-form" {
         minimum = 18
         maximum = 100
       }
-      role {
-        type = "string"
-        enum = "${queries.roles_query}"
-      }
       region {
         type = "string"
         enum = "${queries.regions_query}"
@@ -49,6 +45,10 @@ workflow "complex-input-form" {
       dry_run {
         type = "boolean"
         default = true
+      }
+      role {
+        type = "string"
+        enum = "${queries.roles_query}"
       }
     }
     allOf = [

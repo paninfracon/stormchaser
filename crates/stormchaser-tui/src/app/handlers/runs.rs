@@ -205,8 +205,15 @@ impl<'a> App<'a> {
 
                     // Always trigger a refresh to get the new history entry (throttled)
                     let tx = self.status_tx.clone();
-                    let is_terminal = status == "succeeded" || status == "failed" || status == "aborted" || status == "skipped";
-                    let refresh_type = if is_terminal { "force_refresh" } else { "refresh" };
+                    let is_terminal = status == "succeeded"
+                        || status == "failed"
+                        || status == "aborted"
+                        || status == "skipped";
+                    let refresh_type = if is_terminal {
+                        "force_refresh"
+                    } else {
+                        "refresh"
+                    };
                     tokio::spawn(async move {
                         let _ = tx
                             .send(AppEvent::StatusUpdate(run_id, refresh_type.to_string()))
@@ -333,7 +340,12 @@ impl<'a> App<'a> {
             if needs_refresh {
                 let tx = self.status_tx.clone();
                 tokio::spawn(async move {
-                    let _ = tx.send(crate::AppEvent::StatusUpdate(id, "force_refresh".to_string())).await;
+                    let _ = tx
+                        .send(crate::AppEvent::StatusUpdate(
+                            id,
+                            "force_refresh".to_string(),
+                        ))
+                        .await;
                     let _ = tx.send(crate::AppEvent::StartWatching(id)).await;
                 });
             }

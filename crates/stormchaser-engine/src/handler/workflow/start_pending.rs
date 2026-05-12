@@ -1,6 +1,7 @@
 use crate::handler::{dispatch_pending_steps, fetch_run, fetch_run_context, schedule_step};
 use crate::workflow_machine::{state, WorkflowMachine};
 use anyhow::{Context, Result};
+use opentelemetry::KeyValue;
 use sqlx::PgPool;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -85,6 +86,8 @@ pub async fn handle_workflow_start_pending(
     let machine = WorkflowMachine::<state::StartPending>::new_from_run(run.clone());
     let _ = machine.start(&mut *tx).await?;
 
+    tx.commit().await?;
+
     let js = async_nats::jetstream::new(nats_client.clone());
     use stormchaser_model::nats::NatsSubject;
     if let Err(e) = stormchaser_model::nats::publish_cloudevent(
@@ -112,12 +115,10 @@ pub async fn handle_workflow_start_pending(
     crate::RUNS_STARTED.add(
         1,
         &[
-            opentelemetry::KeyValue::new("workflow_name", run.workflow_name),
-            opentelemetry::KeyValue::new("initiating_user", run.initiating_user),
+            KeyValue::new("workflow_name", run.workflow_name),
+            KeyValue::new("initiating_user", run.initiating_user),
         ],
     );
-
-    tx.commit().await?;
 
     if let Err(e) = dispatch_pending_steps(run_id, pool, nats_client, tls_reloader).await {
         error!(

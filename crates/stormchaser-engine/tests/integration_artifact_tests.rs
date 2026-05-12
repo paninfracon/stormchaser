@@ -1,5 +1,7 @@
+use chrono::Utc;
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
+use std::env::var;
 use std::sync::Arc;
 use stormchaser_engine::handler;
 use stormchaser_model::auth::OpaClient;
@@ -12,11 +14,11 @@ use stormchaser_tls::TlsReloader;
 
 #[tokio::test]
 async fn test_artifact_persistence_on_completion() {
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD")
+            var("STORMCHASER_DEV_PASSWORD")
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
@@ -68,7 +70,7 @@ async fn test_artifact_persistence_on_completion() {
         backend_name
     );
 
-    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
     let opa_client = Arc::new(OpaClient::new(None, None));
 
@@ -108,7 +110,7 @@ async fn test_artifact_persistence_on_completion() {
     let completed_payload = json!({
         "run_id": run_id,
         "step_id": step.id,"event_type": "StepCompletedEvent",
-        "timestamp": chrono::Utc::now(),
+        "timestamp": Utc::now(),
         "status": StepStatus::Succeeded,
         "exit_code": 0,
         "artifacts": {
@@ -164,11 +166,11 @@ async fn test_artifact_persistence_on_completion() {
 
 #[tokio::test]
 async fn test_test_report_persistence_on_completion() {
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD")
+            var("STORMCHASER_DEV_PASSWORD")
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
@@ -196,7 +198,7 @@ async fn test_test_report_persistence_on_completion() {
         }
     "#;
 
-    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
     let opa_client = Arc::new(OpaClient::new(None, None));
 
@@ -236,7 +238,7 @@ async fn test_test_report_persistence_on_completion() {
     let completed_payload = json!({
         "run_id": run_id,
         "step_id": step.id,"event_type": "StepCompletedEvent",
-        "timestamp": chrono::Utc::now(),
+        "timestamp": Utc::now(),
         "status": StepStatus::Succeeded,
         "exit_code": 0,
         "test_reports": {

@@ -1,4 +1,5 @@
 use sqlx::PgPool;
+use std::env::var;
 use stormchaser_model::test_report::{TestCase, TestCaseStatus, TestSummary};
 use stormchaser_model::TestReportId;
 use uuid::Uuid;
@@ -7,11 +8,11 @@ use stormchaser_engine::db;
 
 #[tokio::test]
 async fn test_report_persistence_integration() {
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD")
+            var("STORMCHASER_DEV_PASSWORD")
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });

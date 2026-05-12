@@ -3,11 +3,26 @@ stormchaser_dsl_version = "v1"
 workflow "dogfood" {
   description = "Stormchaser dogfooding workflow (K8s): Build, Test, Image, Deploy"
 
-  input "repo_url" { type = "string" }
-  input "kubeconfig" { type = "string" }
-  input "db_password" {
-    type   = "string"
-    secret = true
+  inputs {
+    type = "object"
+    properties {
+      repo_url {
+        type        = "string"
+        description = "URL to the source code tarball"
+        format      = "uri"
+      }
+      kubeconfig {
+        type        = "string"
+        description = "Kubeconfig YAML content for the target cluster"
+      }
+      db_password {
+        type        = "string"
+        description = "Database password"
+        secret      = true
+        minLength   = 8
+      }
+    }
+    required = ["repo_url", "kubeconfig", "db_password"]
   }
 
   storage "workspace" {

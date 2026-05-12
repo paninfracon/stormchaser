@@ -1,4 +1,5 @@
 use super::*;
+use uuid::Uuid;
 
 #[tokio::test]
 async fn test_terraform_plan_mutates_to_run_container() {
@@ -11,7 +12,7 @@ async fn test_terraform_plan_mutates_to_run_container() {
         "out_file": "tfplan"
     });
 
-    mutate_if_terraform(uuid::Uuid::new_v4(), &mut step_type, &mut spec)
+    mutate_if_terraform(Uuid::new_v4(), &mut step_type, &mut spec)
         .await
         .unwrap();
 
@@ -59,7 +60,7 @@ async fn test_terraform_apply_mutates_to_run_container() {
         "out_file": "myplan"
     });
 
-    mutate_if_terraform(uuid::Uuid::new_v4(), &mut step_type, &mut spec)
+    mutate_if_terraform(Uuid::new_v4(), &mut step_type, &mut spec)
         .await
         .unwrap();
 
@@ -96,7 +97,7 @@ async fn test_terraform_plan_uses_out_file_consistently() {
         "out_file": "custom_plan_file"
     });
 
-    mutate_if_terraform(uuid::Uuid::new_v4(), &mut step_type, &mut spec)
+    mutate_if_terraform(Uuid::new_v4(), &mut step_type, &mut spec)
         .await
         .unwrap();
 
@@ -141,7 +142,7 @@ async fn test_terraform_plan_passthrough_storage_mounts_and_resources() {
         ]
     });
 
-    mutate_if_terraform(uuid::Uuid::new_v4(), &mut step_type, &mut spec)
+    mutate_if_terraform(Uuid::new_v4(), &mut step_type, &mut spec)
         .await
         .unwrap();
 

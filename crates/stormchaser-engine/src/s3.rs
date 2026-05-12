@@ -117,6 +117,7 @@ use stormchaser_tls::build_client_config;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
     use serde_json::json;
     use stormchaser_model::connections::ConnectionType;
     use stormchaser_model::ConnectionId;
@@ -142,8 +143,8 @@ mod tests {
             ca_cert: None,
             client_cert: None,
             client_key: None,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
         };
 
         let client = get_s3_client(&backend).await;

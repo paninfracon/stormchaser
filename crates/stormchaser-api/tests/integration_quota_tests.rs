@@ -6,6 +6,7 @@ use jsonwebtoken::{encode, EncodingKey, Header};
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use std::collections::HashMap;
+use std::env::var;
 use std::sync::Arc;
 use stormchaser_api::{app, AppState, EnqueueResponse};
 use stormchaser_model::auth::{Claims, OpaClient};
@@ -17,11 +18,11 @@ async fn setup_db() -> sqlx::PgPool {
     std::env::set_var("API_RATE_LIMIT_BURST_SIZE", "1000");
     std::env::set_var("CRON_ENGINE", "none");
 
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD")
+            var("STORMCHASER_DEV_PASSWORD")
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
@@ -38,7 +39,7 @@ async fn test_api_enqueue_inserts_quotas() {
         .with_env_filter("debug")
         .try_init();
     let pool = setup_db().await;
-    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
 
     let state = AppState {

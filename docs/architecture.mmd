@@ -11,6 +11,7 @@ graph TD
 
     subgraph "Control Plane (Rust)"
         API[API Server]
+        Query[Query Microservice<br/>Dynamic Hydration]
         Engine[Orchestration Engine<br/>Distributed Controller Cluster]
         DB[(Postgres<br/>State + Audit + Cache)]
         OPA[Open Policy Agent<br/>Authz Policy]
@@ -58,6 +59,10 @@ graph TD
     Docker --- Agent
 
     Agent <-->|Park / Unpark| S3
+    Agent -->|Upload Artifacts| Registry
+    K8s -.->|Push Logs| Logs
+    Docker -.->|Push Logs| Logs
+ / Unpark| S3
     Agent -->|Upload Artifacts| Registry
     K8s -.->|Push Logs| Logs
     Docker -.->|Push Logs| Logs

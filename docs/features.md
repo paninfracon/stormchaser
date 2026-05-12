@@ -14,7 +14,7 @@
 8. 🚧 Workflow step optimization to run multiple steps in one container where
    possible (e.g. small python steps)
 9. ✅ Workflow input specification schemas
-10. 🚧 Workflow input validation including query ability (API, SQL, AWS, etc)
+10. ✅ Workflow input validation including query ability (API, SQL, AWS, etc)
     to retrieve valid values
 11. ✅ Long running workflows
 12. ✅ Human interaction steps in workflow (e.g. wait for approval, provide

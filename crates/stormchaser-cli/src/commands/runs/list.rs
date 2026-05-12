@@ -1,5 +1,6 @@
 use crate::utils::{handle_response, require_token};
 use anyhow::Result;
+use reqwest::header::AUTHORIZATION;
 
 pub struct ListRunsFilters {
     pub owner: Option<String>,
@@ -22,7 +23,7 @@ pub async fn list_runs(
 
     let res = http_client
         .get(url)
-        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
+        .header(AUTHORIZATION, format!("Bearer {}", token))
         .send()
         .await?;
     handle_response(res).await
@@ -108,7 +109,7 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/api/v1/runs"))
-            .and(header(reqwest::header::AUTHORIZATION, "Bearer test-token"))
+            .and(header(AUTHORIZATION, "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
             .mount(&server)
             .await;

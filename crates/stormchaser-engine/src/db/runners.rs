@@ -1,4 +1,5 @@
 use crate::db::steps::StepDefinitionInput;
+use sqlx::postgres::PgQueryResult;
 use sqlx::{Executor, Postgres};
 use stormchaser_model::runner::RunnerStatus;
 
@@ -10,7 +11,7 @@ pub async fn mark_stale_runners_offline<'e, E>(
     executor: E,
     target_status: RunnerStatus,
     current_status: RunnerStatus,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
+) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'e, Database = Postgres>,
 {
@@ -109,7 +110,7 @@ pub async fn upsert_runner<'a, E>(
     protocol_version: &str,
     capabilities: &[String],
     nats_subject: &str,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
+) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
@@ -142,7 +143,7 @@ pub async fn register_runner_step_type<'a, E>(
     executor: E,
     runner_id: &str,
     step_type: &str,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
+) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
@@ -165,7 +166,7 @@ pub async fn update_runner_heartbeat<'a, E>(
     executor: E,
     status: RunnerStatus,
     id: &str,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
+) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
@@ -182,7 +183,7 @@ pub async fn update_runner_status<'a, E>(
     executor: E,
     status: RunnerStatus,
     id: &str,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
+) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {

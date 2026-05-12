@@ -24,31 +24,31 @@ workflow "complex-input-form" {
 
   inputs {
     type = "object"
-    properties = {
-      username = {
+    properties {
+      username {
         type    = "string"
         pattern = "^[a-zA-Z0-9_-]{3,16}$"
       }
-      age = {
+      age {
         type    = "integer"
         minimum = 18
         maximum = 100
       }
-      role = {
-        type = "string"
-        enum = "${queries.roles_query}"
-      }
-      region = {
+      region {
         type = "string"
         enum = "${queries.regions_query}"
       }
-      cluster = {
+      cluster {
         type = "string"
         enum = "${queries.clusters_query}"
       }
-      dry_run = {
+      dry_run {
         type = "boolean"
         default = true
+      }
+      role {
+        type = "string"
+        enum = "${queries.roles_query}"
       }
     }
     allOf = [

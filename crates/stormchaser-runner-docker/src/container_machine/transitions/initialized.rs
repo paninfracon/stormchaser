@@ -104,7 +104,7 @@ impl DockerContainerMachine<state::Initialized> {
                 step_id: StepInstanceId::new(self.metadata.step_id),
                 event_type: EventType::Step(StepEventType::Running),
                 runner_id: None,
-                timestamp: chrono::Utc::now(),
+                timestamp: Utc::now(),
             };
             let _ = publish_cloudevent(
                 &async_nats::jetstream::new(nats.clone()),
@@ -313,13 +313,13 @@ impl DockerContainerMachine<state::Initialized> {
                                 "run_id": self.metadata.run_id,
                                 "step_id": self.metadata.step_id,
                                 "status": StepStatus::UnpackingSfs,
-                                "timestamp": chrono::Utc::now(),
+                                "timestamp": Utc::now(),
                             });
                             if let Ok(ce) = cloudevents::EventBuilderV10::new()
-                                .id(uuid::Uuid::new_v4().to_string())
+                                .id(Uuid::new_v4().to_string())
                                 .ty("stormchaser.v1.step.unpacking_sfs")
                                 .source("/stormchaser/runner")
-                                .time(chrono::Utc::now())
+                                .time(Utc::now())
                                 .data(APPLICATION_JSON, unpacking_event)
                                 .build()
                             {
@@ -359,13 +359,13 @@ impl DockerContainerMachine<state::Initialized> {
                                     "run_id": self.metadata.run_id,
                                     "step_id": self.metadata.step_id,
                                     "status": StepStatus::UnpackingSfs,
-                                    "timestamp": chrono::Utc::now(),
+                                    "timestamp": Utc::now(),
                                 });
                                 if let Ok(ce) = cloudevents::EventBuilderV10::new()
-                                    .id(uuid::Uuid::new_v4().to_string())
+                                    .id(Uuid::new_v4().to_string())
                                     .ty("stormchaser.v1.step.unpacking_sfs")
                                     .source("/stormchaser/runner")
-                                    .time(chrono::Utc::now())
+                                    .time(Utc::now())
                                     .data(APPLICATION_JSON, unpacking_event)
                                     .build()
                                 {
@@ -603,7 +603,7 @@ mod tests {
                 reports: vec![],
                 artifacts: None,
             },
-            received_at: chrono::Utc::now(),
+            received_at: Utc::now(),
             encryption_key: None,
             storage: None,
             test_report_urls: None,

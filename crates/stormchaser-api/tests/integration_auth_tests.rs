@@ -3,11 +3,13 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
+use chrono::Utc;
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::Serialize;
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use std::collections::HashMap;
+use std::env::var;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::Once;
@@ -77,7 +79,7 @@ fn create_id_token(issuer: &str, client_id: &str) -> String {
     let claims = IdTokenClaims {
         sub: "test-user-id".to_string(),
         email: Some("test@paninfracon.net".to_string()),
-        exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
+        exp: (Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
         aud: client_id.to_string(),
         iss: issuer.to_string(),
     };
@@ -93,17 +95,18 @@ async fn setup_app(mock_server_url: String) -> Option<axum::Router> {
     std::env::set_var("API_RATE_LIMIT_PER_SECOND", "1000");
     std::env::set_var("API_RATE_LIMIT_BURST_SIZE", "1000");
 
-    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = async_nats::connect(nats_url).await.ok()?;
 
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
-        format!(
-            "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD")
-                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
-        )
+        let pwd = var("STORMCHASER_DEV_PASSWORD")
+            .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set");
+        let url = format!("postgres://stormchaser:{}@localhost:5432/stormchaser", pwd);
+        println!("DATABASE_URL was not set! Generated URL: {}", url);
+        url
     });
+    println!("Connecting to DB at: {}", db_url);
     let pool = PgPoolOptions::new()
         .max_connections(2)
         .connect(&db_url)
@@ -315,16 +318,17 @@ async fn test_auth_refresh_success() {
 
 #[tokio::test]
 async fn test_auth_exchange_network_error() {
-    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
-        format!(
-            "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD")
-                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
-        )
+        let pwd = var("STORMCHASER_DEV_PASSWORD")
+            .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set");
+        let url = format!("postgres://stormchaser:{}@localhost:5432/stormchaser", pwd);
+        println!("DATABASE_URL was not set! Generated URL: {}", url);
+        url
     });
+    println!("Connecting to DB at: {}", db_url);
     let pool = PgPoolOptions::new()
         .max_connections(2)
         .connect(&db_url)
@@ -442,7 +446,7 @@ async fn test_auth_exchange_no_kid() {
     let claims = IdTokenClaims {
         sub: "test".to_string(),
         email: None,
-        exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
+        exp: (Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
         aud: "test-client".to_string(),
         iss: mock_server.uri().to_string(),
     };
@@ -590,7 +594,7 @@ async fn test_auth_exchange_invalid_signature() {
     let claims = IdTokenClaims {
         sub: "test".to_string(),
         email: None,
-        exp: (chrono::Utc::now() - chrono::Duration::hours(1)).timestamp() as usize,
+        exp: (Utc::now() - chrono::Duration::hours(1)).timestamp() as usize,
         aud: "test-client".to_string(),
         iss: mock_server.uri().to_string(),
     };
@@ -631,16 +635,17 @@ async fn test_auth_exchange_invalid_signature() {
 
 #[tokio::test]
 async fn test_auth_refresh_network_error() {
-    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
-        format!(
-            "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD")
-                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
-        )
+        let pwd = var("STORMCHASER_DEV_PASSWORD")
+            .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set");
+        let url = format!("postgres://stormchaser:{}@localhost:5432/stormchaser", pwd);
+        println!("DATABASE_URL was not set! Generated URL: {}", url);
+        url
     });
+    println!("Connecting to DB at: {}", db_url);
     let pool = PgPoolOptions::new()
         .max_connections(2)
         .connect(&db_url)
@@ -755,7 +760,7 @@ async fn test_auth_refresh_no_kid() {
     let claims = IdTokenClaims {
         sub: "test".to_string(),
         email: None,
-        exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
+        exp: (Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
         aud: "test-client".to_string(),
         iss: mock_server.uri().to_string(),
     };
@@ -898,7 +903,7 @@ async fn test_auth_refresh_invalid_signature() {
     let claims = IdTokenClaims {
         sub: "test".to_string(),
         email: None,
-        exp: (chrono::Utc::now() - chrono::Duration::hours(1)).timestamp() as usize, // Expired
+        exp: (Utc::now() - chrono::Duration::hours(1)).timestamp() as usize, // Expired
         aud: "test-client".to_string(),
         iss: mock_server.uri().to_string(),
     };

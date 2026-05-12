@@ -2,6 +2,7 @@ use crate::handler::{archive_workflow, dispatch_pending_steps, fetch_run, fetch_
 use crate::workflow_machine::{state, WorkflowMachine};
 use anyhow::Result;
 use chrono::Utc;
+use opentelemetry::KeyValue;
 use sqlx::PgPool;
 use std::sync::Arc;
 use stormchaser_model::events::WorkflowFailedEvent;
@@ -61,10 +62,10 @@ pub async fn handle_step_failed(
         .await?;
 
     let attributes = [
-        opentelemetry::KeyValue::new("step_name", instance.step_name),
-        opentelemetry::KeyValue::new("step_type", instance.step_type),
-        opentelemetry::KeyValue::new("runner_id", instance.runner_id.unwrap_or_default()),
-        opentelemetry::KeyValue::new("error", error_msg.to_string()),
+        KeyValue::new("step_name", instance.step_name),
+        KeyValue::new("step_type", instance.step_type),
+        KeyValue::new("runner_id", instance.runner_id.unwrap_or_default()),
+        KeyValue::new("error", error_msg.to_string()),
     ];
 
     crate::STEPS_FAILED.add(1, &attributes);
@@ -125,9 +126,9 @@ pub async fn handle_step_failed(
     crate::RUNS_FAILED.add(
         1,
         &[
-            opentelemetry::KeyValue::new("workflow_name", run.workflow_name),
-            opentelemetry::KeyValue::new("initiating_user", run.initiating_user),
-            opentelemetry::KeyValue::new("error", format!("Step {} failed", step_id)),
+            KeyValue::new("workflow_name", run.workflow_name),
+            KeyValue::new("initiating_user", run.initiating_user),
+            KeyValue::new("error", format!("Step {} failed", step_id)),
         ],
     );
 

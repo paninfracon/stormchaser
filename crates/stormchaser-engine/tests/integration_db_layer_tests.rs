@@ -1,5 +1,6 @@
 use chrono::Utc;
 use sqlx::postgres::PgPoolOptions;
+use std::env::var;
 use stormchaser_engine::db;
 use stormchaser_model::runner::RunnerStatus;
 use stormchaser_model::step::{StepInstance, StepStatus};
@@ -11,11 +12,11 @@ use stormchaser_model::StepInstanceId;
 use stormchaser_model::TestReportId;
 
 async fn setup_db() -> sqlx::PgPool {
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD")
+            var("STORMCHASER_DEV_PASSWORD")
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });

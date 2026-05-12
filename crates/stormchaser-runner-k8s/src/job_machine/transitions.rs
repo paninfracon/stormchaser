@@ -9,6 +9,7 @@ use kube::api::{
 };
 use serde_json::Value;
 use std::collections::HashMap;
+use std::env::var;
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{error, info, warn};
@@ -90,8 +91,8 @@ impl K8sJobMachine<state::Initialized> {
             }
         }
 
-        let agent_image = std::env::var("STORMCHASER_AGENT_IMAGE").ok();
-        let sfs_pvc_name = std::env::var("STORMCHASER_SFS_PVC_NAME").ok();
+        let agent_image = var("STORMCHASER_AGENT_IMAGE").ok();
+        let sfs_pvc_name = var("STORMCHASER_SFS_PVC_NAME").ok();
         let job =
             k8s_utils::do_build_job_spec(&job_name, &self.metadata, agent_image, sfs_pvc_name)?;
 

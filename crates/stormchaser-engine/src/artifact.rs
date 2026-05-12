@@ -70,6 +70,7 @@ pub async fn generate_parking_instructions(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
     use serde_json::json;
     use stormchaser_model::ConnectionId;
 
@@ -88,8 +89,8 @@ mod tests {
             aws_assume_role_arn: None,
             is_default_sfs: false,
             encrypted_credentials: None,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
             ca_cert: None,
             client_cert: None,
             client_key: None,
@@ -127,8 +128,8 @@ mod tests {
             aws_assume_role_arn: None,
             is_default_sfs: false,
             encrypted_credentials: None,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
             ca_cert: None,
             client_cert: None,
             client_key: None,

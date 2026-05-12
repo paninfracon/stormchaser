@@ -1,15 +1,16 @@
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
+use std::env::var;
 use stormchaser_api::WorkflowRunDetail;
 use stormchaser_model::workflow::RunStatus;
 
 #[tokio::test]
 async fn test_workflow_run_detail_query() {
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD")
+            var("STORMCHASER_DEV_PASSWORD")
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });

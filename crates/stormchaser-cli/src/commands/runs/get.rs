@@ -1,5 +1,6 @@
 use crate::utils::{handle_response, require_token};
 use anyhow::Result;
+use reqwest::header::AUTHORIZATION;
 
 pub async fn get_run(
     url: &str,
@@ -10,7 +11,7 @@ pub async fn get_run(
     let token = require_token(token)?;
     let res = http_client
         .get(format!("{}/api/v1/runs/{}", url, id))
-        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
+        .header(AUTHORIZATION, format!("Bearer {}", token))
         .send()
         .await?;
     handle_response(res).await
@@ -30,7 +31,7 @@ mod tests {
         let id = stormchaser_model::RunId::new_v4();
         Mock::given(method("GET"))
             .and(path(format!("/api/v1/runs/{}", id)))
-            .and(header(reqwest::header::AUTHORIZATION, "Bearer test-token"))
+            .and(header(AUTHORIZATION, "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": id})))
             .mount(&server)
             .await;

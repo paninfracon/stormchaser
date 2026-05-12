@@ -31,13 +31,6 @@ Tab
 Sleep 500ms
 
 Down
-Sleep 500ms
-Down
-Sleep 2s
-Tab
-Sleep 500ms
-
-Down
 Sleep 2s
 Tab
 Sleep 500ms
@@ -49,6 +42,13 @@ Sleep 500ms
 
 Type "false"
 Sleep 500ms
+Tab
+Sleep 500ms
+
+Down
+Sleep 500ms
+Down
+Sleep 2s
 Tab
 Sleep 500ms
 

@@ -52,7 +52,22 @@ pub async fn handle_workflow_queued(
         }
     };
 
-    let storm_file_path = repo_path.join(&machine.run.workflow_path);
+    let workflow_req_path = std::path::Path::new(&machine.run.workflow_path);
+    if workflow_req_path.is_absolute()
+        || workflow_req_path
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        let err_msg = format!(
+            "Workflow path {} is invalid (absolute or contains '..')",
+            machine.run.workflow_path
+        );
+        let _ = machine
+            .fail(err_msg.clone(), &mut *pool.acquire().await?)
+            .await?;
+        return Err(anyhow::anyhow!(err_msg));
+    }
+    let storm_file_path = repo_path.join(workflow_req_path);
     if !storm_file_path.exists() {
         let err_msg = format!(
             "Workflow file {} not found in repo",
@@ -98,7 +113,22 @@ pub async fn handle_workflow_queued(
             continue; // Prevent infinite loops
         }
 
-        let inc_path = repo_path.join(&inc.workflow);
+        let req_inc_path = std::path::Path::new(&inc.workflow);
+        if req_inc_path.is_absolute()
+            || req_inc_path
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            let err_msg = format!(
+                "Included workflow path {} is invalid (absolute or contains '..')",
+                inc.workflow
+            );
+            let _ = machine
+                .fail(err_msg.clone(), &mut *pool.acquire().await?)
+                .await?;
+            return Err(anyhow::anyhow!(err_msg));
+        }
+        let inc_path = repo_path.join(req_inc_path);
         if !inc_path.exists() {
             let err_msg = format!("Included workflow file {} not found", inc.workflow);
             let _ = machine

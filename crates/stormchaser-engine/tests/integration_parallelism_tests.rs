@@ -1,5 +1,7 @@
+use chrono::Utc;
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
+use std::env::var;
 use std::sync::Arc;
 use stormchaser_engine::handler;
 use stormchaser_model::auth::OpaClient;
@@ -11,11 +13,11 @@ use stormchaser_tls::TlsReloader;
 
 #[tokio::test]
 async fn test_dynamic_parallelism_with_batching() {
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD")
+            var("STORMCHASER_DEV_PASSWORD")
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
@@ -25,7 +27,7 @@ async fn test_dynamic_parallelism_with_batching() {
         .await
         .unwrap();
 
-    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
     let opa_client = Arc::new(OpaClient::new(None, None));
 
@@ -104,7 +106,7 @@ async fn test_dynamic_parallelism_with_batching() {
     let completed_payload = json!({
         "run_id": run_id,
         "step_id": generate_id,"event_type": "StepCompletedEvent",
-        "timestamp": chrono::Utc::now(),
+        "timestamp": Utc::now(),
         "exit_code": 0
     });
     let log_backend = Arc::new(None);
@@ -150,7 +152,7 @@ async fn test_dynamic_parallelism_with_batching() {
     let completed_payload = json!({
         "run_id": run_id,
         "step_id": process_instances[0].id,"event_type": "StepCompletedEvent",
-        "timestamp": chrono::Utc::now(),
+        "timestamp": Utc::now(),
         "exit_code": 0
     });
     handler::handle_step_completed(

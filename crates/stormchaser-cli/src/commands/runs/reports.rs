@@ -1,5 +1,6 @@
 use crate::utils::{handle_response, require_token};
 use anyhow::Result;
+use reqwest::header::AUTHORIZATION;
 
 pub async fn list_reports(
     url: &str,
@@ -10,7 +11,7 @@ pub async fn list_reports(
     let token = require_token(token)?;
     let res = http_client
         .get(format!("{}/api/v1/runs/{}/reports", url, id))
-        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
+        .header(AUTHORIZATION, format!("Bearer {}", token))
         .send()
         .await?;
     handle_response(res).await
@@ -26,7 +27,7 @@ pub async fn get_report(
     let token = require_token(token)?;
     let res = http_client
         .get(format!("{}/api/v1/runs/{}/reports/{}", url, id, report_id))
-        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
+        .header(AUTHORIZATION, format!("Bearer {}", token))
         .send()
         .await?;
     handle_response(res).await
@@ -37,6 +38,7 @@ mod tests {
     use super::*;
     use reqwest_retry::policies::ExponentialBackoff;
     use reqwest_retry::RetryTransientMiddleware;
+    use stormchaser_model::RunId;
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -50,11 +52,11 @@ mod tests {
     #[tokio::test]
     async fn test_list_reports() {
         let mock_server = MockServer::start().await;
-        let id = stormchaser_model::RunId::new_v4();
+        let id = RunId::new_v4();
 
         Mock::given(method("GET"))
             .and(path(format!("/api/v1/runs/{}/reports", id)))
-            .and(header(reqwest::header::AUTHORIZATION, "Bearer test_token"))
+            .and(header(AUTHORIZATION, "Bearer test_token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
             .mount(&mock_server)
             .await;
@@ -67,7 +69,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_reports_no_token() {
         let mock_server = MockServer::start().await;
-        let id = stormchaser_model::RunId::new_v4();
+        let id = RunId::new_v4();
         let client = build_client();
         let res = list_reports(&mock_server.uri(), None, &client, id).await;
         assert!(res.is_err());
@@ -76,12 +78,12 @@ mod tests {
     #[tokio::test]
     async fn test_get_report() {
         let mock_server = MockServer::start().await;
-        let id = stormchaser_model::RunId::new_v4();
+        let id = RunId::new_v4();
         let report_id = stormchaser_model::TestReportId::new_v4();
 
         Mock::given(method("GET"))
             .and(path(format!("/api/v1/runs/{}/reports/{}", id, report_id)))
-            .and(header(reqwest::header::AUTHORIZATION, "Bearer test_token"))
+            .and(header(AUTHORIZATION, "Bearer test_token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
             .mount(&mock_server)
             .await;
@@ -101,7 +103,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_report_no_token() {
         let mock_server = MockServer::start().await;
-        let id = stormchaser_model::RunId::new_v4();
+        let id = RunId::new_v4();
         let report_id = stormchaser_model::TestReportId::new_v4();
         let client = build_client();
         let res = get_report(&mock_server.uri(), None, &client, id, report_id).await;

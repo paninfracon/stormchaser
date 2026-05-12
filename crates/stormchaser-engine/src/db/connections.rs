@@ -1,4 +1,6 @@
 use serde_json::Value;
+use sqlx::postgres::PgQueryResult;
+use sqlx::postgres::PgRow;
 use sqlx::{Executor, Postgres};
 use stormchaser_model::{ConnectionId, RunId, StepInstanceId, TestSummary};
 use uuid::Uuid;
@@ -12,7 +14,7 @@ pub async fn upsert_run_storage_state<'a, E>(
     run_id: Uuid,
     storage_name: &str,
     last_hash: &str,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
+) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
@@ -39,7 +41,7 @@ pub async fn get_storage_backend_id_by_name<'a, E, O>(
 where
     E: Executor<'a, Database = Postgres>,
     O: Send + Unpin,
-    (O,): for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,
+    (O,): for<'r> sqlx::FromRow<'r, PgRow>,
 {
     sqlx::query_scalar::<_, O>("SELECT id FROM connections WHERE name = $1")
         .bind(name)
@@ -53,7 +55,7 @@ pub async fn get_default_sfs_backend_id<'a, E, O>(executor: E) -> Result<Option<
 where
     E: Executor<'a, Database = Postgres>,
     O: Send + Unpin,
-    (O,): for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,
+    (O,): for<'r> sqlx::FromRow<'r, PgRow>,
 {
     sqlx::query_scalar::<_, O>("SELECT id FROM connections WHERE is_default_sfs = TRUE LIMIT 1")
         .fetch_optional(executor)
@@ -70,7 +72,7 @@ pub async fn insert_artifact_registry<'a, E>(
     connection_id: ConnectionId,
     remote_path: String,
     metadata: Value,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
+) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
@@ -103,7 +105,7 @@ pub async fn insert_step_test_report<'a, E>(
     checksum: &str,
     connection_id: Option<Uuid>,
     remote_path: Option<&str>,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
+) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
@@ -134,7 +136,7 @@ pub async fn insert_step_test_summary<'a, E>(
     step_instance_id: Uuid,
     report_name: &str,
     summary: &TestSummary,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
+) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
@@ -164,7 +166,7 @@ pub async fn insert_step_test_case<'a, E>(
     step_instance_id: Uuid,
     report_name: &str,
     test_case: &test_report::TestCase,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
+) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
@@ -194,7 +196,7 @@ pub async fn get_storage_backend_by_name<'a, E, O>(
 ) -> Result<Option<O>, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
-    O: Send + Unpin + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,
+    O: Send + Unpin + for<'r> sqlx::FromRow<'r, PgRow>,
 {
     sqlx::query_as::<_, O>("SELECT * FROM connections WHERE name = $1")
         .bind(name)
@@ -207,7 +209,7 @@ where
 pub async fn get_default_sfs_backend<'a, E, O>(executor: E) -> Result<Option<O>, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
-    O: Send + Unpin + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,
+    O: Send + Unpin + for<'r> sqlx::FromRow<'r, PgRow>,
 {
     sqlx::query_as::<_, O>("SELECT * FROM connections WHERE is_default_sfs = TRUE LIMIT 1")
         .fetch_optional(executor)
@@ -223,7 +225,7 @@ pub async fn get_run_storage_last_hash<'a, E, O>(
 ) -> Result<Option<O>, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
-    O: Send + Unpin + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,
+    O: Send + Unpin + for<'r> sqlx::FromRow<'r, PgRow>,
 {
     sqlx::query_as::<_, O>(
         "SELECT last_hash FROM run_storage_states WHERE run_id = $1 AND storage_name = $2",
@@ -241,7 +243,7 @@ pub async fn get_storage_backend_by_id<'a, E, O>(
 ) -> Result<Option<O>, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
-    O: Send + Unpin + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,
+    O: Send + Unpin + for<'r> sqlx::FromRow<'r, PgRow>,
 {
     sqlx::query_as::<_, O>("SELECT * FROM connections WHERE id = $1")
         .bind(id)

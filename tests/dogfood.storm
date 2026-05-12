@@ -12,21 +12,72 @@ workflow "dogfood" {
   description = "Stormchaser dogfooding workflow: Build, Test, Image, Deploy"
 
   # Connection variables pointing to the target infrastructure (MicroK8s and supporting services)
-  input "repo_url" { type = "string" }
-  input "host_ip" { type = "string" }
-  input "db_password" {
-    type   = "string"
-    secret = true
+  inputs {
+    type = "object"
+    properties {
+      repo_url {
+        type        = "string"
+        description = "URL to the source code tarball"
+        format      = "uri"
+      }
+      host_ip {
+        type        = "string"
+        description = "IP address of the host running the services"
+        format      = "ipv4"
+      }
+      db_password {
+        type        = "string"
+        description = "Database password"
+        secret      = true
+        minLength   = 8
+      }
+      kubeconfig {
+        type        = "string"
+        description = "Kubeconfig YAML content"
+      }
+      port_api {
+        type    = "integer"
+        minimum = 1
+        maximum = 65535
+      }
+      port_db {
+        type    = "integer"
+        minimum = 1
+        maximum = 65535
+      }
+      port_nats {
+        type    = "integer"
+        minimum = 1
+        maximum = 65535
+      }
+      port_loki {
+        type    = "integer"
+        minimum = 1
+        maximum = 65535
+      }
+      port_dex {
+        type    = "integer"
+        minimum = 1
+        maximum = 65535
+      }
+      port_s3 {
+        type    = "integer"
+        minimum = 1
+        maximum = 65535
+      }
+      port_reg {
+        type    = "integer"
+        minimum = 1
+        maximum = 65535
+      }
+      port_opa {
+        type    = "integer"
+        minimum = 1
+        maximum = 65535
+      }
+    }
+    required = ["repo_url", "host_ip", "db_password", "kubeconfig", "port_api", "port_db", "port_nats", "port_loki", "port_dex", "port_s3", "port_reg", "port_opa"]
   }
-  input "kubeconfig" { type = "string" }
-  input "port_api" { type = "string" }
-  input "port_db" { type = "string" }
-  input "port_nats" { type = "string" }
-  input "port_loki" { type = "string" }
-  input "port_dex" { type = "string" }
-  input "port_s3" { type = "string" }
-  input "port_reg" { type = "string" }
-  input "port_opa" { type = "string" }
 
   # The main workspace volume shared across steps. It provisions the source code
   # by downloading the repository tarball from MinIO.

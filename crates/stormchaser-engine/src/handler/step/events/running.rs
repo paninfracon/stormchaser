@@ -1,5 +1,6 @@
 use crate::handler::fetch_step_instance;
 use anyhow::Result;
+use opentelemetry::KeyValue;
 use sqlx::PgPool;
 use tracing::info;
 
@@ -37,9 +38,9 @@ pub async fn handle_step_running(
     crate::STEPS_STARTED.add(
         1,
         &[
-            opentelemetry::KeyValue::new("step_name", instance.step_name),
-            opentelemetry::KeyValue::new("step_type", instance.step_type),
-            opentelemetry::KeyValue::new("runner_id", runner_id.to_string()),
+            KeyValue::new("step_name", instance.step_name),
+            KeyValue::new("step_type", instance.step_type),
+            KeyValue::new("runner_id", runner_id.to_string()),
         ],
     );
 

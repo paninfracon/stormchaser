@@ -1,3 +1,4 @@
+use chrono::Utc;
 use std::sync::Arc;
 use stormchaser_engine::handler;
 use stormchaser_model::step::StepInstance;
@@ -6,15 +7,16 @@ use stormchaser_model::RunId;
 
 // Assumes there's a test setup function like in other tests
 mod common {
+    use std::env::var;
     use std::sync::Arc;
     use stormchaser_model::auth::{self, OpaClient};
     /// Get pool.
     pub async fn get_pool() -> sqlx::PgPool {
-        let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
             dotenvy::dotenv().ok();
             format!(
                 "postgres://stormchaser:{}@localhost:5432/stormchaser",
-                std::env::var("STORMCHASER_DEV_PASSWORD")
+                var("STORMCHASER_DEV_PASSWORD")
                     .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
             )
         });
@@ -80,10 +82,10 @@ async fn test_step_library_direct_run() {
         git_ref: "HEAD".to_string(),
         status: RunStatus::StartPending,
         version: 1,
-        fencing_token: chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0),
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-        started_resolving_at: Some(chrono::Utc::now()),
+        fencing_token: Utc::now().timestamp_nanos_opt().unwrap_or(0),
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        started_resolving_at: Some(Utc::now()),
         started_at: None,
         finished_at: None,
         error: None,

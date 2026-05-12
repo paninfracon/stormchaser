@@ -19,7 +19,12 @@ impl<'a> App<'a> {
         body: Option<Value>,
     ) -> Result<reqwest::Response> {
         let client = reqwest::Client::new();
-        let mut req = client.request(method, format!("{}{}", self.url, path));
+        let base_url = if path == "/api/v1/schema/hydrate" {
+            &self.query_url
+        } else {
+            &self.url
+        };
+        let mut req = client.request(method, format!("{}{}", base_url, path));
         if let Some(token) = &self.token {
             req = req.header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token));
         }

@@ -227,7 +227,9 @@ impl<'a> crate::app::App<'a> {
             if res.status().is_success() {
                 if let Ok(body) = res.json::<serde_json::Value>().await {
                     if let Some(run_id_str) = body.get("run_id").and_then(|v| v.as_str()) {
-                        if let Ok(run_id) = uuid::Uuid::parse_str(run_id_str).map(stormchaser_model::RunId::new) {
+                        if let Ok(run_id) =
+                            uuid::Uuid::parse_str(run_id_str).map(stormchaser_model::RunId::new)
+                        {
                             self.force_select_run_id = Some(run_id);
                         }
                     }
@@ -246,9 +248,9 @@ impl<'a> crate::app::App<'a> {
 mod tests {
 
     use crate::app::App;
+    use serde_json::json;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
-    use serde_json::json;
 
     fn setup_app() -> App<'static> {
         let (tx, _) = tokio::sync::mpsc::channel(1);
@@ -291,12 +293,7 @@ mod tests {
             .await;
 
         let (tx, _) = tokio::sync::mpsc::channel(1);
-        let mut app = App::new(
-            server.uri(),
-            server.uri(),
-            Some("token".to_string()),
-            tx,
-        );
+        let mut app = App::new(server.uri(), server.uri(), Some("token".to_string()), tx);
         app.open_schedule_git_dialog();
         app.schedule_git_inputs[0].insert_str("http://repo");
         app.schedule_git_inputs[1].insert_str("wf.yaml");
@@ -323,12 +320,7 @@ mod tests {
             .await;
 
         let (tx, _) = tokio::sync::mpsc::channel(1);
-        let mut app = App::new(
-            server.uri(),
-            server.uri(),
-            Some("token".to_string()),
-            tx,
-        );
+        let mut app = App::new(server.uri(), server.uri(), Some("token".to_string()), tx);
         app.direct_submit_dsl = Some("test dsl".to_string());
 
         let res = app.submit_direct_form(json!({"key": "val"})).await;
@@ -347,12 +339,7 @@ mod tests {
             .await;
 
         let (tx, _) = tokio::sync::mpsc::channel(1);
-        let mut app = App::new(
-            server.uri(),
-            server.uri(),
-            Some("token".to_string()),
-            tx,
-        );
+        let mut app = App::new(server.uri(), server.uri(), Some("token".to_string()), tx);
         app.direct_submit_dsl = Some("test dsl".to_string());
 
         let res = app.submit_direct_form(json!({})).await;
@@ -364,7 +351,8 @@ mod tests {
     #[tokio::test]
     async fn test_hydrate_schema_blocking_success() {
         let server = MockServer::start().await;
-        let sse_body = "data: {\"status\": \"Completed\", \"hydrated_schema\": {\"type\": \"string\"}}\n\n";
+        let sse_body =
+            "data: {\"status\": \"Completed\", \"hydrated_schema\": {\"type\": \"string\"}}\n\n";
         Mock::given(method("POST"))
             .and(path("/api/v1/schema/hydrate"))
             .respond_with(ResponseTemplate::new(200).set_body_string(sse_body))
@@ -372,16 +360,14 @@ mod tests {
             .await;
 
         let (tx, _) = tokio::sync::mpsc::channel(1);
-        let app = App::new(
-            server.uri(),
-            server.uri(),
-            Some("token".to_string()),
-            tx,
-        );
+        let app = App::new(server.uri(), server.uri(), Some("token".to_string()), tx);
 
         let schema = json!({"type": "object"});
         let inputs = json!({});
-        let (new_schema, status) = app.hydrate_schema_blocking(&schema, &inputs, None).await.unwrap();
+        let (new_schema, status) = app
+            .hydrate_schema_blocking(&schema, &inputs, None)
+            .await
+            .unwrap();
         assert_eq!(status, "Completed");
         assert_eq!(new_schema, json!({"type": "string"}));
     }

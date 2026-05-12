@@ -149,8 +149,8 @@ mod tests {
             is_active: true,
             secret_token: "secret".to_string(),
             external_job_id: None,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
         }
     }
 
@@ -166,7 +166,12 @@ mod tests {
             .await;
 
         let (tx, _rx) = mpsc::channel(1);
-        let mut app = App::new(server.uri(), Some("token".to_string()), tx);
+        let mut app = App::new(
+            server.uri(),
+            "http://localhost:3001".to_string(),
+            Some("token".to_string()),
+            tx,
+        );
 
         let result = app.refresh_cron_workflows().await;
         assert!(result.is_ok());
@@ -193,7 +198,12 @@ mod tests {
             .await;
 
         let (tx, _rx) = mpsc::channel(1);
-        let mut app = App::new(server.uri(), Some("token".to_string()), tx);
+        let mut app = App::new(
+            server.uri(),
+            "http://localhost:3001".to_string(),
+            Some("token".to_string()),
+            tx,
+        );
         app.selected_cron_workflow = Some(make_cron_workflow(id));
 
         let result = app.delete_selected_cron_workflow().await;

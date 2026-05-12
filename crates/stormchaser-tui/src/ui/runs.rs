@@ -230,6 +230,41 @@ pub(crate) fn render_run_detail(
                     h_time
                 ));
             }
+
+            if !step_detail.outputs.is_empty() {
+                detail_text.push_str("       └─ Outputs:\n");
+                for output in &step_detail.outputs {
+                    let key = output
+                        .get("key")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    let is_sensitive = output
+                        .get("is_sensitive")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let val_str = if is_sensitive {
+                        "*** REDACTED ***".to_string()
+                    } else if let Some(v) = output.get("value") {
+                        if let Some(s) = v.as_str() {
+                            s.to_string()
+                        } else {
+                            v.to_string()
+                        }
+                    } else {
+                        "null".to_string()
+                    };
+
+                    let lines: Vec<&str> = val_str.lines().collect();
+                    if lines.len() > 1 {
+                        detail_text.push_str(&format!("          • {}:\n", key));
+                        for line in lines {
+                            detail_text.push_str(&format!("            {}\n", line));
+                        }
+                    } else {
+                        detail_text.push_str(&format!("          • {}: {}\n", key, val_str));
+                    }
+                }
+            }
         }
     }
 

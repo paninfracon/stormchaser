@@ -1,5 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde_json::Value;
+use sqlx::postgres::PgQueryResult;
+use sqlx::postgres::PgRow;
 use sqlx::{Executor, Postgres};
 use stormchaser_model::step::StepStatus;
 use stormchaser_model::RunId;
@@ -13,7 +15,7 @@ pub async fn complete_step_instance<'a, E>(
     exit_code: Option<i32>,
     runner_id: Option<&str>,
     id: StepInstanceId,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
+) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
@@ -40,7 +42,7 @@ pub async fn get_step_instances_by_run_id<'a, E, O>(
 ) -> Result<Vec<O>, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
-    O: Send + Unpin + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,
+    O: Send + Unpin + for<'r> sqlx::FromRow<'r, PgRow>,
 {
     sqlx::query_as::<_, O>(
         r#"SELECT id, run_id, step_name, step_type, status as "status", iteration_index, runner_id, affinity_context, started_at, finished_at, exit_code, error, spec, params, created_at FROM step_instances WHERE run_id = $1"#,
@@ -56,7 +58,7 @@ pub async fn update_step_instance_status<'a, E>(
     executor: E,
     status: &StepStatus,
     id: StepInstanceId,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
+) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
@@ -75,7 +77,7 @@ pub async fn get_step_spec_and_params<'a, E, O>(
 ) -> Result<O, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
-    O: Send + Unpin + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,
+    O: Send + Unpin + for<'r> sqlx::FromRow<'r, PgRow>,
 {
     sqlx::query_as::<_, O>("SELECT spec, params FROM step_instances WHERE id = $1")
         .bind(id)
@@ -91,7 +93,7 @@ pub async fn fail_step_instance_with_error<'a, E>(
     error: &str,
     exit_code: Option<i32>,
     id: StepInstanceId,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
+) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
@@ -115,7 +117,7 @@ pub async fn record_step_status_history<'a, E>(
     executor: E,
     step_instance_id: StepInstanceId,
     status: &StepStatus,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
+) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
@@ -136,7 +138,7 @@ pub async fn insert_step_instance<'a, E>(
     step_type: &str,
     status: StepStatus,
     created_at: DateTime<Utc>,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
+) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
@@ -171,7 +173,7 @@ pub async fn count_running_steps_for_run<'a, E, O>(
 where
     E: Executor<'a, Database = Postgres>,
     O: Send + Unpin,
-    (O,): for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,
+    (O,): for<'r> sqlx::FromRow<'r, PgRow>,
 {
     sqlx::query_scalar::<_, O>(
         r#"SELECT COUNT(*) FROM step_instances WHERE run_id = $1 AND status = 'running'"#,
@@ -194,7 +196,7 @@ pub async fn insert_step_instance_with_spec<'a, E>(
     spec: Value,
     params: Value,
     created_at: DateTime<Utc>,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
+) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
@@ -235,7 +237,7 @@ pub async fn insert_step_instance_with_spec_on_conflict_do_nothing<'a, E>(
     spec: Value,
     params: Value,
     created_at: DateTime<Utc>,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
+) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
@@ -273,7 +275,7 @@ pub async fn get_pending_step_instances_for_run<'a, E, O>(
 ) -> Result<Vec<O>, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
-    O: Send + Unpin + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,
+    O: Send + Unpin + for<'r> sqlx::FromRow<'r, PgRow>,
 {
     sqlx::query_as::<_, O>(
         r#"
@@ -298,7 +300,7 @@ pub async fn get_step_instance_by_id<'a, E, O>(
 ) -> Result<Option<O>, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
-    O: Send + Unpin + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,
+    O: Send + Unpin + for<'r> sqlx::FromRow<'r, PgRow>,
 {
     sqlx::query_as::<_, O>(
         r#"SELECT id, run_id, step_name, step_type, status as "status", iteration_index, runner_id, affinity_context, started_at, finished_at, exit_code, error, spec, params, created_at FROM step_instances WHERE id = $1"#
@@ -313,7 +315,7 @@ where
 pub async fn fail_pending_steps_for_run_on_timeout<'a, E>(
     executor: E,
     run_id: RunId,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
+) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
@@ -336,7 +338,7 @@ pub async fn update_step_instance_running<'a, E>(
     status: &StepStatus,
     runner_id: Option<&str>,
     id: StepInstanceId,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
+) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
@@ -356,7 +358,7 @@ pub async fn update_step_instance_terminal<'a, E>(
     executor: E,
     status: &StepStatus,
     id: StepInstanceId,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
+) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
@@ -374,7 +376,7 @@ pub async fn get_step_type_and_spec<'a, E, O>(
 ) -> Result<O, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
-    O: Send + Unpin + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,
+    O: Send + Unpin + for<'r> sqlx::FromRow<'r, PgRow>,
 {
     sqlx::query_as::<_, O>("SELECT step_type, spec FROM step_instances WHERE id = $1")
         .bind(id)

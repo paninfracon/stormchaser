@@ -1,3 +1,4 @@
+use chrono::Utc;
 use serde_json::Value;
 use stormchaser_dsl::ast;
 use stormchaser_model::dsl;
@@ -71,7 +72,7 @@ pub async fn schedule_step(
                     &step_dsl.name,
                     &step_dsl.r#type,
                     StepStatus::Skipped,
-                    chrono::Utc::now(),
+                    Utc::now(),
                 )
                 .await?;
                 return Ok(());
@@ -96,7 +97,7 @@ pub async fn schedule_step(
                 &step_dsl.name,
                 &step_dsl.r#type,
                 StepStatus::Skipped,
-                chrono::Utc::now(),
+                Utc::now(),
             )
             .await?;
             return Ok(());
@@ -153,7 +154,7 @@ pub async fn schedule_step(
                 Some(idx as i32),
                 resolved_spec_iter.clone(),
                 resolved_params_iter.clone(),
-                chrono::Utc::now(),
+                Utc::now(),
             )
             .await?;
 
@@ -197,7 +198,7 @@ pub async fn schedule_step(
             None::<i32>,
             resolved_spec.clone(),
             resolved_params.clone(),
-            chrono::Utc::now(),
+            Utc::now(),
         )
         .await?;
 

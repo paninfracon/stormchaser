@@ -1,16 +1,17 @@
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
+use std::env::var;
 use std::sync::Arc;
 use stormchaser_engine::handler;
 use stormchaser_model::auth::OpaClient;
 use stormchaser_model::RunId;
 
 async fn setup_db() -> sqlx::PgPool {
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD")
+            var("STORMCHASER_DEV_PASSWORD")
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
@@ -24,7 +25,7 @@ async fn setup_db() -> sqlx::PgPool {
 #[tokio::test]
 async fn test_headless_validation_dynamic_query_success() {
     let pool = setup_db().await;
-    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
     let opa_client = Arc::new(OpaClient::new(None, None));
 
@@ -62,7 +63,7 @@ async fn test_headless_validation_dynamic_query_success() {
 #[tokio::test]
 async fn test_headless_validation_dynamic_query_failure() {
     let pool = setup_db().await;
-    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
     let opa_client = Arc::new(OpaClient::new(None, None));
 
@@ -110,7 +111,7 @@ async fn test_execute_query_sql_success() {
 #[tokio::test]
 async fn test_headless_validation_malformed_schema_compile_error() {
     let pool = setup_db().await;
-    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
     let opa_client = Arc::new(OpaClient::new(None, None));
 
@@ -148,7 +149,7 @@ workflow "bad-schema" {
 #[tokio::test]
 async fn test_headless_validation_hcl_eval_error() {
     let pool = setup_db().await;
-    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
     let opa_client = Arc::new(OpaClient::new(None, None));
 
@@ -187,11 +188,11 @@ workflow "bad-schema-eval" {
 async fn test_execute_query_connection_resolution() {
     let pool = setup_db().await;
 
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD")
+            var("STORMCHASER_DEV_PASSWORD")
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });

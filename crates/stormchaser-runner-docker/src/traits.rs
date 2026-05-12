@@ -4,6 +4,7 @@ use bollard::container::{
     LogsOptions, RemoveContainerOptions, StartContainerOptions, StopContainerOptions,
     WaitContainerOptions,
 };
+use bollard::errors::Error;
 use bollard::image::CreateImageOptions;
 use bollard::models::{
     ContainerCreateResponse, ContainerInspectResponse, ContainerSummary, ContainerWaitResponse,
@@ -27,71 +28,71 @@ mockall::mock! {
             &self,
             options: Option<CreateContainerOptions<String>>,
             config: Config<String>,
-        ) -> Result<ContainerCreateResponse, bollard::errors::Error>;
+        ) -> Result<ContainerCreateResponse, Error>;
 
         async fn start_container(
             &self,
             container_name: &str,
             options: Option<StartContainerOptions<String>>,
-        ) -> Result<(), bollard::errors::Error>;
+        ) -> Result<(), Error>;
 
         async fn stop_container(
             &self,
             container_name: &str,
             options: Option<StopContainerOptions>,
-        ) -> Result<(), bollard::errors::Error>;
+        ) -> Result<(), Error>;
 
         async fn remove_container(
             &self,
             container_name: &str,
             options: Option<RemoveContainerOptions>,
-        ) -> Result<(), bollard::errors::Error>;
+        ) -> Result<(), Error>;
 
         fn wait_container(
             &self,
             container_name: &str,
             options: Option<WaitContainerOptions<String>>,
-        ) -> BoxStream<'static, Result<ContainerWaitResponse, bollard::errors::Error>>;
+        ) -> BoxStream<'static, Result<ContainerWaitResponse, Error>>;
 
         async fn create_volume(
             &self,
             config: CreateVolumeOptions<String>,
-        ) -> Result<Volume, bollard::errors::Error>;
+        ) -> Result<Volume, Error>;
 
         async fn remove_volume(
             &self,
             name: &str,
             options: Option<RemoveVolumeOptions>,
-        ) -> Result<(), bollard::errors::Error>;
+        ) -> Result<(), Error>;
 
         fn create_image(
             &self,
             options: Option<CreateImageOptions<'static, String>>,
             root_fs: Option<Bytes>,
             credentials: Option<bollard::auth::DockerCredentials>,
-        ) -> BoxStream<'static, Result<CreateImageInfo, bollard::errors::Error>>;
+        ) -> BoxStream<'static, Result<CreateImageInfo, Error>>;
 
         fn logs(
             &self,
             container_name: &str,
             options: Option<LogsOptions<String>>,
-        ) -> BoxStream<'static, Result<LogOutput, bollard::errors::Error>>;
+        ) -> BoxStream<'static, Result<LogOutput, Error>>;
 
         async fn inspect_container(
             &self,
             container_name: &str,
             options: Option<InspectContainerOptions>,
-        ) -> Result<ContainerInspectResponse, bollard::errors::Error>;
+        ) -> Result<ContainerInspectResponse, Error>;
 
         async fn list_containers(
             &self,
             options: Option<ListContainersOptions<String>>,
-        ) -> Result<Vec<ContainerSummary>, bollard::errors::Error>;
+        ) -> Result<Vec<ContainerSummary>, Error>;
 
         async fn list_volumes(
             &self,
             options: Option<ListVolumesOptions<String>>,
-        ) -> Result<VolumeListResponse, bollard::errors::Error>;
+        ) -> Result<VolumeListResponse, Error>;
     }
 
     impl Clone for ContainerRuntime {
@@ -107,48 +108,45 @@ pub trait ContainerRuntime: Send + Sync + Clone + 'static {
         &self,
         options: Option<CreateContainerOptions<String>>,
         config: Config<String>,
-    ) -> Result<ContainerCreateResponse, bollard::errors::Error>;
+    ) -> Result<ContainerCreateResponse, Error>;
 
     /// Starts an existing container.
     async fn start_container(
         &self,
         container_name: &str,
         options: Option<StartContainerOptions<String>>,
-    ) -> Result<(), bollard::errors::Error>;
+    ) -> Result<(), Error>;
 
     /// Stops a running container.
     async fn stop_container(
         &self,
         container_name: &str,
         options: Option<StopContainerOptions>,
-    ) -> Result<(), bollard::errors::Error>;
+    ) -> Result<(), Error>;
 
     /// Removes a container.
     async fn remove_container(
         &self,
         container_name: &str,
         options: Option<RemoveContainerOptions>,
-    ) -> Result<(), bollard::errors::Error>;
+    ) -> Result<(), Error>;
 
     /// Waits for a container to finish executing.
     fn wait_container(
         &self,
         container_name: &str,
         options: Option<WaitContainerOptions<String>>,
-    ) -> BoxStream<'static, Result<ContainerWaitResponse, bollard::errors::Error>>;
+    ) -> BoxStream<'static, Result<ContainerWaitResponse, Error>>;
 
     /// Creates a volume.
-    async fn create_volume(
-        &self,
-        config: CreateVolumeOptions<String>,
-    ) -> Result<Volume, bollard::errors::Error>;
+    async fn create_volume(&self, config: CreateVolumeOptions<String>) -> Result<Volume, Error>;
 
     /// Removes a volume.
     async fn remove_volume(
         &self,
         name: &str,
         options: Option<RemoveVolumeOptions>,
-    ) -> Result<(), bollard::errors::Error>;
+    ) -> Result<(), Error>;
 
     /// Creates an image.
     fn create_image(
@@ -156,33 +154,33 @@ pub trait ContainerRuntime: Send + Sync + Clone + 'static {
         options: Option<CreateImageOptions<'static, String>>,
         root_fs: Option<Bytes>,
         credentials: Option<bollard::auth::DockerCredentials>,
-    ) -> BoxStream<'static, Result<CreateImageInfo, bollard::errors::Error>>;
+    ) -> BoxStream<'static, Result<CreateImageInfo, Error>>;
 
     /// Retrieves logs for a container.
     fn logs(
         &self,
         container_name: &str,
         options: Option<LogsOptions<String>>,
-    ) -> BoxStream<'static, Result<LogOutput, bollard::errors::Error>>;
+    ) -> BoxStream<'static, Result<LogOutput, Error>>;
 
     /// Inspects a container's details.
     async fn inspect_container(
         &self,
         container_name: &str,
         options: Option<InspectContainerOptions>,
-    ) -> Result<ContainerInspectResponse, bollard::errors::Error>;
+    ) -> Result<ContainerInspectResponse, Error>;
 
     /// Lists containers.
     async fn list_containers(
         &self,
         options: Option<ListContainersOptions<String>>,
-    ) -> Result<Vec<ContainerSummary>, bollard::errors::Error>;
+    ) -> Result<Vec<ContainerSummary>, Error>;
 
     /// Lists volumes.
     async fn list_volumes(
         &self,
         options: Option<ListVolumesOptions<String>>,
-    ) -> Result<VolumeListResponse, bollard::errors::Error>;
+    ) -> Result<VolumeListResponse, Error>;
 }
 
 #[async_trait]
@@ -191,7 +189,7 @@ impl ContainerRuntime for Docker {
         &self,
         options: Option<CreateContainerOptions<String>>,
         config: Config<String>,
-    ) -> Result<ContainerCreateResponse, bollard::errors::Error> {
+    ) -> Result<ContainerCreateResponse, Error> {
         self.create_container(options, config).await
     }
 
@@ -199,7 +197,7 @@ impl ContainerRuntime for Docker {
         &self,
         container_name: &str,
         options: Option<StartContainerOptions<String>>,
-    ) -> Result<(), bollard::errors::Error> {
+    ) -> Result<(), Error> {
         self.start_container(container_name, options).await
     }
 
@@ -207,7 +205,7 @@ impl ContainerRuntime for Docker {
         &self,
         container_name: &str,
         options: Option<StopContainerOptions>,
-    ) -> Result<(), bollard::errors::Error> {
+    ) -> Result<(), Error> {
         self.stop_container(container_name, options).await
     }
 
@@ -215,7 +213,7 @@ impl ContainerRuntime for Docker {
         &self,
         container_name: &str,
         options: Option<RemoveContainerOptions>,
-    ) -> Result<(), bollard::errors::Error> {
+    ) -> Result<(), Error> {
         self.remove_container(container_name, options).await
     }
 
@@ -223,14 +221,11 @@ impl ContainerRuntime for Docker {
         &self,
         container_name: &str,
         options: Option<WaitContainerOptions<String>>,
-    ) -> BoxStream<'static, Result<ContainerWaitResponse, bollard::errors::Error>> {
+    ) -> BoxStream<'static, Result<ContainerWaitResponse, Error>> {
         self.wait_container(container_name, options).boxed()
     }
 
-    async fn create_volume(
-        &self,
-        config: CreateVolumeOptions<String>,
-    ) -> Result<Volume, bollard::errors::Error> {
+    async fn create_volume(&self, config: CreateVolumeOptions<String>) -> Result<Volume, Error> {
         self.create_volume(config).await
     }
 
@@ -238,7 +233,7 @@ impl ContainerRuntime for Docker {
         &self,
         name: &str,
         options: Option<RemoveVolumeOptions>,
-    ) -> Result<(), bollard::errors::Error> {
+    ) -> Result<(), Error> {
         self.remove_volume(name, options).await
     }
 
@@ -247,7 +242,7 @@ impl ContainerRuntime for Docker {
         options: Option<CreateImageOptions<'static, String>>,
         root_fs: Option<Bytes>,
         credentials: Option<bollard::auth::DockerCredentials>,
-    ) -> BoxStream<'static, Result<CreateImageInfo, bollard::errors::Error>> {
+    ) -> BoxStream<'static, Result<CreateImageInfo, Error>> {
         self.create_image(options, root_fs, credentials).boxed()
     }
 
@@ -255,7 +250,7 @@ impl ContainerRuntime for Docker {
         &self,
         container_name: &str,
         options: Option<LogsOptions<String>>,
-    ) -> BoxStream<'static, Result<LogOutput, bollard::errors::Error>> {
+    ) -> BoxStream<'static, Result<LogOutput, Error>> {
         self.logs(container_name, options).boxed()
     }
 
@@ -263,21 +258,21 @@ impl ContainerRuntime for Docker {
         &self,
         container_name: &str,
         options: Option<InspectContainerOptions>,
-    ) -> Result<ContainerInspectResponse, bollard::errors::Error> {
+    ) -> Result<ContainerInspectResponse, Error> {
         self.inspect_container(container_name, options).await
     }
 
     async fn list_containers(
         &self,
         options: Option<ListContainersOptions<String>>,
-    ) -> Result<Vec<ContainerSummary>, bollard::errors::Error> {
+    ) -> Result<Vec<ContainerSummary>, Error> {
         self.list_containers(options).await
     }
 
     async fn list_volumes(
         &self,
         options: Option<ListVolumesOptions<String>>,
-    ) -> Result<VolumeListResponse, bollard::errors::Error> {
+    ) -> Result<VolumeListResponse, Error> {
         self.list_volumes(options).await
     }
 }

@@ -1,6 +1,8 @@
+use chrono::Utc;
 use futures::StreamExt;
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
+use std::env::var;
 use std::sync::Arc;
 use std::time::Duration;
 use stormchaser_model::auth::OpaClient;
@@ -19,11 +21,11 @@ async fn test_rest_api_with_httpapi_connection() {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .try_init();
 
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD")
+            var("STORMCHASER_DEV_PASSWORD")
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
@@ -33,7 +35,7 @@ async fn test_rest_api_with_httpapi_connection() {
         .await
         .unwrap();
 
-    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
     let _opa_client = Arc::new(OpaClient::new(None, None));
 
@@ -122,11 +124,11 @@ async fn test_rest_api_with_httpapi_connection() {
         git_ref: "HEAD".to_string(),
         status: stormchaser_model::workflow::RunStatus::Running,
         version: 1,
-        fencing_token: chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0),
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-        started_resolving_at: Some(chrono::Utc::now()),
-        started_at: Some(chrono::Utc::now()),
+        fencing_token: Utc::now().timestamp_nanos_opt().unwrap_or(0),
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        started_resolving_at: Some(Utc::now()),
+        started_at: Some(Utc::now()),
         finished_at: None,
         error: None,
     };
@@ -173,7 +175,7 @@ async fn test_rest_api_with_httpapi_connection() {
         None,
         spec.clone(),
         json!({}),
-        chrono::Utc::now(),
+        Utc::now(),
     )
     .await
     .unwrap();

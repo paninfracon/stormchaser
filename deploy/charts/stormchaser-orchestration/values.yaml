@@ -70,6 +70,18 @@ api:
             true
         }
 
+query:
+  image:
+    repository: stormchaser-query
+    pullPolicy: IfNotPresent
+    tag: "latest"
+  replicaCount: 1
+  rustLog: "stormchaser_query=info"
+  service:
+    type: ClusterIP
+    port: 3001
+  resources: {}
+
 engine:
   image:
     repository: stormchaser-engine
