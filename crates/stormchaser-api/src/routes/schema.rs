@@ -63,15 +63,45 @@ pub struct HydrationEvent {
         (status = 200, description = "Hydrated schema event stream")
     )
 )]
+/// Deserializes the raw query `Value`s from the request payload.
+///
+/// Returns `Ok` with the parsed queries, or `Err` with a list of per-index
+/// parse errors when any entry cannot be deserialized.
+fn parse_queries(
+    raw: Vec<Value>,
+) -> Result<Vec<stormchaser_model::dsl::Query>, Vec<String>> {
+    let mut queries = Vec::new();
+    let mut errors: Vec<String> = Vec::new();
+    for (i, v) in raw.into_iter().enumerate() {
+        match serde_json::from_value::<stormchaser_model::dsl::Query>(v) {
+            Ok(q) => queries.push(q),
+            Err(e) => errors.push(format!("query[{}]: {}", i, e)),
+        }
+    }
+    if errors.is_empty() {
+        Ok(queries)
+    } else {
+        Err(errors)
+    }
+}
+
 pub async fn hydrate_schema(
     State(state): State<AppState>,
     Json(payload): Json<HydrateSchemaRequest>,
-) -> impl IntoResponse {
-    let queries: Vec<stormchaser_model::dsl::Query> = payload
-        .queries
-        .into_iter()
-        .filter_map(|v| serde_json::from_value(v).ok())
-        .collect();
+) -> axum::response::Response {
+    let queries = match parse_queries(payload.queries) {
+        Ok(q) => q,
+        Err(parse_errors) => {
+            return (
+                axum::http::StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "Invalid query definitions",
+                    "details": parse_errors
+                })),
+            )
+                .into_response();
+        }
+    };
 
     let (tx, rx) = tokio::sync::mpsc::channel(100);
 
@@ -89,18 +119,21 @@ pub async fn hydrate_schema(
     let stream = tokio_stream::wrappers::ReceiverStream::new(rx).map(|event| {
         let sse_event = match axum::response::sse::Event::default().json_data(event) {
             Ok(sse_event) => sse_event,
-            Err(err) => axum::response::sse::Event::default()
-                .data(format!(
-                    "{{\"error\":\"failed to serialize hydration event\",\"details\":{}}}",
-                    serde_json::Value::String(err.to_string())
-                ))
-                .unwrap_or_else(|_| axum::response::sse::Event::default()),
+            Err(err) => {
+                let payload = serde_json::json!({
+                    "error": "failed to serialize hydration event",
+                    "details": err.to_string()
+                });
+                axum::response::sse::Event::default().data(payload.to_string())
+            }
         };
 
         Ok::<_, std::convert::Infallible>(sse_event)
     });
 
-    axum::response::sse::Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default())
+    axum::response::sse::Sse::new(stream)
+        .keep_alive(axum::response::sse::KeepAlive::default())
+        .into_response()
 }
 
 #[derive(Clone, Debug)]
@@ -535,5 +568,37 @@ mod tests {
             .unwrap();
         assert_eq!(target_enum[0], json!("val1"));
         assert_eq!(target_enum[1], json!("val2"));
+    }
+
+    #[test]
+    fn test_parse_queries_returns_errors_for_invalid_entries() {
+        // Valid query JSON
+        let valid = json!({
+            "name": "myQuery",
+            "type": "mock",
+            "params": { "items": "a,b" }
+        });
+        // Invalid query JSON (missing required fields)
+        let invalid = json!({"not_a_query": true});
+
+        let raw = vec![valid.clone(), invalid, valid];
+        let result = parse_queries(raw);
+
+        // Should fail because of the invalid entry
+        let errors = result.unwrap_err();
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].starts_with("query[1]:"));
+    }
+
+    #[test]
+    fn test_parse_queries_succeeds_for_all_valid() {
+        let valid = json!({
+            "name": "myQuery",
+            "type": "mock",
+            "params": { "items": "a,b" }
+        });
+        let raw = vec![valid.clone(), valid];
+        let queries = parse_queries(raw).unwrap();
+        assert_eq!(queries.len(), 2);
     }
 }
