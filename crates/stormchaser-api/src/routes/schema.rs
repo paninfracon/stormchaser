@@ -334,7 +334,8 @@ async fn run_hydration_loop(
     mut schema: Value,
     inputs: Value,
     queries: Vec<stormchaser_model::dsl::Query>,
-    pool: Option<sqlx::PgPool>,
+    // Stormchaser internal pool, used only for looking up defined connections.
+    stormchaser_pool: Option<sqlx::PgPool>,
     tx: tokio::sync::mpsc::Sender<HydrationEvent>,
 ) {
     let mut tasks = Vec::new();
@@ -362,6 +363,15 @@ async fn run_hydration_loop(
         return;
     }
 
+    // Fetch the list of configured connections once so tasks can resolve named
+    // connections without ever touching the stormchaser database themselves.
+    let connections: Vec<stormchaser_model::connections::Connection> =
+        if let Some(ref p) = stormchaser_pool {
+            crate::db::list_connections(p).await.unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
     let mut hcl_ctx = hcl::eval::Context::new();
     hcl_ctx.declare_var(
         "inputs",
@@ -383,12 +393,12 @@ async fn run_hydration_loop(
             }
         }
 
-        let pool_ref = pool.clone();
         let query_type = task.query_type.clone();
         let params_clone = resolved_params.clone();
+        let connections_clone = connections.clone();
 
         join_set.spawn(async move {
-            let res = execute_query(&query_type, &params_clone, pool_ref.as_ref()).await;
+            let res = execute_query(&query_type, &params_clone, &connections_clone).await;
             (idx, res)
         });
     }
@@ -429,55 +439,167 @@ async fn run_hydration_loop(
     let _ = emit_event(&schema, &inputs, &tasks, &tx).await;
 }
 
+/// Dispatches a query to the appropriate executor based on type.
+///
+/// All queries must reference a named connection from `connections`; arbitrary
+/// database URLs and API endpoints are not permitted.
 async fn execute_query(
     query_type: &str,
     params: &std::collections::HashMap<String, String>,
-    pool: Option<&sqlx::PgPool>,
+    connections: &[stormchaser_model::connections::Connection],
 ) -> Result<Vec<Value>, anyhow::Error> {
-    if query_type == "sql" {
-        if let Some(p) = pool {
-            let sql_query = params
-                .get("query")
-                .ok_or_else(|| anyhow::anyhow!("Missing 'query' param"))?;
-            use sqlx::Row;
-
-            let rows = sqlx::query(sql_query).fetch_all(p).await?;
-            let mut results = Vec::new();
-            for row in rows {
-                if row.is_empty() {
-                    continue;
-                }
-                if let Ok(val) = row.try_get::<String, _>(0) {
-                    results.push(Value::String(val));
-                } else if let Ok(val) = row.try_get::<i64, _>(0) {
-                    results.push(serde_json::json!(val));
-                } else if let Ok(val) = row.try_get::<bool, _>(0) {
-                    results.push(Value::Bool(val));
-                }
-            }
-            Ok(results)
-        } else {
-            Err(anyhow::anyhow!("SQL pool not available"))
-        }
-    } else if query_type == "api" {
-        let url_str = params
-            .get("url")
-            .ok_or_else(|| anyhow::anyhow!("Missing 'url' param"))?;
-        let url = format!("https://{}", url_str);
-        let response = reqwest::get(&url).await?.json::<Vec<Value>>().await?;
-        Ok(response)
-    } else if query_type == "mock" {
-        let items_str = params
-            .get("items")
-            .ok_or_else(|| anyhow::anyhow!("Missing 'items' param"))?;
-        let options: Vec<Value> = items_str
-            .split(',')
-            .map(|s| Value::String(s.to_string()))
-            .collect();
-        Ok(options)
-    } else {
-        Err(anyhow::anyhow!("Unsupported query protocol"))
+    match query_type {
+        "sql" => execute_sql_query(params, connections).await,
+        "api" => execute_api_query(params, connections).await,
+        "mock" => execute_mock_query(params),
+        _ => Err(anyhow::anyhow!("Unsupported query type: {}", query_type)),
     }
+}
+
+/// Executes a SELECT query against a named external PostgreSQL connection.
+///
+/// The query must be a SELECT statement; DDL and DML are rejected to prevent
+/// arbitrary writes to the external database.  The stormchaser internal database
+/// is never used here.
+async fn execute_sql_query(
+    params: &std::collections::HashMap<String, String>,
+    connections: &[stormchaser_model::connections::Connection],
+) -> Result<Vec<Value>, anyhow::Error> {
+    use sqlx::Row;
+    use stormchaser_model::connections::ConnectionType;
+
+    let connection_name = params
+        .get("connection")
+        .ok_or_else(|| anyhow::anyhow!("Missing 'connection' param for sql query"))?;
+    let sql_query = params
+        .get("query")
+        .ok_or_else(|| anyhow::anyhow!("Missing 'query' param"))?;
+
+    // Security: only SELECT statements are allowed.
+    if !sql_query
+        .trim_start()
+        .to_ascii_uppercase()
+        .starts_with("SELECT")
+    {
+        return Err(anyhow::anyhow!("Only SELECT queries are permitted"));
+    }
+
+    let conn = connections
+        .iter()
+        .find(|c| c.name == *connection_name)
+        .ok_or_else(|| anyhow::anyhow!("Connection '{}' not found", connection_name))?;
+
+    if !matches!(conn.connection_type, ConnectionType::Postgres) {
+        return Err(anyhow::anyhow!(
+            "Connection '{}' is not a Postgres connection",
+            connection_name
+        ));
+    }
+
+    let url = conn
+        .config
+        .get("url")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Connection '{}' config is missing a 'url' field",
+                connection_name
+            )
+        })?;
+
+    // Connect to the external database and run the query.
+    let external_pool = sqlx::PgPool::connect(url).await?;
+    let rows = sqlx::query(sql_query).fetch_all(&external_pool).await?;
+    external_pool.close().await;
+
+    let mut results = Vec::new();
+    for row in rows {
+        if row.is_empty() {
+            continue;
+        }
+        if let Ok(val) = row.try_get::<String, _>(0) {
+            results.push(Value::String(val));
+        } else if let Ok(val) = row.try_get::<i64, _>(0) {
+            results.push(serde_json::json!(val));
+        } else if let Ok(val) = row.try_get::<bool, _>(0) {
+            results.push(Value::Bool(val));
+        }
+    }
+    Ok(results)
+}
+
+/// Fetches options from a named external HTTP API connection.
+///
+/// The base URL is taken from the connection config; callers may not supply
+/// arbitrary URLs to prevent SSRF.  A strict timeout is enforced.
+async fn execute_api_query(
+    params: &std::collections::HashMap<String, String>,
+    connections: &[stormchaser_model::connections::Connection],
+) -> Result<Vec<Value>, anyhow::Error> {
+    use stormchaser_model::connections::ConnectionType;
+
+    let connection_name = params
+        .get("connection")
+        .ok_or_else(|| anyhow::anyhow!("Missing 'connection' param for api query"))?;
+    let path = params.get("path").map(|s| s.as_str()).unwrap_or("");
+
+    let conn = connections
+        .iter()
+        .find(|c| c.name == *connection_name)
+        .ok_or_else(|| anyhow::anyhow!("Connection '{}' not found", connection_name))?;
+
+    if !matches!(conn.connection_type, ConnectionType::HttpApi) {
+        return Err(anyhow::anyhow!(
+            "Connection '{}' is not an HTTP API connection",
+            connection_name
+        ));
+    }
+
+    let base_url = conn
+        .config
+        .get("base_url")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Connection '{}' config is missing a 'base_url' field",
+                connection_name
+            )
+        })?;
+
+    let url = format!(
+        "{}/{}",
+        base_url.trim_end_matches('/'),
+        path.trim_start_matches('/')
+    );
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()?;
+
+    let response = client
+        .get(&url)
+        .send()
+        .await?
+        .json::<Vec<Value>>()
+        .await?;
+
+    Ok(response)
+}
+
+/// Returns a fixed list of options from the `items` parameter (comma-separated).
+///
+/// Used in tests and development to simulate query results without a real backend.
+fn execute_mock_query(
+    params: &std::collections::HashMap<String, String>,
+) -> Result<Vec<Value>, anyhow::Error> {
+    let items_str = params
+        .get("items")
+        .ok_or_else(|| anyhow::anyhow!("Missing 'items' param"))?;
+    let options = items_str
+        .split(',')
+        .map(|s| Value::String(s.to_string()))
+        .collect();
+    Ok(options)
 }
 
 #[cfg(test)]
@@ -501,7 +623,7 @@ mod tests {
     async fn test_execute_query_mock() {
         let mut params = std::collections::HashMap::new();
         params.insert("items".to_string(), "a,b,c".to_string());
-        let res = execute_query("mock", &params, None).await.unwrap();
+        let res = execute_query("mock", &params, &[]).await.unwrap();
         assert_eq!(res, vec![json!("a"), json!("b"), json!("c")]);
     }
 
@@ -600,5 +722,88 @@ mod tests {
         let raw = vec![valid.clone(), valid];
         let queries = parse_queries(raw).unwrap();
         assert_eq!(queries.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_execute_sql_query_rejects_non_select() {
+        let mut params = std::collections::HashMap::new();
+        params.insert("connection".to_string(), "mydb".to_string());
+        params.insert(
+            "query".to_string(),
+            "DROP TABLE users".to_string(),
+        );
+        let err = execute_query("sql", &params, &[]).await.unwrap_err();
+        assert!(
+            err.to_string().contains("Only SELECT"),
+            "expected SELECT-only error, got: {}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execute_sql_query_rejects_missing_connection() {
+        let mut params = std::collections::HashMap::new();
+        params.insert("query".to_string(), "SELECT 1".to_string());
+        let err = execute_query("sql", &params, &[]).await.unwrap_err();
+        assert!(
+            err.to_string().contains("Missing 'connection'"),
+            "expected missing connection error, got: {}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execute_sql_query_rejects_unknown_connection() {
+        let mut params = std::collections::HashMap::new();
+        params.insert("connection".to_string(), "unknown".to_string());
+        params.insert("query".to_string(), "SELECT 1".to_string());
+        let err = execute_query("sql", &params, &[]).await.unwrap_err();
+        assert!(
+            err.to_string().contains("not found"),
+            "expected not-found error, got: {}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execute_api_query_rejects_missing_connection() {
+        let params = std::collections::HashMap::new();
+        let err = execute_query("api", &params, &[]).await.unwrap_err();
+        assert!(
+            err.to_string().contains("Missing 'connection'"),
+            "expected missing connection error, got: {}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execute_api_query_rejects_wrong_connection_type() {
+        use stormchaser_model::connections::{Connection, ConnectionType};
+        use stormchaser_model::ConnectionId;
+
+        let conn = Connection {
+            id: ConnectionId::new_v4(),
+            name: "myconn".to_string(),
+            description: None,
+            connection_type: ConnectionType::Postgres,
+            config: json!({"url": "postgres://localhost/test"}),
+            encrypted_credentials: None,
+            aws_assume_role_arn: None,
+            is_default_sfs: false,
+            ca_cert: None,
+            client_cert: None,
+            client_key: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let mut params = std::collections::HashMap::new();
+        params.insert("connection".to_string(), "myconn".to_string());
+        let err = execute_query("api", &params, &[conn]).await.unwrap_err();
+        assert!(
+            err.to_string().contains("not an HTTP API connection"),
+            "expected wrong-type error, got: {}",
+            err
+        );
     }
 }
