@@ -40,7 +40,7 @@ curl -s -X POST "$API_URL/api/v1/storage-backends" \
   -d '{
     "name": "local-minio",
     "description": "Local Minio S3-compatible storage for SFS parking",
-    "backend_type": "s3",
+    "connection_type": "s3",
     "is_default_sfs": true,
     "config": {
       "endpoint": "http://stormchaser-minio.stormchaser.svc.cluster.local:9000",
