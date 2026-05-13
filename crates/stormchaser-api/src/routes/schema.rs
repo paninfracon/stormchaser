@@ -87,11 +87,17 @@ pub async fn hydrate_schema(
     });
 
     let stream = tokio_stream::wrappers::ReceiverStream::new(rx).map(|event| {
-        Ok::<_, std::convert::Infallible>(
-            axum::response::sse::Event::default()
-                .json_data(event)
-                .unwrap(),
-        )
+        let sse_event = match axum::response::sse::Event::default().json_data(event) {
+            Ok(sse_event) => sse_event,
+            Err(err) => axum::response::sse::Event::default()
+                .data(format!(
+                    "{{\"error\":\"failed to serialize hydration event\",\"details\":{}}}",
+                    serde_json::Value::String(err.to_string())
+                ))
+                .unwrap_or_else(|_| axum::response::sse::Event::default()),
+        };
+
+        Ok::<_, std::convert::Infallible>(sse_event)
     });
 
     axum::response::sse::Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default())
