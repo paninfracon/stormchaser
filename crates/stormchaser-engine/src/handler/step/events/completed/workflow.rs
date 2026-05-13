@@ -1,10 +1,8 @@
+use crate::handler::fetch_run;
 use crate::handler::StepInstance;
-use crate::handler::{dispatch_pending_steps, fetch_run};
 use crate::workflow_machine::{state, WorkflowMachine};
 use anyhow::Result;
 use opentelemetry::KeyValue;
-use sqlx::PgPool;
-use std::sync::Arc;
 use stormchaser_dsl::ast::Workflow;
 use stormchaser_model::events::{
     EventSource, EventType, WorkflowCompletedEvent, WorkflowEventType,
@@ -12,7 +10,6 @@ use stormchaser_model::events::{
 use stormchaser_model::nats::publish_cloudevent;
 use stormchaser_model::step::StepStatus;
 use stormchaser_model::RunId;
-use stormchaser_tls::TlsReloader;
 use tracing::{error, info};
 
 pub async fn check_workflow_completion(
@@ -20,8 +17,6 @@ pub async fn check_workflow_completion(
     run_id: RunId,
     workflow: &Workflow,
     nats_client: async_nats::Client,
-    pool: PgPool,
-    tls_reloader: Arc<TlsReloader>,
 ) -> Result<bool> {
     let all_steps_final: Vec<StepInstance> =
         crate::db::get_step_instances_by_run_id(&mut *tx, run_id).await?;
@@ -90,13 +85,6 @@ pub async fn check_workflow_completion(
             run_id
         );
         return Ok(true); // Signal to caller to archive after committing tx
-    }
-
-    if let Err(e) = dispatch_pending_steps(run_id, pool, nats_client, tls_reloader).await {
-        error!(
-            "Failed to dispatch pending steps for run {}: {:?}",
-            run_id, e
-        );
     }
 
     Ok(false)

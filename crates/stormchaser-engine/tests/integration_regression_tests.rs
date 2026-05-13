@@ -174,3 +174,155 @@ async fn test_dispatch_pending_steps_column_created_at() {
         .await
         .unwrap();
 }
+
+#[tokio::test]
+async fn test_workflow_step_completion_dispatches_next_step() {
+    let _ = tracing_subscriber::fmt::try_init();
+    let pool = setup_db().await;
+    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let _opa_client = Arc::new(OpaClient::new(None, None));
+
+    let run_id = RunId::new_v4();
+    let workflow_name = format!("test-dispatch-next-{}", run_id);
+    let dsl = format!(
+        r#"
+        stormchaser_dsl_version = "1.0"
+        workflow "{}" {{
+            steps {{
+                step "step1" "RunContainer" {{
+                    image = "alpine"
+                    command = ["echo", "1"]
+                    next = ["step2"]
+                }}
+                step "step2" "RunContainer" {{
+                    image = "alpine"
+                    command = ["echo", "2"]
+                }}
+            }}
+        }}
+    "#,
+        workflow_name
+    );
+
+    let _payload = json!({
+        "run_id": run_id,
+        "dsl": dsl,
+        "inputs": {},
+        "initiating_user": "test-user"
+    });
+
+    // Clean up before test
+    sqlx::query("DELETE FROM run_quotas WHERE run_id = $1")
+        .bind(run_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM workflow_runs WHERE id = $1")
+        .bind(run_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Setup run
+    sqlx::query("INSERT INTO workflow_runs (id, workflow_name, initiating_user, status, fencing_token, repo_url, workflow_path, git_ref) VALUES ($1, $2, 'test', 'running', $3, 'http://example.com', 'test.storm', 'main')")
+        .bind(run_id)
+        .bind(&workflow_name)
+        .bind(chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO run_quotas (run_id, max_concurrency, max_cpu, max_memory, max_storage, timeout) VALUES ($1, 10, '1', '1Gi', '10Gi', '1h')")
+        .bind(run_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let parser = stormchaser_dsl::StormchaserParser::new();
+    let parsed_ast = parser.parse(&dsl).unwrap();
+    let workflow_def = serde_json::to_value(&parsed_ast).unwrap();
+
+    sqlx::query("INSERT INTO run_contexts (run_id, dsl_version, workflow_definition, source_code, inputs) VALUES ($1, '1.0', $2, '', '{}')")
+        .bind(run_id)
+        .bind(workflow_def)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let step1_id = Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO step_instances (id, run_id, step_name, step_type, status, spec, params, created_at)
+        VALUES ($1, $2, 'step1', 'RunContainer', 'running', $3, $4, NOW())
+        "#
+    )
+    .bind(step1_id)
+    .bind(run_id)
+    .bind(json!({}))
+    .bind(json!({}))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let step2_id = Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO step_instances (id, run_id, step_name, step_type, status, spec, params, created_at)
+        VALUES ($1, $2, 'step2', 'RunContainer', 'pending', $3, $4, NOW())
+        "#
+    )
+    .bind(step2_id)
+    .bind(run_id)
+    .bind(json!({}))
+    .bind(json!({}))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Parse the workflow AST so we can pass it
+    let parser = stormchaser_dsl::StormchaserParser::new();
+    let _parsed_ast = parser.parse(&dsl).unwrap();
+
+    // Subscribe to NATS to verify dispatch happens
+    use futures::StreamExt;
+    let mut subscriber = nats_client
+        .subscribe("stormchaser.v1.step.scheduled.>")
+        .await
+        .unwrap();
+
+    println!("Calling dispatch_pending_steps manually...");
+    handler::dispatch_pending_steps(
+        run_id,
+        pool.clone(),
+        nats_client.clone(),
+        Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
+    )
+    .await
+    .unwrap();
+    println!("dispatch_pending_steps finished");
+
+    // Verify step2 was dispatched by waiting for the NATS message
+    println!("Waiting for NATS message...");
+    let msg = tokio::time::timeout(tokio::time::Duration::from_secs(2), subscriber.next())
+        .await
+        .expect("Timeout waiting for step dispatch message")
+        .expect("NATS stream closed");
+
+    let payload: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    println!(
+        "Received payload: {}",
+        serde_json::to_string_pretty(&payload).unwrap()
+    );
+    assert_eq!(
+        payload["data"]["step_name"], "step2",
+        "Step 2 should have been dispatched via NATS"
+    );
+
+    // Final cleanup
+    sqlx::query("DELETE FROM workflow_runs WHERE id = $1")
+        .bind(run_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+}

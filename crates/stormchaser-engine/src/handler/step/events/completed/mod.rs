@@ -176,20 +176,24 @@ pub async fn handle_step_completed(
         }
     }
 
-    let should_archive = workflow::check_workflow_completion(
-        &mut *tx,
-        run_id,
-        &workflow_ast,
-        nats_client.clone(),
-        pool.clone(),
-        tls_reloader.clone(),
-    )
-    .await?;
+    let should_archive =
+        workflow::check_workflow_completion(&mut *tx, run_id, &workflow_ast, nats_client.clone())
+            .await?;
 
     tx.commit().await?;
 
     if should_archive {
         archive_workflow(run_id, pool.clone()).await?;
+    } else {
+        if let Err(e) =
+            crate::handler::dispatch_pending_steps(run_id, pool, nats_client, tls_reloader).await
+        {
+            tracing::error!(
+                "Failed to dispatch pending steps for run {}: {:?}",
+                run_id,
+                e
+            );
+        }
     }
 
     Ok(())
