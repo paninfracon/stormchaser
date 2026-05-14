@@ -89,11 +89,11 @@ jobs:
         echo "STORMCHASER_CLI_SECRET=$STORMCHASER_CLI_SECRET" >> $GITHUB_ENV
     - name: Generate Certificates
       run: ./scripts/generate-certs.sh
-    - name: Run Unit Tests
-      run: ./scripts/test-unit.sh --all-features
     - name: Start Infrastructure (NATS, Postgres)
       run: docker compose up -d --wait nats postgres
     - name: Run Database Migrations
       run: sqlx migrate run --database-url postgres://stormchaser:${STORMCHASER_DEV_PASSWORD}@localhost:5432/stormchaser
+    - name: Run Unit Tests
+      run: ./scripts/test-unit.sh --all-features
     - name: Run Integration Tests
       run: ./scripts/test-integration.sh --all-features
