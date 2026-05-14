@@ -1,19 +1,19 @@
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::time::Duration;
+use stormchaser_model::connections::{Connection, ConnectionType};
 use stormchaser_model::dsl::Artifact;
-use stormchaser_model::storage::{BackendType, StorageBackend};
 use uuid::Uuid;
 
 /// Generate parking instructions.
 pub async fn generate_parking_instructions(
-    backend: &StorageBackend,
+    backend: &Connection,
     run_id: Uuid,
     storage_name: &str,
     artifact: &Artifact,
 ) -> Result<Value> {
-    match backend.backend_type {
-        BackendType::S3 => {
+    match backend.connection_type {
+        ConnectionType::S3 => {
             let client = crate::s3::get_s3_client(backend).await?;
             let bucket = backend.config["bucket"]
                 .as_str()
@@ -27,14 +27,14 @@ pub async fn generate_parking_instructions(
                     .await?;
 
             Ok(serde_json::json!({
-                "backend_type": BackendType::S3,
+                "connection_type": ConnectionType::S3,
                 "put_url": put_url,
                 "path": artifact.path,
                 "retention": artifact.retention,
                 "remote_path": artifact_key,
             }))
         }
-        BackendType::Oci => {
+        ConnectionType::Oci => {
             let registry = backend.config["registry"]
                 .as_str()
                 .context("Missing registry in OCI backend config")?;
@@ -44,7 +44,7 @@ pub async fn generate_parking_instructions(
             let remote_path = format!("{}/{}/{}:{}", registry, run_id, storage_name, artifact.name);
 
             let mut payload = serde_json::json!({
-                "backend_type": "oci",
+                "connection_type": "oci",
                 "registry": registry,
                 "remote_path": remote_path,
                 "path": artifact.path,
@@ -62,7 +62,7 @@ pub async fn generate_parking_instructions(
         }
         _ => anyhow::bail!(
             "Unsupported artifact backend type: {:?}",
-            backend.backend_type
+            backend.connection_type
         ),
     }
 }
@@ -71,15 +71,15 @@ pub async fn generate_parking_instructions(
 mod tests {
     use super::*;
     use serde_json::json;
-    use stormchaser_model::BackendId;
+    use stormchaser_model::ConnectionId;
 
     #[tokio::test]
     async fn test_generate_parking_instructions_oci() {
-        let backend = StorageBackend {
-            id: BackendId::new_v4(),
+        let backend = Connection {
+            id: ConnectionId::new_v4(),
             name: "oci-registry".into(),
             description: None,
-            backend_type: BackendType::Oci,
+            connection_type: ConnectionType::Oci,
             config: json!({
                 "registry": "registry.paninfracon.net",
                 "username": "user",
@@ -87,6 +87,7 @@ mod tests {
             }),
             aws_assume_role_arn: None,
             is_default_sfs: false,
+            encrypted_credentials: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             ca_cert: None,
@@ -105,7 +106,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(instructions["backend_type"], "oci");
+        assert_eq!(instructions["connection_type"], "oci");
         assert_eq!(instructions["registry"], "registry.paninfracon.net");
         assert_eq!(instructions["username"], "user");
         assert_eq!(instructions["password"], "pass");
@@ -117,14 +118,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_generate_parking_instructions_unsupported() {
-        let backend = StorageBackend {
-            id: BackendId::new_v4(),
+        let backend = Connection {
+            id: ConnectionId::new_v4(),
             name: "fs-backend".into(),
             description: None,
-            backend_type: BackendType::Jfrog,
+            connection_type: ConnectionType::Jfrog,
             config: json!({}),
             aws_assume_role_arn: None,
             is_default_sfs: false,
+            encrypted_credentials: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
             ca_cert: None,

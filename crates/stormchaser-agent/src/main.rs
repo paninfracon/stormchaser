@@ -7,8 +7,8 @@ use std::fs;
 use std::process::{exit, Command};
 use tracing::info;
 
-mod storage;
-pub use storage::*;
+mod connections;
+pub use connections::*;
 
 mod artifacts;
 pub use artifacts::*;
@@ -47,7 +47,7 @@ pub enum Commands {
         #[arg(short, long, env = "STORMCHASER_TEST_REPORTS")]
         test_reports: Option<String>,
 
-        /// The JSON map of report name to {put_url, remote_path, backend_id}
+        /// The JSON map of report name to {put_url, remote_path, connection_id}
         #[arg(short, long, env = "STORMCHASER_REPORT_URLS")]
         report_urls: Option<String>,
 

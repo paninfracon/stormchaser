@@ -3,8 +3,8 @@ use flate2::read::GzDecoder;
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 use std::io::Read;
-use stormchaser_model::BackendId;
-use stormchaser_model::StorageBackend;
+use stormchaser_model::Connection;
+use stormchaser_model::ConnectionId;
 use tar::Archive;
 
 use std::collections::HashMap;
@@ -22,18 +22,18 @@ async fn process_claim_report(
     hash: &str,
 ) -> Result<()> {
     let remote_path = report_val.get("remote_path").and_then(|v| v.as_str());
-    let backend_id = report_val.get("backend_id").and_then(|v| {
+    let connection_id = report_val.get("connection_id").and_then(|v| {
         if let Some(s) = v.as_str() {
-            uuid::Uuid::parse_str(s).ok().map(BackendId::new)
+            uuid::Uuid::parse_str(s).ok().map(ConnectionId::new)
         } else {
             None
         }
     });
 
-    if let (Some(path), Some(bid)) = (remote_path, backend_id) {
+    if let (Some(path), Some(bid)) = (remote_path, connection_id) {
         // Download and parse
-        let backend: StorageBackend =
-            crate::db::storage::get_storage_backend_by_id(pool, bid.into_inner())
+        let backend: Connection =
+            crate::db::connections::get_storage_backend_by_id(pool, bid.into_inner())
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("Storage backend not found"))?;
 

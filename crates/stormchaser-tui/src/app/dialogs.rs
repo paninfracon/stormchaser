@@ -1,6 +1,6 @@
 use super::*;
 use anyhow::Result;
-use stormchaser_model::storage::BackendType;
+use stormchaser_model::connections::ConnectionType;
 
 use stormchaser_dsl::StormchaserParser;
 
@@ -84,12 +84,16 @@ impl<'a> App<'a> {
                         .clone()
                         .unwrap_or_default()]),
                 ];
-                let type_str = match backend.backend_type {
-                    BackendType::S3 => "S3",
-                    BackendType::Oci => "Oci",
-                    BackendType::Jfrog => "Jfrog",
-                    BackendType::Gcs => "Gcs",
-                    BackendType::Azure => "Azure",
+                let type_str = match backend.connection_type {
+                    ConnectionType::S3 => "S3",
+                    ConnectionType::Oci => "Oci",
+                    ConnectionType::Jfrog => "Jfrog",
+                    ConnectionType::Gcs => "Gcs",
+                    ConnectionType::Azure => "Azure",
+                    ConnectionType::Postgres => "Postgres",
+                    ConnectionType::Mysql => "Mysql",
+                    ConnectionType::HttpApi => "HttpApi",
+                    ConnectionType::Git => "Git",
                 };
                 self.storage_backend_type_index = crate::app::BACKEND_TYPE_OPTIONS
                     .iter()
@@ -326,6 +330,77 @@ impl<'a> App<'a> {
         Ok(())
     }
 
+    pub async fn hydrate_schema_blocking(
+        &self,
+        schema: &serde_json::Value,
+        inputs: &serde_json::Value,
+    ) -> Result<(serde_json::Value, String)> {
+        let res = self
+            .api_request(
+                reqwest::Method::POST,
+                "/api/v1/schema/hydrate",
+                Some(serde_json::json!({ "schema": schema, "inputs": inputs })),
+            )
+            .await?;
+
+        let mut final_schema = schema.clone();
+        let mut final_status = "Update pending".to_string();
+
+        if res.status().is_success() {
+            use futures::stream::StreamExt;
+            let mut byte_stream = res.bytes_stream();
+            let mut buffer = String::new();
+
+            while let Some(item) = byte_stream.next().await {
+                if let Ok(chunk) = item {
+                    buffer.push_str(&String::from_utf8_lossy(&chunk));
+                    while let Some(idx) = buffer.find("\n\n") {
+                        let event_str = buffer[..idx].to_string();
+                        buffer = buffer[idx + 2..].to_string();
+
+                        if let Some(data_idx) = event_str.find("data: ") {
+                            let json_str = &event_str[data_idx + 6..];
+                            if let Ok(event) = serde_json::from_str::<serde_json::Value>(json_str) {
+                                if let Some(status) = event.get("status").and_then(|s| s.as_str()) {
+                                    final_status = status.to_string();
+                                    if let Some(hydrated) = event.get("hydrated_schema") {
+                                        final_schema = hydrated.clone();
+                                    }
+                                    if status == "Completed"
+                                        || status == "Incomplete Input"
+                                        || status == "Schema validation failed"
+                                    {
+                                        return Ok((final_schema, final_status));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok((final_schema, final_status))
+    }
+
+    pub fn strip_required(schema: &mut serde_json::Value) {
+        if let serde_json::Value::Object(obj) = schema {
+            obj.remove("required");
+            if let Some(serde_json::Value::Object(props)) = obj.get_mut("properties") {
+                for (_, prop) in props {
+                    Self::strip_required(prop);
+                }
+            }
+            if let Some(serde_json::Value::Array(items)) = obj.get_mut("items") {
+                for item in items {
+                    Self::strip_required(item);
+                }
+            } else if let Some(item) = obj.get_mut("items") {
+                Self::strip_required(item);
+            }
+        }
+    }
+
     /// Handles the submission of a selected local `.storm` file, optionally prompting for inputs.
     pub async fn submit_file(&mut self) -> Result<()> {
         let path = self
@@ -337,7 +412,23 @@ impl<'a> App<'a> {
             let dsl = std::fs::read_to_string(path)?;
 
             if let Ok(workflow) = StormchaserParser.parse(&dsl) {
-                if !workflow.inputs.is_empty() {
+                if let Some(schema_val) = workflow.inputs_schema {
+                    let initial_inputs = serde_json::json!({});
+                    let (hydrated_schema, status) = self
+                        .hydrate_schema_blocking(&schema_val, &initial_inputs)
+                        .await
+                        .unwrap_or((schema_val, "".to_string()));
+
+                    let mut dialog = crate::app::schema_dialog::SchemaDialog::new(
+                        hydrated_schema,
+                        dsl,
+                        initial_inputs,
+                    );
+                    dialog.hydration_status = status;
+                    self.pending_schema_ui = Some(dialog);
+                    self.file_browser_active = false;
+                    return Ok(());
+                } else if !workflow.inputs.is_empty() {
                     let mut properties = serde_json::Map::new();
                     for input in workflow.inputs {
                         let mut prop = serde_json::Map::new();
@@ -363,7 +454,11 @@ impl<'a> App<'a> {
                         "title": "Workflow Inputs",
                         "properties": properties
                     });
-                    self.pending_schema_ui = Some((schema, dsl));
+                    self.pending_schema_ui = Some(crate::app::schema_dialog::SchemaDialog::new(
+                        schema,
+                        dsl,
+                        serde_json::json!({}),
+                    ));
                     self.file_browser_active = false;
                     return Ok(());
                 }
@@ -443,9 +538,9 @@ impl<'a> App<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use stormchaser_model::connections::Connection;
     use stormchaser_model::cron::CronWorkflow;
     use stormchaser_model::event_rules::{EventRule, WebhookConfig};
-    use stormchaser_model::storage::StorageBackend;
 
     fn setup_app() -> App<'static> {
         let (tx, _) = tokio::sync::mpsc::channel(1);
@@ -495,12 +590,13 @@ mod tests {
     #[test]
     fn test_open_storage_backend_dialog_edit() {
         let mut app = setup_app();
-        let backend = StorageBackend {
-            id: BackendId::new_v4(),
+        let backend = Connection {
+            id: ConnectionId::new_v4(),
             name: "test_backend".to_string(),
             description: Some("desc".to_string()),
-            backend_type: BackendType::S3,
+            connection_type: ConnectionType::S3,
             is_default_sfs: true,
+            encrypted_credentials: None,
             config: serde_json::json!({"region": "us-east-1"}),
             aws_assume_role_arn: None,
             ca_cert: None,

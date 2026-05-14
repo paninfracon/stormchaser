@@ -1,0 +1,27 @@
+workflow "schema-validation" {
+  description = "A test workflow to validate JSON schema inputs"
+
+  inputs {
+    type = "object"
+    properties {
+      name {
+        type    = "string"
+        pattern = "^[a-z]+$"
+      }
+      age {
+        type    = "integer"
+        minimum = 18
+      }
+    }
+    required = ["name", "age"]
+  }
+
+  steps {
+    step "echo-inputs" "docker" {
+      spec {
+        image   = "alpine"
+        command = ["sh", "-c", "echo 'Name: ${inputs.name}, Age: ${inputs.age}'"]
+      }
+    }
+  }
+}

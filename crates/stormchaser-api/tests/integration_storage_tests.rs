@@ -11,8 +11,8 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use stormchaser_api::{app, AppState, Claims, JWT_SECRET};
+use stormchaser_model::connections::ConnectionType;
 use stormchaser_model::step::StepStatus;
-use stormchaser_model::storage::BackendType;
 use stormchaser_model::workflow::RunStatus;
 use stormchaser_model::OpaClient;
 use tower::ServiceExt;
@@ -76,7 +76,7 @@ async fn test_storage_backend_crud() {
     let create_payload = json!({
         "name": "test-s3",
         "description": "Test S3 Backend",
-        "backend_type": BackendType::S3,
+        "connection_type": ConnectionType::S3,
         "config": {
             "bucket": "test-bucket",
             "endpoint": "http://localhost:9000"
@@ -126,7 +126,7 @@ async fn test_storage_backend_crud() {
     let backends: Vec<Value> = serde_json::from_slice(&body).unwrap();
     assert!(backends.iter().any(|b| b["name"] == "test-s3"));
 
-    let backend_id = backends.iter().find(|b| b["name"] == "test-s3").unwrap()["id"]
+    let connection_id = backends.iter().find(|b| b["name"] == "test-s3").unwrap()["id"]
         .as_str()
         .unwrap();
 
@@ -140,7 +140,7 @@ async fn test_storage_backend_crud() {
         .oneshot(
             Request::builder()
                 .method(http::Method::PATCH)
-                .uri(format!("/api/v1/storage-backends/{}", backend_id))
+                .uri(format!("/api/v1/storage-backends/{}", connection_id))
                 .header(http::header::AUTHORIZATION, format!("Bearer {}", token))
                 .header(
                     http::header::CONTENT_TYPE,
@@ -161,7 +161,7 @@ async fn test_storage_backend_crud() {
         .oneshot(
             Request::builder()
                 .method(http::Method::DELETE)
-                .uri(format!("/api/v1/storage-backends/{}", backend_id))
+                .uri(format!("/api/v1/storage-backends/{}", connection_id))
                 .header(http::header::AUTHORIZATION, format!("Bearer {}", token))
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())
@@ -229,12 +229,12 @@ async fn test_artifact_listing() {
         .await
         .unwrap();
 
-    let backend_id = Uuid::new_v4();
+    let connection_id = Uuid::new_v4();
     sqlx::query(
-        "INSERT INTO storage_backends (id, name, backend_type, config) VALUES ($1, $2, $3::backend_type, $4)",
+        "INSERT INTO connections (id, name, connection_type, config) VALUES ($1, $2, $3::connection_type, $4)",
     )
-    .bind(backend_id)
-    .bind(format!("test-backend-{}", backend_id))
+    .bind(connection_id)
+    .bind(format!("test-backend-{}", connection_id))
     .bind("s3")
     .bind(json!({}))
     .execute(&pool)
@@ -254,11 +254,11 @@ async fn test_artifact_listing() {
         .await
         .unwrap();
 
-    sqlx::query("INSERT INTO artifact_registry (run_id, step_instance_id, artifact_name, backend_id, remote_path) VALUES ($1, $2, $3, $4, $5)")
+    sqlx::query("INSERT INTO artifact_registry (run_id, step_instance_id, artifact_name, connection_id, remote_path) VALUES ($1, $2, $3, $4, $5)")
         .bind(run_id)
         .bind(step_id)
         .bind("test-artifact")
-        .bind(backend_id)
+        .bind(connection_id)
         .bind("path/to/artifact")
         .execute(&pool)
         .await
@@ -293,8 +293,8 @@ async fn test_artifact_listing() {
         .await
         .unwrap();
 
-    sqlx::query("DELETE FROM storage_backends WHERE id = $1")
-        .bind(backend_id)
+    sqlx::query("DELETE FROM connections WHERE id = $1")
+        .bind(connection_id)
         .execute(&pool)
         .await
         .unwrap();

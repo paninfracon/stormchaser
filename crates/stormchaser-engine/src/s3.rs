@@ -3,10 +3,10 @@ use aws_config::Region;
 use aws_sdk_s3::presigning::PresigningConfig;
 use aws_sdk_s3::Client;
 use std::time::Duration;
-use stormchaser_model::storage::StorageBackend;
+use stormchaser_model::connections::Connection;
 
 /// Get s3 client.
-pub async fn get_s3_client(backend: &StorageBackend) -> Result<Client> {
+pub async fn get_s3_client(backend: &Connection) -> Result<Client> {
     let config = &backend.config;
     let endpoint = config["endpoint"].as_str();
     let region = config["region"].as_str().unwrap_or("us-east-1");
@@ -118,26 +118,27 @@ use stormchaser_tls::build_client_config;
 mod tests {
     use super::*;
     use serde_json::json;
-    use stormchaser_model::storage::BackendType;
-    use stormchaser_model::BackendId;
+    use stormchaser_model::connections::ConnectionType;
+    use stormchaser_model::ConnectionId;
 
     #[tokio::test]
     async fn test_get_s3_client_config_parsing() {
-        let backend = StorageBackend {
-            id: BackendId::new_v4(),
+        let backend = Connection {
+            id: ConnectionId::new_v4(),
             name: "test-s3".to_string(),
             description: None,
-            backend_type: BackendType::S3,
+            connection_type: ConnectionType::S3,
             config: json!({
-                "bucket": "my-bucket",
+                "bucket": "test",
                 "endpoint": "http://localhost:9000",
                 "region": "us-east-1",
-                "access_key": "test",
-                "secret_key": "test",
-                "force_path_style": true
+                "access_key": "minio",
+                "secret_key": "minio123",
+                "force_path_style": true,
             }),
             aws_assume_role_arn: None,
-            is_default_sfs: true,
+            is_default_sfs: false,
+            encrypted_credentials: None,
             ca_cert: None,
             client_cert: None,
             client_key: None,

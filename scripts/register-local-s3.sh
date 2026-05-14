@@ -44,7 +44,7 @@ curl -s -X POST "$API_URL/api/v1/storage-backends" \
     '{
       "name": "local-minio",
       "description": "Local Minio S3-compatible storage for SFS parking",
-      "backend_type": "s3",
+      "connection_type": "s3",
       "is_default_sfs": true,
       "config": {
         "endpoint": $endpoint,

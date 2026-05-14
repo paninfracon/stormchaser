@@ -2,6 +2,97 @@ use super::*;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 impl<'a> App<'a> {
+    pub async fn handle_schema_dialog_key(&mut self, key: KeyEvent) {
+        let mut should_hydrate = false;
+        let mut should_submit = false;
+
+        if let Some(dialog) = &mut self.pending_schema_ui {
+            match key.code {
+                KeyCode::Esc => {
+                    self.pending_schema_ui = None;
+                    return;
+                }
+                KeyCode::Enter => {
+                    should_submit = true;
+                }
+                KeyCode::Tab => {
+                    dialog.next_field();
+                    should_hydrate = true;
+                }
+                KeyCode::BackTab => {
+                    dialog.prev_field();
+                    should_hydrate = true;
+                }
+                KeyCode::Up => {
+                    dialog.handle_dropdown_up();
+                    should_hydrate = true;
+                }
+                KeyCode::Down => {
+                    dialog.handle_dropdown_down();
+                    should_hydrate = true;
+                }
+                _ => {
+                    if !dialog.fields.is_empty() {
+                        let focus = dialog.focus;
+                        if dialog.fields[focus].input.input(key) {
+                            should_hydrate = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        if should_submit {
+            if let Some(dialog) = self.pending_schema_ui.take() {
+                let inputs = dialog.get_inputs();
+                let dsl = dialog.dsl.clone();
+                let schema = dialog.base_schema.clone();
+                let res = self.hydrate_schema_blocking(&schema, &inputs).await;
+                if let Ok((new_schema, status)) = res {
+                    if status == "Completed" {
+                        self.direct_submit_dsl = Some(dsl);
+                        let _ = self.submit_direct_form(inputs).await;
+                    } else {
+                        let mut new_dialog =
+                            crate::app::schema_dialog::SchemaDialog::new(new_schema, dsl, inputs);
+                        new_dialog.hydration_status = status;
+                        new_dialog.focus = dialog.focus;
+                        self.pending_schema_ui = Some(new_dialog);
+                    }
+                } else {
+                    let mut new_dialog =
+                        crate::app::schema_dialog::SchemaDialog::new(schema, dsl, inputs);
+                    new_dialog
+                        .global_errors
+                        .push("Validation/Hydration failed".to_string());
+                    self.pending_schema_ui = Some(new_dialog);
+                }
+            }
+        } else if should_hydrate {
+            // Background hydrate but we need to do it non-blocking if possible,
+            // or fast-blocking for now since the SSE stream finishes quickly.
+            // Ideally we do this async, but `hydrate_schema_blocking` streams out until it's done.
+            let mut schema = serde_json::Value::Null;
+            let mut inputs = serde_json::Value::Null;
+            if let Some(dialog) = &mut self.pending_schema_ui {
+                dialog.hydration_status = "Updating...".to_string();
+                dialog.is_hydrating = true;
+                schema = dialog.base_schema.clone();
+                inputs = dialog.get_inputs();
+            }
+
+            let res = self.hydrate_schema_blocking(&schema, &inputs).await;
+
+            if let Some(dialog) = &mut self.pending_schema_ui {
+                if let Ok((hydrated, status)) = res {
+                    dialog.apply_hydrated_schema(hydrated, vec![], status);
+                } else {
+                    dialog.is_hydrating = false;
+                }
+            }
+        }
+    }
+
     pub async fn handle_filter_dialog_key(&mut self, key: KeyEvent) {
         // Focus layout: 0..=5 are the 6 text inputs, 6 is the status selector.
         const FOCUS_COUNT: usize = 7;

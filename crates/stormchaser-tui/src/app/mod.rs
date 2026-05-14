@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use stormchaser_model::workflow::RunStatus;
-use stormchaser_model::BackendId;
+use stormchaser_model::ConnectionId;
 use stormchaser_model::CronWorkflowId;
 use stormchaser_model::RuleId;
 use stormchaser_model::RunId;
@@ -13,9 +13,9 @@ use stormchaser_model::StepInstanceId;
 use stormchaser_model::WebhookId;
 use tokio::sync::mpsc;
 
+use stormchaser_model::connections;
 use stormchaser_model::cron;
 use stormchaser_model::event_rules;
-use stormchaser_model::storage;
 use stormchaser_model::test_report;
 
 /// A summary of a workflow run, used for list views.
@@ -56,7 +56,7 @@ pub struct WorkflowRunFullDetail {
     /// The detailed information for each step in the run.
     pub steps: Vec<StepDetail>,
     /// Artifacts generated during the run.
-    pub artifacts: Vec<storage::ArtifactRegistry>,
+    pub artifacts: Vec<connections::ArtifactRegistry>,
     /// Test summaries generated during the run.
     pub test_summaries: Vec<test_report::TestSummary>,
     /// Individual test cases executed during the run.
@@ -150,11 +150,11 @@ pub struct App<'a> {
     /// The full details of the currently selected run, if any.
     pub selected_run: Option<WorkflowRunFullDetail>,
     /// The current list of storage backends.
-    pub storage_backends: Vec<storage::StorageBackend>,
+    pub connections: Vec<connections::Connection>,
     /// The state of the storage backends list widget.
     pub storage_backends_state: ListState,
     /// The currently selected storage backend.
-    pub selected_storage_backend: Option<storage::StorageBackend>,
+    pub selected_storage_backend: Option<connections::Connection>,
     /// The current list of webhooks.
     pub webhooks: Vec<event_rules::WebhookConfig>,
     /// The state of the webhooks list widget.
@@ -226,7 +226,7 @@ pub struct App<'a> {
     /// Whether the backend is the default SFS.
     pub storage_backend_is_default: bool,
     /// The ID of the storage backend being edited, or None for creating a new one.
-    pub storage_backend_edit_id: Option<BackendId>,
+    pub storage_backend_edit_id: Option<ConnectionId>,
     /// Whether the webhook dialog is active.
     pub webhook_dialog_active: bool,
     /// The index of the focused input in the webhook dialog.
@@ -269,8 +269,8 @@ pub struct App<'a> {
     pub file_browser_active: bool,
     /// The state of the file explorer widget.
     pub file_explorer: tui_file_explorer::FileExplorer,
-    /// Schema and DSL for pending schemaui run.
-    pub pending_schema_ui: Option<(serde_json::Value, String)>,
+    /// Schema, DSL, and current inputs for pending schemaui run.
+    pub pending_schema_ui: Option<schema_dialog::SchemaDialog<'a>>,
     /// The loaded DSL content for direct submission.
     pub direct_submit_dsl: Option<String>,
     /// Credentials loaded from deploy/dex/credentials.generated
@@ -310,6 +310,8 @@ pub mod dialogs;
 pub mod handlers;
 /// User interface navigation and scrolling logic.
 pub mod navigation;
+/// Schema Dialog module.
+pub mod schema_dialog;
 /// Background watchers for real-time updates.
 pub mod watch;
 
@@ -343,7 +345,7 @@ impl<'a> App<'a> {
             runs: Vec::new(),
             runs_state: ListState::default(),
             selected_run: None,
-            storage_backends: Vec::new(),
+            connections: Vec::new(),
             storage_backends_state: ListState::default(),
             selected_storage_backend: None,
             webhooks: Vec::new(),

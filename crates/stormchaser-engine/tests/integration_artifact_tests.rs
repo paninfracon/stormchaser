@@ -27,15 +27,15 @@ async fn test_artifact_persistence_on_completion() {
         .unwrap();
 
     // 1. Setup a default SFS backend
-    let backend_id = Uuid::new_v4();
-    let backend_name = format!("test-minio-{}", backend_id);
+    let connection_id = Uuid::new_v4();
+    let backend_name = format!("test-minio-{}", connection_id);
     sqlx::query(
         r#"
-        INSERT INTO storage_backends (id, name, backend_type, config, is_default_sfs)
+        INSERT INTO connections (id, name, connection_type, config, is_default_sfs)
         VALUES ($1, $2, 's3', $3, FALSE)
         "#,
     )
-    .bind(backend_id)
+    .bind(connection_id)
     .bind(&backend_name)
     .bind(json!({"bucket": "test-bucket", "endpoint": "http://localhost:9000"}))
     .execute(&pool)
@@ -147,7 +147,7 @@ async fn test_artifact_persistence_on_completion() {
     );
 
     let artifact: (String, Uuid, String) = sqlx::query_as(
-        "SELECT artifact_name, backend_id, remote_path FROM archived_artifact_registry WHERE run_id = $1",
+        "SELECT artifact_name, connection_id, remote_path FROM archived_artifact_registry WHERE run_id = $1",
     )
     .bind(run_id)
     .fetch_one(&pool)
@@ -155,7 +155,7 @@ async fn test_artifact_persistence_on_completion() {
     .unwrap();
 
     assert_eq!(artifact.0, "app-bin");
-    assert_eq!(artifact.1, backend_id);
+    assert_eq!(artifact.1, connection_id);
     assert_eq!(
         artifact.2,
         format!("artifacts/{}/workspace/app-bin", run_id)

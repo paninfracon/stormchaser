@@ -7,8 +7,8 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use stormchaser_model::storage::ArtifactRegistry;
-use stormchaser_model::BackendId;
+use stormchaser_model::connections::ArtifactRegistry;
+use stormchaser_model::ConnectionId;
 use stormchaser_model::RunId;
 use stormchaser_model::TestReportId;
 
@@ -24,12 +24,12 @@ use stormchaser_model::TestReportId;
     ),
     tag = "storage"
 )]
-pub async fn create_storage_backend(
+pub async fn create_connection(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
     Json(payload): Json<CreateStorageBackendRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let id = stormchaser_model::BackendId::new_v4();
+    let id = stormchaser_model::ConnectionId::new_v4();
 
     let mut tx = state
         .pool
@@ -44,12 +44,12 @@ pub async fn create_storage_backend(
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }
 
-    db::create_storage_backend(
+    db::create_connection(
         &mut tx,
         id,
         &payload.name,
         &payload.description,
-        &payload.backend_type,
+        &payload.connection_type,
         &payload.config,
         &payload.aws_assume_role_arn,
         payload.is_default_sfs,
@@ -79,11 +79,11 @@ pub async fn create_storage_backend(
     ),
     tag = "storage"
 )]
-pub async fn list_storage_backends(
+pub async fn list_connections(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let backends = db::list_storage_backends(&state.pool)
+    let backends = db::list_connections(&state.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -94,7 +94,7 @@ pub async fn list_storage_backends(
 #[utoipa::path(
     get,
     path = "/api/v1/storage-backends/{id}",
-    params(("id" = stormchaser_model::BackendId, Path, description="Backend ID")),
+    params(("id" = stormchaser_model::ConnectionId, Path, description="Backend ID")),
     responses(
         (status = 200, description = "Success"),
         (status = 400, description = "Bad Request"),
@@ -103,12 +103,12 @@ pub async fn list_storage_backends(
     ),
     tag = "storage"
 )]
-pub async fn get_storage_backend(
+pub async fn get_connection(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path(id): Path<BackendId>,
+    Path(id): Path<ConnectionId>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let backend = db::get_storage_backend(&state.pool, id)
+    let backend = db::get_connection(&state.pool, id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
@@ -120,7 +120,7 @@ pub async fn get_storage_backend(
 #[utoipa::path(
     put,
     path = "/api/v1/storage-backends/{id}",
-    params(("id" = stormchaser_model::BackendId, Path, description="Backend ID")),
+    params(("id" = stormchaser_model::ConnectionId, Path, description="Backend ID")),
     responses(
         (status = 200, description = "Success"),
         (status = 400, description = "Bad Request"),
@@ -129,10 +129,10 @@ pub async fn get_storage_backend(
     ),
     tag = "storage"
 )]
-pub async fn update_storage_backend(
+pub async fn update_connection(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path(id): Path<BackendId>,
+    Path(id): Path<ConnectionId>,
     Json(payload): Json<UpdateStorageBackendRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let mut tx = state
@@ -147,7 +147,7 @@ pub async fn update_storage_backend(
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }
 
-    db::update_storage_backend(&mut tx, id, &payload)
+    db::update_connection(&mut tx, id, &payload)
         .await
         .map_err(|e| {
             tracing::error!("Failed to update storage backend: {:?}", e);
@@ -165,7 +165,7 @@ pub async fn update_storage_backend(
 #[utoipa::path(
     delete,
     path = "/api/v1/storage-backends/{id}",
-    params(("id" = stormchaser_model::BackendId, Path, description="Backend ID")),
+    params(("id" = stormchaser_model::ConnectionId, Path, description="Backend ID")),
     responses(
         (status = 200, description = "Success"),
         (status = 400, description = "Bad Request"),
@@ -174,12 +174,12 @@ pub async fn update_storage_backend(
     ),
     tag = "storage"
 )]
-pub async fn delete_storage_backend(
+pub async fn delete_connection(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path(id): Path<BackendId>,
+    Path(id): Path<ConnectionId>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    db::delete_storage_backend(&state.pool, id)
+    db::delete_connection(&state.pool, id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 

@@ -348,7 +348,7 @@ if command -v python3 >/dev/null 2>&1 && [ -f "$REPO_ROOT/scripts/generate_dev_t
               -d '{
                 "name": "local-minio",
                 "description": "Local Minio S3-compatible storage for SFS parking",
-                "backend_type": "s3",
+                "connection_type": "s3",
                 "is_default_sfs": true,
                 "config": {
                   "endpoint": "http://stormchaser-minio.stormchaser.svc.cluster.local:9000",

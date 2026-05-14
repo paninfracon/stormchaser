@@ -11,7 +11,7 @@ use reqwest_middleware::ClientBuilder;
 use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
 use std::path::PathBuf;
 
-use crate::commands::{auth, cron, lint, rules, run, runs, schema, storage, webhooks};
+use crate::commands::{auth, connections, cron, lint, rules, run, runs, schema, webhooks};
 
 /// Main CLI arguments and configuration.
 #[derive(Parser)]
@@ -83,7 +83,7 @@ pub enum Commands {
     Storage {
         /// Subcommands for storage
         #[command(subcommand)]
-        command: storage::StorageCommands,
+        command: connections::StorageCommands,
     },
 
     /// Manage scheduled workflows (Cron)
@@ -156,7 +156,7 @@ pub async fn run_cli(cli: Cli) -> Result<()> {
         }
 
         Commands::Storage { command } => {
-            storage::handle(&cli.url, token_opt, &http_client, command).await?;
+            connections::handle(&cli.url, token_opt, &http_client, command).await?;
         }
 
         Commands::Cron { command } => {

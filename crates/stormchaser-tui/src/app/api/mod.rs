@@ -1,8 +1,8 @@
 pub mod auth;
+pub mod connections;
 pub mod cron;
 pub mod event_rules;
 pub mod runs;
-pub mod storage_backends;
 pub mod webhooks;
 
 use super::*;

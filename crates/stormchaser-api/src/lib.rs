@@ -29,12 +29,12 @@ use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use stormchaser_model::auth::OpaAuthorizer;
+use stormchaser_model::connections::ArtifactRegistry;
+use stormchaser_model::connections::Connection;
+use stormchaser_model::connections::ConnectionType;
 use stormchaser_model::cron::CronWorkflow;
 use stormchaser_model::event_rules::EventRule;
 use stormchaser_model::event_rules::WebhookConfig;
-use stormchaser_model::storage::ArtifactRegistry;
-use stormchaser_model::storage::BackendType;
-use stormchaser_model::storage::StorageBackend;
 use stormchaser_model::test_report::TestCase;
 use stormchaser_model::test_report::TestCaseStatus;
 use stormchaser_model::test_report::TestReport;
@@ -48,12 +48,12 @@ use tower_http::trace::TraceLayer;
 use utoipa::OpenApi;
 
 use routes::auth::*;
+use routes::connections::*;
 use routes::cron::*;
 use routes::event_rule::*;
 #[cfg(feature = "mcp")]
 use routes::mcp::*;
 use routes::step::*;
-use routes::storage::*;
 use routes::webhook::*;
 use routes::workflow::*;
 pub use routes::*;
@@ -74,15 +74,15 @@ pub use routes::*;
         routes::cron::list_cron_workflows,
         routes::cron::delete_cron_workflow,
         routes::cron::trigger_cron_workflow,
-        routes::storage::create_storage_backend,
-        routes::storage::list_storage_backends,
-        routes::storage::get_storage_backend,
-        routes::storage::update_storage_backend,
-        routes::storage::delete_storage_backend,
-        routes::storage::list_run_artifacts,
-        routes::storage::list_run_test_reports,
-        routes::storage::list_run_test_summaries,
-        routes::storage::get_test_report,
+        routes::connections::create_connection,
+        routes::connections::list_connections,
+        routes::connections::get_connection,
+        routes::connections::update_connection,
+        routes::connections::delete_connection,
+        routes::connections::list_run_artifacts,
+        routes::connections::list_run_test_reports,
+        routes::connections::list_run_test_summaries,
+        routes::connections::get_test_report,
         routes::webhook::create_webhook,
         routes::webhook::list_webhooks,
         routes::webhook::get_webhook,
@@ -107,7 +107,7 @@ pub use routes::*;
             CreateCronWorkflowRequest, CronWorkflowResponse,
             CronWorkflow,
             CreateStorageBackendRequest, UpdateStorageBackendRequest,
-            StorageBackend, BackendType,
+            Connection, ConnectionType,
             ArtifactRegistry,
             TestCase, TestCaseStatus,
             TestSummary, TestReport,
@@ -219,13 +219,13 @@ pub fn app(state: AppState) -> Router {
         .route("/rules/:id", delete(delete_event_rule))
         .route(
             "/storage-backends",
-            get(list_storage_backends).post(create_storage_backend),
+            get(list_connections).post(create_connection),
         )
         .route(
             "/storage-backends/:id",
-            get(get_storage_backend)
-                .patch(update_storage_backend)
-                .delete(delete_storage_backend),
+            get(get_connection)
+                .patch(update_connection)
+                .delete(delete_connection),
         );
 
     #[cfg(feature = "mcp")]

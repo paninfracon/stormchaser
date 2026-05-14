@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use stormchaser_model::workflow::RunStatus;
 /// Module for auth.
 pub mod auth;
+/// Module for storage.
+pub mod connections;
 /// Module for cron.
 pub mod cron;
 /// Module for event rule.
@@ -14,8 +16,6 @@ pub mod mcp;
 pub mod schema;
 /// Module for step.
 pub mod step;
-/// Module for storage.
-pub mod storage;
 /// Module for webhook.
 pub mod webhook;
 /// Module for workflow.
@@ -25,8 +25,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
+use stormchaser_model::connections::{ArtifactRegistry, ConnectionType};
 use stormchaser_model::step::{StepInstance, StepOutput, StepStatusHistory};
-use stormchaser_model::storage::{ArtifactRegistry, BackendType};
 use stormchaser_model::test_report;
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -294,7 +294,7 @@ pub struct CreateStorageBackendRequest {
     /// The description.
     pub description: Option<String>,
     /// The backend type.
-    pub backend_type: BackendType,
+    pub connection_type: ConnectionType,
     /// The config.
     #[schema(value_type = Object)]
     pub config: Value,
@@ -312,7 +312,7 @@ pub struct UpdateStorageBackendRequest {
     /// The description.
     pub description: Option<String>,
     /// The backend type.
-    pub backend_type: Option<BackendType>,
+    pub connection_type: Option<ConnectionType>,
     /// The config.
     #[schema(value_type = Object)]
     pub config: Option<Value>,
@@ -336,7 +336,7 @@ pub struct TestReportSummary {
     /// The checksum.
     pub checksum: String,
     /// The backend id.
-    pub backend_id: Option<stormchaser_model::BackendId>,
+    pub connection_id: Option<stormchaser_model::ConnectionId>,
     /// The remote path.
     pub remote_path: Option<String>,
     /// The created at.

@@ -7,7 +7,7 @@ use ratatui::{
     Frame,
 };
 
-pub(crate) fn render_storage_backends_tab(f: &mut Frame, area: Rect, app: &mut App) {
+pub(crate) fn render_connections_tab(f: &mut Frame, area: Rect, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(30), Constraint::Percentage(70)].as_ref())
@@ -26,7 +26,7 @@ pub(crate) fn render_storage_backends_tab(f: &mut Frame, area: Rect, app: &mut A
     };
 
     let backends: Vec<ListItem> = app
-        .storage_backends
+        .connections
         .iter()
         .map(|b| {
             let sfs_marker = if b.is_default_sfs {
@@ -37,7 +37,7 @@ pub(crate) fn render_storage_backends_tab(f: &mut Frame, area: Rect, app: &mut A
             ListItem::new(format!(
                 "{:<20} | {:<10}{}",
                 b.name,
-                format!("{:?}", b.backend_type),
+                format!("{:?}", b.connection_type),
                 sfs_marker
             ))
         })
@@ -64,7 +64,7 @@ pub(crate) fn render_storage_backends_tab(f: &mut Frame, area: Rect, app: &mut A
         .title(" Backend Detail ")
         .border_style(Style::default().fg(detail_border_color));
 
-    if app.storage_backends.is_empty() {
+    if app.connections.is_empty() {
         let empty_paragraph = Paragraph::new("\n\n   No storage backends to display.")
             .style(Style::default().fg(Color::DarkGray))
             .block(detail_block);
@@ -88,7 +88,7 @@ pub(crate) fn render_storage_backends_tab(f: &mut Frame, area: Rect, app: &mut A
             backend.id,
             backend.name,
             backend.description.as_deref().unwrap_or("-"),
-            backend.backend_type,
+            backend.connection_type,
             backend.is_default_sfs,
             format_time_str(&backend.created_at.to_rfc3339()),
             serde_json::to_string_pretty(&masked_config).unwrap_or_default()
@@ -100,7 +100,7 @@ pub(crate) fn render_storage_backends_tab(f: &mut Frame, area: Rect, app: &mut A
     }
 }
 
-pub(crate) fn render_storage_backend_dialog(f: &mut Frame, app: &mut App) {
+pub(crate) fn render_connection_dialog(f: &mut Frame, app: &mut App) {
     let area = centered_rect(60, 60, f.area());
     f.render_widget(Clear, area);
 

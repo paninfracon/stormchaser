@@ -3,9 +3,9 @@ use crate::ui::ui;
 use chrono::{TimeZone, Utc};
 use insta::assert_debug_snapshot;
 use ratatui::{backend::TestBackend, Terminal};
+use stormchaser_model::connections::ArtifactRegistry;
 use stormchaser_model::cron::CronWorkflow;
 use stormchaser_model::event_rules::EventRule;
-use stormchaser_model::storage::ArtifactRegistry;
 use stormchaser_model::test_report::TestCase;
 use stormchaser_model::test_report::TestCaseStatus;
 use stormchaser_model::test_report::TestSummary;
@@ -17,8 +17,8 @@ use stormchaser_model::StepInstanceId;
 use stormchaser_model::TestReportId;
 use stormchaser_model::WebhookId;
 use stormchaser_model::{
+    connections::{Connection, ConnectionType},
     event_rules::WebhookConfig,
-    storage::{BackendType, StorageBackend},
 };
 use uuid::Uuid;
 
@@ -34,19 +34,20 @@ fn create_test_app<'a>() -> App<'a> {
 }
 
 #[test]
-fn render_storage_backends_tab() {
+fn render_connections_tab() {
     let mut app = create_test_app();
     app.active_pane = Pane::StorageBackendsList;
 
     let created_at = Utc.timestamp_opt(1609459200, 0).unwrap();
     let updated_at = Utc.timestamp_opt(1609459200, 0).unwrap();
 
-    app.storage_backends = vec![StorageBackend {
-        id: stormchaser_model::BackendId::new(uuid::Uuid::nil()),
+    app.connections = vec![Connection {
+        id: stormchaser_model::ConnectionId::new(uuid::Uuid::nil()),
         name: "test-sfs".to_string(),
         description: Some("Test SFS".to_string()),
-        backend_type: BackendType::S3,
+        connection_type: ConnectionType::S3,
         is_default_sfs: true,
+        encrypted_credentials: None,
         config: serde_json::json!({"path": "/tmp/sfs"}),
         aws_assume_role_arn: None,
         ca_cert: None,
@@ -55,7 +56,7 @@ fn render_storage_backends_tab() {
         created_at,
         updated_at,
     }];
-    app.selected_storage_backend = app.storage_backends.first().cloned();
+    app.selected_storage_backend = app.connections.first().cloned();
 
     let backend = TestBackend::new(100, 30);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -65,7 +66,7 @@ fn render_storage_backends_tab() {
 }
 
 #[test]
-fn render_storage_backend_dialog() {
+fn render_connection_dialog() {
     let mut app = create_test_app();
     app.active_pane = Pane::StorageBackendsList;
     app.storage_backend_dialog_active = true;
@@ -506,7 +507,7 @@ fn render_run_detail_with_artifacts() {
             run_id: RunId::new(Uuid::nil()),
             step_instance_id,
             artifact_name: "binary".to_string(),
-            backend_id: stormchaser_model::BackendId::new(Uuid::nil()),
+            connection_id: stormchaser_model::ConnectionId::new(Uuid::nil()),
             remote_path: "path/to/bin".to_string(),
             metadata: serde_json::json!({"size": 1024}),
             created_at,

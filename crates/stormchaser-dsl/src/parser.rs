@@ -13,6 +13,8 @@ type ParsedWorkflowBlocks = (
     Vec<dsl::Output>,
     Vec<dsl::StepLibrary>,
     Vec<dsl::Include>,
+    Option<Value>,
+    Vec<dsl::Query>,
 );
 
 /// A parser for translating Stormchaser HCL DSL into an executable Workflow model.
@@ -65,7 +67,7 @@ impl StormchaserParser {
             }
         }
 
-        let (steps, storage, inputs, outputs, step_libraries, includes) =
+        let (steps, storage, inputs, outputs, step_libraries, includes, inputs_schema, queries) =
             self.parse_workflow_blocks(workflow_block.body())?;
 
         Ok(Workflow {
@@ -81,6 +83,8 @@ impl StormchaserParser {
             quotas: None,
             storage,
             inputs,
+            queries,
+            inputs_schema,
             outputs,
             handlers: vec![],
             steps,
@@ -96,6 +100,8 @@ impl StormchaserParser {
         let mut outputs = Vec::new();
         let mut step_libraries = Vec::new();
         let mut includes = Vec::new();
+        let mut inputs_schema = None;
+        let mut queries = Vec::new();
 
         for block in body.blocks() {
             match block.identifier() {
@@ -117,11 +123,58 @@ impl StormchaserParser {
                 "include" => {
                     includes.push(self.parse_include_block(block)?);
                 }
+                "query" => {
+                    queries.push(self.parse_query_block(block)?);
+                }
+                "inputs" if block.labels().is_empty() => {
+                    inputs_schema = Some(crate::hcl_schema::hcl_to_json_schema(block.body())?);
+                }
                 _ => {}
             }
         }
 
-        Ok((steps, storage, inputs, outputs, step_libraries, includes))
+        Ok((
+            steps,
+            storage,
+            inputs,
+            outputs,
+            step_libraries,
+            includes,
+            inputs_schema,
+            queries,
+        ))
+    }
+
+    fn parse_query_block(&self, block: &Block) -> Result<dsl::Query> {
+        let name = block
+            .labels()
+            .first()
+            .map(|l| l.as_str().to_string())
+            .context("Query block must have a name label")?;
+        let mut r#type = String::new();
+        let mut params = HashMap::new();
+
+        for attr in block.body().attributes() {
+            match attr.key() {
+                "type" => r#type = expr_to_string(attr.expr())?,
+                "params" => {
+                    if let Value::Object(obj) = expr_to_value(attr.expr())? {
+                        for (k, v) in obj {
+                            if let Value::String(s) = v {
+                                params.insert(k, s);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        Ok(dsl::Query {
+            name,
+            r#type,
+            params,
+        })
     }
 
     fn parse_storage_block(&self, block: &Block) -> Result<dsl::Storage> {
@@ -208,7 +261,6 @@ impl StormchaserParser {
             default,
             validation: None,
             options: None,
-            query: None,
         })
     }
 

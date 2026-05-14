@@ -32,15 +32,15 @@ async fn test_resolve_storage_provision() {
 
     // 1. Setup a test S3 backend for artifact provisioning (is_default_sfs is FALSE;
     //    provisioning resolves backends by artifact registry entry, not by default SFS flag)
-    let backend_id = Uuid::new_v4();
-    let backend_name = format!("test-s3-{}", backend_id);
+    let connection_id = Uuid::new_v4();
+    let backend_name = format!("test-s3-{}", connection_id);
     sqlx::query(
         r#"
-        INSERT INTO storage_backends (id, name, backend_type, config, is_default_sfs)
+        INSERT INTO connections (id, name, connection_type, config, is_default_sfs)
         VALUES ($1, $2, 's3', $3, FALSE)
         "#,
     )
-    .bind(backend_id)
+    .bind(connection_id)
     .bind(&backend_name)
     .bind(json!({
         "bucket": "test-bucket",
@@ -129,14 +129,14 @@ async fn test_resolve_storage_provision() {
 
     sqlx::query(
         r#"
-        INSERT INTO artifact_registry (run_id, step_instance_id, artifact_name, backend_id, remote_path, metadata)
+        INSERT INTO artifact_registry (run_id, step_instance_id, artifact_name, connection_id, remote_path, metadata)
         VALUES ($1, $2, $3, $4, $5, $6)
         "#,
     )
     .bind(run_id)
     .bind(step_id)
     .bind(artifact_name)
-    .bind(backend_id)
+    .bind(connection_id)
     .bind("path/to/artifact.tar.gz")
     .bind(json!({}))
     .execute(&pool)
@@ -189,14 +189,14 @@ async fn test_resolve_storage_provision() {
         .contains("test-bucket"));
 
     // Cleanup test-specific data inserted by this test
-    sqlx::query("DELETE FROM artifact_registry WHERE backend_id = $1")
-        .bind(backend_id)
+    sqlx::query("DELETE FROM artifact_registry WHERE connection_id = $1")
+        .bind(connection_id)
         .execute(&pool)
         .await
         .unwrap();
 
-    sqlx::query("DELETE FROM storage_backends WHERE id = $1")
-        .bind(backend_id)
+    sqlx::query("DELETE FROM connections WHERE id = $1")
+        .bind(connection_id)
         .execute(&pool)
         .await
         .unwrap();

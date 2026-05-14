@@ -164,6 +164,8 @@ async fn handle_app_event_key<'a>(
         app.handle_approval_dialog_key(key).await;
     } else if app.file_browser_active {
         app.handle_file_browser_key(key).await;
+    } else if app.pending_schema_ui.is_some() {
+        app.handle_schema_dialog_key(key).await;
     } else {
         return app.handle_default_key(key).await;
     }
@@ -217,30 +219,6 @@ async fn main() -> Result<()> {
     let mut should_quit;
     loop {
         terminal.draw(|f| ui(f, &mut app))?;
-
-        if let Some((schema, dsl)) = app.pending_schema_ui.take() {
-            disable_raw_mode()?;
-            execute!(
-                terminal.backend_mut(),
-                LeaveAlternateScreen,
-                DisableMouseCapture
-            )?;
-
-            let result = schemaui::SchemaUI::new(schema).run_tui();
-
-            enable_raw_mode()?;
-            execute!(
-                terminal.backend_mut(),
-                EnterAlternateScreen,
-                EnableMouseCapture
-            )?;
-            terminal.clear()?;
-
-            if let Ok(value) = result {
-                app.direct_submit_dsl = Some(dsl);
-                let _ = app.submit_direct_form(value).await;
-            }
-        }
 
         if let Some(event) = rx.recv().await {
             if let AppEvent::Terminal(Event::Key(key)) = &event {
