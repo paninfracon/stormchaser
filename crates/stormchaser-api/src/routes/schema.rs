@@ -363,12 +363,13 @@ async fn run_hydration_loop(
 
     // Fetch the list of configured connections once so tasks can resolve named
     // connections without ever touching the stormchaser database themselves.
-    let connections: Vec<stormchaser_model::connections::Connection> =
-        if let Some(ref s) = state {
-            crate::db::list_connections(&s.pool).await.unwrap_or_default()
-        } else {
-            Vec::new()
-        };
+    let connections: Vec<stormchaser_model::connections::Connection> = if let Some(ref s) = state {
+        crate::db::list_connections(&s.pool)
+            .await
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
 
     let mut hcl_ctx = hcl::eval::Context::new();
     hcl_ctx.declare_var(
@@ -397,7 +398,13 @@ async fn run_hydration_loop(
         let connections_clone = connections.clone();
 
         join_set.spawn(async move {
-            let res = execute_query(&query_type, &params_clone, &connections_clone, state_for_query.as_ref()).await;
+            let res = execute_query(
+                &query_type,
+                &params_clone,
+                &connections_clone,
+                state_for_query.as_ref(),
+            )
+            .await;
             (idx, res)
         });
     }
@@ -810,7 +817,9 @@ mod tests {
 
         let mut params = std::collections::HashMap::new();
         params.insert("connection".to_string(), "myconn".to_string());
-        let err = execute_query("api", &params, &[conn], None).await.unwrap_err();
+        let err = execute_query("api", &params, &[conn], None)
+            .await
+            .unwrap_err();
         assert!(
             err.to_string().contains("not an HTTP API connection"),
             "expected wrong-type error, got: {}",
