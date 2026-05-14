@@ -71,13 +71,13 @@ else
     exit 1
 fi
 
-echo -e "${BLUE}>>> Verifying Storage Backend Registration...${NC}"
-STORAGE_CHECK=$(curl -s -H "Authorization: Bearer $TOKEN" "$API_URL/api/v1/connections")
-if echo "$STORAGE_CHECK" | grep -q "local-minio"; then
-    echo -e "${GREEN}>>> Storage backend successfully registered!${NC}"
+echo -e "${BLUE}>>> Verifying Connection Registration...${NC}"
+CONNECTIONS_CHECK=$(curl -s -H "Authorization: Bearer $TOKEN" "$API_URL/api/v1/connections")
+if echo "$CONNECTIONS_CHECK" | grep -q "local-minio"; then
+    echo -e "${GREEN}>>> Connection successfully registered!${NC}"
 else
-    echo -e "${RED}>>> Storage backend registration missing!${NC}"
-    echo "$STORAGE_CHECK"
+    echo -e "${RED}>>> Connection registration missing!${NC}"
+    echo "$CONNECTIONS_CHECK"
     exit 1
 fi
 

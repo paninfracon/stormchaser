@@ -65,6 +65,10 @@ pub async fn get_connection(
         .await
 }
 
+/// Retrieves a storage backend by its unique name.
+///
+/// Unlike [`get_connection`], which looks up by [`ConnectionId`], this helper
+/// resolves a connection using the user-facing `name` field.
 pub async fn get_connection_by_name(
     pool: &PgPool,
     name: &str,

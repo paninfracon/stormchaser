@@ -1,6 +1,7 @@
-use crate::AppState;
+use crate::{AppState, AuthClaims};
 use axum::{extract::State, response::IntoResponse, Json};
 use serde_json::Value;
+use std::sync::Arc;
 use stormchaser_model::schema_gen::generate_dsl_schema;
 use tokio_stream::StreamExt;
 
@@ -84,6 +85,7 @@ fn parse_queries(raw: Vec<Value>) -> Result<Vec<stormchaser_model::dsl::Query>, 
 }
 
 pub async fn hydrate_schema(
+    AuthClaims(claims): AuthClaims,
     State(state): State<AppState>,
     Json(payload): Json<HydrateSchemaRequest>,
 ) -> axum::response::Response {
@@ -104,12 +106,14 @@ pub async fn hydrate_schema(
     let (tx, rx) = tokio::sync::mpsc::channel(100);
 
     let state_clone = state.clone();
+    let initiating_user = claims.sub;
     tokio::spawn(async move {
         run_hydration_loop(
             payload.schema,
             payload.inputs,
             queries,
             Some(state_clone),
+            Some(initiating_user),
             tx,
         )
         .await;
@@ -334,6 +338,7 @@ async fn run_hydration_loop(
     inputs: Value,
     queries: Vec<stormchaser_model::dsl::Query>,
     state: Option<crate::AppState>,
+    initiating_user: Option<String>,
     tx: tokio::sync::mpsc::Sender<HydrationEvent>,
 ) {
     let mut tasks = Vec::new();
@@ -364,12 +369,24 @@ async fn run_hydration_loop(
     // Fetch the list of configured connections once so tasks can resolve named
     // connections without ever touching the stormchaser database themselves.
     let connections: Vec<stormchaser_model::connections::Connection> = if let Some(ref s) = state {
-        crate::db::list_connections(&s.pool)
-            .await
-            .unwrap_or_default()
+        match crate::db::list_connections(&s.pool).await {
+            Ok(connections) => connections,
+            Err(err) => {
+                tracing::error!("failed to load connections for schema hydration: {err}");
+                for idx in &tasks_to_run {
+                    tasks[*idx].status =
+                        format!("Failed: unable to load connections for hydration: {err}");
+                }
+                let _ = emit_event(&schema, &inputs, &tasks, &tx).await;
+                return;
+            }
+        }
     } else {
         Vec::new()
     };
+    let shared_state = Arc::new(state);
+    let shared_connections = Arc::new(connections);
+    let shared_initiating_user = Arc::new(initiating_user);
 
     let mut hcl_ctx = hcl::eval::Context::new();
     hcl_ctx.declare_var(
@@ -392,17 +409,19 @@ async fn run_hydration_loop(
             }
         }
 
-        let state_for_query = state.clone();
         let query_type = task.query_type.clone();
         let params_clone = resolved_params.clone();
-        let connections_clone = connections.clone();
+        let state_for_query = Arc::clone(&shared_state);
+        let connections_for_query = Arc::clone(&shared_connections);
+        let initiating_user_for_query = Arc::clone(&shared_initiating_user);
 
         join_set.spawn(async move {
             let res = execute_query(
                 &query_type,
                 &params_clone,
-                &connections_clone,
-                state_for_query.as_ref(),
+                connections_for_query.as_slice(),
+                state_for_query.as_ref().as_ref(),
+                initiating_user_for_query.as_deref(),
             )
             .await;
             (idx, res)
@@ -454,15 +473,14 @@ async fn execute_query(
     params: &std::collections::HashMap<String, String>,
     connections: &[stormchaser_model::connections::Connection],
     state: Option<&crate::AppState>,
+    initiating_user: Option<&str>,
 ) -> Result<Vec<Value>, anyhow::Error> {
     if let Some(conn_name) = params.get("connection") {
         if let Some(app_state) = state {
             if app_state.opa.is_configured() {
                 let opa_ctx = stormchaser_model::auth::ConnectionOpaContext {
                     connection_name: conn_name,
-                    // In a real scenario we extract the username from JWT claims.
-                    // For hydration, we'd need to thread the claims down here.
-                    initiating_user: "schema_hydration_service",
+                    initiating_user: initiating_user.unwrap_or("schema_hydration_service"),
                 };
                 if !app_state.opa.check_connection(opa_ctx).await? {
                     return Err(anyhow::anyhow!(
@@ -644,7 +662,9 @@ mod tests {
     async fn test_execute_query_mock() {
         let mut params = std::collections::HashMap::new();
         params.insert("items".to_string(), "a,b,c".to_string());
-        let res = execute_query("mock", &params, &[], None).await.unwrap();
+        let res = execute_query("mock", &params, &[], None, None)
+            .await
+            .unwrap();
         assert_eq!(res, vec![json!("a"), json!("b"), json!("c")]);
     }
 
@@ -679,7 +699,15 @@ mod tests {
         // 1. Missing dependency
         let (tx, mut rx) = tokio::sync::mpsc::channel(100);
         let inputs_missing = json!({});
-        run_hydration_loop(schema.clone(), inputs_missing, queries.clone(), None, tx).await;
+        run_hydration_loop(
+            schema.clone(),
+            inputs_missing,
+            queries.clone(),
+            None,
+            None,
+            tx,
+        )
+        .await;
 
         let event1 = rx.recv().await.unwrap();
         assert_eq!(event1.status, HydrationStatus::SchemaValidationFailed);
@@ -691,7 +719,15 @@ mod tests {
         // 2. Dependency provided
         let (tx2, mut rx2) = tokio::sync::mpsc::channel(100);
         let inputs_provided = json!({"dep": "val"});
-        run_hydration_loop(schema.clone(), inputs_provided, queries.clone(), None, tx2).await;
+        run_hydration_loop(
+            schema.clone(),
+            inputs_provided,
+            queries.clone(),
+            None,
+            None,
+            tx2,
+        )
+        .await;
 
         let event_start = rx2.recv().await.unwrap();
         assert_eq!(event_start.status, HydrationStatus::UpdatePending);
@@ -750,7 +786,9 @@ mod tests {
         let mut params = std::collections::HashMap::new();
         params.insert("connection".to_string(), "mydb".to_string());
         params.insert("query".to_string(), "DROP TABLE users".to_string());
-        let err = execute_query("sql", &params, &[], None).await.unwrap_err();
+        let err = execute_query("sql", &params, &[], None, None)
+            .await
+            .unwrap_err();
         assert!(
             err.to_string().contains("Only SELECT"),
             "expected SELECT-only error, got: {}",
@@ -762,7 +800,9 @@ mod tests {
     async fn test_execute_sql_query_rejects_missing_connection() {
         let mut params = std::collections::HashMap::new();
         params.insert("query".to_string(), "SELECT 1".to_string());
-        let err = execute_query("sql", &params, &[], None).await.unwrap_err();
+        let err = execute_query("sql", &params, &[], None, None)
+            .await
+            .unwrap_err();
         assert!(
             err.to_string().contains("Missing 'connection'"),
             "expected missing connection error, got: {}",
@@ -775,7 +815,9 @@ mod tests {
         let mut params = std::collections::HashMap::new();
         params.insert("connection".to_string(), "unknown".to_string());
         params.insert("query".to_string(), "SELECT 1".to_string());
-        let err = execute_query("sql", &params, &[], None).await.unwrap_err();
+        let err = execute_query("sql", &params, &[], None, None)
+            .await
+            .unwrap_err();
         assert!(
             err.to_string().contains("not found"),
             "expected not-found error, got: {}",
@@ -786,7 +828,9 @@ mod tests {
     #[tokio::test]
     async fn test_execute_api_query_rejects_missing_connection() {
         let params = std::collections::HashMap::new();
-        let err = execute_query("api", &params, &[], None).await.unwrap_err();
+        let err = execute_query("api", &params, &[], None, None)
+            .await
+            .unwrap_err();
         assert!(
             err.to_string().contains("Missing 'connection'"),
             "expected missing connection error, got: {}",
@@ -817,7 +861,7 @@ mod tests {
 
         let mut params = std::collections::HashMap::new();
         params.insert("connection".to_string(), "myconn".to_string());
-        let err = execute_query("api", &params, &[conn], None)
+        let err = execute_query("api", &params, &[conn], None, None)
             .await
             .unwrap_err();
         assert!(
