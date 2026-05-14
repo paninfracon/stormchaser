@@ -386,7 +386,7 @@ async fn run_hydration_loop(
     };
     let shared_state = Arc::new(state);
     let shared_connections = Arc::new(connections);
-    let shared_initiating_user = Arc::new(initiating_user);
+    let shared_initiating_user = initiating_user.map(Arc::<str>::from);
 
     let mut hcl_ctx = hcl::eval::Context::new();
     hcl_ctx.declare_var(
@@ -413,14 +413,15 @@ async fn run_hydration_loop(
         let params_clone = resolved_params.clone();
         let state_for_query = Arc::clone(&shared_state);
         let connections_for_query = Arc::clone(&shared_connections);
-        let initiating_user_for_query = Arc::clone(&shared_initiating_user);
+        let initiating_user_for_query = shared_initiating_user.clone();
 
         join_set.spawn(async move {
+            let app_state = state_for_query.as_ref();
             let res = execute_query(
                 &query_type,
                 &params_clone,
                 connections_for_query.as_slice(),
-                state_for_query.as_ref().as_ref(),
+                app_state.as_ref(),
                 initiating_user_for_query.as_deref(),
             )
             .await;
