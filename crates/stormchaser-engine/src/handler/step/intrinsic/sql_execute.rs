@@ -170,6 +170,7 @@ async fn execute_sql_query(
     match connection_type {
         stormchaser_model::connections::ConnectionType::Postgres => {
             let pg_pool = sqlx::postgres::PgPoolOptions::new()
+                .max_connections(1)
                 .acquire_timeout(Duration::from_secs(5))
                 .connect(url)
                 .await?;
@@ -209,7 +210,7 @@ mod tests {
         let result = execute_sql_query(&ConnectionType::Postgres, &database_url, "SELECT 1")
             .await
             .expect("postgres query should execute successfully");
-        assert_eq!(result, 0);
+        assert_eq!(result, 1);
     }
 
     #[tokio::test]
