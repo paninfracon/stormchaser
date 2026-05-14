@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use futures::StreamExt;
 use k8s_openapi::api::batch::v1::Job;
-use k8s_openapi::api::core::v1::Pod;
+use k8s_openapi::api::core::v1::{Pod, Secret};
 use kube::api::{
     Api, DeleteParams, ListParams, PostParams, PropagationPolicy, WatchEvent, WatchParams,
 };
@@ -38,11 +38,18 @@ impl K8sJobMachine<state::Initialized> {
             job_name, self.metadata.namespace
         );
         let jobs: Api<Job> = Api::namespaced(self.client.clone(), &self.metadata.namespace);
+        let secrets: Api<Secret> = Api::namespaced(self.client.clone(), &self.metadata.namespace);
         let dp = DeleteParams {
             propagation_policy: Some(PropagationPolicy::Background),
             ..Default::default()
         };
         jobs.delete(job_name, &dp).await?;
+        let secret_name = format!("{}-auth", job_name);
+        if let Err(e) = secrets.delete(&secret_name, &dp).await {
+            if !matches!(e, kube::Error::Api(ref err) if err.code == 404) {
+                return Err(e.into());
+            }
+        }
         Ok(())
     }
 
@@ -89,7 +96,6 @@ impl K8sJobMachine<state::Initialized> {
 
         if let Some(auth) = &self.metadata.registry_auth {
             use base64::{engine::general_purpose, Engine as _};
-            use k8s_openapi::api::core::v1::Secret;
             use std::collections::BTreeMap;
 
             let secret_name = format!("{}-auth", job_name);
@@ -131,12 +137,20 @@ impl K8sJobMachine<state::Initialized> {
             let secrets: Api<Secret> =
                 Api::namespaced(self.client.clone(), &self.metadata.namespace);
             if let Err(e) = secrets.create(&PostParams::default(), &secret).await {
-                if let kube::Error::Api(ref err) = e {
-                    if err.code != 409 {
-                        warn!("Failed to create image pull secret {}: {}", secret_name, e);
-                    }
-                } else {
-                    warn!("Failed to create image pull secret {}: {}", secret_name, e);
+                if !matches!(e, kube::Error::Api(ref err) if err.code == 409) {
+                    return Ok(StartResult::Failed(K8sJobMachine {
+                        client: self.client,
+                        metadata: self.metadata,
+                        state: state::Finished {
+                            result: JobState::Failed(
+                                format!(
+                                    "Failed to create image pull secret {}: {}",
+                                    secret_name, e
+                                ),
+                                JobMetrics::default(),
+                            ),
+                        },
+                    }));
                 }
             }
         }

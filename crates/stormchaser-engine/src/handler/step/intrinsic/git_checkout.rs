@@ -1,3 +1,4 @@
+use anyhow::Context;
 use serde_json::Value;
 use sqlx::PgPool;
 use stormchaser_model::dsl;
@@ -21,49 +22,53 @@ pub async fn mutate(
             let mut env_vars = Vec::new();
 
             if let Some(conn_name) = &git.connection {
-                if let Some(pool) = pool {
-                    if let Some(conn) = crate::db::connections::get_storage_backend_by_name::<
-                        _,
-                        stormchaser_model::Connection,
-                    >(pool, conn_name)
-                    .await?
-                    {
-                        if conn.connection_type
-                            == stormchaser_model::connections::ConnectionType::Git
-                        {
-                            if let Some(creds) = &conn.encrypted_credentials {
-                                if let Some(username) =
-                                    conn.config.get("username").and_then(|v| v.as_str())
-                                {
-                                    env_vars.push(dsl::EnvVar {
-                                        name: "GIT_USERNAME".to_string(),
-                                        value: username.to_string(),
-                                    });
-                                    env_vars.push(dsl::EnvVar {
-                                        name: "GIT_PASSWORD".to_string(),
-                                        value: creds.to_string(),
-                                    });
-                                    auth_command = "git config --global credential.helper '!f() { echo username=$GIT_USERNAME; echo password=$GIT_PASSWORD; }; f' && ".to_string();
-                                } else {
-                                    env_vars.push(dsl::EnvVar {
-                                        name: "GIT_BEARER_TOKEN".to_string(),
-                                        value: creds.to_string(),
-                                    });
-                                    auth_command = "git config --global http.extraHeader \"Authorization: Bearer $GIT_BEARER_TOKEN\" && ".to_string();
-                                }
-                            }
+                let pool = pool.with_context(|| {
+                    format!(
+                        "GitCheckout step references connection '{}' but no database context is available",
+                        conn_name
+                    )
+                })?;
+                let conn = crate::db::connections::get_storage_backend_by_name::<
+                    _,
+                    stormchaser_model::Connection,
+                >(pool, conn_name)
+                .await?
+                .with_context(|| format!("GitCheckout connection '{}' was not found", conn_name))?;
 
-                            if let Some(ssh_key) =
-                                conn.config.get("ssh_key").and_then(|v| v.as_str())
-                            {
-                                env_vars.push(dsl::EnvVar {
-                                    name: "GIT_SSH_KEY".to_string(),
-                                    value: ssh_key.to_string(),
-                                });
-                                auth_command = "mkdir -p ~/.ssh && echo \"$GIT_SSH_KEY\" > ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa && export GIT_SSH_COMMAND='ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no' && ".to_string();
-                            }
-                        }
+                if conn.connection_type != stormchaser_model::connections::ConnectionType::Git {
+                    anyhow::bail!(
+                        "GitCheckout connection '{}' has type {:?}, expected git",
+                        conn_name,
+                        conn.connection_type
+                    );
+                }
+
+                if let Some(creds) = &conn.encrypted_credentials {
+                    if let Some(username) = conn.config.get("username").and_then(|v| v.as_str()) {
+                        env_vars.push(dsl::EnvVar {
+                            name: "GIT_USERNAME".to_string(),
+                            value: username.to_string(),
+                        });
+                        env_vars.push(dsl::EnvVar {
+                            name: "GIT_PASSWORD".to_string(),
+                            value: creds.to_string(),
+                        });
+                        auth_command = "git config --global credential.helper '!f() { echo username=$GIT_USERNAME; echo password=$GIT_PASSWORD; }; f' && ".to_string();
+                    } else {
+                        env_vars.push(dsl::EnvVar {
+                            name: "GIT_BEARER_TOKEN".to_string(),
+                            value: creds.to_string(),
+                        });
+                        auth_command = "git config --global http.extraHeader \"Authorization: Bearer $GIT_BEARER_TOKEN\" && ".to_string();
                     }
+                }
+
+                if let Some(ssh_key) = conn.config.get("ssh_key").and_then(|v| v.as_str()) {
+                    env_vars.push(dsl::EnvVar {
+                        name: "GIT_SSH_KEY".to_string(),
+                        value: ssh_key.to_string(),
+                    });
+                    auth_command = "mkdir -p ~/.ssh && echo \"$GIT_SSH_KEY\" > ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa && export GIT_SSH_COMMAND='ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no' && ".to_string();
                 }
             }
 

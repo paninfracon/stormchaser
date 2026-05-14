@@ -227,7 +227,8 @@ pub fn app(state: AppState) -> Router {
             get(get_connection)
                 .patch(update_connection)
                 .delete(delete_connection),
-        );
+        )
+        .route("/connections/test", post(test_connection));
 
     #[cfg(feature = "mcp")]
     {

@@ -189,6 +189,10 @@ pub fn generate_dsl_schema() -> RootSchema {
         "RestApi".to_string(),
         generator.subschema_for::<RestApiSpec>(),
     );
+    spec_schemas.insert(
+        "SqlExecute".to_string(),
+        generator.subschema_for::<SqlExecuteSpec>(),
+    );
     spec_schemas.insert("Email".to_string(), generator.subschema_for::<EmailSpec>());
     spec_schemas.insert(
         "JinjaRender".to_string(),
@@ -234,6 +238,30 @@ mod tests {
         assert!(
             properties.contains_key("extractors"),
             "RestApiSpec schema should include the extractors property"
+        );
+    }
+
+    #[test]
+    fn test_generate_dsl_schema_registers_sql_execute_spec() {
+        let schema = generate_dsl_schema();
+        let sql_execute_schema = schema
+            .definitions
+            .get("SqlExecuteSpec")
+            .expect("generated DSL schema should include the SqlExecuteSpec definition");
+        let sql_execute_schema_json = serde_json::to_value(sql_execute_schema)
+            .expect("SqlExecuteSpec schema should serialize to JSON value");
+        let properties = sql_execute_schema_json
+            .get("properties")
+            .and_then(serde_json::Value::as_object)
+            .expect("SqlExecuteSpec schema should expose object properties");
+
+        assert!(
+            properties.contains_key("connection"),
+            "SqlExecuteSpec schema should include the connection property"
+        );
+        assert!(
+            properties.contains_key("query"),
+            "SqlExecuteSpec schema should include the query property"
         );
     }
 }

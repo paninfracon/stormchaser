@@ -118,14 +118,7 @@ async fn handle_sql_execute(
 
     let rows_affected = match conn.connection_type {
         stormchaser_model::connections::ConnectionType::Postgres => {
-            let pg_pool = sqlx::postgres::PgPoolOptions::new()
-                .acquire_timeout(Duration::from_secs(5))
-                .connect(url)
-                .await?;
-            let result = sqlx::query(&query).execute(&pg_pool).await?;
-            let affected = result.rows_affected();
-            pg_pool.close().await;
-            affected
+            execute_sql_query(&conn.connection_type, url, &query).await?
         }
         stormchaser_model::connections::ConnectionType::Mysql => {
             anyhow::bail!("MySQL support is not compiled into the engine");
@@ -167,4 +160,70 @@ async fn handle_sql_execute(
     .await?;
 
     Ok(())
+}
+
+async fn execute_sql_query(
+    connection_type: &stormchaser_model::connections::ConnectionType,
+    url: &str,
+    query: &str,
+) -> Result<u64> {
+    match connection_type {
+        stormchaser_model::connections::ConnectionType::Postgres => {
+            let pg_pool = sqlx::postgres::PgPoolOptions::new()
+                .acquire_timeout(Duration::from_secs(5))
+                .connect(url)
+                .await?;
+            let result = sqlx::query(query).execute(&pg_pool).await?;
+            let affected = result.rows_affected();
+            pg_pool.close().await;
+            Ok(affected)
+        }
+        other => anyhow::bail!(
+            "Connection type {:?} is not supported for SqlExecute",
+            other
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::execute_sql_query;
+    use stormchaser_model::connections::ConnectionType;
+
+    fn database_url_from_env() -> String {
+        if let Ok(url) = std::env::var("DATABASE_URL") {
+            return url;
+        }
+        dotenvy::dotenv().ok();
+        let password = std::env::var("STORMCHASER_DEV_PASSWORD")
+            .expect("STORMCHASER_DEV_PASSWORD must be set when DATABASE_URL is unset");
+        format!(
+            "postgres://stormchaser:{}@localhost:5432/stormchaser",
+            password
+        )
+    }
+
+    #[tokio::test]
+    async fn execute_sql_query_supports_postgres_success() {
+        let database_url = database_url_from_env();
+        let result = execute_sql_query(&ConnectionType::Postgres, &database_url, "SELECT 1")
+            .await
+            .expect("postgres query should execute successfully");
+        assert_eq!(result, 0);
+    }
+
+    #[tokio::test]
+    async fn execute_sql_query_rejects_unsupported_connection_type() {
+        let err = execute_sql_query(
+            &ConnectionType::HttpApi,
+            "https://paninfracon.net",
+            "SELECT 1",
+        )
+        .await
+        .expect_err("unsupported connection types should fail");
+        assert!(
+            err.to_string().contains("not supported"),
+            "expected unsupported connection error, got: {err}"
+        );
+    }
 }

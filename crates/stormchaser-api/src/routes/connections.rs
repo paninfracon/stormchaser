@@ -4,16 +4,22 @@ use super::{
 };
 use crate::db;
 use crate::{AppState, AuthClaims};
+use aws_config::Region;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
     Json,
 };
+use std::time::Duration;
 use stormchaser_model::connections::ArtifactRegistry;
 use stormchaser_model::ConnectionId;
 use stormchaser_model::RunId;
 use stormchaser_model::TestReportId;
+use tokio::time::timeout;
+
+const HTTP_TEST_TIMEOUT: Duration = Duration::from_secs(10);
+const GIT_TEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Creates a storage backend.
 #[utoipa::path(
@@ -55,6 +61,7 @@ pub async fn create_connection(
         &payload.connection_type,
         &payload.config,
         &payload.aws_assume_role_arn,
+        &payload.encrypted_credentials,
         payload.is_default_sfs,
     )
     .await
@@ -122,7 +129,7 @@ pub async fn get_connection(
 
 /// Update storage backend.
 #[utoipa::path(
-    put,
+    patch,
     path = "/api/v1/connections/{id}",
     params(("id" = stormchaser_model::ConnectionId, Path, description="Backend ID")),
     responses(
@@ -184,7 +191,10 @@ pub async fn test_connection(
     let (success, message) = match payload.connection_type {
         stormchaser_model::connections::ConnectionType::HttpApi => {
             if let Some(base_url) = payload.config.get("base_url").and_then(|v| v.as_str()) {
-                let client = reqwest::Client::new();
+                let client = reqwest::Client::builder()
+                    .timeout(HTTP_TEST_TIMEOUT)
+                    .build()
+                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
                 let mut req = client.get(base_url);
                 if let Some(headers) = payload.config.get("headers").and_then(|v| v.as_object()) {
                     for (k, v) in headers {
@@ -225,23 +235,31 @@ pub async fn test_connection(
             {
                 let mut cmd = tokio::process::Command::new("git");
                 cmd.arg("ls-remote").arg(url);
+                cmd.kill_on_drop(true);
 
                 // Note: Full auth injection (SSH keys, etc.) is complex here without writing files.
                 // We'll just test if the repo is reachable.
-                match cmd.output().await {
-                    Ok(output) => {
-                        if output.status.success() {
+                match cmd.spawn() {
+                    Ok(mut child) => match timeout(GIT_TEST_TIMEOUT, child.wait()).await {
+                        Ok(Ok(status)) if status.success() => {
                             (true, "Successfully reached Git repository".to_string())
-                        } else {
+                        }
+                        Ok(Ok(status)) => {
+                            (false, format!("Git command exited with status: {}", status))
+                        }
+                        Ok(Err(e)) => (false, format!("Failed while waiting for git: {}", e)),
+                        Err(_) => {
+                            let _ = child.start_kill();
+                            let _ = child.wait().await;
                             (
                                 false,
                                 format!(
-                                    "Git command failed: {}",
-                                    String::from_utf8_lossy(&output.stderr)
+                                    "Git connection test timed out after {}s",
+                                    GIT_TEST_TIMEOUT.as_secs()
                                 ),
                             )
                         }
-                    }
+                    },
                     Err(e) => (false, format!("Failed to execute git: {}", e)),
                 }
             } else {
@@ -268,57 +286,112 @@ pub async fn test_connection(
         stormchaser_model::connections::ConnectionType::Mysql => {
             if payload.config.get("url").is_some() {
                 (
-                    true,
-                    "MySQL URL is present (network validation not enabled in this build)"
-                        .to_string(),
+                    false,
+                    "MySQL connectivity validation is not implemented in this build".to_string(),
                 )
             } else {
                 (false, "Missing url".to_string())
             }
         }
         stormchaser_model::connections::ConnectionType::S3 => {
-            if let (Some(bucket), Some(endpoint)) = (
-                payload.config.get("bucket").and_then(|v| v.as_str()),
-                payload.config.get("endpoint").and_then(|v| v.as_str()),
-            ) {
+            if let Some(bucket) = payload.config.get("bucket").and_then(|v| v.as_str()) {
                 let access_key = payload
                     .config
                     .get("access_key")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("dummy");
+                    .and_then(|v| v.as_str());
                 let secret_key = payload
                     .config
                     .get("secret_key")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("dummy");
+                    .and_then(|v| v.as_str());
                 let region = payload
                     .config
                     .get("region")
                     .and_then(|v| v.as_str())
                     .unwrap_or("us-east-1");
+                let mut loader = aws_config::defaults(aws_config::BehaviorVersion::latest())
+                    .region(Region::new(region.to_string()));
+                if let (Some(access_key), Some(secret_key)) = (access_key, secret_key) {
+                    loader = loader.credentials_provider(aws_sdk_s3::config::Credentials::new(
+                        access_key,
+                        secret_key,
+                        None,
+                        None,
+                        "stormchaser",
+                    ));
+                }
 
-                let creds = aws_sdk_s3::config::Credentials::new(
-                    access_key,
-                    secret_key,
-                    None,
-                    None,
-                    "stormchaser",
-                );
+                let mut sdk_config = loader.load().await;
+                if let Some(role_arn) = payload
+                    .aws_assume_role_arn
+                    .as_deref()
+                    .filter(|v| !v.is_empty())
+                {
+                    let sts_client = aws_sdk_sts::Client::new(&sdk_config);
+                    match sts_client
+                        .assume_role()
+                        .role_arn(role_arn)
+                        .role_session_name("StormchaserConnectionTest")
+                        .send()
+                        .await
+                    {
+                        Ok(assume) => {
+                            if let Some(credentials) = assume.credentials() {
+                                sdk_config = sdk_config
+                                    .into_builder()
+                                    .credentials_provider(
+                                        aws_sdk_s3::config::SharedCredentialsProvider::new(
+                                            aws_sdk_s3::config::Credentials::new(
+                                                credentials.access_key_id(),
+                                                credentials.secret_access_key(),
+                                                Some(credentials.session_token().to_string()),
+                                                None,
+                                                "StsAssumedRole",
+                                            ),
+                                        ),
+                                    )
+                                    .build();
+                            } else {
+                                return Ok((
+                                    StatusCode::OK,
+                                    Json(TestConnectionResponse {
+                                        success: false,
+                                        message: "AssumeRole succeeded but returned no credentials"
+                                            .to_string(),
+                                    }),
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            return Ok((
+                                StatusCode::OK,
+                                Json(TestConnectionResponse {
+                                    success: false,
+                                    message: format!("Failed to assume role: {}", e),
+                                }),
+                            ));
+                        }
+                    }
+                }
 
-                let config = aws_sdk_s3::Config::builder()
-                    .credentials_provider(creds)
-                    .region(aws_sdk_s3::config::Region::new(region.to_string()))
-                    .endpoint_url(endpoint)
-                    .force_path_style(true)
-                    .build();
-
-                let client = aws_sdk_s3::Client::from_conf(config);
+                let mut config = aws_sdk_s3::config::Builder::from(&sdk_config);
+                if let Some(endpoint) = payload.config.get("endpoint").and_then(|v| v.as_str()) {
+                    config = config.endpoint_url(endpoint);
+                }
+                if payload
+                    .config
+                    .get("force_path_style")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+                {
+                    config = config.force_path_style(true);
+                }
+                let client = aws_sdk_s3::Client::from_conf(config.build());
                 match client.head_bucket().bucket(bucket).send().await {
                     Ok(_) => (true, "Successfully connected to S3 bucket".to_string()),
                     Err(e) => (false, format!("Failed to access S3 bucket: {}", e)),
                 }
             } else {
-                (false, "Missing bucket or endpoint".to_string())
+                (false, "Missing bucket".to_string())
             }
         }
         _ => (

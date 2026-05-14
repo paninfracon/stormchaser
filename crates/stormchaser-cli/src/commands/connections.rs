@@ -26,6 +26,9 @@ pub enum ConnectionCommands {
         /// Optional AWS role ARN to assume
         #[arg(long)]
         aws_assume_role_arn: Option<String>,
+        /// Optional encrypted credentials (password/token)
+        #[arg(long)]
+        encrypted_credentials: Option<String>,
         /// Validate the connection before creating it
         #[arg(long)]
         test: bool,
@@ -47,6 +50,9 @@ pub enum ConnectionCommands {
         /// Optional AWS role ARN to assume
         #[arg(long)]
         aws_assume_role_arn: Option<String>,
+        /// Optional encrypted credentials (password/token)
+        #[arg(long)]
+        encrypted_credentials: Option<String>,
     },
     /// Delete a storage backend
     Delete { id: stormchaser_model::ConnectionId },
@@ -87,6 +93,7 @@ pub async fn handle(
             default_sfs,
             description,
             aws_assume_role_arn,
+            encrypted_credentials,
             test,
         } => {
             let config_json: Value = serde_json::from_str(&fs::read_to_string(config)?)?;
@@ -135,6 +142,7 @@ pub async fn handle(
                     "is_default_sfs": default_sfs,
                     "description": description,
                     "aws_assume_role_arn": aws_assume_role_arn,
+                    "encrypted_credentials": encrypted_credentials,
                 }))
                 .send()
                 .await?;
@@ -156,6 +164,7 @@ pub async fn handle(
             default_sfs,
             description,
             aws_assume_role_arn,
+            encrypted_credentials,
         } => {
             let mut body = json!({});
             if let Some(n) = name {
@@ -172,6 +181,9 @@ pub async fn handle(
             }
             if let Some(arn) = aws_assume_role_arn {
                 body["aws_assume_role_arn"] = json!(arn);
+            }
+            if let Some(credentials) = encrypted_credentials {
+                body["encrypted_credentials"] = json!(credentials);
             }
 
             let token = require_token(token)?;
@@ -262,6 +274,7 @@ mod tests {
             default_sfs: true,
             description: None,
             aws_assume_role_arn: None,
+            encrypted_credentials: None,
             test: false,
         };
 
