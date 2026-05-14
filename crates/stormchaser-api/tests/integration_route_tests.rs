@@ -156,7 +156,7 @@ async fn test_list_cron_workflows() {
 }
 
 #[tokio::test]
-async fn test_list_storage_backends() {
+async fn test_list_connections() {
     let app = match setup_app().await {
         Some(a) => a,
         None => return,
@@ -166,7 +166,7 @@ async fn test_list_storage_backends() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/api/v1/storage-backends")
+                .uri("/api/v1/connections")
                 .header(
                     axum::http::header::AUTHORIZATION,
                     format!("Bearer {}", get_token()),

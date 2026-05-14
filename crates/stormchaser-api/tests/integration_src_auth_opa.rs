@@ -6,7 +6,7 @@ use std::sync::Arc;
 use stormchaser_api::auth::opa::opa_middleware;
 use stormchaser_api::AppState;
 use stormchaser_model::auth::ApprovalOpaContext;
-use stormchaser_model::auth::{ApiOpaContext, OpaAuthorizer};
+use stormchaser_model::auth::{ApiOpaContext, ConnectionOpaContext, OpaAuthorizer};
 use tower::ServiceExt;
 
 struct MockAuthorizer {
@@ -23,6 +23,12 @@ impl OpaAuthorizer for MockAuthorizer {
         }
     }
     async fn check_approval(&self, _context: ApprovalOpaContext<'_>) -> anyhow::Result<bool> {
+        match &self.result {
+            Ok(b) => Ok(*b),
+            Err(_) => anyhow::bail!("error"),
+        }
+    }
+    async fn check_connection(&self, _context: ConnectionOpaContext<'_>) -> anyhow::Result<bool> {
         match &self.result {
             Ok(b) => Ok(*b),
             Err(_) => anyhow::bail!("error"),

@@ -16,9 +16,9 @@ fi
 
 echo ">>> Cleaning up existing 'local-minio' if present..."
 # Get the ID of the existing backend
-OLD_ID=$(curl -s -H "Authorization: Bearer $TOKEN" "$API_URL/api/v1/storage-backends" | jq -r '.[] | select(.name=="local-minio") | .id')
+OLD_ID=$(curl -s -H "Authorization: Bearer $TOKEN" "$API_URL/api/v1/connections" | jq -r '.[] | select(.name=="local-minio") | .id')
 if [ -n "$OLD_ID" ] && [ "$OLD_ID" != "null" ]; then
-  curl -s -X DELETE -H "Authorization: Bearer $TOKEN" "$API_URL/api/v1/storage-backends/$OLD_ID"
+  curl -s -X DELETE -H "Authorization: Bearer $TOKEN" "$API_URL/api/v1/connections/$OLD_ID"
   echo "Deleted old backend $OLD_ID"
 fi
 
@@ -35,7 +35,7 @@ aws --endpoint-url "$AWS_ENDPOINT" s3 mb "s3://stormchaser-sfs" 2>/dev/null || t
 
 echo ">>> Registering local Minio as default SFS backend..."
 S3_ENDPOINT=${S3_ENDPOINT:-"http://s3:9000"}
-curl -s -X POST "$API_URL/api/v1/storage-backends" \
+curl -s -X POST "$API_URL/api/v1/connections" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d "$(jq -n \

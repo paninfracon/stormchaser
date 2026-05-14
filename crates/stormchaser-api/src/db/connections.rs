@@ -65,6 +65,20 @@ pub async fn get_connection(
         .await
 }
 
+/// Retrieves a storage backend by its unique name.
+///
+/// Unlike [`get_connection`], which looks up by [`ConnectionId`], this helper
+/// resolves a connection using the user-facing `name` field.
+pub async fn get_connection_by_name(
+    pool: &PgPool,
+    name: &str,
+) -> Result<Option<connections::Connection>, sqlx::Error> {
+    sqlx::query_as("SELECT * FROM connections WHERE name = $1")
+        .bind(name)
+        .fetch_optional(pool)
+        .await
+}
+
 /// Updates an existing storage backend.
 /// Update storage backend.
 pub async fn update_connection(

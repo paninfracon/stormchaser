@@ -34,7 +34,7 @@ API_IP=$(microk8s kubectl get svc -n stormchaser stormchaser-stormchaser-orchest
 API_URL="http://${API_IP}:3000"
 
 echo -e "${BLUE}>>> Registering SFS backend...${NC}"
-curl -s -X POST "$API_URL/api/v1/storage-backends" \
+curl -s -X POST "$API_URL/api/v1/connections" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
