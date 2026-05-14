@@ -67,9 +67,7 @@ pub struct HydrationEvent {
 ///
 /// Returns `Ok` with the parsed queries, or `Err` with a list of per-index
 /// parse errors when any entry cannot be deserialized.
-fn parse_queries(
-    raw: Vec<Value>,
-) -> Result<Vec<stormchaser_model::dsl::Query>, Vec<String>> {
+fn parse_queries(raw: Vec<Value>) -> Result<Vec<stormchaser_model::dsl::Query>, Vec<String>> {
     let mut queries = Vec::new();
     let mut errors: Vec<String> = Vec::new();
     for (i, v) in raw.into_iter().enumerate() {
@@ -576,12 +574,7 @@ async fn execute_api_query(
         .timeout(std::time::Duration::from_secs(30))
         .build()?;
 
-    let response = client
-        .get(&url)
-        .send()
-        .await?
-        .json::<Vec<Value>>()
-        .await?;
+    let response = client.get(&url).send().await?.json::<Vec<Value>>().await?;
 
     Ok(response)
 }
@@ -728,10 +721,7 @@ mod tests {
     async fn test_execute_sql_query_rejects_non_select() {
         let mut params = std::collections::HashMap::new();
         params.insert("connection".to_string(), "mydb".to_string());
-        params.insert(
-            "query".to_string(),
-            "DROP TABLE users".to_string(),
-        );
+        params.insert("query".to_string(), "DROP TABLE users".to_string());
         let err = execute_query("sql", &params, &[]).await.unwrap_err();
         assert!(
             err.to_string().contains("Only SELECT"),
