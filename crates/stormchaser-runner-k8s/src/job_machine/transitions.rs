@@ -55,10 +55,11 @@ impl K8sJobMachine<state::Initialized> {
 
     /// Starts the Kubernetes job, transitioning to either Running or Failed state.
     pub async fn start(self) -> Result<StartResult> {
+        let step_id_prefix: String = self.metadata.step_id.to_string().chars().take(8).collect();
         let job_name = format!(
             "storm-{}-{}",
             self.metadata.step_dsl.name.to_lowercase().replace('_', "-"),
-            &self.metadata.step_id.to_string()[..8]
+            step_id_prefix
         );
 
         info!(

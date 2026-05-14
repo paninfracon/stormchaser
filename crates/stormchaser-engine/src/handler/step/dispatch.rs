@@ -77,7 +77,7 @@ async fn inject_connection_env_vars(
         return Ok(());
     };
 
-    let mut envs = env.take().unwrap_or_default();
+    let mut envs = env.clone().unwrap_or_default();
     for conn_name in connection_names {
         if let Some(conn) = crate::db::connections::get_storage_backend_by_name::<
             _,

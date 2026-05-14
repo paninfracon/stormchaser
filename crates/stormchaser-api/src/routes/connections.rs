@@ -250,7 +250,7 @@ pub async fn test_connection(
                         Ok(Err(e)) => (false, format!("Failed while waiting for git: {}", e)),
                         Err(_) => {
                             let _ = child.start_kill();
-                            let _ = child.wait().await;
+                            let _ = timeout(Duration::from_secs(3), child.wait()).await;
                             (
                                 false,
                                 format!(
@@ -295,14 +295,8 @@ pub async fn test_connection(
         }
         stormchaser_model::connections::ConnectionType::S3 => {
             if let Some(bucket) = payload.config.get("bucket").and_then(|v| v.as_str()) {
-                let access_key = payload
-                    .config
-                    .get("access_key")
-                    .and_then(|v| v.as_str());
-                let secret_key = payload
-                    .config
-                    .get("secret_key")
-                    .and_then(|v| v.as_str());
+                let access_key = payload.config.get("access_key").and_then(|v| v.as_str());
+                let secret_key = payload.config.get("secret_key").and_then(|v| v.as_str());
                 let region = payload
                     .config
                     .get("region")
