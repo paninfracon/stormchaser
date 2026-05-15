@@ -475,3 +475,29 @@ async fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_extract_template_deps() {
+        let q = "SELECT ${inputs.env} UNION ${inputs.prod}";
+        let mut deps = extract_template_deps(q);
+        deps.sort();
+        assert_eq!(deps, vec!["env", "prod"]);
+
+        let q2 = "%{ if inputs.active }yes%{ endif }";
+        let deps2 = extract_template_deps(q2);
+        assert_eq!(deps2, vec!["active"]);
+    }
+
+    #[tokio::test]
+    async fn test_execute_query_mock() {
+        let mut params = std::collections::HashMap::new();
+        params.insert("items".to_string(), "a,b,c".to_string());
+        let res = execute_query("mock", &params, None).await.unwrap();
+        assert_eq!(res, vec![json!("a"), json!("b"), json!("c")]);
+    }
+}
