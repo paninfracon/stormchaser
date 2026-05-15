@@ -373,4 +373,33 @@ mod tests {
         assert_eq!(status, "Completed");
         assert_eq!(new_schema, json!({"type": "string"}));
     }
+
+    #[test]
+    fn test_strip_required() {
+        let mut schema = json!({
+            "type": "object",
+            "required": ["a"],
+            "properties": {
+                "a": { "type": "string" },
+                "b": {
+                    "type": "object",
+                    "required": ["c"],
+                    "properties": { "c": { "type": "string" } }
+                }
+            },
+            "items": [
+                {
+                    "type": "object",
+                    "required": ["d"],
+                    "properties": { "d": { "type": "string" } }
+                }
+            ]
+        });
+
+        App::strip_required(&mut schema);
+
+        assert!(schema.get("required").is_none());
+        assert!(schema["properties"]["b"].get("required").is_none());
+        assert!(schema["items"][0].get("required").is_none());
+    }
 }

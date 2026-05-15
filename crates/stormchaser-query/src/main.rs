@@ -500,4 +500,69 @@ mod tests {
         let res = execute_query("mock", &params, None).await.unwrap();
         assert_eq!(res, vec![json!("a"), json!("b"), json!("c")]);
     }
+
+    #[tokio::test]
+    async fn test_run_hydration_loop_success() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "dep": {
+                    "type": "string"
+                },
+                "target": {
+                    "type": "string",
+                    "enum": "${queries.target}"
+                }
+            },
+            "required": ["dep", "target"]
+        });
+
+        let mut query = stormchaser_model::dsl::Query {
+            name: "target".to_string(),
+            r#type: "mock".to_string(),
+            params: std::collections::HashMap::new(),
+        };
+        query.params.insert(
+            "items".to_string(),
+            "${inputs.dep}1,${inputs.dep}2".to_string(),
+        );
+
+        let queries = vec![query];
+
+        // 1. Missing dependency
+        let (tx, mut rx) = tokio::sync::mpsc::channel(100);
+        let inputs_missing = json!({});
+        run_hydration_loop(schema.clone(), inputs_missing, queries.clone(), None, tx).await;
+
+        let event1 = rx.recv().await.unwrap();
+        assert_eq!(event1.status, HydrationStatus::SchemaValidationFailed);
+        assert_eq!(
+            event1.query_status.get("target").unwrap(),
+            "Pending Dependency"
+        );
+
+        // 2. Dependency provided
+        let (tx2, mut rx2) = tokio::sync::mpsc::channel(100);
+        let inputs_provided = json!({"dep": "val"});
+        run_hydration_loop(schema.clone(), inputs_provided, queries.clone(), None, tx2).await;
+
+        let event_start = rx2.recv().await.unwrap();
+        assert_eq!(event_start.status, HydrationStatus::UpdatePending);
+        assert_eq!(event_start.query_status.get("target").unwrap(), "Running");
+
+        let mut final_event = None;
+        while let Some(evt) = rx2.recv().await {
+            final_event = Some(evt);
+        }
+
+        let event_end = final_event.unwrap();
+        assert_eq!(event_end.status, HydrationStatus::IncompleteInput); // Still missing 'target' input for full validation
+        assert_eq!(event_end.query_status.get("target").unwrap(), "Resolved");
+
+        let target_enum = event_end.hydrated_schema["properties"]["target"]["enum"]
+            .as_array()
+            .unwrap();
+        assert_eq!(target_enum[0], json!("val1"));
+        assert_eq!(target_enum[1], json!("val2"));
+    }
 }
