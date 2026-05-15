@@ -304,12 +304,24 @@ async fn test_workflow_step_completion_dispatches_next_step() {
 
     // Verify step2 was dispatched by waiting for the NATS message
     println!("Waiting for NATS message...");
-    let msg = tokio::time::timeout(tokio::time::Duration::from_secs(2), subscriber.next())
-        .await
-        .expect("Timeout waiting for step dispatch message")
-        .expect("NATS stream closed");
+    let timeout = tokio::time::sleep(tokio::time::Duration::from_secs(5));
+    tokio::pin!(timeout);
 
-    let payload: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+    let payload = loop {
+        tokio::select! {
+            msg_opt = subscriber.next() => {
+                let msg = msg_opt.expect("NATS stream closed");
+                let payload: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+                if payload["data"]["run_id"].as_str() == Some(&run_id.to_string()) {
+                    break payload;
+                }
+            }
+            _ = &mut timeout => {
+                panic!("Timeout waiting for step dispatch message");
+            }
+        }
+    };
+
     println!(
         "Received payload: {}",
         serde_json::to_string_pretty(&payload).unwrap()
@@ -318,7 +330,6 @@ async fn test_workflow_step_completion_dispatches_next_step() {
         payload["data"]["step_name"], "step2",
         "Step 2 should have been dispatched via NATS"
     );
-
     // Final cleanup
     sqlx::query("DELETE FROM workflow_runs WHERE id = $1")
         .bind(run_id)
