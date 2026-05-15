@@ -9,7 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add Workflow Input Schemas to define schema properties for inputs and workspace parameters.
+- Add the intrinsic `SqlExecute` step for engine-side database query execution.
 - Add the intrinsic `RestApi` step for engine-side HTTP calls with templated requests and response extraction.
+
 ### Changed
 
 - Prepare `stormchaser-tui` for publishing by removing the `publish = false` directive.

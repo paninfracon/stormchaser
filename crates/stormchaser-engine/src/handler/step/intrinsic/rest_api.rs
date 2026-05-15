@@ -90,7 +90,56 @@ async fn handle_rest_api_invoke(
     pool: PgPool,
     nats_client: async_nats::Client,
 ) -> Result<()> {
-    let spec: RestApiSpec = serde_json::from_value(spec.get("spec").unwrap_or(&spec).clone())?;
+    let mut spec: RestApiSpec = serde_json::from_value(spec.get("spec").unwrap_or(&spec).clone())?;
+
+    // Load connection if specified
+    if let Some(conn_name) = &spec.connection {
+        if let Some(conn) = crate::db::connections::get_storage_backend_by_name::<
+            _,
+            stormchaser_model::Connection,
+        >(&pool, conn_name)
+        .await?
+        {
+            if conn.connection_type == stormchaser_model::connections::ConnectionType::HttpApi {
+                if let Some(base_url) = conn.config.get("base_url").and_then(|v| v.as_str()) {
+                    let mut url = spec.url.clone();
+                    if !url.starts_with("http://") && !url.starts_with("https://") {
+                        let base = base_url.trim_end_matches('/');
+                        let path = url.trim_start_matches('/');
+                        url = format!("{}/{}", base, path);
+                    }
+                    spec.url = url;
+                }
+
+                if let Some(headers) = conn.config.get("headers").and_then(|v| v.as_object()) {
+                    let mut current_headers = spec.headers.unwrap_or_default();
+                    for (k, v) in headers {
+                        if let Some(s) = v.as_str() {
+                            current_headers.insert(k.clone(), s.to_string());
+                        }
+                    }
+                    spec.headers = Some(current_headers);
+                }
+
+                if let Some(auth_token) = conn.encrypted_credentials {
+                    let mut current_headers = spec.headers.unwrap_or_default();
+                    if !current_headers.contains_key("Authorization")
+                        && !current_headers.contains_key("authorization")
+                    {
+                        current_headers.insert(
+                            "Authorization".to_string(),
+                            format!("Bearer {}", auth_token),
+                        );
+                    }
+                    spec.headers = Some(current_headers);
+                }
+            } else {
+                warn!("Connection {} is not of type HttpApi", conn_name);
+            }
+        } else {
+            anyhow::bail!("Connection {} not found", conn_name);
+        }
+    }
 
     info!("Invoking REST API {} for run {}", spec.url, run_id);
 
@@ -320,6 +369,7 @@ mod tests {
     #[test]
     fn test_render_request_body() {
         let spec = RestApiSpec {
+            connection: None,
             url: "http://example.com".to_string(),
             method: Some("POST".to_string()),
             headers: None,
@@ -339,6 +389,7 @@ mod tests {
     #[test]
     fn test_build_request_method() {
         let mut spec = RestApiSpec {
+            connection: None,
             url: "http://example.com".to_string(),
             method: None,
             headers: None,
@@ -367,6 +418,7 @@ mod tests {
     #[test]
     fn test_apply_extractors_json() {
         let spec = RestApiSpec {
+            connection: None,
             url: "http://example.com".to_string(),
             method: None,
             headers: None,
@@ -421,6 +473,7 @@ mod tests {
     #[test]
     fn test_apply_extractors_regex() {
         let spec = RestApiSpec {
+            connection: None,
             url: "http://example.com".to_string(),
             method: None,
             headers: None,
@@ -505,6 +558,7 @@ mod tests {
         let run_id = RunId::new(uuid::Uuid::new_v4());
         let step_id = StepInstanceId::new(uuid::Uuid::new_v4());
         let spec = RestApiSpec {
+            connection: None,
             url: "http://example.com".to_string(),
             method: None,
             headers: None,
@@ -527,6 +581,7 @@ mod tests {
         let run_id = RunId::new(uuid::Uuid::new_v4());
         let step_id = StepInstanceId::new(uuid::Uuid::new_v4());
         let spec = RestApiSpec {
+            connection: None,
             url: "http://example.com".to_string(),
             method: None,
             headers: None,

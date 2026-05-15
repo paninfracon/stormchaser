@@ -77,6 +77,7 @@ fn test_do_build_job_spec_basic() {
         encryption_key: None,
         storage: None,
         test_report_urls: None,
+        registry_auth: None,
     };
 
     let job = do_build_job_spec("test-job", &metadata, None, None).unwrap();
@@ -148,6 +149,7 @@ fn test_do_build_job_spec_with_pvc() {
         encryption_key: None,
         storage: Some(storage_map),
         test_report_urls: None,
+        registry_auth: None,
     };
 
     let job = do_build_job_spec(

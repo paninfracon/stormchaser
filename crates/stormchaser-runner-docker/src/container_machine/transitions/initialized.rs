@@ -514,6 +514,26 @@ impl DockerContainerMachine<state::Initialized> {
             }
         };
 
+        let credentials =
+            self.metadata
+                .registry_auth
+                .as_ref()
+                .map(|auth| bollard::auth::DockerCredentials {
+                    username: auth
+                        .get("username")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                    password: auth
+                        .get("password")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                    serveraddress: auth
+                        .get("url")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                    ..Default::default()
+                });
+
         let mut pull_stream = self.docker.create_image(
             Some(CreateImageOptions {
                 from_image: from_image.to_string(),
@@ -521,7 +541,7 @@ impl DockerContainerMachine<state::Initialized> {
                 ..Default::default()
             }),
             None,
-            None,
+            credentials,
         );
         while let Some(pull_result) = pull_stream.next().await {
             if let Err(e) = pull_result {
@@ -587,6 +607,7 @@ mod tests {
             encryption_key: None,
             storage: None,
             test_report_urls: None,
+            registry_auth: None,
         }
     }
 

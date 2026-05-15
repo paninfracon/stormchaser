@@ -25,7 +25,7 @@ impl<'a> App<'a> {
             KeyCode::Char('j') | KeyCode::Down => {
                 match self.active_pane {
                     Pane::RunsList => self.next_run(),
-                    Pane::StorageBackendsList => self.next_storage_backend(),
+                    Pane::ConnectionsList => self.next_connection(),
                     Pane::WebhooksList => self.next_webhook(),
                     Pane::EventRulesList => self.next_event_rule(),
                     Pane::CronWorkflowsList => self.next_cron_workflow(),
@@ -36,7 +36,7 @@ impl<'a> App<'a> {
             KeyCode::Char('k') | KeyCode::Up => {
                 match self.active_pane {
                     Pane::RunsList => self.previous_run(),
-                    Pane::StorageBackendsList => self.previous_storage_backend(),
+                    Pane::ConnectionsList => self.previous_connection(),
                     Pane::WebhooksList => self.previous_webhook(),
                     Pane::EventRulesList => self.previous_event_rule(),
                     Pane::CronWorkflowsList => self.previous_cron_workflow(),
@@ -49,7 +49,7 @@ impl<'a> App<'a> {
                 true
             }
             KeyCode::Char('2') => {
-                self.active_pane = Pane::StorageBackendsList;
+                self.active_pane = Pane::ConnectionsList;
                 true
             }
             KeyCode::Char('3') => {
@@ -68,9 +68,9 @@ impl<'a> App<'a> {
                 self.active_pane = match self.active_pane {
                     Pane::RunsList => Pane::RunDetail,
                     Pane::RunDetail => Pane::TestResults,
-                    Pane::TestResults => Pane::StorageBackendsList,
-                    Pane::StorageBackendsList => Pane::StorageBackendDetail,
-                    Pane::StorageBackendDetail => Pane::WebhooksList,
+                    Pane::TestResults => Pane::ConnectionsList,
+                    Pane::ConnectionsList => Pane::ConnectionDetail,
+                    Pane::ConnectionDetail => Pane::WebhooksList,
                     Pane::WebhooksList => Pane::WebhookDetail,
                     Pane::WebhookDetail => Pane::EventRulesList,
                     Pane::EventRulesList => Pane::EventRuleDetail,
@@ -96,7 +96,7 @@ impl<'a> App<'a> {
             {
                 self.active_pane = match self.active_pane {
                     Pane::RunDetail | Pane::TestResults => Pane::RunsList,
-                    Pane::StorageBackendDetail => Pane::StorageBackendsList,
+                    Pane::ConnectionDetail => Pane::ConnectionsList,
                     Pane::WebhookDetail => Pane::WebhooksList,
                     Pane::EventRuleDetail => Pane::EventRulesList,
                     Pane::CronWorkflowDetail => Pane::CronWorkflowsList,
@@ -111,7 +111,7 @@ impl<'a> App<'a> {
             {
                 self.active_pane = match self.active_pane {
                     Pane::RunsList => Pane::RunDetail,
-                    Pane::StorageBackendsList => Pane::StorageBackendDetail,
+                    Pane::ConnectionsList => Pane::ConnectionDetail,
                     Pane::WebhooksList => Pane::WebhookDetail,
                     Pane::EventRulesList => Pane::EventRuleDetail,
                     Pane::CronWorkflowsList => Pane::CronWorkflowDetail,
@@ -194,8 +194,8 @@ impl<'a> App<'a> {
                 let _ = self.reject_selected_step().await;
             }
             KeyCode::Char('c') => match self.active_pane {
-                Pane::StorageBackendsList | Pane::StorageBackendDetail => {
-                    self.open_storage_backend_dialog(false)
+                Pane::ConnectionsList | Pane::ConnectionDetail => {
+                    self.open_connection_dialog(false)
                 }
                 Pane::WebhooksList | Pane::WebhookDetail => self.open_webhook_dialog(false),
                 Pane::EventRulesList | Pane::EventRuleDetail => self.open_event_rule_dialog(false),
@@ -204,17 +204,15 @@ impl<'a> App<'a> {
                 _ => {}
             },
             KeyCode::Char('e') => match self.active_pane {
-                Pane::StorageBackendsList | Pane::StorageBackendDetail => {
-                    self.open_storage_backend_dialog(true)
-                }
+                Pane::ConnectionsList | Pane::ConnectionDetail => self.open_connection_dialog(true),
                 Pane::WebhooksList | Pane::WebhookDetail => self.open_webhook_dialog(true),
                 Pane::EventRulesList | Pane::EventRuleDetail => self.open_event_rule_dialog(true),
                 Pane::CronWorkflowsList | Pane::CronWorkflowDetail => self.open_cron_dialog(true),
                 _ => {}
             },
             KeyCode::Char('d') => match self.active_pane {
-                Pane::StorageBackendsList | Pane::StorageBackendDetail => {
-                    let _ = self.delete_selected_storage_backend().await;
+                Pane::ConnectionsList | Pane::ConnectionDetail => {
+                    let _ = self.delete_selected_connection().await;
                 }
                 Pane::WebhooksList | Pane::WebhookDetail => {
                     let _ = self.delete_selected_webhook().await;
@@ -492,58 +490,52 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_handle_storage_backend_dialog_key() {
+    async fn test_handle_connection_dialog_key() {
         let mut app = setup_app();
-        app.storage_backend_dialog_active = true;
-        app.storage_backend_inputs = vec![
+        app.connection_dialog_active = true;
+        app.connection_inputs = vec![
             ratatui_textarea::TextArea::default(),
             ratatui_textarea::TextArea::default(),
             ratatui_textarea::TextArea::default(),
             ratatui_textarea::TextArea::default(),
         ];
-        app.storage_backend_focus = 0;
+        app.connection_focus = 0;
 
-        app.handle_storage_backend_dialog_key(KeyEvent::new(
-            KeyCode::Char('y'),
-            KeyModifiers::NONE,
-        ))
-        .await;
-        assert_eq!(app.storage_backend_inputs[0].lines()[0], "y");
-
-        app.handle_storage_backend_dialog_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+        app.handle_connection_dialog_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE))
             .await;
-        assert_eq!(app.storage_backend_focus, 1);
+        assert_eq!(app.connection_inputs[0].lines()[0], "y");
 
-        app.handle_storage_backend_dialog_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT))
+        app.handle_connection_dialog_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
             .await;
-        assert_eq!(app.storage_backend_focus, 0);
+        assert_eq!(app.connection_focus, 1);
+
+        app.handle_connection_dialog_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT))
+            .await;
+        assert_eq!(app.connection_focus, 0);
 
         // Focus 4: Type Options
-        app.storage_backend_focus = 4;
-        app.storage_backend_type_index = 0;
-        app.handle_storage_backend_dialog_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE))
+        app.connection_focus = 4;
+        app.connection_type_index = 0;
+        app.handle_connection_dialog_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE))
             .await;
-        assert_eq!(app.storage_backend_type_index, 1);
-        app.handle_storage_backend_dialog_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE))
+        assert_eq!(app.connection_type_index, 1);
+        app.handle_connection_dialog_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE))
             .await;
-        assert_eq!(app.storage_backend_type_index, 0);
+        assert_eq!(app.connection_type_index, 0);
 
         // Focus 5: Is Default
-        app.storage_backend_focus = 5;
-        app.storage_backend_is_default = false;
-        app.handle_storage_backend_dialog_key(KeyEvent::new(
-            KeyCode::Char(' '),
-            KeyModifiers::NONE,
-        ))
-        .await;
-        assert!(app.storage_backend_is_default);
-        app.handle_storage_backend_dialog_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        app.connection_focus = 5;
+        app.connection_is_default = false;
+        app.handle_connection_dialog_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
             .await;
-        assert!(!app.storage_backend_is_default);
+        assert!(app.connection_is_default);
+        app.handle_connection_dialog_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .await;
+        assert!(!app.connection_is_default);
 
-        app.handle_storage_backend_dialog_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        app.handle_connection_dialog_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
             .await;
-        assert!(!app.storage_backend_dialog_active);
+        assert!(!app.connection_dialog_active);
     }
 
     #[tokio::test]
@@ -732,21 +724,21 @@ mod tests {
         assert!(!app.file_browser_active);
         assert!(!app.delete_run_dialog_active);
 
-        // c on StorageBackendsList opens storage_backend_dialog in create mode
-        app.active_pane = Pane::StorageBackendsList;
+        // c on ConnectionsList opens connection_dialog in create mode
+        app.active_pane = Pane::ConnectionsList;
         app.handle_action_keys(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE))
             .await;
-        assert!(app.storage_backend_dialog_active);
-        assert_eq!(app.storage_backend_edit_id, None);
-        app.storage_backend_dialog_active = false;
+        assert!(app.connection_dialog_active);
+        assert_eq!(app.connection_edit_id, None);
+        app.connection_dialog_active = false;
 
-        // e on StorageBackendsList opens storage_backend_dialog in edit mode
+        // e on ConnectionsList opens connection_dialog in edit mode
         app.handle_action_keys(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE))
             .await;
-        assert!(app.storage_backend_dialog_active);
-        app.storage_backend_dialog_active = false;
+        assert!(app.connection_dialog_active);
+        app.connection_dialog_active = false;
 
-        // d on StorageBackendsList deletes selected (just check no crash since we can't easily mock the API call in this unit test without server mock)
+        // d on ConnectionsList deletes selected (just check no crash since we can't easily mock the API call in this unit test without server mock)
         // Note: the delete method requires the selected item to exist to make API calls, so if none is selected, it should safely do nothing.
         app.handle_action_keys(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE))
             .await;

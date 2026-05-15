@@ -13,13 +13,13 @@ pub(crate) fn render_connections_tab(f: &mut Frame, area: Rect, app: &mut App) {
         .constraints([Constraint::Percentage(30), Constraint::Percentage(70)].as_ref())
         .split(area);
 
-    let list_border_color = if app.active_pane == crate::app::Pane::StorageBackendsList {
+    let list_border_color = if app.active_pane == crate::app::Pane::ConnectionsList {
         Color::Yellow
     } else {
         Color::White
     };
 
-    let detail_border_color = if app.active_pane == crate::app::Pane::StorageBackendDetail {
+    let detail_border_color = if app.active_pane == crate::app::Pane::ConnectionDetail {
         Color::Yellow
     } else {
         Color::White
@@ -47,7 +47,7 @@ pub(crate) fn render_connections_tab(f: &mut Frame, area: Rect, app: &mut App) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" Storage Backends ")
+                .title(" Connections ")
                 .border_style(Style::default().fg(list_border_color)),
         )
         .highlight_style(
@@ -57,7 +57,7 @@ pub(crate) fn render_connections_tab(f: &mut Frame, area: Rect, app: &mut App) {
         )
         .highlight_spacing(HighlightSpacing::Always);
 
-    f.render_stateful_widget(backends_list, chunks[0], &mut app.storage_backends_state);
+    f.render_stateful_widget(backends_list, chunks[0], &mut app.connections_state);
 
     let detail_block = Block::default()
         .borders(Borders::ALL)
@@ -72,7 +72,7 @@ pub(crate) fn render_connections_tab(f: &mut Frame, area: Rect, app: &mut App) {
         return;
     }
 
-    if let Some(backend) = &app.selected_storage_backend {
+    if let Some(backend) = &app.selected_connection {
         let mut masked_config = backend.config.clone();
         if let Some(obj) = masked_config.as_object_mut() {
             if obj.contains_key("secret_key") {
@@ -104,10 +104,10 @@ pub(crate) fn render_connection_dialog(f: &mut Frame, app: &mut App) {
     let area = centered_rect(60, 60, f.area());
     f.render_widget(Clear, area);
 
-    let title = if app.storage_backend_edit_id.is_some() {
-        " Edit Storage Backend "
+    let title = if app.connection_edit_id.is_some() {
+        " Edit Connection "
     } else {
-        " Create Storage Backend "
+        " Create Connection "
     };
 
     let block = Block::default()
@@ -141,8 +141,8 @@ pub(crate) fn render_connection_dialog(f: &mut Frame, app: &mut App) {
     ];
 
     for i in 0..4 {
-        let mut text_area = app.storage_backend_inputs[i].clone();
-        if app.storage_backend_focus == i {
+        let mut text_area = app.connection_inputs[i].clone();
+        if app.connection_focus == i {
             text_area.set_block(
                 Block::default()
                     .borders(Borders::ALL)
@@ -156,7 +156,7 @@ pub(crate) fn render_connection_dialog(f: &mut Frame, app: &mut App) {
     }
 
     // Type filter
-    let type_block = if app.storage_backend_focus == 4 {
+    let type_block = if app.connection_focus == 4 {
         Block::default()
             .borders(Borders::ALL)
             .title("Type (Arrows to change):")
@@ -164,11 +164,11 @@ pub(crate) fn render_connection_dialog(f: &mut Frame, app: &mut App) {
     } else {
         Block::default().borders(Borders::ALL).title("Type:")
     };
-    let type_text = crate::app::BACKEND_TYPE_OPTIONS[app.storage_backend_type_index];
+    let type_text = crate::app::BACKEND_TYPE_OPTIONS[app.connection_type_index];
     f.render_widget(Paragraph::new(type_text).block(type_block), chunks[4]);
 
     // Is Default
-    let default_block = if app.storage_backend_focus == 5 {
+    let default_block = if app.connection_focus == 5 {
         Block::default()
             .borders(Borders::ALL)
             .title("Is Default SFS (Space to toggle):")
@@ -178,7 +178,7 @@ pub(crate) fn render_connection_dialog(f: &mut Frame, app: &mut App) {
             .borders(Borders::ALL)
             .title("Is Default SFS:")
     };
-    let default_text = if app.storage_backend_is_default {
+    let default_text = if app.connection_is_default {
         "Yes"
     } else {
         "No"
@@ -186,7 +186,7 @@ pub(crate) fn render_connection_dialog(f: &mut Frame, app: &mut App) {
     f.render_widget(Paragraph::new(default_text).block(default_block), chunks[5]);
 
     f.render_widget(
-        Paragraph::new("Ctrl+Enter to Save, Esc to Cancel")
+        Paragraph::new("Ctrl+Enter to Save, Ctrl+T to Test, Esc to Cancel")
             .style(Style::default().fg(Color::Yellow)),
         chunks[6],
     );

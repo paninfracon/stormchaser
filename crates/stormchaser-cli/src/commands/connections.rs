@@ -7,7 +7,7 @@ use std::fs;
 use std::path::PathBuf;
 
 #[derive(Subcommand)]
-pub enum StorageCommands {
+pub enum ConnectionCommands {
     /// List storage backends
     List,
     /// Create a storage backend
@@ -26,6 +26,12 @@ pub enum StorageCommands {
         /// Optional AWS role ARN to assume
         #[arg(long)]
         aws_assume_role_arn: Option<String>,
+        /// Optional encrypted credentials (password/token)
+        #[arg(long)]
+        encrypted_credentials: Option<String>,
+        /// Validate the connection before creating it
+        #[arg(long)]
+        test: bool,
     },
     /// Get storage backend details
     Get { id: stormchaser_model::ConnectionId },
@@ -44,39 +50,90 @@ pub enum StorageCommands {
         /// Optional AWS role ARN to assume
         #[arg(long)]
         aws_assume_role_arn: Option<String>,
+        /// Optional encrypted credentials (password/token)
+        #[arg(long)]
+        encrypted_credentials: Option<String>,
     },
     /// Delete a storage backend
     Delete { id: stormchaser_model::ConnectionId },
+    /// Test a connection payload without saving it
+    Test {
+        /// The type of connection (e.g., http_api, s3, postgres)
+        #[arg(long)]
+        connection_type: String,
+        /// Path to JSON configuration file
+        #[arg(long)]
+        config: PathBuf,
+        /// Optional AWS role ARN to assume
+        #[arg(long)]
+        aws_assume_role_arn: Option<String>,
+    },
 }
 
 pub async fn handle(
     url: &str,
     token: Option<&str>,
     http_client: &reqwest_middleware::ClientWithMiddleware,
-    command: StorageCommands,
+    command: ConnectionCommands,
 ) -> Result<()> {
     match command {
-        StorageCommands::List => {
+        ConnectionCommands::List => {
             let token = require_token(token)?;
             let res = http_client
-                .get(format!("{}/api/v1/storage-backends", url))
+                .get(format!("{}/api/v1/connections", url))
                 .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
                 .send()
                 .await?;
             handle_response(res).await?;
         }
-        StorageCommands::Create {
+        ConnectionCommands::Create {
             name,
             connection_type,
             config,
             default_sfs,
             description,
             aws_assume_role_arn,
+            encrypted_credentials,
+            test,
         } => {
             let config_json: Value = serde_json::from_str(&fs::read_to_string(config)?)?;
             let token = require_token(token)?;
+
+            if test {
+                let test_res = http_client
+                    .post(format!("{}/api/v1/connections/test", url))
+                    .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
+                    .json(&json!({
+                        "connection_type": connection_type,
+                        "config": config_json,
+                        "aws_assume_role_arn": aws_assume_role_arn,
+                    }))
+                    .send()
+                    .await?;
+
+                if !test_res.status().is_success() {
+                    anyhow::bail!("Test request failed: {}", test_res.status());
+                }
+
+                let body: Value = test_res.json().await?;
+                let success = body
+                    .get("success")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let msg = body
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Unknown");
+
+                if !success {
+                    anyhow::bail!("Connection test failed: {}. Aborting creation.", msg);
+                } else {
+                    println!("Connection test passed: {}", msg);
+                }
+            }
+
             let res = http_client
-                .post(format!("{}/api/v1/storage-backends", url))
+                .post(format!("{}/api/v1/connections", url))
                 .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
                 .json(&json!({
                     "name": name,
@@ -85,27 +142,29 @@ pub async fn handle(
                     "is_default_sfs": default_sfs,
                     "description": description,
                     "aws_assume_role_arn": aws_assume_role_arn,
+                    "encrypted_credentials": encrypted_credentials,
                 }))
                 .send()
                 .await?;
             handle_response(res).await?;
         }
-        StorageCommands::Get { id } => {
+        ConnectionCommands::Get { id } => {
             let token = require_token(token)?;
             let res = http_client
-                .get(format!("{}/api/v1/storage-backends/{}", url, id))
+                .get(format!("{}/api/v1/connections/{}", url, id))
                 .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
                 .send()
                 .await?;
             handle_response(res).await?;
         }
-        StorageCommands::Update {
+        ConnectionCommands::Update {
             id,
             name,
             config,
             default_sfs,
             description,
             aws_assume_role_arn,
+            encrypted_credentials,
         } => {
             let mut body = json!({});
             if let Some(n) = name {
@@ -123,21 +182,43 @@ pub async fn handle(
             if let Some(arn) = aws_assume_role_arn {
                 body["aws_assume_role_arn"] = json!(arn);
             }
+            if let Some(credentials) = encrypted_credentials {
+                body["encrypted_credentials"] = json!(credentials);
+            }
 
             let token = require_token(token)?;
             let res = http_client
-                .patch(format!("{}/api/v1/storage-backends/{}", url, id))
+                .patch(format!("{}/api/v1/connections/{}", url, id))
                 .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
                 .json(&body)
                 .send()
                 .await?;
             handle_response(res).await?;
         }
-        StorageCommands::Delete { id } => {
+        ConnectionCommands::Delete { id } => {
             let token = require_token(token)?;
             let res = http_client
-                .delete(format!("{}/api/v1/storage-backends/{}", url, id))
+                .delete(format!("{}/api/v1/connections/{}", url, id))
                 .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
+                .send()
+                .await?;
+            handle_response(res).await?;
+        }
+        ConnectionCommands::Test {
+            connection_type,
+            config,
+            aws_assume_role_arn,
+        } => {
+            let config_json: Value = serde_json::from_str(&fs::read_to_string(config)?)?;
+            let token = require_token(token)?;
+            let res = http_client
+                .post(format!("{}/api/v1/connections/test", url))
+                .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
+                .json(&json!({
+                    "connection_type": connection_type,
+                    "config": config_json,
+                    "aws_assume_role_arn": aws_assume_role_arn,
+                }))
                 .send()
                 .await?;
             handle_response(res).await?;
@@ -157,14 +238,14 @@ mod tests {
     async fn test_storage_list() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .and(path("/api/v1/storage-backends"))
+            .and(path("/api/v1/connections"))
             .and(header(reqwest::header::AUTHORIZATION, "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
             .mount(&server)
             .await;
 
         let client = ClientBuilder::new(reqwest::Client::new()).build();
-        let cmd = StorageCommands::List;
+        let cmd = ConnectionCommands::List;
 
         let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
         assert!(result.is_ok());
@@ -174,7 +255,7 @@ mod tests {
     async fn test_storage_create() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
-            .and(path("/api/v1/storage-backends"))
+            .and(path("/api/v1/connections"))
             .and(header(reqwest::header::AUTHORIZATION, "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "created"})))
             .mount(&server)
@@ -186,13 +267,15 @@ mod tests {
         writeln!(temp_file, "{{\"bucket\":\"my-bucket\"}}").unwrap();
 
         let client = ClientBuilder::new(reqwest::Client::new()).build();
-        let cmd = StorageCommands::Create {
+        let cmd = ConnectionCommands::Create {
             name: "test-storage".to_string(),
             connection_type: "s3".to_string(),
             config: temp_file.path().to_path_buf(),
             default_sfs: true,
             description: None,
             aws_assume_role_arn: None,
+            encrypted_credentials: None,
+            test: false,
         };
 
         let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
@@ -204,14 +287,14 @@ mod tests {
         let server = MockServer::start().await;
         let id = stormchaser_model::ConnectionId::new_v4();
         Mock::given(method("DELETE"))
-            .and(path(format!("/api/v1/storage-backends/{}", id)))
+            .and(path(format!("/api/v1/connections/{}", id)))
             .and(header(reqwest::header::AUTHORIZATION, "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "deleted"})))
             .mount(&server)
             .await;
 
         let client = ClientBuilder::new(reqwest::Client::new()).build();
-        let cmd = StorageCommands::Delete { id };
+        let cmd = ConnectionCommands::Delete { id };
 
         let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
         assert!(result.is_ok());

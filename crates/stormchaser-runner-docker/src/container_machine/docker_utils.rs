@@ -187,6 +187,7 @@ mod tests {
             encryption_key: None,
             storage: None,
             test_report_urls: None,
+            registry_auth: None,
         };
         DockerContainerMachine::new(docker, metadata, None)
     }
@@ -216,6 +217,8 @@ mod tests {
         let machine = get_dummy_machine();
         let spec = CommonContainerSpec {
             image: "alpine:latest".into(),
+            registry_connection: None,
+            connections: None,
             command: Some(vec!["echo".into()]),
             args: Some(vec!["hello".into()]),
             env: None,

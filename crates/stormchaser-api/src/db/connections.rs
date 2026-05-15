@@ -25,12 +25,13 @@ pub async fn create_connection(
     connection_type: &connections::ConnectionType,
     config: &Value,
     aws_assume_role_arn: &Option<String>,
+    encrypted_credentials: &Option<String>,
     is_default_sfs: bool,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"
-        INSERT INTO connections (id, name, description, connection_type, config, aws_assume_role_arn, is_default_sfs)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO connections (id, name, description, connection_type, config, aws_assume_role_arn, encrypted_credentials, is_default_sfs)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         "#,
     )
     .bind(id)
@@ -39,6 +40,7 @@ pub async fn create_connection(
     .bind(connection_type)
     .bind(config)
     .bind(aws_assume_role_arn)
+    .bind(encrypted_credentials)
     .bind(is_default_sfs)
     .execute(&mut **tx)
     .await?;
@@ -112,6 +114,16 @@ pub async fn update_connection(
         };
         separated
             .push("aws_assume_role_arn = ")
+            .push_bind_unseparated(value);
+    }
+    if let Some(credentials) = &payload.encrypted_credentials {
+        let value: Option<&str> = if credentials.is_empty() {
+            None
+        } else {
+            Some(credentials.as_str())
+        };
+        separated
+            .push("encrypted_credentials = ")
             .push_bind_unseparated(value);
     }
     if let Some(is_default) = payload.is_default_sfs {

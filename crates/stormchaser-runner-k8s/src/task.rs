@@ -58,6 +58,7 @@ async fn execute_job_on_cluster(
     step_dsl: dsl::Step,
     storage: Option<HashMap<String, Value>>,
     test_report_urls: Option<HashMap<String, Value>>,
+    registry_auth: Option<Value>,
     runner_id: String,
     nats_client: async_nats::Client,
     encryption_key: Option<String>,
@@ -76,6 +77,7 @@ async fn execute_job_on_cluster(
         encryption_key,
         storage,
         test_report_urls,
+        registry_auth,
     };
 
     let machine = job_machine::K8sJobMachine::new(client.clone(), metadata.clone());
@@ -316,6 +318,8 @@ pub async fn handle_task(
         serde_json::from_value(payload["storage"].clone()).ok();
     let test_report_urls: Option<HashMap<String, Value>> =
         serde_json::from_value(payload["test_report_urls"].clone()).ok();
+    let registry_auth: Option<Value> =
+        serde_json::from_value(payload["registry_auth"].clone()).ok();
 
     let in_progress_msg = msg.clone();
     let in_progress_handle = tokio::spawn(async move {
@@ -357,6 +361,7 @@ pub async fn handle_task(
                 step_dsl,
                 storage,
                 test_report_urls,
+                registry_auth,
                 runner_id,
                 nats_client,
                 encryption_key,

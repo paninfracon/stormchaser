@@ -79,6 +79,7 @@ pub use routes::*;
         routes::connections::get_connection,
         routes::connections::update_connection,
         routes::connections::delete_connection,
+        routes::connections::test_connection,
         routes::connections::list_run_artifacts,
         routes::connections::list_run_test_reports,
         routes::connections::list_run_test_summaries,
@@ -226,7 +227,8 @@ pub fn app(state: AppState) -> Router {
             get(get_connection)
                 .patch(update_connection)
                 .delete(delete_connection),
-        );
+        )
+        .route("/connections/test", post(test_connection));
 
     #[cfg(feature = "mcp")]
     {

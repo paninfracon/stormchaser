@@ -225,6 +225,8 @@ pub struct StepScheduledEvent {
     pub storage: Option<HashMap<String, Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub test_report_urls: Option<HashMap<String, Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registry_auth: Option<Value>,
     pub timestamp: DateTime<Utc>,
 }
 

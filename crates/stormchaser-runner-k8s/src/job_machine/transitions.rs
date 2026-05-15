@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use futures::StreamExt;
 use k8s_openapi::api::batch::v1::Job;
-use k8s_openapi::api::core::v1::Pod;
+use k8s_openapi::api::core::v1::{Pod, Secret};
 use kube::api::{
     Api, DeleteParams, ListParams, PostParams, PropagationPolicy, WatchEvent, WatchParams,
 };
@@ -38,20 +38,28 @@ impl K8sJobMachine<state::Initialized> {
             job_name, self.metadata.namespace
         );
         let jobs: Api<Job> = Api::namespaced(self.client.clone(), &self.metadata.namespace);
+        let secrets: Api<Secret> = Api::namespaced(self.client.clone(), &self.metadata.namespace);
         let dp = DeleteParams {
             propagation_policy: Some(PropagationPolicy::Background),
             ..Default::default()
         };
         jobs.delete(job_name, &dp).await?;
+        let secret_name = format!("{}-auth", job_name);
+        if let Err(e) = secrets.delete(&secret_name, &dp).await {
+            if !matches!(e, kube::Error::Api(ref err) if err.code == 404) {
+                return Err(e.into());
+            }
+        }
         Ok(())
     }
 
     /// Starts the Kubernetes job, transitioning to either Running or Failed state.
     pub async fn start(self) -> Result<StartResult> {
+        let step_id_prefix: String = self.metadata.step_id.to_string().chars().take(8).collect();
         let job_name = format!(
             "storm-{}-{}",
             self.metadata.step_dsl.name.to_lowercase().replace('_', "-"),
-            &self.metadata.step_id.to_string()[..8]
+            step_id_prefix
         );
 
         info!(
@@ -86,6 +94,67 @@ impl K8sJobMachine<state::Initialized> {
         let sfs_pvc_name = std::env::var("STORMCHASER_SFS_PVC_NAME").ok();
         let job =
             k8s_utils::do_build_job_spec(&job_name, &self.metadata, agent_image, sfs_pvc_name)?;
+
+        if let Some(auth) = &self.metadata.registry_auth {
+            use base64::{engine::general_purpose, Engine as _};
+            use std::collections::BTreeMap;
+
+            let secret_name = format!("{}-auth", job_name);
+            let username = auth.get("username").and_then(|v| v.as_str()).unwrap_or("");
+            let password = auth.get("password").and_then(|v| v.as_str()).unwrap_or("");
+            let url = auth
+                .get("url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("https://index.docker.io/v1/");
+            let url = if url.is_empty() {
+                "https://index.docker.io/v1/"
+            } else {
+                url
+            };
+
+            let auth_string = format!("{}:{}", username, password);
+            let auth_base64 = general_purpose::STANDARD.encode(auth_string);
+
+            let dockerconfigjson = serde_json::json!({
+                "auths": {
+                    url: {
+                        "username": username,
+                        "password": password,
+                        "auth": auth_base64
+                    }
+                }
+            });
+
+            let mut secret = Secret::default();
+            secret.metadata.name = Some(secret_name.clone());
+            secret.type_ = Some("kubernetes.io/dockerconfigjson".to_string());
+            let mut data = BTreeMap::new();
+            data.insert(
+                ".dockerconfigjson".to_string(),
+                k8s_openapi::ByteString(serde_json::to_vec(&dockerconfigjson).unwrap()),
+            );
+            secret.data = Some(data);
+
+            let secrets: Api<Secret> =
+                Api::namespaced(self.client.clone(), &self.metadata.namespace);
+            if let Err(e) = secrets.create(&PostParams::default(), &secret).await {
+                if !matches!(e, kube::Error::Api(ref err) if err.code == 409) {
+                    return Ok(StartResult::Failed(K8sJobMachine {
+                        client: self.client,
+                        metadata: self.metadata,
+                        state: state::Finished {
+                            result: JobState::Failed(
+                                format!(
+                                    "Failed to create image pull secret {}: {}",
+                                    secret_name, e
+                                ),
+                                JobMetrics::default(),
+                            ),
+                        },
+                    }));
+                }
+            }
+        }
 
         let jobs: Api<Job> = Api::namespaced(self.client.clone(), &self.metadata.namespace);
 

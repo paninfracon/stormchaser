@@ -39,6 +39,20 @@ pub(crate) fn build_k8s_pod_spec(
     metadata: &JobMetadata,
     step_spec: &StepSpec,
 ) -> PodTemplateSpec {
+    let image_pull_secrets = if metadata.registry_auth.is_some() {
+        let step_id_prefix: String = metadata.step_id.to_string().chars().take(8).collect();
+        let secret_name = format!(
+            "storm-{}-{}-auth",
+            metadata.step_dsl.name.to_lowercase().replace('_', "-"),
+            step_id_prefix
+        );
+        Some(vec![k8s_openapi::api::core::v1::LocalObjectReference {
+            name: secret_name,
+        }])
+    } else {
+        None
+    };
+
     PodTemplateSpec {
         metadata: Some(ObjectMeta {
             labels: Some(BTreeMap::from([
@@ -69,6 +83,7 @@ pub(crate) fn build_k8s_pod_spec(
                 .clone()
                 .map(|ns| ns.into_iter().collect()),
             service_account_name: step_spec.service_account_name.clone(),
+            image_pull_secrets,
             ..Default::default()
         }),
     }

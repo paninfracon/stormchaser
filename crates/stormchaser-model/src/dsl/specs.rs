@@ -10,6 +10,10 @@ use super::{Input, StorageMount};
 pub struct CommonContainerSpec {
     /// Container image to run.
     pub image: String,
+    /// Connection to use for private registry authentication.
+    pub registry_connection: Option<String>,
+    /// List of connections to inject as environment variables.
+    pub connections: Option<Vec<String>>,
     /// Override the container entrypoint.
     pub command: Option<Vec<String>>,
     /// Arguments passed to the command.
@@ -31,6 +35,10 @@ pub struct CommonContainerSpec {
 pub struct K8sJobSpec {
     /// Container image.
     pub image: String,
+    /// Connection to use for private registry authentication.
+    pub registry_connection: Option<String>,
+    /// List of connections to inject as environment variables.
+    pub connections: Option<Vec<String>>,
     /// Command.
     pub command: Option<Vec<String>>,
     /// Arguments.
@@ -160,9 +168,20 @@ pub struct LambdaInvokeSpec {
     pub role_session_name: Option<String>, // Optional session name for the assumed role
 }
 
+/// Specification for a database query execution step.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SqlExecuteSpec {
+    /// The database connection name.
+    pub connection: String,
+    /// The SQL query to execute.
+    pub query: String,
+}
+
 /// Specification for checking out a Git repository.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct GitCheckoutSpec {
+    /// Connection name to use for authentication.
+    pub connection: Option<String>,
     /// Repository URL.
     pub repo: String,
     /// Git reference (branch, tag, commit).
@@ -223,6 +242,8 @@ pub struct RestApiResponseExtractor {
 /// Specification for making a REST API call.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct RestApiSpec {
+    /// Connection name.
+    pub connection: Option<String>,
     /// REST API URL.
     pub url: String,
     /// HTTP method.

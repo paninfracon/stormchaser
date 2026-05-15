@@ -12,6 +12,8 @@ pub mod jq;
 pub mod lambda;
 /// REST API step.
 pub mod rest_api;
+/// SQL Execution step.
+pub mod sql_execute;
 /// Terraform step orchestration.
 pub mod terraform;
 /// JUnit test report email step.

@@ -38,12 +38,78 @@ async fn apply_intrinsic_mutations(
     run_id: RunId,
     step_type: &mut String,
     resolved_spec: &mut Value,
+    pool: &PgPool,
 ) -> Result<()> {
-    super::intrinsic::git_checkout::mutate(step_type, resolved_spec);
+    super::intrinsic::git_checkout::mutate(step_type, resolved_spec, Some(pool)).await?;
     super::intrinsic::jq::mutate_if_has_files(step_type, resolved_spec);
     super::intrinsic::terraform::mutate_if_terraform(run_id.into_inner(), step_type, resolved_spec)
         .await?;
     super::intrinsic::terraform::mutate_if_terraform_approval(step_type, resolved_spec);
+
+    // Inject generic connections
+    if step_type == "RunContainer" {
+        if let Ok(mut spec) =
+            serde_json::from_value::<dsl::CommonContainerSpec>(resolved_spec.clone())
+        {
+            inject_connection_env_vars(&spec.connections, &mut spec.env, pool).await?;
+            if let Ok(new_spec) = serde_json::to_value(spec) {
+                *resolved_spec = new_spec;
+            }
+        }
+    } else if step_type == "RunK8sJob" {
+        if let Ok(mut spec) = serde_json::from_value::<dsl::K8sJobSpec>(resolved_spec.clone()) {
+            inject_connection_env_vars(&spec.connections, &mut spec.env, pool).await?;
+            if let Ok(new_spec) = serde_json::to_value(spec) {
+                *resolved_spec = new_spec;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn inject_connection_env_vars(
+    connections: &Option<Vec<String>>,
+    env: &mut Option<Vec<dsl::EnvVar>>,
+    pool: &PgPool,
+) -> Result<()> {
+    let Some(connection_names) = connections else {
+        return Ok(());
+    };
+
+    let mut envs = env.clone().unwrap_or_default();
+    for conn_name in connection_names {
+        if let Some(conn) = crate::db::connections::get_storage_backend_by_name::<
+            _,
+            stormchaser_model::Connection,
+        >(pool, conn_name)
+        .await?
+        {
+            let prefix = format!(
+                "STORMCHASER_CONN_{}_",
+                conn_name.to_uppercase().replace("-", "_")
+            );
+            if let Some(url) = conn.config.get("url").and_then(|v| v.as_str()) {
+                envs.push(dsl::EnvVar {
+                    name: format!("{}URL", prefix),
+                    value: url.to_string(),
+                });
+            }
+            if let Some(user) = conn.config.get("username").and_then(|v| v.as_str()) {
+                envs.push(dsl::EnvVar {
+                    name: format!("{}USERNAME", prefix),
+                    value: user.to_string(),
+                });
+            }
+            if let Some(creds) = &conn.encrypted_credentials {
+                envs.push(dsl::EnvVar {
+                    name: format!("{}PASSWORD", prefix),
+                    value: creds.to_string(),
+                });
+            }
+        }
+    }
+    *env = Some(envs);
     Ok(())
 }
 
@@ -285,6 +351,18 @@ async fn try_dispatch_intrinsic(
     {
         return Ok(true);
     }
+    if super::intrinsic::sql_execute::try_dispatch(
+        run_id,
+        step_instance_id,
+        step_type,
+        resolved_spec,
+        pool.clone(),
+        nats_client.clone(),
+    )
+    .await?
+    {
+        return Ok(true);
+    }
     if super::intrinsic::webhook::try_dispatch(
         run_id,
         step_instance_id,
@@ -411,7 +489,7 @@ pub async fn dispatch_step_instance(
     let mut step_type = step_type.to_string();
     let mut resolved_spec = resolved_spec.clone();
 
-    apply_intrinsic_mutations(run_id, &mut step_type, &mut resolved_spec).await?;
+    apply_intrinsic_mutations(run_id, &mut step_type, &mut resolved_spec, &pool).await?;
 
     let run_context = fetch_run_context(run_id, &pool).await?;
     let workflow: dsl::Workflow = serde_json::from_value(run_context.workflow_definition.clone())
@@ -443,6 +521,56 @@ pub async fn dispatch_step_instance(
     let test_report_urls =
         setup_test_report_urls(run_id, step_instance_id, step_name, &pool, &workflow).await?;
 
+    let mut registry_auth = None;
+    if let Some(reg_conn_name) = resolved_spec
+        .get("registry_connection")
+        .and_then(|v| v.as_str())
+    {
+        let conn = crate::db::connections::get_storage_backend_by_name::<
+            _,
+            stormchaser_model::Connection,
+        >(&pool, reg_conn_name)
+        .await?
+        .with_context(|| format!("Registry connection '{}' not found", reg_conn_name))?;
+
+        if conn.connection_type != stormchaser_model::connections::ConnectionType::Oci
+            && conn.connection_type != stormchaser_model::connections::ConnectionType::Jfrog
+        {
+            anyhow::bail!(
+                "Registry connection '{}' has unsupported type {:?}; expected oci or jfrog",
+                reg_conn_name,
+                conn.connection_type
+            );
+        }
+
+        let username = conn
+            .config
+            .get("username")
+            .and_then(|v| v.as_str())
+            .filter(|v| !v.is_empty())
+            .with_context(|| {
+                format!(
+                    "Registry connection '{}' is missing required config.username",
+                    reg_conn_name
+                )
+            })?;
+        let password = conn
+            .encrypted_credentials
+            .filter(|v| !v.is_empty())
+            .with_context(|| {
+                format!(
+                    "Registry connection '{}' is missing encrypted credentials",
+                    reg_conn_name
+                )
+            })?;
+
+        registry_auth = Some(serde_json::json!({
+            "username": username,
+            "password": password,
+            "url": conn.config.get("url").and_then(|v| v.as_str()).unwrap_or(""),
+        }));
+    }
+
     let payload = StepScheduledEvent {
         run_id,
         step_id: step_instance_id,
@@ -452,6 +580,7 @@ pub async fn dispatch_step_instance(
         params: Some(resolved_params.clone()),
         storage: Some(storage_urls.into_iter().collect()),
         test_report_urls: Some(test_report_urls.into_iter().collect()),
+        registry_auth,
         timestamp: Utc::now(),
         event_type: EventType::Step(StepEventType::Scheduled),
         step_dsl: dsl_step_val,

@@ -69,6 +69,9 @@ rmcp = { version = "1.6.0", features = ["server", "macros", "transport-streamabl
 rmcp-openapi = { version = "0.26.6", optional = true }
 url = { version = "2.5.8", optional = true }
 jsonschema.workspace = true
+aws-config = { workspace = true }
+aws-sdk-s3 = { workspace = true }
+aws-sdk-sts = { workspace = true }
 
 [dev-dependencies]
 rand = "0.8"

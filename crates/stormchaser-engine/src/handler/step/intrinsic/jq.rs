@@ -38,6 +38,8 @@ pub fn mutate_if_has_files(step_type: &mut String, resolved_spec: &mut Value) {
             }
 
             let container_spec = dsl::CommonContainerSpec {
+                registry_connection: None,
+                connections: None,
                 image: "ghcr.io/jqlang/jq:latest".to_string(),
                 command: Some(vec!["sh".to_string(), "-c".to_string(), script]),
                 args: None,

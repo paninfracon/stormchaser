@@ -44,6 +44,8 @@ pub struct JobMetadata {
     pub storage: Option<HashMap<String, Value>>,
     /// Optional URLs for uploading test reports.
     pub test_report_urls: Option<HashMap<String, Value>>,
+    /// Optional private registry authentication details.
+    pub registry_auth: Option<Value>,
 }
 
 /// Metrics collected after a job execution completes.

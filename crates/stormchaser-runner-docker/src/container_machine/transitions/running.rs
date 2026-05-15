@@ -493,6 +493,7 @@ mod tests {
             encryption_key: None,
             storage: Some(storage),
             test_report_urls: None,
+            registry_auth: None,
         }
     }
 

@@ -150,41 +150,46 @@ impl<'a> App<'a> {
         }
     }
 
-    pub async fn handle_storage_backend_dialog_key(&mut self, key: KeyEvent) {
-        let focus_count = self.storage_backend_inputs.len() + 2; // +2 for type dropdown and is_default
+    pub async fn handle_connection_dialog_key(&mut self, key: KeyEvent) {
+        let focus_count = self.connection_inputs.len() + 2; // +2 for type dropdown and is_default
         match key.code {
             KeyCode::Esc => {
-                self.storage_backend_dialog_active = false;
+                self.connection_dialog_active = false;
             }
             KeyCode::Enter
                 if key
                     .modifiers
                     .contains(ratatui::crossterm::event::KeyModifiers::CONTROL) =>
             {
-                let _ = self.submit_storage_backend_form().await;
+                let _ = self.submit_connection_form().await;
+            }
+            KeyCode::Char('t')
+                if key
+                    .modifiers
+                    .contains(ratatui::crossterm::event::KeyModifiers::CONTROL) =>
+            {
+                let _ = self.test_connection_form().await;
             }
             KeyCode::BackTab => {
-                self.storage_backend_focus =
-                    (self.storage_backend_focus + focus_count - 1) % focus_count;
+                self.connection_focus = (self.connection_focus + focus_count - 1) % focus_count;
             }
             KeyCode::Tab => {
-                self.storage_backend_focus = (self.storage_backend_focus + 1) % focus_count;
+                self.connection_focus = (self.connection_focus + 1) % focus_count;
             }
-            KeyCode::Left if self.storage_backend_focus == 4 => {
+            KeyCode::Left if self.connection_focus == 4 => {
                 let opts_len = crate::app::BACKEND_TYPE_OPTIONS.len();
-                self.storage_backend_type_index =
-                    (self.storage_backend_type_index + opts_len - 1) % opts_len;
+                self.connection_type_index = (self.connection_type_index + opts_len - 1) % opts_len;
             }
-            KeyCode::Right if self.storage_backend_focus == 4 => {
+            KeyCode::Right if self.connection_focus == 4 => {
                 let opts_len = crate::app::BACKEND_TYPE_OPTIONS.len();
-                self.storage_backend_type_index = (self.storage_backend_type_index + 1) % opts_len;
+                self.connection_type_index = (self.connection_type_index + 1) % opts_len;
             }
-            KeyCode::Char(' ') | KeyCode::Enter if self.storage_backend_focus == 5 => {
-                self.storage_backend_is_default = !self.storage_backend_is_default;
+            KeyCode::Char(' ') | KeyCode::Enter if self.connection_focus == 5 => {
+                self.connection_is_default = !self.connection_is_default;
             }
             _ => {
-                if self.storage_backend_focus < 4 {
-                    self.storage_backend_inputs[self.storage_backend_focus].input(key);
+                if self.connection_focus < 4 {
+                    self.connection_inputs[self.connection_focus].input(key);
                 }
             }
         }

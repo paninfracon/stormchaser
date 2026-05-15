@@ -303,6 +303,7 @@ async fn handle_orphaned_container(
                             step_dsl,
                             storage: None,
                             test_report_urls: None,
+                            registry_auth: None,
                             encryption_key: key_clone,
                             received_at,
                         },
@@ -324,6 +325,7 @@ async fn handle_orphaned_container(
             step_dsl: step_dsl.clone(),
             storage: None,
             test_report_urls: None,
+            registry_auth: None,
             encryption_key: key_clone,
             received_at,
         };
@@ -460,6 +462,9 @@ pub async fn handle_task(
     let test_report_urls: Option<HashMap<String, Value>> =
         serde_json::from_value(payload["test_report_urls"].clone()).ok();
 
+    let registry_auth: Option<Value> =
+        serde_json::from_value(payload["registry_auth"].clone()).ok();
+
     let in_progress_msg = msg.clone();
     let in_progress_handle = tokio::spawn(async move {
         loop {
@@ -494,6 +499,7 @@ pub async fn handle_task(
             step_dsl,
             storage,
             test_report_urls,
+            registry_auth,
             encryption_key,
             received_at,
         },

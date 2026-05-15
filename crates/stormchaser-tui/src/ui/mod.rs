@@ -35,8 +35,8 @@ pub fn ui(f: &mut Frame, app: &mut App) {
         .constraints([Constraint::Min(0), Constraint::Length(3)].as_ref())
         .split(f.area());
 
-    if app.active_pane == crate::app::Pane::StorageBackendsList
-        || app.active_pane == crate::app::Pane::StorageBackendDetail
+    if app.active_pane == crate::app::Pane::ConnectionsList
+        || app.active_pane == crate::app::Pane::ConnectionDetail
     {
         render_connections_tab(f, chunks[0], app);
     } else if app.active_pane == crate::app::Pane::WebhooksList
@@ -75,7 +75,7 @@ pub fn ui(f: &mut Frame, app: &mut App) {
         render_filter_dialog(f, app);
     } else if app.schedule_git_dialog_active {
         render_schedule_git_dialog(f, app);
-    } else if app.storage_backend_dialog_active {
+    } else if app.connection_dialog_active {
         render_connection_dialog(f, app);
     } else if app.webhook_dialog_active {
         render_webhook_dialog(f, app);

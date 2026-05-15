@@ -79,11 +79,11 @@ pub enum Commands {
         command: rules::RuleCommands,
     },
 
-    /// Manage storage backends
-    Storage {
-        /// Subcommands for storage
+    /// Manage connections
+    Connections {
+        /// Subcommands for connections
         #[command(subcommand)]
-        command: connections::StorageCommands,
+        command: connections::ConnectionCommands,
     },
 
     /// Manage scheduled workflows (Cron)
@@ -155,7 +155,7 @@ pub async fn run_cli(cli: Cli) -> Result<()> {
             rules::handle(&cli.url, token_opt, &http_client, command).await?;
         }
 
-        Commands::Storage { command } => {
+        Commands::Connections { command } => {
             connections::handle(&cli.url, token_opt, &http_client, command).await?;
         }
 
