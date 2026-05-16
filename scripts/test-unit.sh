@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+# Source test environment variables and bring up isolated infrastructure
+source ./scripts/test-env.sh
+./scripts/test-env-up.sh
+
 echo "Running Unit Tests..."
 export SQLX_OFFLINE=true
 

@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+# Source test environment variables and bring up isolated infrastructure
+source ./scripts/test-env.sh
+./scripts/test-env-up.sh
+
 echo "Running Integration Tests..."
 export SQLX_OFFLINE=true
 export STORMCHASER_CERT_DIR=${STORMCHASER_CERT_DIR:-./tests/certs}
