@@ -132,6 +132,19 @@ pub async fn approve_step_link(
     };
 
     let publish_result = if is_approve {
+        let outputs = match serde_json::from_value(payload.inputs) {
+            Ok(outputs) => Some(outputs),
+            Err(error) => {
+                tracing::warn!(
+                    "Approval link inputs for run {} step {} could not be deserialized: {:?}",
+                    payload.run_id,
+                    payload.step_id,
+                    error
+                );
+                return (StatusCode::BAD_REQUEST, "Invalid approval inputs payload")
+                    .into_response();
+            }
+        };
         let completion_event = StepCompletedEvent {
             run_id: payload.run_id,
             step_id: payload.step_id,
@@ -142,7 +155,7 @@ pub async fn approve_step_link(
             storage_hashes: None,
             artifacts: None,
             test_reports: None,
-            outputs: serde_json::from_value(payload.inputs).ok(),
+            outputs,
             timestamp: Utc::now(),
         };
         publish_cloudevent(
@@ -152,7 +165,8 @@ pub async fn approve_step_link(
             ))),
             EventType::Step(StepEventType::Completed),
             EventSource::Api,
-            serde_json::to_value(completion_event).unwrap(),
+            serde_json::to_value(completion_event)
+                .expect("serializing StepCompletedEvent should not fail"),
             Some(SchemaVersion::new("1.0".to_string())),
             None,
         )
@@ -179,7 +193,8 @@ pub async fn approve_step_link(
             ))),
             EventType::Step(StepEventType::Failed),
             EventSource::Api,
-            serde_json::to_value(failure_event).unwrap(),
+            serde_json::to_value(failure_event)
+                .expect("serializing StepFailedEvent should not fail"),
             Some(SchemaVersion::new("1.0".to_string())),
             None,
         )

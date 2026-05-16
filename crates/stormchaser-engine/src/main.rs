@@ -645,5 +645,9 @@ mod tests {
             normalize_subject("stormchaser.v1.global.runner.heartbeat"),
             "stormchaser.v1.runner.heartbeat"
         );
+        assert_eq!(
+            normalize_subject("stormchaser.v1.step.completed"),
+            "stormchaser.v1.step.completed"
+        );
     }
 }
