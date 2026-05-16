@@ -133,3 +133,29 @@ pub async fn decrypt_sops_secrets(
 
     Ok((secrets_val, sensitive_values))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_sensitive_values() {
+        let val = serde_json::json!({
+            "key1": "secret1234",
+            "key2": "too", // Too short to extract
+            "arr": [
+                "secret5678",
+                {"nested": "secret9012"}
+            ]
+        });
+
+        let mut registry = Vec::new();
+        extract_sensitive_values(&val, &mut registry);
+
+        assert_eq!(registry.len(), 3);
+        assert!(registry.contains(&"secret1234".to_string()));
+        assert!(registry.contains(&"secret5678".to_string()));
+        assert!(registry.contains(&"secret9012".to_string()));
+        assert!(!registry.contains(&"too".to_string()));
+    }
+}
