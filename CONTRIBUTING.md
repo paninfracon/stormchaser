@@ -48,7 +48,7 @@ Unsure where to begin contributing to Stormchaser? You can start by looking thro
 * Make your changes to the code.
 * Ensure that the code is formatted with `rustfmt`. The project includes a `rustfmt.toml` file with the project's formatting rules.
 * This project uses `pre-commit` hooks. Please make sure to install them by running `pre-commit install`.
-* Add tests for your changes. You can run the tests with `cargo test -- --test-threads=2`.
+* Add tests for your changes. You can run the tests via `./scripts/test-unit.sh` and `./scripts/test-integration.sh`.
 * Make sure the tests pass.
 
 ## Pull Request Process

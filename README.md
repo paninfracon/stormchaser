@@ -243,10 +243,11 @@ We welcome contributions! Please see our
 The project is structured as a Cargo workspace containing multiple crates
 (e.g., `stormchaser-api`, `stormchaser-engine`, `stormchaser-model`).
 
-Run tests using:
+Run tests using the isolated test infrastructure scripts:
 
 ```bash
-cargo test
+./scripts/test-unit.sh
+./scripts/test-integration.sh
 ```
 
 ## 📝 License

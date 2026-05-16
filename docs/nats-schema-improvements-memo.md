@@ -63,7 +63,7 @@ We will adopt the **Permissive (Background Sync)** approach combined with the of
 
 ## Verification
 
-* Run the full test suite (`cargo test --all-features`).
+* Run the full test suite (`./scripts/test-unit.sh` and `./scripts/test-integration.sh`).
 * Verify that `stormchaser-api` SSE streams correctly parse the unwrapped CloudEvent payload and send it to the UI.
 * Verify the OCI caching task starts and functions without crashing.
 

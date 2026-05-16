@@ -22,7 +22,7 @@ This plan outlines the phased approach to implementing the outstanding items ide
 
 **Goal:** Prevent visual regressions in the legacy UI components by cementing their expected output via `insta` snapshot tests.
 
-1. **Preparation:** Leverage the existing `insta` setup used in the newer `storage.rs` and `webhooks.rs` UI components. Ensure `INSTA_UPDATE=always cargo test` workflow is understood.
+1. **Preparation:** Leverage the existing `insta` setup used in the newer `storage.rs` and `webhooks.rs` UI components. Ensure `INSTA_UPDATE=always ./scripts/test-unit.sh` workflow is understood.
 2. **Snapshot `ui/runs.rs`:**
     * Create test fixtures for `App` state representing: an empty run list, a populated run list, a run with a failure, and a run in progress.
     * Write tests that call `render_runs_tab` or `render_run_detail` with these states and snapshot the resulting `ratatui::buffer::Buffer`.
