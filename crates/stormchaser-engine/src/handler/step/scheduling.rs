@@ -133,6 +133,7 @@ pub async fn schedule_step(
             let mut iteration_ctx = crate::hcl_eval::create_context(
                 run_context.inputs.clone(),
                 run_id,
+                run_context.secrets.clone(),
                 steps_outputs.clone(),
                 Some(workflow),
                 Some(step_dsl),

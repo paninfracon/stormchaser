@@ -147,6 +147,7 @@ async fn evaluate_successors(
     let hcl_ctx = crate::hcl_eval::create_context(
         inputs,
         run_id,
+        serde_json::json!({}), // secrets
         fetch_outputs(run_id, &mut *tx).await?,
         Some(workflow),
         Some(dsl_step),

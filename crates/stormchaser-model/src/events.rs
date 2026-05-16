@@ -170,6 +170,10 @@ pub struct WorkflowQueuedEvent {
     pub inputs: Option<HashMap<String, Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub initiating_user: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sops_file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sops_role_arn: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

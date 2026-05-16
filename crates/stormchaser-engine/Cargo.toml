@@ -8,7 +8,7 @@ repository.workspace = true
 license.workspace = true
 
 [features]
-default = ["aws-lambda", "aws-ses", "aws-s3-sts", "email", "vault", "aws-sdk-sts", "rustls-native-certs", "aws-cloudcontrol"]
+default = ["aws-lambda", "aws-ses", "aws-s3-sts", "email", "vault", "aws-sdk-sts", "rustls-native-certs", "aws-cloudcontrol", "aws-sops"]
 aws-lambda = ["dep:aws-sdk-lambda", "aws-sdk-sts"]
 aws-ses = ["dep:aws-sdk-ses", "aws-sdk-sts"]
 aws-s3-sts = ["aws-sdk-sts"]
@@ -17,6 +17,7 @@ vault = ["dep:vaultrs"]
 aws-sdk-sts = ["dep:aws-sdk-sts"]
 rustls-native-certs = ["dep:rustls-native-certs"]
 aws-cloudcontrol = ["dep:aws-sdk-cloudcontrol", "aws-sdk-sts"]
+aws-sops = ["aws-sdk-sts"]
 
 [lib]
 name = "stormchaser_engine"
@@ -82,6 +83,7 @@ rustls-native-certs = { version = "0.8.3", optional = true }
 cloudevents-sdk = "0.9.0"
 jsonschema.workspace = true
 aws-sdk-cloudcontrol = { version = "1.65.0", optional = true }
+serde_yaml = "0.9"
 
 [dev-dependencies]
 dotenvy = "0.15"

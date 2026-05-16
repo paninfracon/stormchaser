@@ -198,18 +198,22 @@ pub async fn update_run_context<'a, E>(
     source_code: Option<&str>,
     dsl_version: &str,
     inputs: Value,
+    secrets: Value,
+    sensitive_values: Vec<String>,
     run_id: RunId,
 ) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
     sqlx::query(
-        r#"UPDATE run_contexts SET workflow_definition = $1, source_code = $2, dsl_version = $3, inputs = $4 WHERE run_id = $5"#
+        r#"UPDATE run_contexts SET workflow_definition = $1, source_code = $2, dsl_version = $3, inputs = $4, secrets = $5, sensitive_values = $6 WHERE run_id = $7"#
     )
     .bind(workflow_definition)
     .bind(source_code)
     .bind(dsl_version)
     .bind(inputs)
+    .bind(secrets)
+    .bind(sensitive_values)
     .bind(run_id)
     .execute(executor)
     .await

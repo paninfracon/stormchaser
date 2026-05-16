@@ -103,6 +103,8 @@ async fn test_db_layer_functions() {
         Some("new code"),
         "2.0",
         serde_json::json!({}),
+        serde_json::json!({}),
+        vec![],
         run_id,
     )
     .await

@@ -174,6 +174,7 @@ async fn resolve_storage_provision(
                 run_context.inputs.clone(),
                 run_id,
                 run_context.secrets.clone(),
+                serde_json::json!({}), // Steps value is not needed here
                 None,
                 None,
             );

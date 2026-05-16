@@ -38,6 +38,7 @@ async fn handle_run_events(
             tokio::spawn(async move {
                 if let Err(e) = handler::handle_workflow_queued(
                     stormchaser_model::RunId::new(run_id),
+                    payload,
                     pool,
                     git_cache,
                     opa_client,

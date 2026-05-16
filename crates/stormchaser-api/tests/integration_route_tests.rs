@@ -794,6 +794,7 @@ async fn test_run_from_git() {
     // Advance Queued -> StartPending
     if let Err(e) = stormchaser_engine::handler::workflow::handle_workflow_queued(
         uuid::Uuid::parse_str(run_id).map(RunId::new).unwrap(),
+        serde_json::json!({}),
         pool.clone(),
         std::sync::Arc::new(git_cache),
         opa_client,

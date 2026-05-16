@@ -327,13 +327,17 @@ pub async fn handle_webhook(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
+        let inputs_value = serde_json::Value::Object(inputs);
+
         db::insert_run_context(
-            &mut tx,
+            &mut *tx,
             run_id,
             "v1",
             serde_json::json!({}),
             "",
-            &Value::Object(inputs),
+            &inputs_value,
+            serde_json::json!({}),
+            vec![],
         )
         .await
         .map_err(|e| {
@@ -359,6 +363,8 @@ pub async fn handle_webhook(
             dsl: None,
             inputs: None,
             initiating_user: None,
+            sops_file: None,
+            sops_role_arn: None,
         };
 
         publish_cloudevent(
