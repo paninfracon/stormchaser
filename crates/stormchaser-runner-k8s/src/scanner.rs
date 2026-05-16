@@ -197,7 +197,8 @@ async fn handle_orphaned_job(
                         job_machine::JobMetadata {
                             run_id,
                             step_id,
-                            step_dsl,
+                            fencing_token: 0,
+                            step_dsl: step_dsl.clone(),
                             namespace,
                             received_at,
                             cluster_version: cv,
@@ -222,6 +223,7 @@ async fn handle_orphaned_job(
         let metadata = job_machine::JobMetadata {
             run_id,
             step_id,
+            fencing_token: 0,
             step_dsl: step_dsl.clone(),
             namespace: namespace.clone(),
             received_at,
@@ -258,6 +260,7 @@ async fn handle_orphaned_job(
                     let event = StepCompletedEvent {
                         run_id: RunId::new(run_id),
                         step_id: StepInstanceId::new(step_id),
+                        fencing_token: 0,
                         event_type: EventType::Step(StepEventType::Completed),
                         runner_id: Some(r_id.clone()),
                         exit_code: metrics.exit_code,
@@ -305,6 +308,7 @@ async fn handle_orphaned_job(
                     let event = StepFailedEvent {
                         run_id: RunId::new(run_id),
                         step_id: StepInstanceId::new(step_id),
+                        fencing_token: 0,
                         event_type: EventType::Step(StepEventType::Failed),
                         error: reason,
                         runner_id: Some(r_id.clone()),

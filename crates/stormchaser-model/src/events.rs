@@ -211,6 +211,7 @@ pub struct WorkflowAbortedEvent {
 pub struct StepScheduledEvent {
     pub run_id: RunId,
     pub step_id: StepInstanceId,
+    pub fencing_token: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub step_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -244,6 +245,7 @@ pub struct StepRunningEvent {
 pub struct StepCompletedEvent {
     pub run_id: RunId,
     pub step_id: StepInstanceId,
+    pub fencing_token: i64,
     pub event_type: EventType,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runner_id: Option<String>,
@@ -264,6 +266,7 @@ pub struct StepCompletedEvent {
 pub struct StepFailedEvent {
     pub run_id: RunId,
     pub step_id: StepInstanceId,
+    pub fencing_token: i64,
     pub event_type: EventType,
     pub error: String,
     #[serde(skip_serializing_if = "Option::is_none")]

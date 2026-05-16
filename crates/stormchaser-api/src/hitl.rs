@@ -292,6 +292,7 @@ pub async fn approve_step(
     let completion_event = StepCompletedEvent {
         run_id,
         step_id,
+        fencing_token: 0,
         event_type: EventType::Step(StepEventType::Completed),
         runner_id: None,
         exit_code: Some(0),
@@ -361,6 +362,7 @@ pub async fn reject_step(
     let event = StepFailedEvent {
         run_id,
         step_id,
+        fencing_token: 0,
         event_type: EventType::Step(StepEventType::Failed),
         error: "Rejected by human".to_string(),
         exit_code: Some(1),
@@ -411,6 +413,7 @@ pub async fn correlate_event(
     let completion_event = StepCompletedEvent {
         run_id: corr.run_id,
         step_id: corr.step_instance_id,
+        fencing_token: 0,
         event_type: EventType::Step(StepEventType::Completed),
         runner_id: None,
         exit_code: Some(0),

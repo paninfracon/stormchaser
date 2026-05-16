@@ -78,6 +78,7 @@ pub async fn try_dispatch(
                     let event = StepCompletedEvent {
                         run_id,
                         step_id: step_instance_id,
+                        fencing_token: 0,
                         event_type: EventType::Step(StepEventType::Completed),
                         runner_id: None,
                         exit_code: Some(0),
@@ -103,6 +104,7 @@ pub async fn try_dispatch(
                     let event = StepFailedEvent {
                         run_id,
                         step_id: step_instance_id,
+                        fencing_token: 0,
                         event_type: EventType::Step(StepEventType::Failed),
                         error: format!("WASM execution failed: {:?}", e),
                         runner_id: None,

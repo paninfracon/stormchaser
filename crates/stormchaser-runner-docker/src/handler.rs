@@ -82,6 +82,7 @@ fn build_container_result_event(
     state: ContainerState,
     run_id: Uuid,
     step_id: Uuid,
+    fencing_token: i64,
     runner_id: String,
 ) -> (NatsSubject, EventType, Value) {
     match state {
@@ -91,6 +92,7 @@ fn build_container_result_event(
             let event = StepCompletedEvent {
                 run_id: RunId::new(run_id),
                 step_id: StepInstanceId::new(step_id),
+                fencing_token,
                 event_type: event_type.clone(),
                 runner_id: Some(runner_id),
                 exit_code: metrics.exit_code.map(|c| c as i32),
@@ -116,6 +118,7 @@ fn build_container_result_event(
             let event = StepFailedEvent {
                 run_id: RunId::new(run_id),
                 step_id: StepInstanceId::new(step_id),
+                fencing_token,
                 event_type: event_type.clone(),
                 error: reason,
                 runner_id: Some(runner_id),
@@ -142,12 +145,14 @@ fn build_container_result_event(
 fn build_container_execution_error_event(
     run_id: Uuid,
     step_id: Uuid,
+    fencing_token: i64,
     runner_id: String,
     error: &anyhow::Error,
 ) -> Value {
     serde_json::to_value(StepFailedEvent {
         run_id: RunId::new(run_id),
         step_id: StepInstanceId::new(step_id),
+        fencing_token,
         event_type: EventType::Step(StepEventType::Failed),
         error: format!("{:?}", error),
         runner_id: Some(runner_id),
@@ -165,6 +170,7 @@ async fn publish_container_result(
     state: ContainerState,
     run_id: Uuid,
     step_id: Uuid,
+    fencing_token: i64,
     runner_id: String,
     nats: async_nats::Client,
 ) {
@@ -173,7 +179,7 @@ async fn publish_container_result(
         ContainerState::Failed(reason, _) => warn!("Adopted step {} failed: {}", step_id, reason),
     }
     let (subject, event_type, event_value) =
-        build_container_result_event(state, run_id, step_id, runner_id);
+        build_container_result_event(state, run_id, step_id, fencing_token, runner_id);
 
     let _ = publish_cloudevent(
         &async_nats::jetstream::new(nats),
@@ -301,6 +307,7 @@ async fn handle_orphaned_container(
                         ContainerMetadata {
                             run_id,
                             step_id,
+                            fencing_token: 0,
                             step_dsl,
                             storage: None,
                             test_report_urls: None,
@@ -323,6 +330,7 @@ async fn handle_orphaned_container(
         let metadata = ContainerMetadata {
             run_id,
             step_id,
+            fencing_token: 0,
             step_dsl: step_dsl.clone(),
             storage: None,
             test_report_urls: None,
@@ -339,6 +347,7 @@ async fn handle_orphaned_container(
                     finished_machine.into_result(),
                     run_id,
                     step_id,
+                    0, // Fencing token
                     r_id,
                     nats.clone(),
                 )
@@ -465,6 +474,7 @@ pub async fn handle_task(
 
     let registry_auth: Option<Value> =
         serde_json::from_value(payload["registry_auth"].clone()).ok();
+    let fencing_token: i64 = payload["fencing_token"].as_i64().unwrap_or(0);
 
     let in_progress_msg = msg.clone();
     let in_progress_handle = tokio::spawn(async move {
@@ -497,6 +507,7 @@ pub async fn handle_task(
         ContainerMetadata {
             run_id,
             step_id,
+            fencing_token: 0,
             step_dsl,
             storage,
             test_report_urls,
@@ -530,8 +541,13 @@ pub async fn handle_task(
                     error!("Step {} (Run {}) failed: {}", step_id, run_id, reason)
                 }
             }
-            let (subject, event_type, event) =
-                build_container_result_event(state, run_id, step_id, runner_id.clone());
+            let (subject, event_type, event) = build_container_result_event(
+                state,
+                run_id,
+                step_id,
+                fencing_token,
+                runner_id.clone(),
+            );
             let _ = publish_cloudevent(
                 &async_nats::jetstream::new(nats_client.clone()),
                 subject,
@@ -550,7 +566,13 @@ pub async fn handle_task(
                 NatsSubject::StepFailed,
                 EventType::Step(StepEventType::Failed),
                 EventSource::System,
-                build_container_execution_error_event(run_id, step_id, runner_id.clone(), &e),
+                build_container_execution_error_event(
+                    run_id,
+                    step_id,
+                    fencing_token,
+                    runner_id.clone(),
+                    &e,
+                ),
                 Some(SchemaVersion::new("1.0".to_string())),
                 None,
             )
@@ -604,6 +626,7 @@ mod tests_handler_ext {
             ContainerState::Succeeded(metrics),
             run_id,
             step_id,
+            0,
             "runner-1".to_string(),
         );
 
@@ -636,6 +659,7 @@ mod tests_handler_ext {
             ContainerState::Failed("boom".to_string(), metrics),
             run_id,
             step_id,
+            0,
             "runner-2".to_string(),
         );
 
@@ -653,6 +677,7 @@ mod tests_handler_ext {
         let event = build_container_execution_error_event(
             run_id,
             step_id,
+            0,
             "runner-3".to_string(),
             &anyhow::anyhow!("execution failed"),
         );

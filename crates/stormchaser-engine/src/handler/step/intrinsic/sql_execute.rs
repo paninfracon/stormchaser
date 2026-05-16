@@ -36,6 +36,7 @@ pub async fn try_dispatch(
                 let fail_event = StepFailedEvent {
                     run_id,
                     step_id,
+                    fencing_token: 0,
                     event_type: EventType::Step(StepEventType::Failed),
                     error: format!("SqlExecute failed: {:?}", e),
                     runner_id: Some("intrinsic-sql".to_string()),
@@ -139,6 +140,7 @@ async fn handle_sql_execute(
     let completed_event = StepCompletedEvent {
         run_id,
         step_id,
+        fencing_token: 0,
         event_type: EventType::Step(StepEventType::Completed),
         runner_id: Some("intrinsic-sql".to_string()),
         exit_code: Some(0),

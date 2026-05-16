@@ -491,6 +491,8 @@ pub async fn dispatch_step_instance(
     let mut step_type = step_type.to_string();
     let mut resolved_spec = resolved_spec.clone();
 
+    let workflow_run = crate::handler::fetch_run(run_id, &pool).await?;
+
     apply_intrinsic_mutations(run_id, &mut step_type, &mut resolved_spec, &pool).await?;
 
     let run_context = fetch_run_context(run_id, &pool).await?;
@@ -576,6 +578,7 @@ pub async fn dispatch_step_instance(
     let payload = StepScheduledEvent {
         run_id,
         step_id: step_instance_id,
+        fencing_token: workflow_run.fencing_token,
         step_name: Some(step_name.to_string()),
         step_type: Some(step_type.clone()),
         spec: Some(resolved_spec),

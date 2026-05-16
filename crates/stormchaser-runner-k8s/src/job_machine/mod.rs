@@ -30,6 +30,8 @@ pub struct JobMetadata {
     pub run_id: Uuid,
     /// Unique identifier for the specific step.
     pub step_id: Uuid,
+    /// Monotonically increasing token for preventing duplicate execution.
+    pub fencing_token: i64,
     /// DSL definition of the step to execute.
     pub step_dsl: Step,
     /// Kubernetes namespace where the job will run.

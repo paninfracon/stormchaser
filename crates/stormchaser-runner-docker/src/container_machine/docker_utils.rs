@@ -182,6 +182,7 @@ mod tests {
         let metadata = ContainerMetadata {
             run_id: Uuid::new_v4(),
             step_id: Uuid::new_v4(),
+            fencing_token: 0,
             step_dsl,
             received_at: chrono::Utc::now(),
             encryption_key: None,

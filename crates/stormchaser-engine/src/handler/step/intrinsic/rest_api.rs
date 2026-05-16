@@ -288,6 +288,7 @@ fn parse_response(
         Ok(StepCompletedEvent {
             run_id,
             step_id,
+            fencing_token: 0,
             event_type: EventType::Step(StepEventType::Completed),
             test_reports: None,
             artifacts: None,

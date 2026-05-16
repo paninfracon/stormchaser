@@ -178,6 +178,7 @@ async fn dispatch_jq_internal(
             let event = StepCompletedEvent {
                 run_id,
                 step_id: step_instance_id,
+                fencing_token: 0,
                 event_type: EventType::Step(StepEventType::Completed),
                 runner_id: None,
                 exit_code: Some(0),
@@ -204,6 +205,7 @@ async fn dispatch_jq_internal(
             let event = StepFailedEvent {
                 run_id,
                 step_id: step_instance_id,
+                fencing_token: 0,
                 event_type: EventType::Step(StepEventType::Failed),
                 error: format!("JQ execution failed: {:?}", e),
                 runner_id: None,

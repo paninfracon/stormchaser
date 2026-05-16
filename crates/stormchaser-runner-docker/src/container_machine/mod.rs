@@ -22,6 +22,8 @@ pub struct ContainerMetadata {
     pub run_id: Uuid,
     /// The unique identifier of the step being executed.
     pub step_id: Uuid,
+    /// Monotonically increasing token for preventing duplicate execution.
+    pub fencing_token: i64,
     /// The step specification from the workflow DSL.
     pub step_dsl: Step,
     /// When the container task was received.
