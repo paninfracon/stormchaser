@@ -78,7 +78,12 @@ impl Config {
                 "TLS_SERVER_NAME" => tls_server_name = Some(v.as_ref().to_string()),
                 "STORMCHASER_DB_SSL" => db_ssl = v.as_ref() == "true",
                 "NATS_URL" => nats_url = v.as_ref().to_string(),
-                "OPA_URL" => opa_url = Some(v.as_ref().to_string()),
+                "OPA_URL" => {
+                    let val = v.as_ref().to_string();
+                    if !val.is_empty() {
+                        opa_url = Some(val);
+                    }
+                }
                 "OPA_WASM_PATH" => opa_wasm_path = Some(v.as_ref().to_string()),
                 "OPA_ENTRYPOINT" => opa_entrypoint = Some(v.as_ref().to_string()),
                 "LOKI_URL" => loki_url = Some(v.as_ref().to_string()),
@@ -113,5 +118,36 @@ impl Config {
             oidc_client_secret,
             api_base_url,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_config_opa_url_empty_string_treated_as_none() {
+        let env = vec![
+            ("DATABASE_URL", "postgres://user:pass@localhost/db"),
+            ("OPA_URL", ""),
+        ];
+        let config = Config::from_env(env).unwrap();
+        assert!(
+            config.opa_url.is_none(),
+            "Empty OPA_URL should be treated as None"
+        );
+    }
+
+    #[test]
+    fn test_config_opa_url_non_empty_is_set() {
+        let env = vec![
+            ("DATABASE_URL", "postgres://user:pass@localhost/db"),
+            ("OPA_URL", "http://127.0.0.1:8181/v1/data/stormchaser/allow"),
+        ];
+        let config = Config::from_env(env).unwrap();
+        assert_eq!(
+            config.opa_url.as_deref(),
+            Some("http://127.0.0.1:8181/v1/data/stormchaser/allow")
+        );
     }
 }

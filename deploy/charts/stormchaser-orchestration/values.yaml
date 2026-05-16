@@ -81,6 +81,10 @@ query:
     type: ClusterIP
     port: 3001
   resources: {}
+  # Optional: path to a compiled OPA WASM policy bundle mounted in the container.
+  # When set, the query service uses the local WASM policy instead of an HTTP OPA server.
+  # Leave empty to disable OPA enforcement on this service.
+  opaWasmPath: ""
 
 engine:
   image:

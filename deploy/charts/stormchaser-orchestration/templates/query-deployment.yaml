@@ -59,8 +59,14 @@ spec:
               value: {{ .Values.global.otel.endpoint | quote }}
             - name: OTEL_SERVICE_NAME
               value: "stormchaser-query"
+            {{- if .Values.global.opa.url }}
             - name: OPA_URL
               value: {{ .Values.global.opa.url | quote }}
+            {{- end }}
+            {{- if .Values.query.opaWasmPath }}
+            - name: OPA_WASM_PATH
+              value: {{ .Values.query.opaWasmPath | quote }}
+            {{- end }}
             - name: PORT
               value: "3001"
             {{- if .Values.global.tls.enabled }}
