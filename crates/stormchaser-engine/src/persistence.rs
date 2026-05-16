@@ -56,7 +56,28 @@ pub async fn persist_step_instance(
             )
             .await?;
         }
-        StepStatus::Succeeded | StepStatus::Failed => {
+        StepStatus::Failed | StepStatus::LostZombie | StepStatus::FailedIgnored => {
+            if let Some(ref err) = instance.error {
+                crate::db::fail_step_instance_with_error(
+                    &mut *executor,
+                    instance.status.clone(),
+                    err,
+                    instance.exit_code,
+                    instance.id,
+                )
+                .await?;
+            } else {
+                crate::db::complete_step_instance(
+                    &mut *executor,
+                    &instance.status,
+                    instance.exit_code,
+                    instance.runner_id.as_deref(),
+                    instance.id,
+                )
+                .await?;
+            }
+        }
+        StepStatus::Succeeded => {
             crate::db::complete_step_instance(
                 &mut *executor,
                 &instance.status,

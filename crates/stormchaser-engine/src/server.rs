@@ -340,7 +340,7 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
         env!("VERGEN_BUILD_TIMESTAMP")
     );
 
-    start_liveness_worker(pool.clone());
+    start_liveness_worker(pool.clone(), nats_client.clone());
     start_timeout_worker(pool.clone(), nats_client.clone(), tls_reloader.clone());
     start_resolver_crash_recovery_worker(pool.clone(), nats_client.clone());
 

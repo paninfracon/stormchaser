@@ -3,7 +3,7 @@ use serde_json::Value;
 use sqlx::postgres::PgQueryResult;
 use sqlx::postgres::PgRow;
 use sqlx::{Executor, Postgres};
-use stormchaser_model::step::StepStatus;
+use stormchaser_model::step::{StepInstance, StepStatus};
 use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
 
@@ -382,4 +382,21 @@ where
         .bind(id)
         .fetch_one(executor)
         .await
+}
+
+/// Fetch steps that are currently running on offline runners.
+pub async fn fetch_zombie_steps<'a, E>(executor: E) -> Result<Vec<StepInstance>, sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    sqlx::query_as(
+        r#"
+        SELECT s.* FROM step_instances s
+        JOIN runners r ON s.runner_id = r.id
+        WHERE s.status IN ('running', 'unpacking_sfs', 'packing_sfs')
+        AND (r.status = 'offline' OR r.last_heartbeat_at < NOW() - INTERVAL '30 seconds')
+        "#,
+    )
+    .fetch_all(executor)
+    .await
 }

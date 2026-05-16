@@ -9,11 +9,13 @@ use stormchaser_model::RunId;
 use stormchaser_tls::TlsReloader;
 use uuid::Uuid;
 
-pub fn start_liveness_worker(pool: sqlx::PgPool) {
+pub fn start_liveness_worker(pool: sqlx::PgPool, nats_client: async_nats::Client) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(15));
         loop {
             interval.tick().await;
+
+            // 1. Mark stale runners offline
             let result =
                 db::mark_stale_runners_offline(&pool, RunnerStatus::Offline, RunnerStatus::Online)
                     .await;
@@ -29,6 +31,54 @@ pub fn start_liveness_worker(pool: sqlx::PgPool) {
                     }
                 }
                 Err(e) => tracing::error!("Failed to check runner liveness: {:?}", e),
+            }
+
+            // 2. Detect zombie steps and fail them out
+            match crate::db::steps::fetch_zombie_steps(&pool).await {
+                Ok(zombies) => {
+                    for zombie in zombies {
+                        tracing::warn!(
+                            "Detected zombie step {} (Run {}) on dead runner {}",
+                            zombie.id,
+                            zombie.run_id,
+                            zombie.runner_id.clone().unwrap_or_default()
+                        );
+
+                        let fail_event = stormchaser_model::events::StepFailedEvent {
+                            run_id: zombie.run_id,
+                            step_id: zombie.id,
+                            fencing_token: crate::db::runs::get_workflow_run_fencing_token_by_id(&pool, zombie.run_id).await.unwrap_or(0),
+                            event_type: stormchaser_model::events::EventType::Step(
+                                stormchaser_model::events::StepEventType::Failed,
+                            ),
+                            error: "lost_zombie".to_string(),
+                            runner_id: zombie.runner_id,
+                            exit_code: None,
+                            storage_hashes: None,
+                            artifacts: None,
+                            test_reports: None,
+                            outputs: None,
+                            timestamp: chrono::Utc::now(),
+                        };
+
+                        let js = async_nats::jetstream::new(nats_client.clone());
+                        let _ = stormchaser_model::nats::publish_cloudevent(
+                            &js,
+                            stormchaser_model::nats::NatsSubject::StepFailed(Some(stormchaser_model::nats::compute_shard_id(&zombie.run_id))),
+                            stormchaser_model::events::EventType::Step(
+                                stormchaser_model::events::StepEventType::Failed,
+                            ),
+                            stormchaser_model::events::EventSource::System,
+                            serde_json::to_value(fail_event).unwrap(),
+                            Some(stormchaser_model::events::SchemaVersion::new(
+                                "1.0".to_string(),
+                            )),
+                            None,
+                        )
+                        .await;
+                    }
+                }
+                Err(e) => tracing::error!("Failed to fetch zombie steps: {:?}", e),
             }
         }
     });

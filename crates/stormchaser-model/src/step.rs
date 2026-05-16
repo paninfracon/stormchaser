@@ -34,6 +34,8 @@ pub enum StepStatus {
     WaitingForEvent,
     /// The step was aborted, typically due to the run being cancelled.
     Aborted,
+    /// The step's runner went offline while it was executing.
+    LostZombie,
 }
 
 /// Represents the execution instance of a specific step in a workflow.

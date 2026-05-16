@@ -72,9 +72,14 @@ pub async fn handle_step_failed(
         crate::step_machine::StepMachine::<crate::step_machine::state::Running>::from_instance(
             instance.clone(),
         );
-    let _ = machine
-        .fail(error_msg.to_string(), exit_code, &mut *tx)
-        .await?;
+
+    if error_msg == "lost_zombie" {
+        let _ = machine.zombify(&mut *tx).await?;
+    } else {
+        let _ = machine
+            .fail(error_msg.to_string(), exit_code, &mut *tx)
+            .await?;
+    }
 
     let attributes = [
         KeyValue::new("step_name", instance.step_name),
