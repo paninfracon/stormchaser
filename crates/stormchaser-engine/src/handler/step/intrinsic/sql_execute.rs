@@ -230,7 +230,7 @@ mod tests {
         let password = std::env::var("STORMCHASER_DEV_PASSWORD")
             .expect("STORMCHASER_DEV_PASSWORD must be set when DATABASE_URL is unset");
         format!(
-            "postgres://stormchaser:{}@localhost:5432/stormchaser",
+            "postgres://stormchaser:{}@127.0.0.1:5432/stormchaser",
             password
         )
     }
