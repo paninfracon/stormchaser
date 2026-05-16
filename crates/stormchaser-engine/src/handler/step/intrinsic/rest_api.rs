@@ -14,10 +14,12 @@ use stormchaser_model::StepInstanceId;
 use stormchaser_tls::TlsReloader;
 use tracing::{info, warn};
 
-/// Attempts to dispatch a REST API step instance.
+/// Attempts to dispatch a REST API step instance directly.
+#[allow(clippy::too_many_arguments)]
 pub async fn try_dispatch(
     run_id: RunId,
     step_instance_id: StepInstanceId,
+    fencing_token: i64,
     step_type: &str,
     resolved_spec: &Value,
     pool: PgPool,
@@ -33,6 +35,7 @@ pub async fn try_dispatch(
             if let Err(e) = handle_rest_api_invoke(
                 run_id,
                 step_instance_id,
+                fencing_token,
                 spec,
                 pool.clone(),
                 nats_client.clone(),
@@ -86,6 +89,7 @@ fn prepare_template_context(inputs: Value, outputs: Value, run_id: RunId) -> Val
 async fn handle_rest_api_invoke(
     run_id: RunId,
     step_id: StepInstanceId,
+    fencing_token: i64,
     spec: Value,
     pool: PgPool,
     nats_client: async_nats::Client,
@@ -163,7 +167,16 @@ async fn handle_rest_api_invoke(
     let rendered_body = render_request_body(&spec, &template_ctx)?;
 
     // 4. Build and Execute Request
-    execute_request(run_id, step_id, &spec, rendered_body, pool, nats_client).await
+    execute_request(
+        run_id,
+        step_id,
+        fencing_token,
+        &spec,
+        rendered_body,
+        pool,
+        nats_client,
+    )
+    .await
 }
 
 fn render_request_body(spec: &RestApiSpec, template_ctx: &Value) -> Result<Option<String>> {
@@ -274,6 +287,7 @@ fn parse_response(
     spec: &RestApiSpec,
     run_id: RunId,
     step_id: StepInstanceId,
+    fencing_token: i64,
 ) -> Result<StepCompletedEvent> {
     if status_is_success {
         let body_val: Value = serde_json::from_slice(body_bytes)
@@ -288,6 +302,7 @@ fn parse_response(
         Ok(StepCompletedEvent {
             run_id,
             step_id,
+            fencing_token,
             event_type: EventType::Step(StepEventType::Completed),
             test_reports: None,
             artifacts: None,
@@ -306,6 +321,7 @@ fn parse_response(
 async fn execute_request(
     run_id: RunId,
     step_id: StepInstanceId,
+    fencing_token: i64,
     spec: &RestApiSpec,
     rendered_body: Option<String>,
     _pool: PgPool,
@@ -336,7 +352,14 @@ async fn execute_request(
     let status = res.status();
     let body_bytes = res.bytes().await?;
 
-    match parse_response(status.is_success(), &body_bytes, spec, run_id, step_id) {
+    match parse_response(
+        status.is_success(),
+        &body_bytes,
+        spec,
+        run_id,
+        step_id,
+        fencing_token,
+    ) {
         Ok(event) => {
             let js = async_nats::jetstream::new(nats_client);
             let event_payload = serde_json::to_value(event)
@@ -569,7 +592,7 @@ mod tests {
         };
 
         let body = b"{\"hello\":\"world\"}";
-        let result = parse_response(true, body, &spec, run_id, step_id).unwrap();
+        let result = parse_response(true, body, &spec, run_id, step_id, 1).unwrap();
 
         assert_eq!(result.exit_code, Some(0));
         let outputs = result.outputs.unwrap();
@@ -592,7 +615,7 @@ mod tests {
         };
 
         let body = b"Internal Server Error";
-        let err = parse_response(false, body, &spec, run_id, step_id).unwrap_err();
+        let err = parse_response(false, body, &spec, run_id, step_id, 1).unwrap_err();
 
         assert!(err
             .to_string()

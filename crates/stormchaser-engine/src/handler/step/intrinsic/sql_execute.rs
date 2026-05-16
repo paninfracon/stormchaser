@@ -2,6 +2,7 @@ use crate::handler::{fetch_outputs, fetch_run_context, fetch_step_instance};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use serde_json::Value;
+use sqlx::Connection;
 use sqlx::PgPool;
 use std::time::Duration;
 use stormchaser_model::dsl::SqlExecuteSpec;
@@ -15,6 +16,7 @@ use tracing::{error, info};
 pub async fn try_dispatch(
     run_id: RunId,
     step_id: StepInstanceId,
+    fencing_token: i64,
     step_type: &str,
     spec: &Value,
     pool: PgPool,
@@ -26,6 +28,7 @@ pub async fn try_dispatch(
             if let Err(e) = handle_sql_execute(
                 run_id,
                 step_id,
+                fencing_token,
                 spec_clone,
                 pool.clone(),
                 nats_client.clone(),
@@ -36,6 +39,7 @@ pub async fn try_dispatch(
                 let fail_event = StepFailedEvent {
                     run_id,
                     step_id,
+                    fencing_token,
                     event_type: EventType::Step(StepEventType::Failed),
                     error: format!("SqlExecute failed: {:?}", e),
                     runner_id: Some("intrinsic-sql".to_string()),
@@ -67,6 +71,7 @@ pub async fn try_dispatch(
 async fn handle_sql_execute(
     run_id: RunId,
     step_id: StepInstanceId,
+    fencing_token: i64,
     spec: Value,
     pool: PgPool,
     nats_client: async_nats::Client,
@@ -139,6 +144,7 @@ async fn handle_sql_execute(
     let completed_event = StepCompletedEvent {
         run_id,
         step_id,
+        fencing_token,
         event_type: EventType::Step(StepEventType::Completed),
         runner_id: Some("intrinsic-sql".to_string()),
         exit_code: Some(0),
@@ -170,14 +176,36 @@ async fn execute_sql_query(
 ) -> Result<u64> {
     match connection_type {
         stormchaser_model::connections::ConnectionType::Postgres => {
-            let pg_pool = sqlx::postgres::PgPoolOptions::new()
-                .max_connections(1)
-                .acquire_timeout(Duration::from_secs(5))
-                .connect(url)
-                .await?;
-            let result = sqlx::query(query).execute(&pg_pool).await?;
+            let mut retries = 5;
+            let mut conn = loop {
+                match tokio::time::timeout(
+                    Duration::from_secs(10),
+                    sqlx::PgConnection::connect(url),
+                )
+                .await
+                {
+                    Ok(Ok(c)) => break c,
+                    Ok(Err(e)) => {
+                        if retries == 0 {
+                            return Err(e.into());
+                        }
+                        tracing::warn!("Transient SQL connection error: {}. Retrying...", e);
+                        retries -= 1;
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                    }
+                    Err(_) => {
+                        if retries == 0 {
+                            anyhow::bail!("Connection attempt timed out");
+                        }
+                        tracing::warn!("SQL connection attempt timed out. Retrying...");
+                        retries -= 1;
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                    }
+                }
+            };
+
+            let result = sqlx::query(query).execute(&mut conn).await?;
             let affected = result.rows_affected();
-            pg_pool.close().await;
             Ok(affected)
         }
         other => anyhow::bail!(

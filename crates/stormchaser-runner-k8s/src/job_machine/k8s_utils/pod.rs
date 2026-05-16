@@ -65,6 +65,10 @@ pub(crate) fn build_k8s_pod_spec(
                     "stormchaser-step-id".to_string(),
                     metadata.step_id.to_string(),
                 ),
+                (
+                    "stormchaser-fencing-token".to_string(),
+                    metadata.fencing_token.to_string(),
+                ),
             ])),
             ..Default::default()
         }),

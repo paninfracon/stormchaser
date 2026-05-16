@@ -57,6 +57,7 @@ async fn execute_job_on_cluster(
     cluster_version: String,
     run_id: Uuid,
     step_id: Uuid,
+    fencing_token: i64,
     step_dsl: dsl::Step,
     storage: Option<HashMap<String, Value>>,
     test_report_urls: Option<HashMap<String, Value>>,
@@ -72,6 +73,7 @@ async fn execute_job_on_cluster(
     let metadata = job_machine::JobMetadata {
         run_id,
         step_id,
+        fencing_token,
         step_dsl,
         namespace,
         received_at,
@@ -93,13 +95,22 @@ async fn execute_job_on_cluster(
     };
     in_progress_handle.abort();
     let _ = msg.double_ack().await;
-    publish_job_result(nats_client, run_id, step_id, runner_id, result).await;
+    publish_job_result(
+        nats_client,
+        run_id,
+        step_id,
+        metadata.fencing_token,
+        runner_id,
+        result,
+    )
+    .await;
 }
 
 async fn publish_job_result(
     nats_client: async_nats::Client,
     run_id: Uuid,
     step_id: Uuid,
+    fencing_token: i64,
     runner_id: String,
     result: Result<job_machine::JobState, anyhow::Error>,
 ) {
@@ -114,7 +125,7 @@ async fn publish_job_result(
                 }
             }
             let (subject, event_type, event) =
-                build_job_result_event(state, run_id, step_id, runner_id.clone());
+                build_job_result_event(state, run_id, step_id, fencing_token, runner_id.clone());
             let _ = publish_cloudevent(
                 &async_nats::jetstream::new(nats_client.clone()),
                 subject,
@@ -133,7 +144,7 @@ async fn publish_job_result(
                 NatsSubject::StepFailed,
                 EventType::Step(StepEventType::Failed),
                 EventSource::System,
-                build_job_error_event(run_id, step_id, runner_id.clone(), &e),
+                build_job_error_event(run_id, step_id, fencing_token, runner_id.clone(), &e),
                 Some(SchemaVersion::new("1.0".to_string())),
                 None,
             )
@@ -167,6 +178,7 @@ fn build_job_result_event(
     state: job_machine::JobState,
     run_id: Uuid,
     step_id: Uuid,
+    fencing_token: i64,
     runner_id: String,
 ) -> (NatsSubject, EventType, Value) {
     match state {
@@ -176,6 +188,7 @@ fn build_job_result_event(
             let event = StepCompletedEvent {
                 run_id: RunId::new(run_id),
                 step_id: StepInstanceId::new(step_id),
+                fencing_token,
                 event_type: event_type.clone(),
                 runner_id: Some(runner_id),
                 exit_code: metrics.exit_code,
@@ -201,6 +214,7 @@ fn build_job_result_event(
             let event = StepFailedEvent {
                 run_id: RunId::new(run_id),
                 step_id: StepInstanceId::new(step_id),
+                fencing_token,
                 event_type: event_type.clone(),
                 error: reason,
                 runner_id: Some(runner_id),
@@ -227,12 +241,14 @@ fn build_job_result_event(
 fn build_job_error_event(
     run_id: Uuid,
     step_id: Uuid,
+    fencing_token: i64,
     runner_id: String,
     error: &anyhow::Error,
 ) -> Value {
     serde_json::to_value(StepFailedEvent {
         run_id: RunId::new(run_id),
         step_id: StepInstanceId::new(step_id),
+        fencing_token,
         event_type: EventType::Step(StepEventType::Failed),
         error: format!("{:?}", error),
         runner_id: Some(runner_id),
@@ -322,6 +338,7 @@ pub async fn handle_task(
         serde_json::from_value(payload["test_report_urls"].clone()).ok();
     let registry_auth: Option<Value> =
         serde_json::from_value(payload["registry_auth"].clone()).ok();
+    let fencing_token: i64 = payload["fencing_token"].as_i64().unwrap_or(0);
 
     let in_progress_msg = msg.clone();
     let in_progress_handle = tokio::spawn(async move {
@@ -360,6 +377,7 @@ pub async fn handle_task(
                 cluster_version,
                 run_id,
                 step_id,
+                fencing_token,
                 step_dsl,
                 storage,
                 test_report_urls,
@@ -379,6 +397,7 @@ pub async fn handle_task(
             let fail_event = StepFailedEvent {
                 run_id: RunId::new(run_id),
                 step_id: StepInstanceId::new(step_id),
+                fencing_token,
                 event_type: EventType::Step(StepEventType::Failed),
                 error: format!("Failed to acquire K8s client: {:?}", e),
                 runner_id: Some(runner_id.clone()),
@@ -482,6 +501,7 @@ mod tests {
             job_machine::JobState::Succeeded(metrics),
             run_id,
             step_id,
+            0,
             "runner-k8s".to_string(),
         );
 
@@ -514,6 +534,7 @@ mod tests {
             job_machine::JobState::Failed("boom".to_string(), metrics),
             run_id,
             step_id,
+            0,
             "runner-k8s".to_string(),
         );
 
@@ -530,6 +551,7 @@ mod tests {
         let event = build_job_error_event(
             run_id,
             step_id,
+            0,
             "runner-k8s".to_string(),
             &anyhow::anyhow!("job exploded"),
         );

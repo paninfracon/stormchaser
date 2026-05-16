@@ -59,9 +59,11 @@ pub fn mutate_if_has_files(step_type: &mut String, resolved_spec: &mut Value) {
 }
 
 /// Attempts to dispatch a jq step instance directly if it operates on strings (instead of files).
+#[allow(clippy::too_many_arguments)]
 pub async fn try_dispatch(
     run_id: RunId,
     step_instance_id: StepInstanceId,
+    fencing_token: i64,
     step_type: &str,
     resolved_spec: &Value,
     pool: PgPool,
@@ -74,7 +76,15 @@ pub async fn try_dispatch(
         let spec = resolved_spec.clone();
 
         tokio::spawn(async move {
-            let _ = dispatch_jq_internal(run_id, step_instance_id, spec, pool, nats_client).await;
+            let _ = dispatch_jq_internal(
+                run_id,
+                step_instance_id,
+                fencing_token,
+                spec,
+                pool,
+                nats_client,
+            )
+            .await;
         });
         return Ok(true);
     }
@@ -85,6 +95,7 @@ pub async fn try_dispatch(
 async fn dispatch_jq_internal(
     run_id: RunId,
     step_instance_id: StepInstanceId,
+    fencing_token: i64,
     spec: Value,
     pool: PgPool,
     nats_client: async_nats::Client,
@@ -178,6 +189,7 @@ async fn dispatch_jq_internal(
             let event = StepCompletedEvent {
                 run_id,
                 step_id: step_instance_id,
+                fencing_token,
                 event_type: EventType::Step(StepEventType::Completed),
                 runner_id: None,
                 exit_code: Some(0),
@@ -204,6 +216,7 @@ async fn dispatch_jq_internal(
             let event = StepFailedEvent {
                 run_id,
                 step_id: step_instance_id,
+                fencing_token,
                 event_type: EventType::Step(StepEventType::Failed),
                 error: format!("JQ execution failed: {:?}", e),
                 runner_id: None,

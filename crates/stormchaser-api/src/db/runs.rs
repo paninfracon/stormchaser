@@ -202,6 +202,17 @@ pub async fn get_combined_run_status(
     .await
 }
 
+/// Retrieves the fencing token for an active workflow run.
+pub async fn get_workflow_run_fencing_token(
+    pool: &PgPool,
+    run_id: RunId,
+) -> Result<Option<i64>, sqlx::Error> {
+    sqlx::query_scalar("SELECT fencing_token FROM workflow_runs WHERE id = $1")
+        .bind(run_id)
+        .fetch_optional(pool)
+        .await
+}
+
 /// Deletes a workflow run completely from the system (active and archived).
 pub async fn delete_workflow_run(pool: &PgPool, id: RunId) -> Result<(), sqlx::Error> {
     // Delete from active table

@@ -71,6 +71,7 @@ fn test_do_build_job_spec_basic() {
     let metadata = JobMetadata {
         run_id: Uuid::new_v4(),
         step_id: Uuid::new_v4(),
+        fencing_token: 0,
         step_dsl,
         namespace: "default".into(),
         received_at: Utc::now(),
@@ -144,6 +145,7 @@ fn test_do_build_job_spec_with_pvc() {
     let metadata = JobMetadata {
         run_id,
         step_id: Uuid::new_v4(),
+        fencing_token: 0,
         step_dsl,
         namespace: "default".into(),
         received_at: Utc::now(),

@@ -26,7 +26,8 @@ mod common {
     /// Setup test env.
     pub async fn setup_test_env() -> (sqlx::PgPool, async_nats::Client, Arc<auth::OpaClient>) {
         let pool = get_pool().await;
-        let nats_client = async_nats::connect("nats://localhost:4222").await.unwrap();
+        let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+        let nats_client = async_nats::connect(&nats_url).await.unwrap();
 
         let opa_client = OpaClient::new(None, None);
 

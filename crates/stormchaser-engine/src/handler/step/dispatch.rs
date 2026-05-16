@@ -306,6 +306,7 @@ async fn setup_storage_urls(
 async fn try_dispatch_intrinsic(
     run_id: RunId,
     step_instance_id: StepInstanceId,
+    fencing_token: i64,
     step_type: &str,
     resolved_spec: &Value,
     resolved_params: &Value,
@@ -316,6 +317,7 @@ async fn try_dispatch_intrinsic(
     if super::intrinsic::wasm::try_dispatch(
         run_id,
         step_instance_id,
+        fencing_token,
         step_type,
         resolved_spec,
         resolved_params,
@@ -343,6 +345,7 @@ async fn try_dispatch_intrinsic(
     if super::intrinsic::rest_api::try_dispatch(
         run_id,
         step_instance_id,
+        fencing_token,
         step_type,
         resolved_spec,
         pool.clone(),
@@ -356,6 +359,7 @@ async fn try_dispatch_intrinsic(
     if super::intrinsic::sql_execute::try_dispatch(
         run_id,
         step_instance_id,
+        fencing_token,
         step_type,
         resolved_spec,
         pool.clone(),
@@ -420,6 +424,7 @@ async fn try_dispatch_intrinsic(
     if super::intrinsic::jq::try_dispatch(
         run_id,
         step_instance_id,
+        fencing_token,
         step_type,
         resolved_spec,
         pool.clone(),
@@ -491,6 +496,8 @@ pub async fn dispatch_step_instance(
     let mut step_type = step_type.to_string();
     let mut resolved_spec = resolved_spec.clone();
 
+    let fencing_token = crate::db::get_workflow_run_fencing_token_by_id(&pool, run_id).await?;
+
     apply_intrinsic_mutations(run_id, &mut step_type, &mut resolved_spec, &pool).await?;
 
     let run_context = fetch_run_context(run_id, &pool).await?;
@@ -503,6 +510,7 @@ pub async fn dispatch_step_instance(
     if try_dispatch_intrinsic(
         run_id,
         step_instance_id,
+        fencing_token,
         &step_type,
         &resolved_spec,
         resolved_params,
@@ -576,6 +584,7 @@ pub async fn dispatch_step_instance(
     let payload = StepScheduledEvent {
         run_id,
         step_id: step_instance_id,
+        fencing_token,
         step_name: Some(step_name.to_string()),
         step_type: Some(step_type.clone()),
         spec: Some(resolved_spec),

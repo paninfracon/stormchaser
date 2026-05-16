@@ -102,6 +102,7 @@ pub fn reconstruct_step(
 async fn handle_orphaned_job(
     run_id_s: &str,
     step_id_s: &str,
+    fencing_token: i64,
     job_name: String,
     namespace: String,
     cluster_name: &str,
@@ -197,7 +198,8 @@ async fn handle_orphaned_job(
                         job_machine::JobMetadata {
                             run_id,
                             step_id,
-                            step_dsl,
+                            fencing_token,
+                            step_dsl: step_dsl.clone(),
                             namespace,
                             received_at,
                             cluster_version: cv,
@@ -222,6 +224,7 @@ async fn handle_orphaned_job(
         let metadata = job_machine::JobMetadata {
             run_id,
             step_id,
+            fencing_token,
             step_dsl: step_dsl.clone(),
             namespace: namespace.clone(),
             received_at,
@@ -258,6 +261,7 @@ async fn handle_orphaned_job(
                     let event = StepCompletedEvent {
                         run_id: RunId::new(run_id),
                         step_id: StepInstanceId::new(step_id),
+                        fencing_token,
                         event_type: EventType::Step(StepEventType::Completed),
                         runner_id: Some(r_id.clone()),
                         exit_code: metrics.exit_code,
@@ -305,6 +309,7 @@ async fn handle_orphaned_job(
                     let event = StepFailedEvent {
                         run_id: RunId::new(run_id),
                         step_id: StepInstanceId::new(step_id),
+                        fencing_token,
                         event_type: EventType::Step(StepEventType::Failed),
                         error: reason,
                         runner_id: Some(r_id.clone()),
@@ -354,11 +359,16 @@ pub async fn scan_for_orphans(
 
             let run_id_str = labels.get("stormchaser-run-id");
             let step_id_str = labels.get("stormchaser-step-id");
+            let fencing_token = labels
+                .get("stormchaser-fencing-token")
+                .and_then(|token| token.parse::<i64>().ok())
+                .unwrap_or(0);
 
             if let (Some(run_id_s), Some(step_id_s)) = (run_id_str, step_id_str) {
                 handle_orphaned_job(
                     run_id_s,
                     step_id_s,
+                    fencing_token,
                     job_name,
                     namespace,
                     &cluster_name,

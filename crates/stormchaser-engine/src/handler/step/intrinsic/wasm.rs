@@ -16,6 +16,7 @@ use stormchaser_tls::TlsReloader;
 pub async fn try_dispatch(
     run_id: RunId,
     step_instance_id: StepInstanceId,
+    fencing_token: i64,
     step_type: &str,
     resolved_spec: &Value,
     resolved_params: &Value,
@@ -78,6 +79,7 @@ pub async fn try_dispatch(
                     let event = StepCompletedEvent {
                         run_id,
                         step_id: step_instance_id,
+                        fencing_token,
                         event_type: EventType::Step(StepEventType::Completed),
                         runner_id: None,
                         exit_code: Some(0),
@@ -103,6 +105,7 @@ pub async fn try_dispatch(
                     let event = StepFailedEvent {
                         run_id,
                         step_id: step_instance_id,
+                        fencing_token,
                         event_type: EventType::Step(StepEventType::Failed),
                         error: format!("WASM execution failed: {:?}", e),
                         runner_id: None,

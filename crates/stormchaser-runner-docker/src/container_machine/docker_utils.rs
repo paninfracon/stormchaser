@@ -93,6 +93,10 @@ impl<S> DockerContainerMachine<S> {
             self.metadata.step_id.to_string(),
         );
         labels.insert(
+            "stormchaser-fencing-token".to_string(),
+            self.metadata.fencing_token.to_string(),
+        );
+        labels.insert(
             "stormchaser.v1.io/received-at".to_string(),
             self.metadata.received_at.to_rfc3339(),
         );
@@ -182,6 +186,7 @@ mod tests {
         let metadata = ContainerMetadata {
             run_id: Uuid::new_v4(),
             step_id: Uuid::new_v4(),
+            fencing_token: 0,
             step_dsl,
             received_at: chrono::Utc::now(),
             encryption_key: None,

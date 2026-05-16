@@ -24,7 +24,8 @@ use stormchaser_model::StepInstanceId;
 use crate::auth::AuthClaims;
 use crate::db::{
     delete_event_correlation, get_event_correlation, get_run_outputs_for_opa,
-    get_step_instance_for_approval, get_workflow_context_for_opa, insert_approval_registry,
+    get_step_instance_for_approval, get_workflow_context_for_opa, get_workflow_run_fencing_token,
+    insert_approval_registry,
 };
 use async_nats::jetstream::new as new_jetstream;
 use chrono::Utc;
@@ -245,6 +246,32 @@ fn find_step(steps: &[Step], name: &str) -> Option<Step> {
     None
 }
 
+async fn resolve_fencing_token(state: &AppState, run_id: RunId) -> Result<i64, StatusCode> {
+    get_workflow_run_fencing_token(&state.pool, run_id)
+        .await
+        .map_err(|error| {
+            tracing::error!(
+                "Failed to load fencing token for run {} in HITL handler: {:?}",
+                run_id,
+                error
+            );
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)
+}
+
+async fn resolve_fencing_token_or_response(
+    state: &AppState,
+    run_id: RunId,
+) -> Result<i64, axum::response::Response> {
+    resolve_fencing_token(state, run_id)
+        .await
+        .map_err(|status| match status {
+            StatusCode::NOT_FOUND => (StatusCode::NOT_FOUND, "Run not found").into_response(),
+            _ => (StatusCode::INTERNAL_SERVER_ERROR, "Failed to load run").into_response(),
+        })
+}
+
 /// Approves a step.
 pub async fn approve_step(
     State(state): State<AppState>,
@@ -288,10 +315,16 @@ pub async fn approve_step(
     )
     .await;
 
+    let fencing_token = match resolve_fencing_token_or_response(&state, run_id).await {
+        Ok(token) => token,
+        Err(response) => return response,
+    };
+
     // 3. Publish to NATS simulating step completion
     let completion_event = StepCompletedEvent {
         run_id,
         step_id,
+        fencing_token,
         event_type: EventType::Step(StepEventType::Completed),
         runner_id: None,
         exit_code: Some(0),
@@ -358,9 +391,15 @@ pub async fn reject_step(
     )
     .await;
 
+    let fencing_token = match resolve_fencing_token_or_response(&state, run_id).await {
+        Ok(token) => token,
+        Err(response) => return response,
+    };
+
     let event = StepFailedEvent {
         run_id,
         step_id,
+        fencing_token,
         event_type: EventType::Step(StepEventType::Failed),
         error: "Rejected by human".to_string(),
         exit_code: Some(1),
@@ -407,10 +446,16 @@ pub async fn correlate_event(
         None => return (StatusCode::NOT_FOUND, "No correlation matched").into_response(),
     };
 
+    let fencing_token = match resolve_fencing_token_or_response(&state, corr.run_id).await {
+        Ok(token) => token,
+        Err(response) => return response,
+    };
+
     // 2. Publish to stormchaser.step.completed
     let completion_event = StepCompletedEvent {
         run_id: corr.run_id,
         step_id: corr.step_instance_id,
+        fencing_token,
         event_type: EventType::Step(StepEventType::Completed),
         runner_id: None,
         exit_code: Some(0),

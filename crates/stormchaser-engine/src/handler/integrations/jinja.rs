@@ -119,6 +119,7 @@ async fn save_output_and_complete(
     let event = StepCompletedEvent {
         run_id,
         step_id,
+        fencing_token: 0,
         event_type: EventType::Step(StepEventType::Completed),
         outputs: Some(outputs_map),
         exit_code: Some(0),
