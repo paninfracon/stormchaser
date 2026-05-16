@@ -90,6 +90,6 @@ jobs:
     - name: Generate Certificates
       run: ./scripts/generate-certs.sh
     - name: Run Unit Tests
-      run: ./scripts/test-unit.sh --all-features
+      run: STORMCHASER_UNIT_TEST_WITH_ENV=1 ./scripts/test-unit.sh --all-features
     - name: Run Integration Tests
       run: ./scripts/test-integration.sh --all-features
