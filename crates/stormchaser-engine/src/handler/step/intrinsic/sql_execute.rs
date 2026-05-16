@@ -177,7 +177,7 @@ async fn execute_sql_query(
         stormchaser_model::connections::ConnectionType::Postgres => {
             let pg_pool = sqlx::postgres::PgPoolOptions::new()
                 .max_connections(1)
-                .acquire_timeout(Duration::from_secs(5))
+                .acquire_timeout(Duration::from_secs(30))
                 .connect(url)
                 .await?;
             let result = sqlx::query(query).execute(&pg_pool).await?;
