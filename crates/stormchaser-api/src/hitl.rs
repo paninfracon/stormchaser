@@ -249,8 +249,27 @@ fn find_step(steps: &[Step], name: &str) -> Option<Step> {
 async fn resolve_fencing_token(state: &AppState, run_id: RunId) -> Result<i64, StatusCode> {
     get_workflow_run_fencing_token(&state.pool, run_id)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .map_err(|error| {
+            tracing::error!(
+                "Failed to load fencing token for run {} in HITL handler: {:?}",
+                run_id,
+                error
+            );
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
         .ok_or(StatusCode::NOT_FOUND)
+}
+
+async fn resolve_fencing_token_or_response(
+    state: &AppState,
+    run_id: RunId,
+) -> Result<i64, axum::response::Response> {
+    resolve_fencing_token(state, run_id)
+        .await
+        .map_err(|status| match status {
+            StatusCode::NOT_FOUND => (StatusCode::NOT_FOUND, "Run not found").into_response(),
+            _ => (StatusCode::INTERNAL_SERVER_ERROR, "Failed to load run").into_response(),
+        })
 }
 
 /// Approves a step.
@@ -296,12 +315,9 @@ pub async fn approve_step(
     )
     .await;
 
-    let fencing_token = match resolve_fencing_token(&state, run_id).await {
+    let fencing_token = match resolve_fencing_token_or_response(&state, run_id).await {
         Ok(token) => token,
-        Err(StatusCode::NOT_FOUND) => {
-            return (StatusCode::NOT_FOUND, "Run not found").into_response()
-        }
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to load run").into_response(),
+        Err(response) => return response,
     };
 
     // 3. Publish to NATS simulating step completion
@@ -375,12 +391,9 @@ pub async fn reject_step(
     )
     .await;
 
-    let fencing_token = match resolve_fencing_token(&state, run_id).await {
+    let fencing_token = match resolve_fencing_token_or_response(&state, run_id).await {
         Ok(token) => token,
-        Err(StatusCode::NOT_FOUND) => {
-            return (StatusCode::NOT_FOUND, "Run not found").into_response()
-        }
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to load run").into_response(),
+        Err(response) => return response,
     };
 
     let event = StepFailedEvent {
@@ -433,12 +446,9 @@ pub async fn correlate_event(
         None => return (StatusCode::NOT_FOUND, "No correlation matched").into_response(),
     };
 
-    let fencing_token = match resolve_fencing_token(&state, corr.run_id).await {
+    let fencing_token = match resolve_fencing_token_or_response(&state, corr.run_id).await {
         Ok(token) => token,
-        Err(StatusCode::NOT_FOUND) => {
-            return (StatusCode::NOT_FOUND, "Run not found").into_response()
-        }
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to load run").into_response(),
+        Err(response) => return response,
     };
 
     // 2. Publish to stormchaser.step.completed
