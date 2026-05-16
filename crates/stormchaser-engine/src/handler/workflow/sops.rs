@@ -1,17 +1,20 @@
 use anyhow::{Context, Result};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::Stdio;
 use tokio::process::Command;
 use tracing::{debug, warn};
 
 /// Extracts all leaf values from a JSON value to populate the redaction registry.
-pub fn extract_sensitive_values(val: &Value, registry: &mut Vec<String>) {
+///
+/// Uses a [`HashSet`] to prevent duplicate entries, which avoids inflating storage
+/// and redundant work in any downstream redaction logic.
+pub fn extract_sensitive_values(val: &Value, registry: &mut HashSet<String>) {
     match val {
         Value::String(s) if !s.is_empty() && s.len() > 3 => {
             // Avoid redacting tiny strings which could mask everything
-            registry.push(s.clone());
+            registry.insert(s.clone());
         }
         Value::Array(arr) => {
             for v in arr {
@@ -128,8 +131,9 @@ pub async fn decrypt_sops_secrets(
         .or_else(|_| serde_json::from_str(&stdout))
         .context("Failed to parse decrypted SOPS output as JSON or YAML")?;
 
-    let mut sensitive_values = Vec::new();
-    extract_sensitive_values(&secrets_val, &mut sensitive_values);
+    let mut sensitive_set = HashSet::new();
+    extract_sensitive_values(&secrets_val, &mut sensitive_set);
+    let sensitive_values: Vec<String> = sensitive_set.into_iter().collect();
 
     Ok((secrets_val, sensitive_values))
 }
@@ -149,13 +153,13 @@ mod tests {
             ]
         });
 
-        let mut registry = Vec::new();
+        let mut registry = HashSet::new();
         extract_sensitive_values(&val, &mut registry);
 
         assert_eq!(registry.len(), 3);
-        assert!(registry.contains(&"secret1234".to_string()));
-        assert!(registry.contains(&"secret5678".to_string()));
-        assert!(registry.contains(&"secret9012".to_string()));
-        assert!(!registry.contains(&"too".to_string()));
+        assert!(registry.contains("secret1234"));
+        assert!(registry.contains("secret5678"));
+        assert!(registry.contains("secret9012"));
+        assert!(!registry.contains("too"));
     }
 }

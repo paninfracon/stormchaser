@@ -182,6 +182,7 @@ pub async fn handle_step_completed(
             pool.clone(),
             tls_reloader.clone(),
             context.inputs.clone(),
+            context.secrets.clone(),
             &workflow_ast,
         )
         .await?

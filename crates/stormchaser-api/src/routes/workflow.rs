@@ -114,8 +114,8 @@ pub async fn enqueue_workflow(
         dsl: None,
         inputs: None,
         initiating_user: None,
-        sops_file: payload.sops_file,
-        sops_role_arn: payload.sops_role_arn,
+        sops_file: payload.sops_file.clone(),
+        sops_role_arn: payload.sops_role_arn.clone(),
     };
 
     publish_cloudevent(
