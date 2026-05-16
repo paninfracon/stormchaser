@@ -2,6 +2,7 @@ use futures::StreamExt;
 use serde_json::json;
 use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
+use std::env::var;
 use std::sync::Arc;
 use std::time::Duration;
 use stormchaser_engine::handler;
@@ -18,11 +19,11 @@ async fn test_jq_step_execution() {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .try_init();
 
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD")
+            var("STORMCHASER_DEV_PASSWORD")
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
@@ -55,7 +56,7 @@ async fn test_jq_step_execution() {
         }
     "#;
 
-    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
     let opa_client = Arc::new(OpaClient::new(None, None));
 

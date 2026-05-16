@@ -7,6 +7,7 @@ use serde_json::json;
 use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
 use std::collections::HashMap;
+use std::env::var;
 use stormchaser_model::OpaClient;
 
 use std::net::SocketAddr;
@@ -19,11 +20,11 @@ use uuid::Uuid;
 async fn test_webhook_trigger() {
     std::env::set_var("API_RATE_LIMIT_PER_SECOND", "1000");
     std::env::set_var("API_RATE_LIMIT_BURST_SIZE", "1000");
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD")
+            var("STORMCHASER_DEV_PASSWORD")
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
@@ -33,7 +34,7 @@ async fn test_webhook_trigger() {
         .await
         .unwrap();
 
-    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
 
     let state = AppState {
@@ -143,11 +144,11 @@ async fn test_github_webhook_signature() {
 
     std::env::set_var("API_RATE_LIMIT_PER_SECOND", "1000");
     std::env::set_var("API_RATE_LIMIT_BURST_SIZE", "1000");
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD")
+            var("STORMCHASER_DEV_PASSWORD")
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
@@ -157,7 +158,7 @@ async fn test_github_webhook_signature() {
         .await
         .unwrap();
 
-    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
 
     let state = AppState {

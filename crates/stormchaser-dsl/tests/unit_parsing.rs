@@ -199,3 +199,108 @@ fn test_parse_wasm_step() {
     assert_eq!(spec["args"]["timeout"], 60);
     assert_eq!(spec["args"]["retries"], 3);
 }
+
+#[test]
+fn test_parse_inputs_view() {
+    let dsl = r#"
+        stormchaser_dsl_version = "0.1"
+        workflow "test_view" {
+            inputs {
+                ui_order = ["field_b", "field_a", "*"]
+                type = "object"
+                properties = {
+                    field_a = { type = "string" }
+                    field_b = { type = "string" }
+                }
+            }
+            steps {}
+        }
+    "#;
+
+    let parser = StormchaserParser::new();
+    let workflow = parser.parse(dsl).expect("Failed to parse DSL");
+
+    assert!(workflow.inputs_view.is_some());
+    let view = workflow.inputs_view.unwrap();
+    assert_eq!(view.ui_order, vec!["field_b", "field_a", "*"]);
+}
+
+#[test]
+fn test_parse_include_library_strategy_quotas_handler() {
+    let dsl = r#"
+        stormchaser_dsl_version = "0.1"
+        workflow "test_blocks" {
+            include "my_include" {
+                workflow = "other_wf"
+                inputs = {
+                    foo = "bar"
+                    baz = 123
+                }
+            }
+            library "my_lib" {
+                source = "git://example.com/repo"
+                version = "v1.0.0"
+                checksum = "sha256:1234"
+            }
+            strategy {
+                affinity = "zone-a"
+                fail_fast = true
+                max_parallel = 5
+                process_allow_list = ["safe_process", "other"]
+            }
+            quotas {
+                max_concurrency = 10
+                max_cpu = "2"
+                max_memory = "4Gi"
+                max_storage = "10Gi"
+                timeout = "1h"
+            }
+            handler "on_fail" {
+                event_type = "failed"
+                condition = "true"
+                action = "notify"
+            }
+            steps {}
+        }
+    "#;
+
+    let parser = StormchaserParser::new();
+    let workflow = parser.parse(dsl).expect("Failed to parse DSL");
+
+    assert_eq!(workflow.includes.len(), 1);
+    let inc = &workflow.includes[0];
+    assert_eq!(inc.name, "my_include");
+    assert_eq!(inc.workflow, "other_wf");
+    assert_eq!(inc.inputs.get("foo").unwrap(), "bar");
+    assert_eq!(inc.inputs.get("baz").unwrap(), "123");
+
+    assert_eq!(workflow.libraries.len(), 1);
+    let lib = &workflow.libraries[0];
+    assert_eq!(lib.name, "my_lib");
+    assert_eq!(lib.source, "git://example.com/repo");
+    assert_eq!(lib.version, "v1.0.0");
+    assert_eq!(lib.checksum, "sha256:1234");
+
+    let strat = workflow.strategy.as_ref().unwrap();
+    assert_eq!(strat.affinity.as_deref(), Some("zone-a"));
+    assert_eq!(strat.fail_fast, Some(true));
+    assert_eq!(strat.max_parallel, Some(5));
+    assert_eq!(
+        strat.process_allow_list.as_ref().unwrap(),
+        &vec!["safe_process".to_string(), "other".to_string()]
+    );
+
+    let quotas = workflow.quotas.as_ref().unwrap();
+    assert_eq!(quotas.max_concurrency, Some(10));
+    assert_eq!(quotas.max_cpu.as_deref(), Some("2"));
+    assert_eq!(quotas.max_memory.as_deref(), Some("4Gi"));
+    assert_eq!(quotas.max_storage.as_deref(), Some("10Gi"));
+    assert_eq!(quotas.timeout.as_deref(), Some("1h"));
+
+    assert_eq!(workflow.handlers.len(), 1);
+    let handler = &workflow.handlers[0];
+    assert_eq!(handler.name, "on_fail");
+    assert_eq!(handler.event_type, "failed");
+    assert_eq!(handler.condition.as_deref(), Some("true"));
+    assert_eq!(handler.action, "notify");
+}

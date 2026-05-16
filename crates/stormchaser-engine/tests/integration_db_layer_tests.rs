@@ -1,5 +1,6 @@
 use chrono::Utc;
 use sqlx::postgres::PgPoolOptions;
+use std::env::var;
 use stormchaser_engine::db;
 use stormchaser_model::runner::RunnerStatus;
 use stormchaser_model::step::{StepInstance, StepStatus};
@@ -11,11 +12,11 @@ use stormchaser_model::StepInstanceId;
 use stormchaser_model::TestReportId;
 
 async fn setup_db() -> sqlx::PgPool {
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD")
+            var("STORMCHASER_DEV_PASSWORD")
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
@@ -242,4 +243,36 @@ async fn test_db_layer_functions() {
             .await
             .unwrap();
     assert_eq!(cases.len(), 1);
+}
+
+#[tokio::test]
+async fn test_get_stalled_resolving_runs() {
+    let pool = setup_db().await;
+
+    // Create a new run stuck in resolving
+    let run_id = RunId::new_v4();
+    let mut tx = pool.begin().await.unwrap();
+
+    db::runs::insert_workflow_run(
+        &mut *tx,
+        run_id,
+        "stuck-workflow",
+        Some("user"),
+        Some("https://github"),
+        Some("path"),
+        Some("HEAD"),
+        RunStatus::Resolving, // Insert as resolving
+        Some(1),
+        Utc::now(),
+        Utc::now(),
+        Some(Utc::now() - chrono::Duration::minutes(10)), // Started resolving 10 mins ago
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+
+    let stalled = db::runs::get_stalled_resolving_runs(&pool, 5)
+        .await
+        .unwrap();
+    assert!(stalled.contains(&run_id));
 }

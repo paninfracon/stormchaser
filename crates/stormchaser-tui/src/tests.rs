@@ -1,8 +1,10 @@
+use crate::app::WorkflowRunDetail;
 use crate::app::{App, AppState, Pane};
 use crate::ui::ui;
 use chrono::{TimeZone, Utc};
 use insta::assert_debug_snapshot;
 use ratatui::{backend::TestBackend, Terminal};
+use ratatui_textarea::TextArea;
 use stormchaser_model::connections::ArtifactRegistry;
 use stormchaser_model::cron::CronWorkflow;
 use stormchaser_model::event_rules::EventRule;
@@ -26,6 +28,7 @@ fn create_test_app<'a>() -> App<'a> {
     let (tx, _) = tokio::sync::mpsc::channel(100);
     let mut app = App::new(
         "http://localhost:3000".to_string(),
+        "http://localhost:3001".to_string(),
         Some("token".to_string()),
         tx,
     );
@@ -42,7 +45,7 @@ fn render_connections_tab() {
     let updated_at = Utc.timestamp_opt(1609459200, 0).unwrap();
 
     app.connections = vec![Connection {
-        id: stormchaser_model::ConnectionId::new(uuid::Uuid::nil()),
+        id: stormchaser_model::ConnectionId::new(Uuid::nil()),
         name: "test-sfs".to_string(),
         description: Some("Test SFS".to_string()),
         connection_type: ConnectionType::S3,
@@ -71,10 +74,10 @@ fn render_connection_dialog() {
     app.active_pane = Pane::ConnectionsList;
     app.connection_dialog_active = true;
     app.connection_inputs = vec![
-        ratatui_textarea::TextArea::default(),
-        ratatui_textarea::TextArea::default(),
-        ratatui_textarea::TextArea::default(),
-        ratatui_textarea::TextArea::default(),
+        TextArea::default(),
+        TextArea::default(),
+        TextArea::default(),
+        TextArea::default(),
     ];
     app.connection_inputs[0].insert_str("new-sfs");
     app.connection_inputs[1].insert_str("Desc");
@@ -156,16 +159,16 @@ fn render_event_rule_dialog() {
     app.active_pane = Pane::EventRulesList;
     app.event_rule_dialog_active = true;
     app.event_rule_inputs = vec![
-        ratatui_textarea::TextArea::default(),
-        ratatui_textarea::TextArea::default(),
-        ratatui_textarea::TextArea::default(),
-        ratatui_textarea::TextArea::default(),
-        ratatui_textarea::TextArea::default(),
-        ratatui_textarea::TextArea::default(),
-        ratatui_textarea::TextArea::default(),
-        ratatui_textarea::TextArea::default(),
-        ratatui_textarea::TextArea::default(),
-        ratatui_textarea::TextArea::default(),
+        TextArea::default(),
+        TextArea::default(),
+        TextArea::default(),
+        TextArea::default(),
+        TextArea::default(),
+        TextArea::default(),
+        TextArea::default(),
+        TextArea::default(),
+        TextArea::default(),
+        TextArea::default(),
     ];
     app.event_rule_inputs[0].insert_str("new-rule");
     app.event_rule_inputs[3].insert_str("push");
@@ -217,14 +220,14 @@ fn render_cron_dialog() {
     app.active_pane = Pane::CronWorkflowsList;
     app.cron_dialog_active = true;
     app.cron_inputs = vec![
-        ratatui_textarea::TextArea::default(),
-        ratatui_textarea::TextArea::default(),
-        ratatui_textarea::TextArea::default(),
-        ratatui_textarea::TextArea::default(),
-        ratatui_textarea::TextArea::default(),
-        ratatui_textarea::TextArea::default(),
-        ratatui_textarea::TextArea::default(),
-        ratatui_textarea::TextArea::default(),
+        TextArea::default(),
+        TextArea::default(),
+        TextArea::default(),
+        TextArea::default(),
+        TextArea::default(),
+        TextArea::default(),
+        TextArea::default(),
+        TextArea::default(),
     ];
     app.cron_inputs[0].insert_str("new-cron");
     app.cron_inputs[2].insert_str("* * * * *");
@@ -243,9 +246,9 @@ fn render_webhook_dialog() {
     app.active_pane = Pane::WebhooksList;
     app.webhook_dialog_active = true;
     app.webhook_inputs = vec![
-        ratatui_textarea::TextArea::default(),
-        ratatui_textarea::TextArea::default(),
-        ratatui_textarea::TextArea::default(),
+        TextArea::default(),
+        TextArea::default(),
+        TextArea::default(),
     ];
     app.webhook_inputs[0].insert_str("new-hook");
     app.webhook_inputs[1].insert_str("Desc");
@@ -262,7 +265,7 @@ fn render_approval_dialog() {
     let mut app = create_test_app();
     app.active_pane = Pane::RunDetail;
     app.approval_dialog_active = true;
-    app.approval_inputs = ratatui_textarea::TextArea::default();
+    app.approval_inputs = TextArea::default();
     app.approval_inputs.insert_str("{\"approve\": true}");
 
     let backend = TestBackend::new(100, 30);
@@ -291,8 +294,8 @@ fn render_runs_tab_populated() {
 
     let created_at = Utc.timestamp_opt(1609459200, 0).unwrap();
 
-    app.runs = vec![crate::app::WorkflowRunDetail {
-        id: RunId::new(uuid::Uuid::nil()),
+    app.runs = vec![WorkflowRunDetail {
+        id: RunId::new(Uuid::nil()),
         workflow_name: "test-workflow".to_string(),
         initiating_user: "jacrisp".to_string(),
         status: RunStatus::Succeeded,
@@ -316,8 +319,8 @@ fn render_run_detail_populated() {
     let created_at = Utc.timestamp_opt(1609459200, 0).unwrap();
 
     let detail = crate::app::WorkflowRunFullDetail {
-        detail: crate::app::WorkflowRunDetail {
-            id: RunId::new(uuid::Uuid::nil()),
+        detail: WorkflowRunDetail {
+            id: RunId::new(Uuid::nil()),
             workflow_name: "test-workflow".to_string(),
             initiating_user: "jacrisp".to_string(),
             status: RunStatus::Running,
@@ -356,12 +359,12 @@ fn render_filter_dialog() {
     let mut app = create_test_app();
     app.filter_dialog_active = true;
     app.filter_inputs = vec![
-        ratatui_textarea::TextArea::default(),
-        ratatui_textarea::TextArea::default(),
-        ratatui_textarea::TextArea::default(),
-        ratatui_textarea::TextArea::default(),
-        ratatui_textarea::TextArea::default(),
-        ratatui_textarea::TextArea::default(),
+        TextArea::default(),
+        TextArea::default(),
+        TextArea::default(),
+        TextArea::default(),
+        TextArea::default(),
+        TextArea::default(),
     ];
     app.filter_inputs[0].insert_str("owner");
 
@@ -377,9 +380,9 @@ fn render_schedule_git_dialog() {
     let mut app = create_test_app();
     app.schedule_git_dialog_active = true;
     app.schedule_git_inputs = vec![
-        ratatui_textarea::TextArea::default(),
-        ratatui_textarea::TextArea::default(),
-        ratatui_textarea::TextArea::default(),
+        TextArea::default(),
+        TextArea::default(),
+        TextArea::default(),
     ];
     app.schedule_git_inputs[0].insert_str("https://github.com/test");
 
@@ -414,8 +417,8 @@ fn render_test_results_pane() {
     let created_at = Utc.timestamp_opt(1609459200, 0).unwrap();
 
     let detail = crate::app::WorkflowRunFullDetail {
-        detail: crate::app::WorkflowRunDetail {
-            id: RunId::new(uuid::Uuid::nil()),
+        detail: WorkflowRunDetail {
+            id: RunId::new(Uuid::nil()),
             workflow_name: "test-workflow".to_string(),
             initiating_user: "jacrisp".to_string(),
             status: RunStatus::Succeeded,
@@ -484,8 +487,8 @@ fn render_run_detail_with_artifacts() {
     let step_instance_id = StepInstanceId::new_v4();
 
     let detail = crate::app::WorkflowRunFullDetail {
-        detail: crate::app::WorkflowRunDetail {
-            id: RunId::new(uuid::Uuid::nil()),
+        detail: WorkflowRunDetail {
+            id: RunId::new(Uuid::nil()),
             workflow_name: "test-workflow".to_string(),
             initiating_user: "jacrisp".to_string(),
             status: RunStatus::Succeeded,
@@ -503,7 +506,7 @@ fn render_run_detail_with_artifacts() {
             logs: vec![],
         }],
         artifacts: vec![ArtifactRegistry {
-            id: stormchaser_model::ArtifactId::new(uuid::Uuid::nil()),
+            id: stormchaser_model::ArtifactId::new(Uuid::nil()),
             run_id: RunId::new(Uuid::nil()),
             step_instance_id,
             artifact_name: "binary".to_string(),
@@ -519,6 +522,38 @@ fn render_run_detail_with_artifacts() {
     app.selected_run = Some(detail);
     app.runs_state.select(Some(0));
     app.overview_scroll = 4;
+
+    let backend = TestBackend::new(100, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    terminal.draw(|f| ui(f, &mut app)).unwrap();
+    assert_debug_snapshot!(terminal.backend());
+}
+
+#[test]
+fn render_schema_dialog_invalid_inputs() {
+    let mut app = create_test_app();
+
+    let schema = serde_json::json!({
+        "type": "object",
+        "properties": {
+            "required_string": { "type": "string" },
+            "number_field": { "type": "number" }
+        },
+        "required": ["required_string"]
+    });
+
+    let mut dialog = crate::app::schema_dialog::SchemaDialog::new(
+        schema,
+        "".to_string(),
+        serde_json::json!({"number_field": "not_a_number"}),
+        None,
+    );
+
+    // Call validate to trigger the error population
+    dialog.validate();
+
+    app.pending_schema_ui = Some(dialog);
 
     let backend = TestBackend::new(100, 30);
     let mut terminal = Terminal::new(backend).unwrap();

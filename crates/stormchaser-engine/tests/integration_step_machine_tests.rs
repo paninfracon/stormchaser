@@ -1,6 +1,7 @@
 use anyhow::Result;
 use chrono::Utc;
 use sqlx::PgPool;
+use std::env::var;
 use stormchaser_engine::step_machine::{state, StepMachine};
 use stormchaser_model::step::StepStatus;
 use stormchaser_model::workflow::RunStatus;
@@ -9,11 +10,11 @@ use stormchaser_model::StepInstanceId;
 
 // Helper to setup database test environment. Assuming a setup script handles standard test env setup.
 async fn setup_db() -> Result<PgPool> {
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD")
+            var("STORMCHASER_DEV_PASSWORD")
                 .expect("STORMCHASER_DEV_PASSWORD must be set (run scripts/setup.sh first)")
         )
     });
@@ -23,7 +24,7 @@ async fn setup_db() -> Result<PgPool> {
 
 #[tokio::test]
 async fn test_step_machine_pending_fail() -> Result<()> {
-    if std::env::var("SQL_OFFLINE").is_ok() {
+    if var("SQL_OFFLINE").is_ok() {
         return Ok(());
     }
 
@@ -85,7 +86,7 @@ async fn test_step_machine_pending_fail() -> Result<()> {
 
 #[tokio::test]
 async fn test_step_machine_waiting_for_event_fail() -> Result<()> {
-    if std::env::var("SQL_OFFLINE").is_ok() {
+    if var("SQL_OFFLINE").is_ok() {
         return Ok(());
     }
 

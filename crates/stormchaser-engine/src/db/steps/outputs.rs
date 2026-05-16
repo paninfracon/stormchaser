@@ -1,4 +1,5 @@
 use serde_json::Value;
+use sqlx::postgres::PgQueryResult;
 use sqlx::{Executor, Postgres};
 use stormchaser_model::{RunId, StepInstanceId};
 
@@ -9,7 +10,7 @@ pub async fn upsert_step_output<'a, E>(
     step_instance_id: StepInstanceId,
     key: &str,
     value: &Value,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
+) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
@@ -35,7 +36,7 @@ pub async fn upsert_step_output_with_sensitivity<'a, E>(
     key: &str,
     value: &Value,
     is_sensitive: bool,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
+) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {

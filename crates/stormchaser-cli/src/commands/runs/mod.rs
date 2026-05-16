@@ -174,6 +174,7 @@ pub async fn handle(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use stormchaser_model::StepInstanceId;
 
     fn build_dummy_client() -> reqwest_middleware::ClientWithMiddleware {
         reqwest_middleware::ClientBuilder::new(reqwest::Client::new()).build()
@@ -219,12 +220,12 @@ mod tests {
             },
             RunCommands::Approve {
                 run_id: id,
-                step_id: stormchaser_model::StepInstanceId::new_v4(),
+                step_id: StepInstanceId::new_v4(),
                 input: vec![],
             },
             RunCommands::Reject {
                 run_id: id,
-                step_id: stormchaser_model::StepInstanceId::new_v4(),
+                step_id: StepInstanceId::new_v4(),
             },
             RunCommands::ApproveLink {
                 token: "dummy".to_string(),

@@ -1,6 +1,7 @@
 use crate::handler::{dispatch_pending_steps, fetch_run, fetch_run_context, schedule_step};
 use crate::workflow_machine::{state, WorkflowMachine};
 use anyhow::{Context, Result};
+use opentelemetry::KeyValue;
 use sqlx::PgPool;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -62,9 +63,14 @@ pub async fn handle_workflow_start_pending(
         return Err(anyhow::anyhow!("No initial steps found in workflow"));
     }
 
-    // 4. Create CelContext for resolving expressions
-    let hcl_ctx =
-        crate::hcl_eval::create_context(context.inputs.clone(), run_id, serde_json::json!({}));
+    // 4. Create HCL Context for resolving expressions
+    let hcl_ctx = crate::hcl_eval::create_context(
+        context.inputs.clone(),
+        run_id,
+        serde_json::json!({}),
+        Some(&workflow),
+        None,
+    );
 
     // 5. Create StepInstances for initial steps and schedule them
     for step_dsl in initial_steps {
@@ -84,6 +90,8 @@ pub async fn handle_workflow_start_pending(
     // 5. Transition Workflow to Running
     let machine = WorkflowMachine::<state::StartPending>::new_from_run(run.clone());
     let _ = machine.start(&mut *tx).await?;
+
+    tx.commit().await?;
 
     let js = async_nats::jetstream::new(nats_client.clone());
     use stormchaser_model::nats::NatsSubject;
@@ -112,12 +120,10 @@ pub async fn handle_workflow_start_pending(
     crate::RUNS_STARTED.add(
         1,
         &[
-            opentelemetry::KeyValue::new("workflow_name", run.workflow_name),
-            opentelemetry::KeyValue::new("initiating_user", run.initiating_user),
+            KeyValue::new("workflow_name", run.workflow_name),
+            KeyValue::new("initiating_user", run.initiating_user),
         ],
     );
-
-    tx.commit().await?;
 
     if let Err(e) = dispatch_pending_steps(run_id, pool, nats_client, tls_reloader).await {
         error!(

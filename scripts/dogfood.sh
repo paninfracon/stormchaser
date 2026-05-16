@@ -94,14 +94,14 @@ KUBECONFIG_DATA=$(cat "$KUBECONFIG" 2>/dev/null | sed "s/127.0.0.1/$HOST_IP/g" |
 
 DSL_CONTENT=$(cat "$REPO_ROOT/tests/dogfood.storm")
 INPUTS=$(jq -n --arg url "$REPO_URL" --arg ip "$HOST_IP" --arg kubeconfig "$KUBECONFIG_DATA" \
-  --arg port_api "${PORT_API:-3000}" \
-  --arg port_db "${PORT_DB:-5432}" \
-  --arg port_nats "${PORT_NATS:-4222}" \
-  --arg port_loki "${PORT_LOKI:-3100}" \
-  --arg port_dex "${PORT_DEX:-5556}" \
-  --arg port_s3 "${PORT_S3:-9000}" \
-  --arg port_reg "${PORT_REG:-32000}" \
-  --arg port_opa "${PORT_OPA:-8181}" \
+  --argjson port_api "${PORT_API:-3000}" \
+  --argjson port_db "${PORT_DB:-5432}" \
+  --argjson port_nats "${PORT_NATS:-4222}" \
+  --argjson port_loki "${PORT_LOKI:-3100}" \
+  --argjson port_dex "${PORT_DEX:-5556}" \
+  --argjson port_s3 "${PORT_S3:-9000}" \
+  --argjson port_reg "${PORT_REG:-32000}" \
+  --argjson port_opa "${PORT_OPA:-8181}" \
   --arg db_pwd "$STORMCHASER_DEV_PASSWORD" '{
   "repo_url": $url,
   "host_ip": $ip,

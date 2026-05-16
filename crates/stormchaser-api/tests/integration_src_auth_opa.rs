@@ -2,6 +2,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use axum::{body::Body, http::Request, http::StatusCode, routing::get, Router};
 use std::collections::HashMap;
+use std::env::var;
 use std::sync::Arc;
 use stormchaser_api::auth::opa::opa_middleware;
 use stormchaser_api::AppState;
@@ -41,11 +42,11 @@ impl OpaAuthorizer for MockAuthorizer {
 
 async fn mock_state(auth: MockAuthorizer) -> AppState {
     use sqlx::postgres::PgPoolOptions;
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD")
+            var("STORMCHASER_DEV_PASSWORD")
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
@@ -55,7 +56,7 @@ async fn mock_state(auth: MockAuthorizer) -> AppState {
         .await
         .unwrap();
 
-    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats = async_nats::connect(nats_url).await.unwrap();
 
     AppState {

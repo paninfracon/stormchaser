@@ -67,7 +67,13 @@ fn secret_lookup(args: hcl::eval::FuncArgs) -> Result<HclValue, String> {
 }
 
 /// Create context.
-pub fn create_context(inputs: Value, run_id: RunId, steps: Value) -> HclContext<'static> {
+pub fn create_context(
+    inputs: Value,
+    run_id: RunId,
+    steps: Value,
+    workflow: Option<&stormchaser_dsl::ast::Workflow>,
+    step: Option<&stormchaser_dsl::ast::Step>,
+) -> HclContext<'static> {
     let mut ctx = HclContext::new();
     ctx.declare_var("inputs", json_to_hcl(inputs));
     ctx.declare_var(
@@ -78,6 +84,36 @@ pub fn create_context(inputs: Value, run_id: RunId, steps: Value) -> HclContext<
 
     ctx.declare_func("secret", FuncDef::new(secret_lookup, [ParamType::Any]));
     crate::stdlib::register_stdlib(&mut ctx);
+
+    // Apply workflow aliases
+    if let Some(wf) = workflow {
+        for (alias, expr_str) in &wf.aliases {
+            let val = match evaluate_string(expr_str, &ctx) {
+                Ok(Some(v)) => v,
+                Ok(None) => Value::String(expr_str.clone()),
+                Err(e) => {
+                    tracing::warn!("Failed to evaluate workflow alias '{}': {:?}", alias, e);
+                    Value::String(expr_str.clone())
+                }
+            };
+            ctx.declare_var(alias.clone(), json_to_hcl(val));
+        }
+    }
+
+    // Apply step aliases
+    if let Some(st) = step {
+        for (alias, expr_str) in &st.aliases {
+            let val = match evaluate_string(expr_str, &ctx) {
+                Ok(Some(v)) => v,
+                Ok(None) => Value::String(expr_str.clone()),
+                Err(e) => {
+                    tracing::warn!("Failed to evaluate step alias '{}': {:?}", alias, e);
+                    Value::String(expr_str.clone())
+                }
+            };
+            ctx.declare_var(alias.clone(), json_to_hcl(val));
+        }
+    }
 
     ctx
 }
@@ -100,6 +136,8 @@ mod tests {
             serde_json::json!({}),
             RunId::new_v4(),
             serde_json::json!({}),
+            None,
+            None,
         );
 
         let rt = tokio::runtime::Builder::new_multi_thread()

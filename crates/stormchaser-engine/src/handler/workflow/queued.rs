@@ -52,7 +52,22 @@ pub async fn handle_workflow_queued(
         }
     };
 
-    let storm_file_path = repo_path.join(&machine.run.workflow_path);
+    let workflow_req_path = std::path::Path::new(&machine.run.workflow_path);
+    if workflow_req_path.is_absolute()
+        || workflow_req_path
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        let err_msg = format!(
+            "Workflow path {} is invalid (absolute or contains '..')",
+            machine.run.workflow_path
+        );
+        let _ = machine
+            .fail(err_msg.clone(), &mut *pool.acquire().await?)
+            .await?;
+        return Err(anyhow::anyhow!(err_msg));
+    }
+    let storm_file_path = repo_path.join(workflow_req_path);
     if !storm_file_path.exists() {
         let err_msg = format!(
             "Workflow file {} not found in repo",
@@ -98,7 +113,22 @@ pub async fn handle_workflow_queued(
             continue; // Prevent infinite loops
         }
 
-        let inc_path = repo_path.join(&inc.workflow);
+        let req_inc_path = std::path::Path::new(&inc.workflow);
+        if req_inc_path.is_absolute()
+            || req_inc_path
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            let err_msg = format!(
+                "Included workflow path {} is invalid (absolute or contains '..')",
+                inc.workflow
+            );
+            let _ = machine
+                .fail(err_msg.clone(), &mut *pool.acquire().await?)
+                .await?;
+            return Err(anyhow::anyhow!(err_msg));
+        }
+        let inc_path = repo_path.join(req_inc_path);
         if !inc_path.exists() {
             let err_msg = format!("Included workflow file {} not found", inc.workflow);
             let _ = machine
@@ -134,14 +164,16 @@ pub async fn handle_workflow_queued(
                 *next_ref = format!("{}{}", prefix, next_ref);
             }
 
-            // Very naive input substitution using HCL templates/variables
-            // In a real engine, we'd use hcl_eval, but for AST merging we can inject param overrides
+            // Substitute include inputs into the step parameters using a word-boundary aware regex
+            // to avoid matching similarly named variables (e.g. replacing 'inputs.id' shouldn't affect 'my_inputs.id')
             for (k, v) in &inc.inputs {
-                let var_pattern = format!("inputs.{}", k);
-                let val_str = v.to_string();
+                let var_pattern = format!(r"\binputs\.{}\b", regex::escape(k));
+                if let Ok(re) = regex::Regex::new(&var_pattern) {
+                    let val_str = v.to_string();
 
-                for param_val in step.params.values_mut() {
-                    *param_val = param_val.replace(&var_pattern, &val_str);
+                    for param_val in step.params.values_mut() {
+                        *param_val = re.replace_all(param_val, val_str.as_str()).to_string();
+                    }
                 }
             }
 
@@ -157,10 +189,15 @@ pub async fn handle_workflow_queued(
     // Evaluate dynamic queries
     let mut query_results = serde_json::Map::new();
     for query in &parsed_workflow.queries {
-        let hcl_ctx =
-            crate::hcl_eval::create_context(inputs.clone(), run_id, serde_json::json!({}));
+        let hcl_ctx = crate::hcl_eval::create_context(
+            inputs.clone(),
+            run_id,
+            serde_json::json!({}),
+            Some(&parsed_workflow),
+            None,
+        );
         let mut resolved_params = serde_json::to_value(&query.params)?;
-        if let Err(e) = crate::hcl_eval::resolve_expressions(&mut resolved_params, &hcl_ctx) {
+        if let Err(e) = crate::hcl_eval::resolve_expressions(&mut resolved_params, &hcl_ctx, true) {
             let err_msg = format!(
                 "Failed to evaluate parameters for query {}: {}",
                 query.name, e
@@ -171,28 +208,47 @@ pub async fn handle_workflow_queued(
             return Err(anyhow::anyhow!(err_msg));
         }
 
+        let resolved_params_map: std::collections::HashMap<String, String> =
+            serde_json::from_value(resolved_params)?;
+
         // Execute the query
-        let result = {
-            debug!(
-                "Query execution for type '{}' is not implemented yet",
-                query.r#type
-            );
-            serde_json::json!([]) // Stub implementation
+        let result_vec = match crate::query::execute_query(
+            &query.r#type,
+            &resolved_params_map,
+            Some(&pool),
+            None,
+        )
+        .await
+        {
+            Ok(res) => res,
+            Err(e) => {
+                let err_msg = format!("Failed to execute query {}: {}", query.name, e);
+                let _ = machine
+                    .fail(err_msg.clone(), &mut *pool.acquire().await?)
+                    .await?;
+                return Err(anyhow::anyhow!(err_msg));
+            }
         };
+        let result = serde_json::Value::Array(result_vec);
 
         query_results.insert(query.name.clone(), result);
     }
 
     if let Some(mut schema_val) = parsed_workflow.inputs_schema.clone() {
         // Resolve dynamic expressions (like query results) inside the schema
-        let mut schema_ctx =
-            crate::hcl_eval::create_context(inputs.clone(), run_id, serde_json::json!({}));
+        let mut schema_ctx = crate::hcl_eval::create_context(
+            inputs.clone(),
+            run_id,
+            serde_json::json!({}),
+            Some(&parsed_workflow),
+            None,
+        );
         schema_ctx.declare_var(
             "queries",
             crate::hcl_eval::json_to_hcl(serde_json::Value::Object(query_results)),
         );
 
-        if let Err(e) = crate::hcl_eval::resolve_expressions(&mut schema_val, &schema_ctx) {
+        if let Err(e) = crate::hcl_eval::resolve_expressions(&mut schema_val, &schema_ctx, true) {
             let err_msg = format!("Failed to evaluate expressions in inputs schema: {}", e);
             let _ = machine
                 .fail(err_msg.clone(), &mut *pool.acquire().await?)
@@ -299,4 +355,38 @@ pub async fn handle_workflow_queued(
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn test_include_input_substitution_regex() {
+        let mut params = std::collections::HashMap::new();
+        params.insert("cmd".to_string(), "echo ${inputs.id}".to_string());
+        params.insert(
+            "other".to_string(),
+            "${my_inputs.id} and ${inputs.identity}".to_string(),
+        );
+
+        let mut inputs = std::collections::HashMap::new();
+        inputs.insert("id".to_string(), serde_json::json!("123"));
+
+        for (k, v) in &inputs {
+            let var_pattern = format!(r"\binputs\.{}\b", regex::escape(k));
+            if let Ok(re) = regex::Regex::new(&var_pattern) {
+                let val_str = match v {
+                    serde_json::Value::String(s) => s.to_string(),
+                    _ => v.to_string(),
+                };
+
+                for param_val in params.values_mut() {
+                    *param_val = re.replace_all(param_val, val_str.as_str()).to_string();
+                }
+            }
+        }
+
+        assert_eq!(params["cmd"], "echo ${123}");
+        assert_eq!(params["other"], "${my_inputs.id} and ${inputs.identity}");
+    }
 }

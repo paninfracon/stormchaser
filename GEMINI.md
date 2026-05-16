@@ -39,6 +39,10 @@ The project is divided into specialized crates to ensure a clear separation of c
   - `db.rs`: API-specific database queries.
   - `routes/schema.rs`: Serves the live DSL JSON schema for offline validation support.
 
+- **`stormchaser-query`**: Standalone microservice for workflow schema hydration and dynamic option resolution.
+  - `main.rs`: Independent Axum server exposing `/api/v1/schema/hydrate`.
+  - Integrates securely with external data sources (SQL, API, AWS) using shared OPA contexts.
+
 - **`stormchaser-runner-*`**: Environment-specific executors.
   - `stormchaser-runner-docker`: Uses `container_machine.rs` to manage Docker container lifecycles.
   - `stormchaser-runner-k8s`: Uses `job_machine.rs` to manage Kubernetes Job lifecycles.

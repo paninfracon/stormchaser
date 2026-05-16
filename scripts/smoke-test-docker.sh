@@ -20,6 +20,7 @@ echo -e "${BLUE}>>> Generating test token...${NC}"
 TOKEN=$(python3 "$REPO_ROOT/scripts/generate_dev_token.py")
 
 PORT_API=${PORT_API:-3000}
+PORT_QUERY=${PORT_QUERY:-3001}
 PORT_LOKI=${PORT_LOKI:-3100}
 PORT_TEMPO=${PORT_TEMPO:-3200}
 PORT_S3=${PORT_S3:-9000}
@@ -27,12 +28,14 @@ PORT_GRAFANA=${PORT_GRAFANA:-3002}
 PORT_PROMETHEUS=${PORT_PROMETHEUS:-9090}
 
 API_URL="http://localhost:${PORT_API}"
+QUERY_URL="http://localhost:${PORT_QUERY}"
 
-echo -e "${BLUE}>>> Checking Service Health (API, Engine, Loki, Tempo, MinIO, Grafana, Prometheus)...${NC}"
+echo -e "${BLUE}>>> Checking Service Health (API, Query, Engine, Loki, Tempo, MinIO, Grafana, Prometheus)...${NC}"
 
 ALL_READY=false
 for i in {1..24}; do
     API_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/api/health" || echo "000")
+    QUERY_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$QUERY_URL/healthz" || echo "000")
     LOKI_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${PORT_LOKI}/ready" || echo "000")
     TEMPO_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${PORT_TEMPO}/ready" || echo "000")
     MINIO_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${PORT_S3}/minio/health/live" || echo "000")
@@ -44,12 +47,12 @@ for i in {1..24}; do
         ENGINE_STATUS="200"
     fi
 
-    if [ "$API_STATUS" = "200" ] && [ "$LOKI_STATUS" = "200" ] && [ "$TEMPO_STATUS" = "200" ] && [ "$MINIO_STATUS" = "200" ] && [ "$GRAFANA_STATUS" = "200" ] && [ "$PROM_STATUS" = "200" ] && [ "$ENGINE_STATUS" = "200" ]; then
+    if [ "$API_STATUS" = "200" ] && [ "$QUERY_STATUS" = "200" ] && [ "$LOKI_STATUS" = "200" ] && [ "$TEMPO_STATUS" = "200" ] && [ "$MINIO_STATUS" = "200" ] && [ "$GRAFANA_STATUS" = "200" ] && [ "$PROM_STATUS" = "200" ] && [ "$ENGINE_STATUS" = "200" ]; then
         ALL_READY=true
         echo -e "${GREEN}>>> All core services are healthy!${NC}"
         break
     fi
-    echo "Waiting for services to become ready (API: $API_STATUS, Engine: $ENGINE_STATUS, Loki: $LOKI_STATUS, Tempo: $TEMPO_STATUS, MinIO: $MINIO_STATUS, Grafana: $GRAFANA_STATUS, Prom: $PROM_STATUS) (attempt $i/24)..."
+    echo "Waiting for services to become ready (API: $API_STATUS, Query: $QUERY_STATUS, Engine: $ENGINE_STATUS, Loki: $LOKI_STATUS, Tempo: $TEMPO_STATUS, MinIO: $MINIO_STATUS, Grafana: $GRAFANA_STATUS, Prom: $PROM_STATUS) (attempt $i/24)..."
     sleep 5
 done
 

@@ -163,8 +163,8 @@ mod tests {
             git_ref: "main".to_string(),
             input_mappings: serde_json::json!({}),
             is_active: true,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
         }
     }
 
@@ -180,7 +180,12 @@ mod tests {
             .await;
 
         let (tx, _rx) = mpsc::channel(1);
-        let mut app = App::new(server.uri(), Some("token".to_string()), tx);
+        let mut app = App::new(
+            server.uri(),
+            "http://localhost:3001".to_string(),
+            Some("token".to_string()),
+            tx,
+        );
 
         let result = app.refresh_event_rules().await;
         assert!(result.is_ok());
@@ -207,7 +212,12 @@ mod tests {
             .await;
 
         let (tx, _rx) = mpsc::channel(1);
-        let mut app = App::new(server.uri(), Some("token".to_string()), tx);
+        let mut app = App::new(
+            server.uri(),
+            "http://localhost:3001".to_string(),
+            Some("token".to_string()),
+            tx,
+        );
         app.selected_event_rule = Some(make_event_rule(id));
 
         let result = app.delete_selected_event_rule().await;

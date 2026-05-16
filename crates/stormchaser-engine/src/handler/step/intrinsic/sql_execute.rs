@@ -1,5 +1,6 @@
 use crate::handler::{fetch_outputs, fetch_run_context, fetch_step_instance};
 use anyhow::{Context, Result};
+use chrono::Utc;
 use serde_json::Value;
 use sqlx::PgPool;
 use std::time::Duration;
@@ -43,7 +44,7 @@ pub async fn try_dispatch(
                     outputs: None,
                     artifacts: None,
                     test_reports: None,
-                    timestamp: chrono::Utc::now(),
+                    timestamp: Utc::now(),
                 };
                 let _ = publish_cloudevent(
                     &async_nats::jetstream::new(nats_client),
@@ -145,7 +146,7 @@ async fn handle_sql_execute(
         outputs: Some(vec![("result".to_string(), output)].into_iter().collect()),
         artifacts: None,
         test_reports: None,
-        timestamp: chrono::Utc::now(),
+        timestamp: Utc::now(),
     };
 
     publish_cloudevent(

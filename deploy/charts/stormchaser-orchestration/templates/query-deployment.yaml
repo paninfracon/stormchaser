@@ -1,0 +1,105 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "stormchaser-orchestration.fullname" . }}-query
+  labels:
+    {{- include "stormchaser-orchestration.labels" . | nindent 4 }}
+    app.kubernetes.io/component: query
+spec:
+  replicas: {{ .Values.query.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "stormchaser-orchestration.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: query
+  template:
+    metadata:
+      labels:
+        {{- include "stormchaser-orchestration.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: query
+    spec:
+      containers:
+        - name: query
+          image: "{{ .Values.query.image.repository }}:{{ .Values.query.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.query.image.pullPolicy }}
+          env:
+            - name: BINARY
+              value: "stormchaser-query"
+            - name: KUBERNETES_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: DATABASE_URL
+              {{- if .Values.global.database.existingSecret }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.database.existingSecret }}
+                  key: {{ .Values.global.database.existingSecretKey }}
+              {{- else }}
+              value: {{ .Values.global.database.url | quote }}
+              {{- end }}
+            - name: STORMCHASER_DB_SSL
+              value: {{ .Values.global.database.ssl | quote }}
+            - name: NATS_URL
+              value: {{ .Values.global.nats.url | quote }}
+            - name: RUST_LOG
+              value: {{ .Values.query.rustLog | quote }}
+            - name: OIDC_ISSUER
+              value: {{ .Values.global.oidc.issuer | quote }}
+            {{- if .Values.global.oidc.externalIssuer }}
+            - name: OIDC_EXTERNAL_ISSUER
+              value: {{ .Values.global.oidc.externalIssuer | quote }}
+            {{- end }}
+            - name: OIDC_CLIENT_ID
+              value: {{ .Values.global.oidc.clientId | quote }}
+            - name: OIDC_CLIENT_SECRET
+              value: {{ .Values.global.oidc.clientSecret | quote }}
+            - name: LOKI_URL
+              value: {{ .Values.global.loki.url | quote }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.global.otel.endpoint | quote }}
+            - name: OTEL_SERVICE_NAME
+              value: "stormchaser-query"
+            {{- if .Values.global.opa.url }}
+            - name: OPA_URL
+              value: {{ .Values.global.opa.url | quote }}
+            {{- end }}
+            {{- if .Values.query.opaWasmPath }}
+            - name: OPA_WASM_PATH
+              value: {{ .Values.query.opaWasmPath | quote }}
+            {{- end }}
+            - name: PORT
+              value: "3001"
+            {{- if .Values.global.tls.enabled }}
+            - name: TLS_CA_CERT_PATH
+              value: {{ .Values.global.tls.caCertPath | quote }}
+            - name: TLS_CERT_PATH
+              value: {{ .Values.global.tls.certPath | quote }}
+            - name: TLS_KEY_PATH
+              value: {{ .Values.global.tls.keyPath | quote }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 3001
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          resources:
+            {{- toYaml .Values.query.resources | nindent 12 }}
+          volumeMounts:
+            {{- if .Values.global.tls.enabled }}
+            - name: certs
+              mountPath: /etc/stormchaser/certs
+              readOnly: true
+            {{- end }}
+      {{- if .Values.global.tls.enabled }}
+      volumes:
+        - name: certs
+          secret:
+            secretName: {{ .Values.global.tls.existingSecret }}
+      {{- end }}

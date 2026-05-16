@@ -6,14 +6,15 @@ use opentelemetry_sdk::{
     trace::TracerProvider,
     Resource,
 };
+use std::env::var;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Initializes OpenTelemetry tracing, logging, and metrics based on environment variables.
 pub fn init_telemetry(rust_log: &str) -> anyhow::Result<()> {
     let service_name =
-        std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| "stormchaser-engine".to_string());
-    let otlp_endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
-        .unwrap_or_else(|_| "http://localhost:4317".to_string());
+        var("OTEL_SERVICE_NAME").unwrap_or_else(|_| "stormchaser-engine".to_string());
+    let otlp_endpoint =
+        var("OTEL_EXPORTER_OTLP_ENDPOINT").unwrap_or_else(|_| "http://localhost:4317".to_string());
 
     let resource = Resource::new(vec![KeyValue::new(
         opentelemetry_semantic_conventions::resource::SERVICE_NAME,
@@ -21,7 +22,7 @@ pub fn init_telemetry(rust_log: &str) -> anyhow::Result<()> {
     )]);
 
     // Configure Tracing (Optional)
-    let tracer = if std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").is_ok() {
+    let tracer = if var("OTEL_EXPORTER_OTLP_ENDPOINT").is_ok() {
         let exporter = opentelemetry_otlp::SpanExporter::builder()
             .with_tonic()
             .with_endpoint(&otlp_endpoint)
@@ -41,7 +42,7 @@ pub fn init_telemetry(rust_log: &str) -> anyhow::Result<()> {
     };
 
     // Configure Metrics (Optional)
-    if std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").is_ok() {
+    if var("OTEL_EXPORTER_OTLP_ENDPOINT").is_ok() {
         let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
             .with_tonic()
             .with_endpoint(&otlp_endpoint)

@@ -247,7 +247,12 @@ mod tests {
             .await;
 
         let (tx, _rx) = mpsc::channel(1);
-        let mut app = App::new(server.uri(), Some("token".to_string()), tx);
+        let mut app = App::new(
+            server.uri(),
+            "http://localhost:3001".to_string(),
+            Some("token".to_string()),
+            tx,
+        );
 
         let result = app.refresh_connections().await;
         assert!(result.is_ok());
@@ -273,7 +278,12 @@ mod tests {
             .await;
 
         let (tx, _rx) = mpsc::channel(1);
-        let mut app = App::new(server.uri(), Some("token".to_string()), tx);
+        let mut app = App::new(
+            server.uri(),
+            "http://localhost:3001".to_string(),
+            Some("token".to_string()),
+            tx,
+        );
         app.connection_dialog_active = true;
 
         app.connection_inputs = vec![
@@ -294,6 +304,7 @@ mod tests {
         let (tx, _rx) = mpsc::channel(1);
         let mut app = App::new(
             "http://localhost".to_string(),
+            "http://localhost:3001".to_string(),
             Some("token".to_string()),
             tx,
         );
@@ -327,7 +338,12 @@ mod tests {
             .await;
 
         let (tx, _rx) = mpsc::channel(1);
-        let mut app = App::new(server.uri(), Some("token".to_string()), tx);
+        let mut app = App::new(
+            server.uri(),
+            "http://localhost:3001".to_string(),
+            Some("token".to_string()),
+            tx,
+        );
 
         let backend = Connection {
             id: connection_id,

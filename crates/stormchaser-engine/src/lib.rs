@@ -21,6 +21,8 @@ pub mod junit;
 pub mod nats;
 /// Database persistence for workflow and step models.
 pub mod persistence;
+/// Dynamic queries for schemas.
+pub mod query;
 /// Utilities for parsing resources like CPU and Memory.
 pub mod resource_utils;
 /// S3 backend storage implementation.

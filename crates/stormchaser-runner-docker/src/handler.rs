@@ -4,6 +4,7 @@ use anyhow::Result;
 use async_nats::jetstream::message::{AckKind, Message};
 use bollard::container::ListContainersOptions;
 use bollard::Docker;
+use chrono::Utc;
 use cloudevents::EventBuilder;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -41,7 +42,7 @@ fn build_cloudevent_payload(
         .id(Uuid::new_v4().to_string())
         .ty(event_type)
         .source(source.as_str())
-        .time(chrono::Utc::now())
+        .time(Utc::now())
         .data(APPLICATION_JSON, data)
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to build CloudEvent: {}", e))?;
@@ -101,7 +102,7 @@ fn build_container_result_event(
                 artifacts: metrics.artifacts,
                 test_reports: normalize_test_reports(metrics.test_reports),
                 outputs: Some(outputs),
-                timestamp: chrono::Utc::now(),
+                timestamp: Utc::now(),
             };
             (
                 NatsSubject::StepCompleted,
@@ -127,7 +128,7 @@ fn build_container_result_event(
                 artifacts: metrics.artifacts,
                 test_reports: normalize_test_reports(metrics.test_reports),
                 outputs: Some(outputs),
-                timestamp: chrono::Utc::now(),
+                timestamp: Utc::now(),
             };
             (
                 NatsSubject::StepFailed,
@@ -155,7 +156,7 @@ fn build_container_execution_error_event(
         artifacts: None,
         test_reports: None,
         outputs: None,
-        timestamp: chrono::Utc::now(),
+        timestamp: Utc::now(),
     })
     .unwrap()
 }
@@ -220,7 +221,7 @@ async fn handle_orphaned_container(
         .get("stormchaser.v1.io/received-at")
         .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok())
         .map(|dt| dt.with_timezone(&chrono::Utc))
-        .unwrap_or_else(chrono::Utc::now);
+        .unwrap_or_else(Utc::now);
 
     let is_encrypted = labels
         .get("stormchaser.v1.io/state-encrypted")
@@ -403,7 +404,7 @@ pub async fn handle_task(
     runner_id: String,
     encryption_key: Option<String>,
 ) {
-    let received_at = chrono::Utc::now();
+    let received_at = Utc::now();
     info!("Received task message: {:?}", msg.subject);
 
     let ce: cloudevents::Event = match serde_json::from_slice(&msg.payload) {
@@ -478,7 +479,7 @@ pub async fn handle_task(
         step_id: StepInstanceId::new(step_id),
         event_type: EventType::Step(StepEventType::Running),
         runner_id: Some(runner_id.clone()),
-        timestamp: chrono::Utc::now(),
+        timestamp: Utc::now(),
     };
     let _ = publish_cloudevent(
         &async_nats::jetstream::new(nats_client.clone()),

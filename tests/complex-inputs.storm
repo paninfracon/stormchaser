@@ -1,0 +1,56 @@
+workflow "complex-input-form" {
+  description = "A complex input form to showcase query and schema capabilities."
+
+  query "roles_query" {
+    type = "mock"
+    params = {
+      items = "admin,developer,viewer"
+    }
+  }
+
+  query "regions_query" {
+    type = "mock"
+    params = {
+      items = "us-east-1,us-west-2,eu-central-1"
+    }
+  }
+
+  query "clusters_query" {
+    type = "mock"
+    params = {
+      items = "${inputs.region}-cluster-1,${inputs.region}-cluster-2"
+    }
+  }
+
+  inputs {
+    ui_order = ["username", "role", "github_username", "region", "cluster", "dry_run", "age"]
+    username = string(pattern("^[a-zA-Z0-9_-]{3,16}$"))
+    age      = integer(minimum(18), maximum(100))
+    region   = string(enum("${queries.regions_query}"))
+    cluster  = string(enum("${queries.clusters_query}"))
+    dry_run  = boolean(default(true))
+    role     = string(enum("${queries.roles_query}"))
+
+    allOf = [
+      {
+        if   = { properties = { role = { const = "developer" } } }
+        then = { properties = { github_username = { type = "string" } }, required = ["github_username"] }
+      }
+    ]
+    required = ["username", "role", "region", "cluster"]
+  }
+
+  steps {
+    step "echo-inputs" "JinjaRender" {
+      spec {
+        template   = <<EOF
+{
+  "received_inputs": {{ inputs | tojson }},
+  "message": "Hello {{ inputs.username }}, deploying to {{ inputs.region }} cluster {{ inputs.cluster }}"
+}
+EOF
+        output_key = "echoed_data"
+      }
+    }
+  }
+}

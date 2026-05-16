@@ -1,5 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde_json::Value;
+use sqlx::postgres::PgQueryResult;
+use sqlx::postgres::PgRow;
 use sqlx::{Executor, Postgres};
 use stormchaser_model::workflow::{RunStatus, WorkflowRun};
 use stormchaser_model::RunId;
@@ -11,7 +13,7 @@ pub async fn get_active_workflow_runs_with_quotas<'e, E, O>(
 ) -> Result<Vec<O>, sqlx::Error>
 where
     E: Executor<'e, Database = Postgres>,
-    O: Send + Unpin + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,
+    O: Send + Unpin + for<'r> sqlx::FromRow<'r, PgRow>,
 {
     sqlx::query_as::<_, O>(
         r#"
@@ -23,6 +25,34 @@ where
     )
     .fetch_all(executor)
     .await
+}
+
+/// Get runs stuck in the 'resolving' state.
+pub async fn get_stalled_resolving_runs<'e, E>(
+    executor: E,
+    timeout_minutes: i64,
+) -> Result<Vec<RunId>, sqlx::Error>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    #[derive(sqlx::FromRow)]
+    struct IdRow {
+        id: uuid::Uuid,
+    }
+
+    let rows: Vec<IdRow> = sqlx::query_as(
+        r#"
+        SELECT id
+        FROM workflow_runs
+        WHERE status = 'resolving'
+          AND started_resolving_at < NOW() - INTERVAL '1 minute' * $1
+        "#,
+    )
+    .bind(timeout_minutes)
+    .fetch_all(executor)
+    .await?;
+
+    Ok(rows.into_iter().map(|r| RunId::new(r.id)).collect())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -107,7 +137,7 @@ pub async fn insert_workflow_run<'a, E>(
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
     started_resolving_at: Option<DateTime<Utc>>,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
+) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
@@ -141,7 +171,7 @@ pub async fn insert_run_context<'a, E>(
     workflow_definition: Value,
     source_code: Option<&str>,
     inputs: Value,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
+) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
@@ -169,7 +199,7 @@ pub async fn update_run_context<'a, E>(
     dsl_version: &str,
     inputs: Value,
     run_id: RunId,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
+) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
@@ -187,10 +217,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 /// Lock workflow run.
-pub async fn lock_workflow_run<'a, E>(
-    executor: E,
-    id: RunId,
-) -> Result<Option<sqlx::postgres::PgRow>, sqlx::Error>
+pub async fn lock_workflow_run<'a, E>(executor: E, id: RunId) -> Result<Option<PgRow>, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
@@ -206,7 +233,7 @@ pub async fn update_workflow_run_status<'a, E>(
     executor: E,
     status: RunStatus,
     id: RunId,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
+) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
@@ -230,7 +257,7 @@ pub async fn fail_workflow_run<'a, E>(
     status: RunStatus,
     error: &str,
     id: RunId,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
+) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
@@ -253,7 +280,7 @@ where
 pub async fn get_workflow_run_by_id<'a, E, O>(executor: E, id: RunId) -> Result<O, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
-    O: Send + Unpin + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,
+    O: Send + Unpin + for<'r> sqlx::FromRow<'r, PgRow>,
 {
     sqlx::query_as::<_, O>(
         r#"SELECT id, workflow_name, initiating_user, repo_url, workflow_path, git_ref, status as "status", version, fencing_token, created_at, updated_at, started_resolving_at, started_at, finished_at, error FROM workflow_runs WHERE id = $1"#
@@ -268,7 +295,7 @@ where
 pub async fn get_run_context_by_id<'a, E, O>(executor: E, run_id: RunId) -> Result<O, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
-    O: Send + Unpin + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,
+    O: Send + Unpin + for<'r> sqlx::FromRow<'r, PgRow>,
 {
     sqlx::query_as::<_, O>(
         r#"SELECT run_id, dsl_version, workflow_definition, source_code, inputs, secrets, sensitive_values FROM run_contexts WHERE run_id = $1"#
@@ -283,7 +310,7 @@ where
 pub async fn get_run_inputs_by_id<'a, E, O>(executor: E, run_id: RunId) -> Result<O, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
-    O: Send + Unpin + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,
+    O: Send + Unpin + for<'r> sqlx::FromRow<'r, PgRow>,
 {
     sqlx::query_as::<_, O>("SELECT inputs FROM run_contexts WHERE run_id = $1")
         .bind(run_id)
@@ -303,7 +330,7 @@ pub async fn update_workflow_run_status_full<'a, E>(
     error: Option<&str>,
     id: RunId,
     version: i32,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
+) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
@@ -334,7 +361,7 @@ pub async fn get_workflow_run_status<'a, E, O>(
 ) -> Result<Option<O>, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
-    O: Send + Unpin + for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow>,
+    O: Send + Unpin + for<'r> sqlx::FromRow<'r, PgRow>,
 {
     sqlx::query_as::<_, O>(r#"SELECT status FROM workflow_runs WHERE id = $1"#)
         .bind(id)

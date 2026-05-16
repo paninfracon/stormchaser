@@ -1,3 +1,4 @@
+use crate::persistence::persist_run;
 use anyhow::Result;
 use chrono::Utc;
 use std::marker::PhantomData;
@@ -69,7 +70,7 @@ impl WorkflowMachine<state::Queued> {
         self.run.started_resolving_at = Some(Utc::now());
         self.run.updated_at = Utc::now();
 
-        crate::persistence::persist_run(&mut self.run, executor).await?;
+        persist_run(&mut self.run, executor).await?;
 
         Ok(WorkflowMachine {
             run: self.run,
@@ -87,7 +88,7 @@ impl WorkflowMachine<state::Queued> {
         self.run.finished_at = Some(Utc::now());
         self.run.updated_at = Utc::now();
 
-        crate::persistence::persist_run(&mut self.run, executor).await?;
+        persist_run(&mut self.run, executor).await?;
 
         Ok(WorkflowMachine {
             run: self.run,
@@ -107,7 +108,7 @@ impl WorkflowMachine<state::Resolving> {
         self.run.status = RunStatus::StartPending;
         self.run.updated_at = Utc::now();
 
-        crate::persistence::persist_run(&mut self.run, executor).await?;
+        persist_run(&mut self.run, executor).await?;
 
         Ok(WorkflowMachine {
             run: self.run,
@@ -127,7 +128,7 @@ impl WorkflowMachine<state::Resolving> {
         self.run.updated_at = Utc::now();
         self.run.error = Some(error);
 
-        crate::persistence::persist_run(&mut self.run, executor).await?;
+        persist_run(&mut self.run, executor).await?;
 
         Ok(WorkflowMachine {
             run: self.run,
@@ -145,7 +146,7 @@ impl WorkflowMachine<state::Resolving> {
         self.run.finished_at = Some(Utc::now());
         self.run.updated_at = Utc::now();
 
-        crate::persistence::persist_run(&mut self.run, executor).await?;
+        persist_run(&mut self.run, executor).await?;
 
         Ok(WorkflowMachine {
             run: self.run,
@@ -166,7 +167,7 @@ impl WorkflowMachine<state::StartPending> {
         self.run.started_at = Some(Utc::now());
         self.run.updated_at = Utc::now();
 
-        crate::persistence::persist_run(&mut self.run, executor).await?;
+        persist_run(&mut self.run, executor).await?;
 
         Ok(WorkflowMachine {
             run: self.run,
@@ -186,7 +187,7 @@ impl WorkflowMachine<state::StartPending> {
         self.run.updated_at = Utc::now();
         self.run.error = Some(error);
 
-        crate::persistence::persist_run(&mut self.run, executor).await?;
+        persist_run(&mut self.run, executor).await?;
 
         Ok(WorkflowMachine {
             run: self.run,
@@ -204,7 +205,7 @@ impl WorkflowMachine<state::StartPending> {
         self.run.finished_at = Some(Utc::now());
         self.run.updated_at = Utc::now();
 
-        crate::persistence::persist_run(&mut self.run, executor).await?;
+        persist_run(&mut self.run, executor).await?;
 
         Ok(WorkflowMachine {
             run: self.run,
@@ -225,7 +226,7 @@ impl WorkflowMachine<state::Running> {
         self.run.finished_at = Some(Utc::now());
         self.run.updated_at = Utc::now();
 
-        crate::persistence::persist_run(&mut self.run, executor).await?;
+        persist_run(&mut self.run, executor).await?;
 
         Ok(WorkflowMachine {
             run: self.run,
@@ -245,7 +246,7 @@ impl WorkflowMachine<state::Running> {
         self.run.updated_at = Utc::now();
         self.run.error = Some(error);
 
-        crate::persistence::persist_run(&mut self.run, executor).await?;
+        persist_run(&mut self.run, executor).await?;
 
         Ok(WorkflowMachine {
             run: self.run,
@@ -263,7 +264,7 @@ impl WorkflowMachine<state::Running> {
         self.run.finished_at = Some(Utc::now());
         self.run.updated_at = Utc::now();
 
-        crate::persistence::persist_run(&mut self.run, executor).await?;
+        persist_run(&mut self.run, executor).await?;
 
         Ok(WorkflowMachine {
             run: self.run,

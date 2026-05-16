@@ -2,6 +2,7 @@ use super::*;
 use crate::AppEvent;
 use eventsource_stream::Eventsource;
 use futures::StreamExt;
+use reqwest::header::AUTHORIZATION;
 use serde_json::Value;
 use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
@@ -51,7 +52,7 @@ impl<'a> App<'a> {
                                 "{}/api/v1/runs/{}/steps/{}/logs?limit=5000",
                                 url, run_id, id
                             ))
-                            .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
+                            .header(AUTHORIZATION, format!("Bearer {}", token))
                             .send()
                             .await
                         {
@@ -106,7 +107,7 @@ impl<'a> App<'a> {
                 let client = reqwest::Client::new();
                 if let Ok(res) = client
                     .get(&status_url)
-                    .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
+                    .header(AUTHORIZATION, format!("Bearer {}", token))
                     .send()
                     .await
                 {
@@ -162,7 +163,7 @@ impl<'a> App<'a> {
                 let client = reqwest::Client::new();
                 if let Ok(res) = client
                     .get(&log_url)
-                    .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
+                    .header(AUTHORIZATION, format!("Bearer {}", token))
                     .send()
                     .await
                 {
@@ -196,7 +197,12 @@ mod tests {
     #[tokio::test]
     async fn test_start_watching_handles() {
         let (tx, _rx) = mpsc::channel(100);
-        let mut app = App::new("http://localhost".to_string(), None, tx);
+        let mut app = App::new(
+            "http://localhost".to_string(),
+            "http://localhost:3001".to_string(),
+            None,
+            tx,
+        );
 
         let id = RunId::new_v4();
 
@@ -217,7 +223,12 @@ mod tests {
     #[tokio::test]
     async fn test_start_watching_cached() {
         let (tx, _rx) = mpsc::channel(100);
-        let mut app = App::new("http://localhost".to_string(), None, tx);
+        let mut app = App::new(
+            "http://localhost".to_string(),
+            "http://localhost:3001".to_string(),
+            None,
+            tx,
+        );
 
         let id = RunId::new_v4();
         // Insert a dummy into cached runs
@@ -276,7 +287,12 @@ mod tests {
             .await;
 
         let (tx, mut rx) = mpsc::channel(100);
-        let mut app = App::new(server.uri(), Some("token".to_string()), tx);
+        let mut app = App::new(
+            server.uri(),
+            "http://localhost:3001".to_string(),
+            Some("token".to_string()),
+            tx,
+        );
 
         app.start_watching(id).await;
 

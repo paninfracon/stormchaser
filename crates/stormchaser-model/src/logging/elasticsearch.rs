@@ -1,5 +1,6 @@
 use crate::logging::LogBackend;
 use anyhow::Result;
+use chrono::Utc;
 
 pub(crate) async fn fetch_elasticsearch_logs(
     backend: &LogBackend,
@@ -14,13 +15,13 @@ pub(crate) async fn fetch_elasticsearch_logs(
 
     let gte = started_at
         .map(|t| t - chrono::Duration::minutes(1))
-        .unwrap_or_else(|| chrono::Utc::now() - chrono::Duration::days(30))
+        .unwrap_or_else(|| Utc::now() - chrono::Duration::days(30))
         .to_rfc3339();
 
     let lte = finished_at
-        .unwrap_or_else(chrono::Utc::now)
+        .unwrap_or_else(Utc::now)
         .checked_add_signed(chrono::Duration::seconds(5))
-        .unwrap_or_else(chrono::Utc::now)
+        .unwrap_or_else(Utc::now)
         .to_rfc3339();
 
     let mut logs = Vec::new();

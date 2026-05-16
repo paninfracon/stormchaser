@@ -1,5 +1,6 @@
 use crate::utils::{handle_run_response, parse_key_val_list, require_token};
 use anyhow::Result;
+use reqwest::header::AUTHORIZATION;
 use serde_json::json;
 
 pub struct EnqueueRunParams {
@@ -22,10 +23,7 @@ pub async fn enqueue_run(
     let token_str = require_token(token)?;
     let res = http_client
         .post(format!("{}/api/v1/runs", url))
-        .header(
-            reqwest::header::AUTHORIZATION,
-            format!("Bearer {}", token_str),
-        )
+        .header(AUTHORIZATION, format!("Bearer {}", token_str))
         .json(&json!({
             "workflow_name": params.workflow_name,
             "repo_url": params.repo,
@@ -52,7 +50,7 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/api/v1/runs"))
-            .and(header(reqwest::header::AUTHORIZATION, "Bearer test-token"))
+            .and(header(AUTHORIZATION, "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "id": "12345678-1234-1234-1234-123456789012",
                 "status": RunStatus::Queued

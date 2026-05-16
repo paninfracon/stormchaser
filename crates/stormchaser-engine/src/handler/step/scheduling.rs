@@ -1,3 +1,4 @@
+use chrono::Utc;
 use serde_json::Value;
 use stormchaser_dsl::ast;
 use stormchaser_model::dsl;
@@ -71,7 +72,7 @@ pub async fn schedule_step(
                     &step_dsl.name,
                     &step_dsl.r#type,
                     StepStatus::Skipped,
-                    chrono::Utc::now(),
+                    Utc::now(),
                 )
                 .await?;
                 return Ok(());
@@ -96,7 +97,7 @@ pub async fn schedule_step(
                 &step_dsl.name,
                 &step_dsl.r#type,
                 StepStatus::Skipped,
-                chrono::Utc::now(),
+                Utc::now(),
             )
             .await?;
             return Ok(());
@@ -133,15 +134,22 @@ pub async fn schedule_step(
                 run_context.inputs.clone(),
                 run_id,
                 steps_outputs.clone(),
+                Some(workflow),
+                Some(step_dsl),
             );
             let iter_var_name = step_dsl.iterate_as.as_deref().unwrap_or("item");
             iteration_ctx.declare_var(iter_var_name, crate::hcl_eval::json_to_hcl(item));
 
             let mut resolved_spec_iter = resolved_spec.clone();
-            let _ = crate::hcl_eval::resolve_expressions(&mut resolved_spec_iter, &iteration_ctx);
+            let _ =
+                crate::hcl_eval::resolve_expressions(&mut resolved_spec_iter, &iteration_ctx, true);
 
             let mut resolved_params_iter = resolved_params.clone();
-            let _ = crate::hcl_eval::resolve_expressions(&mut resolved_params_iter, &iteration_ctx);
+            let _ = crate::hcl_eval::resolve_expressions(
+                &mut resolved_params_iter,
+                &iteration_ctx,
+                true,
+            );
 
             crate::db::insert_step_instance_with_spec(
                 &mut *executor,
@@ -153,7 +161,7 @@ pub async fn schedule_step(
                 Some(idx as i32),
                 resolved_spec_iter.clone(),
                 resolved_params_iter.clone(),
-                chrono::Utc::now(),
+                Utc::now(),
             )
             .await?;
 
@@ -174,8 +182,8 @@ pub async fn schedule_step(
             }
         }
     } else {
-        let _ = crate::hcl_eval::resolve_expressions(&mut resolved_spec, hcl_ctx);
-        let _ = crate::hcl_eval::resolve_expressions(&mut resolved_params, hcl_ctx);
+        let _ = crate::hcl_eval::resolve_expressions(&mut resolved_spec, hcl_ctx, true);
+        let _ = crate::hcl_eval::resolve_expressions(&mut resolved_params, hcl_ctx, true);
 
         let step_instance_id = StepInstanceId::new(Uuid::new_v4());
         let initial_status = match resolved_type.as_str() {
@@ -197,7 +205,7 @@ pub async fn schedule_step(
             None::<i32>,
             resolved_spec.clone(),
             resolved_params.clone(),
-            chrono::Utc::now(),
+            Utc::now(),
         )
         .await?;
 

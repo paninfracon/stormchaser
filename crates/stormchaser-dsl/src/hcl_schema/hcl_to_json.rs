@@ -136,6 +136,22 @@ pub fn hcl_expr_to_json(expr: &Expression) -> Result<Value> {
             map.insert("$ref".to_string(), Value::String(path));
             Ok(Value::Object(map))
         }
+        Expression::TemplateExpr(t) => {
+            let s = t.to_string();
+            if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
+                Ok(Value::String(s[1..s.len() - 1].to_string()))
+            } else if s.starts_with("<<") {
+                let lines: Vec<&str> = s.lines().collect();
+                if lines.len() >= 2 {
+                    let content = lines[1..lines.len() - 1].join("\n") + "\n";
+                    Ok(Value::String(content))
+                } else {
+                    Ok(Value::String(s))
+                }
+            } else {
+                Ok(Value::String(s))
+            }
+        }
         _ => Ok(Value::Null),
     }
 }

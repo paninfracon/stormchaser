@@ -1,15 +1,15 @@
 workflow "dynamic-query" {
   description = "A test workflow to validate dynamic query capabilities"
 
-  inputs {
-    type = "object"
-    properties {
-      environment {
-        type  = "string"
-        query = "sql://SELECT 'dev' UNION SELECT 'staging' UNION SELECT 'prod'"
-      }
+  query "env_options" {
+    type = "mock"
+    params = {
+      items = "dev,staging,prod"
     }
-    required = ["environment"]
+  }
+
+  inputs {
+    environment = string(enum("${queries.env_options}"))
   }
 
   steps {

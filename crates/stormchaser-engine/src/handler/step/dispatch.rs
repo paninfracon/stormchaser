@@ -174,8 +174,10 @@ async fn resolve_storage_provision(
                 run_context.inputs.clone(),
                 run_id,
                 run_context.secrets.clone(),
+                None,
+                None,
             );
-            if crate::hcl_eval::resolve_expressions(&mut val, &hcl_ctx).is_ok() {
+            if crate::hcl_eval::resolve_expressions(&mut val, &hcl_ctx, true).is_ok() {
                 prov_clone.url = match val {
                     Value::String(s) => Some(s),
                     other => Some(other.to_string()),

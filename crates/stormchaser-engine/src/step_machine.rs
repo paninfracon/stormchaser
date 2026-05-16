@@ -1,5 +1,7 @@
+use crate::persistence::persist_step_instance;
 use anyhow::Result;
 use chrono::Utc;
+use std::marker::PhantomData;
 use stormchaser_model::step::{StepInstance, StepStatus};
 
 /// State markers for the typestate pattern
@@ -31,7 +33,7 @@ pub mod state {
 pub struct StepMachine<S> {
     /// The underlying step instance data model.
     pub instance: StepInstance,
-    _state: std::marker::PhantomData<S>,
+    _state: PhantomData<S>,
 }
 
 impl<S> StepMachine<S> {
@@ -39,7 +41,7 @@ impl<S> StepMachine<S> {
     pub fn from_instance(instance: StepInstance) -> Self {
         Self {
             instance,
-            _state: std::marker::PhantomData,
+            _state: PhantomData,
         }
     }
 }
@@ -54,7 +56,7 @@ impl StepMachine<state::Pending> {
 
         StepMachine {
             instance,
-            _state: std::marker::PhantomData,
+            _state: PhantomData,
         }
     }
 
@@ -69,11 +71,11 @@ impl StepMachine<state::Pending> {
         self.instance.started_at = Some(Utc::now());
         self.instance.runner_id = Some(runner_id);
 
-        crate::persistence::persist_step_instance(&self.instance, executor).await?;
+        persist_step_instance(&self.instance, executor).await?;
 
         Ok(StepMachine {
             instance: self.instance,
-            _state: std::marker::PhantomData,
+            _state: PhantomData,
         })
     }
 
@@ -88,11 +90,11 @@ impl StepMachine<state::Pending> {
         self.instance.started_at = Some(Utc::now());
         self.instance.runner_id = Some(runner_id);
 
-        crate::persistence::persist_step_instance(&self.instance, executor).await?;
+        persist_step_instance(&self.instance, executor).await?;
 
         Ok(StepMachine {
             instance: self.instance,
-            _state: std::marker::PhantomData,
+            _state: PhantomData,
         })
     }
 
@@ -109,11 +111,11 @@ impl StepMachine<state::Pending> {
         self.instance.error = Some(error);
         self.instance.exit_code = exit_code;
 
-        crate::persistence::persist_step_instance(&self.instance, executor).await?;
+        persist_step_instance(&self.instance, executor).await?;
 
         Ok(StepMachine {
             instance: self.instance,
-            _state: std::marker::PhantomData,
+            _state: PhantomData,
         })
     }
 }
@@ -128,11 +130,11 @@ impl StepMachine<state::UnpackingSfs> {
     ) -> Result<StepMachine<state::Running>> {
         self.instance.status = StepStatus::Running;
 
-        crate::persistence::persist_step_instance(&self.instance, executor).await?;
+        persist_step_instance(&self.instance, executor).await?;
 
         Ok(StepMachine {
             instance: self.instance,
-            _state: std::marker::PhantomData,
+            _state: PhantomData,
         })
     }
 
@@ -149,11 +151,11 @@ impl StepMachine<state::UnpackingSfs> {
         self.instance.error = Some(error);
         self.instance.exit_code = exit_code;
 
-        crate::persistence::persist_step_instance(&self.instance, executor).await?;
+        persist_step_instance(&self.instance, executor).await?;
 
         Ok(StepMachine {
             instance: self.instance,
-            _state: std::marker::PhantomData,
+            _state: PhantomData,
         })
     }
 
@@ -166,11 +168,11 @@ impl StepMachine<state::UnpackingSfs> {
         self.instance.status = StepStatus::Skipped;
         self.instance.finished_at = Some(Utc::now());
 
-        crate::persistence::persist_step_instance(&self.instance, executor).await?;
+        persist_step_instance(&self.instance, executor).await?;
 
         Ok(StepMachine {
             instance: self.instance,
-            _state: std::marker::PhantomData,
+            _state: PhantomData,
         })
     }
 
@@ -190,11 +192,11 @@ impl StepMachine<state::Running> {
     ) -> Result<StepMachine<state::PackingSfs>> {
         self.instance.status = StepStatus::PackingSfs;
 
-        crate::persistence::persist_step_instance(&self.instance, executor).await?;
+        persist_step_instance(&self.instance, executor).await?;
 
         Ok(StepMachine {
             instance: self.instance,
-            _state: std::marker::PhantomData,
+            _state: PhantomData,
         })
     }
 
@@ -208,11 +210,11 @@ impl StepMachine<state::Running> {
         self.instance.finished_at = Some(Utc::now());
         self.instance.exit_code = Some(0);
 
-        crate::persistence::persist_step_instance(&self.instance, executor).await?;
+        persist_step_instance(&self.instance, executor).await?;
 
         Ok(StepMachine {
             instance: self.instance,
-            _state: std::marker::PhantomData,
+            _state: PhantomData,
         })
     }
 
@@ -229,11 +231,11 @@ impl StepMachine<state::Running> {
         self.instance.error = Some(error);
         self.instance.exit_code = exit_code;
 
-        crate::persistence::persist_step_instance(&self.instance, executor).await?;
+        persist_step_instance(&self.instance, executor).await?;
 
         Ok(StepMachine {
             instance: self.instance,
-            _state: std::marker::PhantomData,
+            _state: PhantomData,
         })
     }
 
@@ -245,11 +247,11 @@ impl StepMachine<state::Running> {
     ) -> Result<StepMachine<state::WaitingForEvent>> {
         self.instance.status = StepStatus::WaitingForEvent;
 
-        crate::persistence::persist_step_instance(&self.instance, executor).await?;
+        persist_step_instance(&self.instance, executor).await?;
 
         Ok(StepMachine {
             instance: self.instance,
-            _state: std::marker::PhantomData,
+            _state: PhantomData,
         })
     }
 
@@ -262,11 +264,11 @@ impl StepMachine<state::Running> {
         self.instance.status = StepStatus::Aborted;
         self.instance.finished_at = Some(Utc::now());
 
-        crate::persistence::persist_step_instance(&self.instance, executor).await?;
+        persist_step_instance(&self.instance, executor).await?;
 
         Ok(StepMachine {
             instance: self.instance,
-            _state: std::marker::PhantomData,
+            _state: PhantomData,
         })
     }
 
@@ -288,11 +290,11 @@ impl StepMachine<state::PackingSfs> {
         self.instance.finished_at = Some(Utc::now());
         self.instance.exit_code = Some(0);
 
-        crate::persistence::persist_step_instance(&self.instance, executor).await?;
+        persist_step_instance(&self.instance, executor).await?;
 
         Ok(StepMachine {
             instance: self.instance,
-            _state: std::marker::PhantomData,
+            _state: PhantomData,
         })
     }
 
@@ -309,11 +311,11 @@ impl StepMachine<state::PackingSfs> {
         self.instance.error = Some(error);
         self.instance.exit_code = exit_code;
 
-        crate::persistence::persist_step_instance(&self.instance, executor).await?;
+        persist_step_instance(&self.instance, executor).await?;
 
         Ok(StepMachine {
             instance: self.instance,
-            _state: std::marker::PhantomData,
+            _state: PhantomData,
         })
     }
 
@@ -333,11 +335,11 @@ impl StepMachine<state::WaitingForEvent> {
     ) -> Result<StepMachine<state::Running>> {
         self.instance.status = StepStatus::Running;
 
-        crate::persistence::persist_step_instance(&self.instance, executor).await?;
+        persist_step_instance(&self.instance, executor).await?;
 
         Ok(StepMachine {
             instance: self.instance,
-            _state: std::marker::PhantomData,
+            _state: PhantomData,
         })
     }
 
@@ -349,11 +351,11 @@ impl StepMachine<state::WaitingForEvent> {
     ) -> Result<StepMachine<state::Pending>> {
         self.instance.status = StepStatus::Pending;
 
-        crate::persistence::persist_step_instance(&self.instance, executor).await?;
+        persist_step_instance(&self.instance, executor).await?;
 
         Ok(StepMachine {
             instance: self.instance,
-            _state: std::marker::PhantomData,
+            _state: PhantomData,
         })
     }
 
@@ -375,11 +377,11 @@ impl StepMachine<state::WaitingForEvent> {
         self.instance.error = Some(error);
         self.instance.exit_code = exit_code;
 
-        crate::persistence::persist_step_instance(&self.instance, executor).await?;
+        persist_step_instance(&self.instance, executor).await?;
 
         Ok(StepMachine {
             instance: self.instance,
-            _state: std::marker::PhantomData,
+            _state: PhantomData,
         })
     }
 }
@@ -394,11 +396,11 @@ impl StepMachine<state::Failed> {
     ) -> Result<StepMachine<state::FailedIgnored>> {
         self.instance.status = StepStatus::FailedIgnored;
 
-        crate::persistence::persist_step_instance(&self.instance, executor).await?;
+        persist_step_instance(&self.instance, executor).await?;
 
         Ok(StepMachine {
             instance: self.instance,
-            _state: std::marker::PhantomData,
+            _state: PhantomData,
         })
     }
 

@@ -3,12 +3,16 @@
 
 /// Authentication and authorization module
 pub mod auth;
+/// Configuration module
+pub mod config;
 /// Database access module
 pub mod db;
 /// Human-in-the-loop module
 pub mod hitl;
 /// API routes module
 pub mod routes;
+/// Setup module
+pub mod setup;
 /// Telemetry and metrics module
 pub mod telemetry;
 

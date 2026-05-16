@@ -290,7 +290,12 @@ mod tests {
     #[tokio::test]
     async fn test_scroll_logic() {
         let (tx, _rx) = mpsc::channel(1);
-        let mut app = App::new("http://localhost".to_string(), None, tx);
+        let mut app = App::new(
+            "http://localhost".to_string(),
+            "http://localhost".to_string(),
+            None,
+            tx,
+        );
 
         app.scroll_logs_down();
         assert_eq!(app.log_scroll, 1);
@@ -325,7 +330,12 @@ mod tests {
     #[tokio::test]
     async fn test_run_navigation_empty() {
         let (tx, _rx) = mpsc::channel(1);
-        let mut app = App::new("http://localhost".to_string(), None, tx);
+        let mut app = App::new(
+            "http://localhost".to_string(),
+            "http://localhost".to_string(),
+            None,
+            tx,
+        );
 
         app.next_run();
         assert_eq!(app.runs_state.selected(), None);
@@ -337,7 +347,12 @@ mod tests {
     #[tokio::test]
     async fn test_run_navigation() {
         let (tx, _rx) = mpsc::channel(100);
-        let mut app = App::new("http://localhost".to_string(), None, tx);
+        let mut app = App::new(
+            "http://localhost".to_string(),
+            "http://localhost".to_string(),
+            None,
+            tx,
+        );
 
         app.runs = vec![
             WorkflowRunDetail {

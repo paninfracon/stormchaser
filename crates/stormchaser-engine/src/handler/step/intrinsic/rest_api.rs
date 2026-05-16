@@ -365,6 +365,7 @@ async fn execute_request(
 mod tests {
     use super::*;
     use serde_json::json;
+    use uuid::Uuid;
 
     #[test]
     fn test_render_request_body() {
@@ -542,7 +543,7 @@ mod tests {
 
     #[test]
     fn test_prepare_template_context() {
-        let run_id = RunId::new(uuid::Uuid::new_v4());
+        let run_id = RunId::new(Uuid::new_v4());
         let inputs = json!({"foo": "bar"});
         let outputs = json!({"step1": {"result": 42}});
         let ctx = prepare_template_context(inputs.clone(), outputs.clone(), run_id);
@@ -555,8 +556,8 @@ mod tests {
     #[test]
     fn test_parse_response_success() {
         use stormchaser_model::StepInstanceId;
-        let run_id = RunId::new(uuid::Uuid::new_v4());
-        let step_id = StepInstanceId::new(uuid::Uuid::new_v4());
+        let run_id = RunId::new(Uuid::new_v4());
+        let step_id = StepInstanceId::new(Uuid::new_v4());
         let spec = RestApiSpec {
             connection: None,
             url: "http://example.com".to_string(),
@@ -578,8 +579,8 @@ mod tests {
     #[test]
     fn test_parse_response_failure() {
         use stormchaser_model::StepInstanceId;
-        let run_id = RunId::new(uuid::Uuid::new_v4());
-        let step_id = StepInstanceId::new(uuid::Uuid::new_v4());
+        let run_id = RunId::new(Uuid::new_v4());
+        let step_id = StepInstanceId::new(Uuid::new_v4());
         let spec = RestApiSpec {
             connection: None,
             url: "http://example.com".to_string(),

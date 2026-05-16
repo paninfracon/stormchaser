@@ -213,6 +213,134 @@ pub fn generate_dsl_schema() -> RootSchema {
     root_schema
 }
 
+/// Flattens conditional `allOf` blocks into the current node's properties based on current inputs.
+/// This allows UI clients to easily render active conditional fields without complex parsing.
+pub fn flatten_schema_for_ui(schema: &Value, inputs: &Value) -> Value {
+    let mut flat = schema.clone();
+
+    fn recursive_flatten(node: &mut Value, current_inputs: &Value) {
+        if let Some(obj) = node.as_object_mut() {
+            // First, recurse into properties
+            if let Some(props) = obj.get_mut("properties").and_then(|v| v.as_object_mut()) {
+                for v in props.values_mut() {
+                    recursive_flatten(v, current_inputs);
+                }
+            }
+
+            // Now handle allOf at this level
+            if let Some(all_of) = obj.get("allOf").and_then(|v| v.as_array()) {
+                let mut splices: Vec<(Option<String>, serde_json::Map<String, Value>)> = Vec::new();
+                let mut merged_required = Vec::new();
+
+                for condition in all_of {
+                    // Check if condition matches current inputs.
+                    // This is a naive evaluation: if all const properties in `if` match `inputs`.
+                    let mut matches = true;
+                    let mut last_trigger_field = None;
+
+                    if let Some(if_props) = condition
+                        .get("if")
+                        .and_then(|i| i.get("properties"))
+                        .and_then(|p| p.as_object())
+                    {
+                        for (k, v) in if_props {
+                            last_trigger_field = Some(k.clone());
+                            if let Some(const_val) = v.get("const") {
+                                if current_inputs.get(k) != Some(const_val) {
+                                    matches = false;
+                                    break;
+                                }
+                            } else {
+                                // If it's not a const check, we conservatively don't match or assume false for this basic UI flattener.
+                                matches = false;
+                                break;
+                            }
+                        }
+                    } else {
+                        matches = false; // No if properties
+                    }
+
+                    if matches {
+                        if let Some(then_props) = condition
+                            .get("then")
+                            .and_then(|t| t.get("properties"))
+                            .and_then(|p| p.as_object())
+                        {
+                            splices.push((last_trigger_field, then_props.clone()));
+                        }
+                        if let Some(then_req) = condition
+                            .get("then")
+                            .and_then(|t| t.get("required"))
+                            .and_then(|r| r.as_array())
+                        {
+                            for r in then_req {
+                                if let Some(rs) = r.as_str() {
+                                    merged_required.push(Value::String(rs.to_string()));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if !splices.is_empty() {
+                    if let Some(props) = obj.get_mut("properties").and_then(|v| v.as_object_mut()) {
+                        let mut new_props = serde_json::Map::new();
+                        let mut processed_splices = vec![false; splices.len()];
+
+                        for (k, v) in props.iter() {
+                            new_props.insert(k.clone(), v.clone());
+                            for (i, (trigger, then_props)) in splices.iter().enumerate() {
+                                if !processed_splices[i] && trigger.as_ref() == Some(k) {
+                                    for (tk, tv) in then_props {
+                                        new_props.insert(tk.clone(), tv.clone());
+                                    }
+                                    processed_splices[i] = true;
+                                }
+                            }
+                        }
+
+                        // Fallback: apply splices whose trigger field wasn't found
+                        for (i, (_, then_props)) in splices.iter().enumerate() {
+                            if !processed_splices[i] {
+                                for (tk, tv) in then_props {
+                                    new_props.insert(tk.clone(), tv.clone());
+                                }
+                            }
+                        }
+                        *props = new_props;
+                    } else {
+                        let mut merged_props = serde_json::Map::new();
+                        for (_, then_props) in splices {
+                            for (tk, tv) in then_props {
+                                merged_props.insert(tk, tv);
+                            }
+                        }
+                        obj.insert("properties".to_string(), Value::Object(merged_props));
+                    }
+                }
+
+                if !merged_required.is_empty() {
+                    if let Some(reqs) = obj.get_mut("required").and_then(|v| v.as_array_mut()) {
+                        for r in merged_required {
+                            if !reqs.contains(&r) {
+                                reqs.push(r);
+                            }
+                        }
+                    } else {
+                        obj.insert("required".to_string(), Value::Array(merged_required));
+                    }
+                }
+            }
+
+            // Optionally, strip allOf to keep it completely flat for the UI
+            // obj.remove("allOf");
+        }
+    }
+
+    recursive_flatten(&mut flat, inputs);
+    flat
+}
+
 #[cfg(test)]
 mod tests {
     use super::generate_dsl_schema;
@@ -262,6 +390,79 @@ mod tests {
         assert!(
             properties.contains_key("query"),
             "SqlExecuteSpec schema should include the query property"
+        );
+    }
+
+    #[test]
+    fn test_flatten_schema_for_ui() {
+        use super::flatten_schema_for_ui;
+        use serde_json::json;
+
+        let schema = json!({
+            "properties": {
+                "type": { "type": "string" }
+            },
+            "allOf": [
+                {
+                    "if": { "properties": { "type": { "const": "RunK8sJob" } } },
+                    "then": { "properties": { "spec": { "type": "object" } }, "required": ["spec"] }
+                }
+            ]
+        });
+
+        let inputs = json!({
+            "type": "RunK8sJob"
+        });
+
+        let flat = flatten_schema_for_ui(&schema, &inputs);
+        let properties = flat.get("properties").unwrap().as_object().unwrap();
+        assert!(properties.contains_key("spec"));
+
+        let required = flat.get("required").unwrap().as_array().unwrap();
+        assert!(required.contains(&json!("spec")));
+
+        let inputs_no_match = json!({
+            "type": "Other"
+        });
+
+        let flat_no_match = flatten_schema_for_ui(&schema, &inputs_no_match);
+        let properties_no_match = flat_no_match
+            .get("properties")
+            .unwrap()
+            .as_object()
+            .unwrap();
+        assert!(!properties_no_match.contains_key("spec"));
+    }
+
+    #[test]
+    fn test_flatten_schema_for_ui_ordering() {
+        use super::flatten_schema_for_ui;
+        use serde_json::json;
+
+        let schema = json!({
+            "properties": {
+                "first_field": { "type": "string" },
+                "trigger_field": { "type": "string" },
+                "last_field": { "type": "string" }
+            },
+            "allOf": [
+                {
+                    "if": { "properties": { "trigger_field": { "const": "show_more" } } },
+                    "then": { "properties": { "cond_field1": { "type": "string" } } }
+                }
+            ]
+        });
+
+        let inputs = json!({
+            "trigger_field": "show_more"
+        });
+
+        let flat = flatten_schema_for_ui(&schema, &inputs);
+        let props = flat.get("properties").unwrap().as_object().unwrap();
+        let keys: Vec<_> = props.keys().map(|s| s.as_str()).collect();
+        assert_eq!(
+            keys,
+            vec!["first_field", "trigger_field", "cond_field1", "last_field"]
         );
     }
 }

@@ -223,13 +223,13 @@ impl DockerContainerMachine<state::Running> {
                 "run_id": self.metadata.run_id,
                 "step_id": self.metadata.step_id,
                 "status": StepStatus::PackingSfs,
-                "timestamp": chrono::Utc::now(),
+                "timestamp": Utc::now(),
             });
             if let Ok(ce) = cloudevents::EventBuilderV10::new()
                 .id(uuid::Uuid::new_v4().to_string())
                 .ty("stormchaser.v1.step.packing_sfs")
                 .source("/stormchaser/runner")
-                .time(chrono::Utc::now())
+                .time(Utc::now())
                 .data(APPLICATION_JSON, packing_event)
                 .build()
             {
@@ -480,6 +480,7 @@ mod tests {
                 steps: None,
                 next: vec![],
                 on_failure: None,
+                aliases: std::collections::HashMap::new(),
                 retry: None,
                 timeout: None,
                 allow_failure: None,
@@ -489,7 +490,7 @@ mod tests {
                 reports: vec![],
                 artifacts: None,
             },
-            received_at: chrono::Utc::now(),
+            received_at: Utc::now(),
             encryption_key: None,
             storage: Some(storage),
             test_report_urls: None,

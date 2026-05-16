@@ -103,6 +103,91 @@ pub fn register_stdlib(ctx: &mut HclContext) {
             .variadic_param(ParamType::Any)
             .build(coalesce),
     );
+
+    // Additional standard library functions
+    ctx.declare_func("uuid", FuncDef::builder().build(uuid_func));
+    ctx.declare_func(
+        "slugify",
+        FuncDef::builder().param(ParamType::String).build(slugify),
+    );
+    ctx.declare_func(
+        "path_join",
+        FuncDef::builder()
+            .param(ParamType::Array(Box::new(ParamType::Any)))
+            .build(path_join),
+    );
+    ctx.declare_func(
+        "env",
+        FuncDef::builder().param(ParamType::String).build(env),
+    );
+    ctx.declare_func(
+        "regex_match",
+        FuncDef::builder()
+            .param(ParamType::String)
+            .param(ParamType::String)
+            .build(regex_match),
+    );
+}
+
+fn uuid_func(_args: FuncArgs) -> Result<Value, String> {
+    Ok(Value::String(uuid::Uuid::new_v4().to_string()))
+}
+
+fn slugify(args: FuncArgs) -> Result<Value, String> {
+    if let Some(Value::String(s)) = args.first() {
+        let slug = s.to_lowercase();
+        let re = regex::Regex::new(r"[^a-z0-9]+").map_err(|e| e.to_string())?;
+        let slug = re.replace_all(&slug, "-").trim_matches('-').to_string();
+        Ok(Value::String(slug))
+    } else {
+        Err("slugify() expects a string argument".to_string())
+    }
+}
+
+fn path_join(args: FuncArgs) -> Result<Value, String> {
+    if let Some(Value::Array(arr)) = args.first() {
+        let mut path = std::path::PathBuf::new();
+        for item in arr {
+            if let Value::String(s) = item {
+                path.push(s);
+            } else {
+                return Err("path_join() expects an array of strings".to_string());
+            }
+        }
+        // Always use '/' for HCL path joining consistently across platforms
+        let path_str = path
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join("/");
+        Ok(Value::String(path_str.replace("//", "/")))
+    } else {
+        Err("path_join() expects an array argument".to_string())
+    }
+}
+
+fn env(args: FuncArgs) -> Result<Value, String> {
+    if let Some(Value::String(s)) = args.first() {
+        match std::env::var(s) {
+            Ok(val) => Ok(Value::String(val)),
+            Err(_) => Ok(Value::String("".to_string())),
+        }
+    } else {
+        Err("env() expects a string argument".to_string())
+    }
+}
+
+fn regex_match(args: FuncArgs) -> Result<Value, String> {
+    if args.len() != 2 {
+        return Err("regex_match() expects exactly 2 arguments".to_string());
+    }
+    match (&args[0], &args[1]) {
+        (Value::String(pattern), Value::String(text)) => match regex::Regex::new(pattern) {
+            Ok(re) => Ok(Value::Bool(re.is_match(text))),
+            Err(e) => Err(format!("regex_match() invalid pattern: {}", e)),
+        },
+        _ => Err("regex_match() expects string arguments".to_string()),
+    }
 }
 
 fn upper(args: FuncArgs) -> Result<Value, String> {
@@ -396,5 +481,54 @@ mod tests {
     fn test_coalesce_returns_empty_array() {
         // Terraform: empty array is a valid non-empty value — must not be skipped.
         assert_eq!(eval_with_stdlib("coalesce([], [1, 2])"), json!([]));
+    }
+
+    #[test]
+    fn test_uuid_function() {
+        let uuid_val = eval_with_stdlib("uuid()");
+        assert!(!uuid_val.as_str().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_slugify_function() {
+        assert_eq!(
+            eval_with_stdlib("slugify(\"Hello World! 123\")"),
+            json!("hello-world-123")
+        );
+        assert_eq!(eval_with_stdlib("slugify(\"---test---\")"), json!("test"));
+    }
+
+    #[test]
+    fn test_path_join_function() {
+        assert_eq!(
+            eval_with_stdlib("path_join([\"/tmp\", \"dir\", \"file.txt\"])"),
+            json!("/tmp/dir/file.txt")
+        );
+        assert_eq!(
+            eval_with_stdlib("path_join([\"dir\", \"sub/dir\", \"file.txt\"])"),
+            json!("dir/sub/dir/file.txt")
+        );
+    }
+
+    #[test]
+    fn test_env_function() {
+        std::env::set_var("TEST_HCL_ENV_VAR", "my_value");
+        assert_eq!(
+            eval_with_stdlib("env(\"TEST_HCL_ENV_VAR\")"),
+            json!("my_value")
+        );
+        assert_eq!(eval_with_stdlib("env(\"NON_EXISTENT_VAR_123\")"), json!(""));
+    }
+
+    #[test]
+    fn test_regex_match_function() {
+        assert_eq!(
+            eval_with_stdlib("regex_match(\"^[a-z]+$\", \"hello\")"),
+            json!(true)
+        );
+        assert_eq!(
+            eval_with_stdlib("regex_match(\"^[a-z]+$\", \"hello 123\")"),
+            json!(false)
+        );
     }
 }

@@ -1,5 +1,6 @@
 use crate::utils::{handle_response, parse_key_val_list, require_token};
 use anyhow::Result;
+use reqwest::header::AUTHORIZATION;
 
 pub async fn approve_step(
     url: &str,
@@ -16,7 +17,7 @@ pub async fn approve_step(
             "{}/api/v1/runs/{}/steps/{}/approve",
             url, run_id, step_id
         ))
-        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
+        .header(AUTHORIZATION, format!("Bearer {}", token))
         .json(&inputs)
         .send()
         .await?;
@@ -36,7 +37,7 @@ pub async fn reject_step(
             "{}/api/v1/runs/{}/steps/{}/reject",
             url, run_id, step_id
         ))
-        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
+        .header(AUTHORIZATION, format!("Bearer {}", token))
         .send()
         .await?;
     handle_response(res).await
@@ -62,7 +63,7 @@ pub async fn list_pending(
     let token = require_token(token)?;
     let res = http_client
         .get(format!("{}/api/v1/runs?status=Running", url))
-        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
+        .header(AUTHORIZATION, format!("Bearer {}", token))
         .send()
         .await?;
     handle_response(res).await
@@ -73,20 +74,21 @@ mod tests {
     use super::*;
     use reqwest_middleware::ClientBuilder;
     use serde_json::json;
+    use stormchaser_model::{RunId, StepInstanceId};
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
     async fn test_runs_approve() {
         let server = MockServer::start().await;
-        let run_id = stormchaser_model::RunId::new_v4();
-        let step_id = stormchaser_model::StepInstanceId::new_v4();
+        let run_id = RunId::new_v4();
+        let step_id = StepInstanceId::new_v4();
         Mock::given(method("POST"))
             .and(path(format!(
                 "/api/v1/runs/{}/steps/{}/approve",
                 run_id, step_id
             )))
-            .and(header(reqwest::header::AUTHORIZATION, "Bearer test-token"))
+            .and(header(AUTHORIZATION, "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "approved"})))
             .mount(&server)
             .await;
@@ -108,14 +110,14 @@ mod tests {
     #[tokio::test]
     async fn test_runs_reject() {
         let server = MockServer::start().await;
-        let run_id = stormchaser_model::RunId::new_v4();
-        let step_id = stormchaser_model::StepInstanceId::new_v4();
+        let run_id = RunId::new_v4();
+        let step_id = StepInstanceId::new_v4();
         Mock::given(method("POST"))
             .and(path(format!(
                 "/api/v1/runs/{}/steps/{}/reject",
                 run_id, step_id
             )))
-            .and(header(reqwest::header::AUTHORIZATION, "Bearer test-token"))
+            .and(header(AUTHORIZATION, "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "rejected"})))
             .mount(&server)
             .await;
@@ -131,7 +133,7 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/api/v1/runs"))
-            .and(header(reqwest::header::AUTHORIZATION, "Bearer test-token"))
+            .and(header(AUTHORIZATION, "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
             .mount(&server)
             .await;

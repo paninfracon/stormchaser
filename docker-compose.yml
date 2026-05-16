@@ -153,6 +153,43 @@ services:
       opa:
         condition: service_started
 
+  orchestration-query:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BINARY: stormchaser-query
+    environment:
+      DATABASE_URL: 'postgres://stormchaser:${STORMCHASER_DEV_PASSWORD?Error: STORMCHASER_DEV_PASSWORD is not set}@postgres:5432/stormchaser'
+      NATS_URL: nats://nats:4222
+      RUST_LOG: stormchaser_query=debug
+      OIDC_ISSUER: http://dex:5556/dex
+      OIDC_EXTERNAL_ISSUER: http://localhost:${PORT_DEX:-5556}/dex
+      OIDC_CLIENT_ID: stormchaser-cli
+      OIDC_CLIENT_SECRET: '${STORMCHASER_CLI_SECRET?Error: STORMCHASER_CLI_SECRET is not set}'
+      LOKI_URL: http://loki:3100
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4317
+      OTEL_SERVICE_NAME: stormchaser-query
+      OPA_URL: http://opa:8181/v1/data/stormchaser/allow
+      API_RATE_LIMIT_PER_SECOND: 10000
+      API_RATE_LIMIT_BURST_SIZE: 100000
+      TLS_CA_CERT_PATH: /etc/engine/certs/ca.crt
+      TLS_CERT_PATH: /etc/engine/certs/tls.crt
+      TLS_KEY_PATH: /etc/engine/certs/tls.key
+    volumes:
+      - ${STORMCHASER_CERT_DIR:-./tests/certs}:/etc/engine/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+      dex:
+        condition: service_started
+      opa:
+        condition: service_started
+    ports:
+      - "${PORT_QUERY:-3001}:3001"
+
   orchestration-api:
     build:
       context: .

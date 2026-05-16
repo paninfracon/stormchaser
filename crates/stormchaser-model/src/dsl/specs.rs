@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
-use super::{Input, StorageMount};
+use super::StorageMount;
 
 /// Minimal common set of arguments for running containers (portable across runners)
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -131,7 +131,7 @@ pub struct ApprovalSpec {
     /// List of user IDs or groups allowed to approve.
     pub approvers: Option<Vec<String>>,
     /// Input fields required during approval.
-    pub inputs: Option<Vec<Input>>,
+    pub inputs: Option<Value>,
     /// Notification settings.
     pub notify: Option<EmailSpec>,
     /// Timeout for waiting for approval.

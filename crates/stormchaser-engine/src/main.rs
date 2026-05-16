@@ -49,8 +49,7 @@ async fn main() -> anyhow::Result<()> {
     result
 }
 
-/// Run engine.
-pub async fn run_engine(config: Config) -> anyhow::Result<()> {
+async fn setup_tls(config: &Config) -> anyhow::Result<Arc<TlsReloader>> {
     let tls_config = TlsConfig {
         ca_cert_path: config.tls_ca_cert_path.clone(),
         cert_path: config.tls_cert_path.clone(),
@@ -58,8 +57,10 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
         server_name: config.tls_server_name.clone(),
     };
 
-    let tls_reloader = Arc::new(TlsReloader::new(tls_config).await?);
+    Ok(Arc::new(TlsReloader::new(tls_config).await?))
+}
 
+async fn setup_database(config: &Config) -> anyhow::Result<sqlx::PgPool> {
     let mut db_options: sqlx::postgres::PgConnectOptions = config.database_url.parse()?;
     if config.db_ssl {
         if let Some(ca) = &config.tls_ca_cert_path {
@@ -68,7 +69,6 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
                 .ssl_root_cert(ca.to_string_lossy().to_string());
         }
 
-        // sqlx 0.8 supports providing client certs for mTLS
         db_options = db_options
             .ssl_client_cert(config.tls_cert_path.clone())
             .ssl_client_key(config.tls_key_path.clone());
@@ -89,8 +89,10 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
     sqlx::migrate!("./migrations").run(&pool).await?;
     tracing::info!("Database migrations completed successfully");
 
-    let git_cache = Arc::new(GitCache::new(config.git_cache_dir.clone()));
+    Ok(pool)
+}
 
+fn setup_opa(config: &Config, tls_reloader: &TlsReloader) -> anyhow::Result<Arc<OpaClient>> {
     let mut opa_client = OpaClient::new(config.opa_url.clone(), Some(tls_reloader.client_config()));
 
     if let Some(wasm_path) = &config.opa_wasm_path {
@@ -100,19 +102,22 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
         opa_client = opa_client.with_wasm_executor(Arc::new(executor));
     }
 
-    if let Some(entrypoint) = config.opa_entrypoint {
+    if let Some(entrypoint) = config.opa_entrypoint.clone() {
         opa_client = opa_client.with_entrypoint(entrypoint);
     }
 
-    let opa_client = Arc::new(opa_client);
+    Ok(Arc::new(opa_client))
+}
 
-    // Log Backend Configuration
+fn setup_log_backend(config: &Config) -> Arc<Option<LogBackend>> {
     let mut log_backend = None;
-    if let Some(url) = config.loki_url {
+    if let Some(url) = config.loki_url.clone() {
         tracing::info!("Configuring Loki log backend: {}", url);
         log_backend = Some(LogBackend::Loki { url });
-    } else if let (Some(url), Some(index)) = (config.elasticsearch_url, config.elasticsearch_index)
-    {
+    } else if let (Some(url), Some(index)) = (
+        config.elasticsearch_url.clone(),
+        config.elasticsearch_index.clone(),
+    ) {
         tracing::info!(
             "Configuring Elasticsearch log backend: {} (index: {})",
             url,
@@ -120,39 +125,17 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
         );
         log_backend = Some(LogBackend::Elasticsearch { url, index });
     }
-    let log_backend = Arc::new(log_backend);
+    Arc::new(log_backend)
+}
 
-    // Initialize Secret Backend
-    let secret_backend = Arc::new(VaultBackend::new(config.vault_addr, config.vault_token)?)
-        as secrets::SharedSecretBackend;
-    hcl_eval::set_secrets_backend(secret_backend);
-
-    let nats_options = async_nats::ConnectOptions::new()
-        .retry_on_initial_connect()
-        .tls_client_config((*tls_reloader.client_config()).clone());
-
-    let nats_client = async_nats::connect_with_options(config.nats_url, nats_options).await?;
-
-    tracing::info!(
-        "Stormchaser Orchestration Engine {} starting (rev: {}, branch: {}, built: {})",
-        env!("CARGO_PKG_VERSION"),
-        env!("VERGEN_GIT_SHA"),
-        env!("VERGEN_GIT_BRANCH"),
-        env!("VERGEN_BUILD_TIMESTAMP")
-    );
-
-    // Background task for runner liveness (marking as offline after inactivity)
-    let liveness_pool = pool.clone();
+fn start_liveness_worker(pool: sqlx::PgPool) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(15));
         loop {
             interval.tick().await;
-            let result = db::mark_stale_runners_offline(
-                &liveness_pool,
-                RunnerStatus::Offline,
-                RunnerStatus::Online,
-            )
-            .await;
+            let result =
+                db::mark_stale_runners_offline(&pool, RunnerStatus::Offline, RunnerStatus::Online)
+                    .await;
 
             match result {
                 Ok(res) => {
@@ -168,17 +151,18 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
             }
         }
     });
+}
 
-    // Background task for workflow timeouts
-    let timeout_pool = pool.clone();
-    let timeout_nats = nats_client.clone();
-    let timeout_tls_reloader = tls_reloader.clone();
+fn start_timeout_worker(
+    pool: sqlx::PgPool,
+    nats_client: async_nats::Client,
+    tls_reloader: Arc<TlsReloader>,
+) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(30));
         loop {
             interval.tick().await;
 
-            // Find all non-terminal runs and check their timeouts
             #[derive(sqlx::FromRow)]
             struct TimeoutCheck {
                 id: Uuid,
@@ -189,7 +173,7 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
                 timeout: String,
             }
 
-            let result = db::get_active_workflow_runs_with_quotas(&timeout_pool)
+            let result = db::get_active_workflow_runs_with_quotas(&pool)
                 .await
                 .map(|v: Vec<TimeoutCheck>| v);
 
@@ -219,9 +203,9 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
                         {
                             if let Err(e) = handler::handle_workflow_timeout(
                                 RunId::new(run.id),
-                                timeout_pool.clone(),
-                                timeout_nats.clone(),
-                                timeout_tls_reloader.clone(),
+                                pool.clone(),
+                                nats_client.clone(),
+                                tls_reloader.clone(),
                             )
                             .await
                             {
@@ -238,10 +222,66 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
             }
         }
     });
+}
 
-    let js = nats::init_jetstream(&nats_client).await?;
+fn start_resolver_crash_recovery_worker(pool: sqlx::PgPool, nats_client: async_nats::Client) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        loop {
+            interval.tick().await;
 
-    // Use JetStream for events
+            match db::get_stalled_resolving_runs(&pool, 5).await {
+                Ok(run_ids) => {
+                    for run_id in run_ids {
+                        tracing::warn!("Recovering crashed resolution for run {}", run_id);
+                        if let Ok(run) = handler::fetch_run(run_id, &pool).await {
+                            if run.status == RunStatus::Resolving {
+                                let machine = stormchaser_engine::workflow_machine::WorkflowMachine::<
+                                    stormchaser_engine::workflow_machine::state::Resolving,
+                                >::new_from_run(run);
+                                if let Ok(mut tx) = pool.begin().await {
+                                    let result = machine
+                                        .fail(
+                                            "Engine crashed during resolution".to_string(),
+                                            &mut tx,
+                                        )
+                                        .await;
+                                    if result.is_ok() && tx.commit().await.is_ok() {
+                                        // Emit failed event
+                                        let event = stormchaser_model::events::WorkflowFailedEvent {
+                                            run_id,
+                                            event_type: stormchaser_model::events::EventType::Workflow(stormchaser_model::events::WorkflowEventType::Failed),
+                                            timestamp: chrono::Utc::now(),
+                                        };
+                                        let js = async_nats::jetstream::new(nats_client.clone());
+                                        let _ = stormchaser_model::nats::publish_cloudevent(
+                                            &js,
+                                            stormchaser_model::nats::NatsSubject::RunFailed,
+                                            stormchaser_model::events::EventType::Workflow(stormchaser_model::events::WorkflowEventType::Failed),
+                                            stormchaser_model::events::EventSource::System,
+                                            serde_json::to_value(event).unwrap(),
+                                            Some(stormchaser_model::events::SchemaVersion::new("1.0".to_string())),
+                                            None,
+                                        ).await;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => tracing::error!("Failed to fetch stalled resolving runs: {:?}", e),
+            }
+        }
+    });
+}
+
+async fn setup_nats_consumers(
+    nats_client: &async_nats::Client,
+) -> anyhow::Result<(
+    async_nats::jetstream::consumer::pull::Stream,
+    async_nats::Subscriber,
+)> {
+    let js = nats::init_jetstream(nats_client).await?;
     let stream = js.get_stream("stormchaser").await?;
     let consumer = stream
         .get_or_create_consumer(
@@ -254,17 +294,40 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
         )
         .await?;
 
-    let mut messages = consumer.messages().await?;
+    let messages = consumer.messages().await?;
+    let query_subscriber = nats_client.subscribe("stormchaser.v1.step.query").await?;
 
-    // Standard NATS subscriber for Request/Reply (queries)
-    let mut query_subscriber = nats_client.subscribe("stormchaser.v1.step.query").await?;
+    Ok((messages, query_subscriber))
+}
 
-    info!("Engine listening for events and queries");
+fn process_query_message(
+    message: async_nats::Message,
+    pool: sqlx::PgPool,
+    nats_client: async_nats::Client,
+) {
+    let ce: cloudevents::Event = match serde_json::from_slice(&message.payload) {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::error!("Failed to parse CloudEvent payload: {:?}", e);
+            return;
+        }
+    };
+    let payload: Value = if let Some(cloudevents::Data::Json(v)) = ce.data() {
+        v.clone()
+    } else {
+        tracing::error!("Query CloudEvent data is not JSON");
+        return;
+    };
+    let reply = message.reply.clone().map(|r| r.to_string());
+    tokio::spawn(async move {
+        if let Err(e) = handler::handle_step_query(payload, pool, nats_client, reply).await {
+            tracing::error!("Failed to handle step query: {:?}", e);
+        }
+    });
+}
 
-    // Build subject → schema type map for CloudEvent payload validation.
-    // Validation is permissive when a schema is not found for a subject.
-    let event_schemas = stormchaser_model::schema_gen::generate_event_schemas();
-    let subject_schema_map: std::collections::HashMap<&str, &str> = [
+fn build_subject_schema_map() -> std::collections::HashMap<&'static str, &'static str> {
+    [
         ("stormchaser.v1.run.queued", "WorkflowQueuedEvent"),
         (
             "stormchaser.v1.run.start_pending",
@@ -278,7 +341,22 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
         ("stormchaser.v1.step.failed", "StepFailedEvent"),
     ]
     .into_iter()
-    .collect();
+    .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_event_loop(
+    mut messages: async_nats::jetstream::consumer::pull::Stream,
+    mut query_subscriber: async_nats::Subscriber,
+    pool: sqlx::PgPool,
+    git_cache: Arc<GitCache>,
+    opa_client: Arc<OpaClient>,
+    nats_client: async_nats::Client,
+    tls_reloader: Arc<TlsReloader>,
+    log_backend: Arc<Option<LogBackend>>,
+) {
+    let event_schemas = stormchaser_model::schema_gen::generate_event_schemas();
+    let subject_schema_map = build_subject_schema_map();
 
     loop {
         tokio::select! {
@@ -286,7 +364,6 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
                 match message {
                     Some(Ok(message)) => {
                         let subject = message.subject.to_string();
-                        // Ignore tasks meant for runners
                         if subject.starts_with("stormchaser.v1.step.scheduled.") {
                             let _ = message.ack().await;
                             continue;
@@ -297,12 +374,7 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
                         let ce: cloudevents::Event = match serde_json::from_slice(&message.payload) {
                             Ok(e) => e,
                             Err(e) => {
-                                tracing::error!(
-                                    "Failed to parse CloudEvent from {}: {:?}. Payload: {:?}",
-                                    subject,
-                                    e,
-                                    String::from_utf8_lossy(&message.payload)
-                                );
+                                tracing::error!("Failed to parse CloudEvent from {}: {:?}. Payload: {:?}", subject, e, String::from_utf8_lossy(&message.payload));
                                 let _ = message.ack().await;
                                 continue;
                             }
@@ -316,16 +388,11 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
                             continue;
                         };
 
-                        // Validate payload against schema when one is available.
                         let schema = subject_schema_map
                             .get(subject.as_str())
                             .and_then(|name| event_schemas.get(*name));
                         if let Err(e) = stormchaser_model::nats::validate_against_schema(&payload, schema) {
-                            tracing::error!(
-                                "Rejecting CloudEvent on {}: schema validation failed: {}",
-                                subject,
-                                e
-                            );
+                            tracing::error!("Rejecting CloudEvent on {}: schema validation failed: {}", subject, e);
                             let _ = message.ack().await;
                             continue;
                         }
@@ -354,32 +421,64 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
             }
             message = query_subscriber.next() => {
                 if let Some(message) = message {
-                    let ce: cloudevents::Event = match serde_json::from_slice(&message.payload) {
-                        Ok(e) => e,
-                        Err(e) => {
-                            tracing::error!("Failed to parse CloudEvent payload: {:?}", e);
-                            continue;
-                        }
-                    };
-                    let payload: Value = if let Some(cloudevents::Data::Json(v)) = ce.data() {
-                        v.clone()
-                    } else {
-                        tracing::error!("Query CloudEvent data is not JSON");
-                        continue;
-                    };
-                    let pool = pool.clone();
-                    let nats_client = nats_client.clone();
-                    let reply = message.reply.clone().map(|r| r.to_string());
-                    tokio::spawn(async move {
-                        if let Err(e) = handler::handle_step_query(payload, pool, nats_client, reply).await
-                        {
-                            tracing::error!("Failed to handle step query: {:?}", e);
-                        }
-                    });
+                    process_query_message(message, pool.clone(), nats_client.clone());
                 }
             }
         }
     }
+}
+
+/// Run engine.
+pub async fn run_engine(config: Config) -> anyhow::Result<()> {
+    let tls_reloader = setup_tls(&config).await?;
+    let pool = setup_database(&config).await?;
+
+    let git_cache = Arc::new(GitCache::new(config.git_cache_dir.clone()));
+
+    let opa_client = setup_opa(&config, &tls_reloader)?;
+    let log_backend = setup_log_backend(&config);
+
+    // Initialize Secret Backend
+    let secret_backend = Arc::new(VaultBackend::new(
+        config.vault_addr.clone(),
+        config.vault_token.clone(),
+    )?) as secrets::SharedSecretBackend;
+    hcl_eval::set_secrets_backend(secret_backend);
+
+    let nats_options = async_nats::ConnectOptions::new()
+        .retry_on_initial_connect()
+        .tls_client_config((*tls_reloader.client_config()).clone());
+
+    let nats_client =
+        async_nats::connect_with_options(config.nats_url.clone(), nats_options).await?;
+
+    tracing::info!(
+        "Stormchaser Orchestration Engine {} starting (rev: {}, branch: {}, built: {})",
+        env!("CARGO_PKG_VERSION"),
+        env!("VERGEN_GIT_SHA"),
+        env!("VERGEN_GIT_BRANCH"),
+        env!("VERGEN_BUILD_TIMESTAMP")
+    );
+
+    start_liveness_worker(pool.clone());
+    start_timeout_worker(pool.clone(), nats_client.clone(), tls_reloader.clone());
+    start_resolver_crash_recovery_worker(pool.clone(), nats_client.clone());
+
+    let (messages, query_subscriber) = setup_nats_consumers(&nats_client).await?;
+
+    info!("Engine listening for events and queries");
+
+    run_event_loop(
+        messages,
+        query_subscriber,
+        pool,
+        git_cache,
+        opa_client,
+        nats_client,
+        tls_reloader,
+        log_backend,
+    )
+    .await;
 
     Ok(())
 }

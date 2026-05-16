@@ -179,6 +179,8 @@ jobs:
           sleep 15
           cargo publish -p stormchaser-api
           sleep 15
+          cargo publish -p stormchaser-query
+          sleep 15
           cargo publish -p stormchaser-runner-docker
           sleep 15
           cargo publish -p stormchaser-runner-k8s

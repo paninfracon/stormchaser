@@ -1,4 +1,4 @@
-use super::*;
+use crate::app::{App, WorkflowRunDetail, WorkflowRunFullDetail};
 use crate::AppEvent;
 use chrono::Utc;
 use serde_json::Value;
@@ -205,9 +205,18 @@ impl<'a> App<'a> {
 
                     // Always trigger a refresh to get the new history entry (throttled)
                     let tx = self.status_tx.clone();
+                    let is_terminal = status == "succeeded"
+                        || status == "failed"
+                        || status == "aborted"
+                        || status == "skipped";
+                    let refresh_type = if is_terminal {
+                        "force_refresh"
+                    } else {
+                        "refresh"
+                    };
                     tokio::spawn(async move {
                         let _ = tx
-                            .send(AppEvent::StatusUpdate(run_id, "refresh".to_string()))
+                            .send(AppEvent::StatusUpdate(run_id, refresh_type.to_string()))
                             .await;
                     });
                 }
@@ -291,21 +300,136 @@ impl<'a> App<'a> {
 
     /// Handles a partial summary update for a workflow run, usually from the global run list stream.
     pub fn handle_workflow_update(&mut self, run_detail: WorkflowRunDetail) {
+        let is_forced = self.force_select_run_id == Some(run_detail.id);
+        let id = run_detail.id;
+
         if let Some(run) = self.runs.iter_mut().find(|r| r.id == run_detail.id) {
             *run = run_detail.clone();
+            if is_forced {
+                if let Some(pos) = self.runs.iter().position(|r| r.id == run_detail.id) {
+                    self.runs_state.select(Some(pos));
+                    self.force_select_run_id = None;
+
+                    let tx = self.status_tx.clone();
+                    tokio::spawn(async move {
+                        let _ = tx
+                            .send(crate::AppEvent::StatusUpdate(
+                                id,
+                                "force_refresh".to_string(),
+                            ))
+                            .await;
+                        let _ = tx.send(crate::AppEvent::StartWatching(id)).await;
+                    });
+                }
+            }
         } else {
             self.runs.insert(0, run_detail.clone());
-            // Adjust selection if something was selected
-            if let Some(selected) = self.runs_state.selected() {
+            if is_forced {
+                self.runs_state.select(Some(0));
+                self.force_select_run_id = None;
+
+                let tx = self.status_tx.clone();
+                tokio::spawn(async move {
+                    let _ = tx
+                        .send(crate::AppEvent::StatusUpdate(
+                            id,
+                            "force_refresh".to_string(),
+                        ))
+                        .await;
+                    let _ = tx.send(crate::AppEvent::StartWatching(id)).await;
+                });
+            } else if let Some(selected) = self.runs_state.selected() {
                 self.runs_state.select(Some(selected + 1));
             }
         }
 
         let current_selected_id = self.runs_state.selected().map(|i| self.runs[i].id);
         if Some(run_detail.id) == current_selected_id {
+            let mut needs_refresh = false;
+            let id = run_detail.id;
             if let Some(run) = &mut self.selected_run {
-                run.detail = run_detail;
+                if run.detail.id == id {
+                    if run.detail.status != run_detail.status {
+                        needs_refresh = true;
+                    }
+                    run.detail = run_detail;
+                } else {
+                    needs_refresh = true;
+                }
+            } else {
+                needs_refresh = true;
+            }
+
+            if needs_refresh {
+                let tx = self.status_tx.clone();
+                tokio::spawn(async move {
+                    let _ = tx
+                        .send(crate::AppEvent::StatusUpdate(
+                            id,
+                            "force_refresh".to_string(),
+                        ))
+                        .await;
+                    let _ = tx.send(crate::AppEvent::StartWatching(id)).await;
+                });
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::app::handlers::test_utils::{
+        mock_full_detail, mock_run_detail, mock_step_detail, setup_app,
+    };
+    use stormchaser_model::workflow::RunStatus;
+    use stormchaser_model::RunId;
+    use uuid::Uuid;
+
+    #[test]
+    fn test_handle_status_update_basic() {
+        let mut app = setup_app();
+        let run_id = RunId::new(Uuid::new_v4());
+
+        let run = mock_run_detail(run_id, RunStatus::Running);
+        app.runs.push(run.clone());
+
+        app.handle_status_update(run_id, "succeeded".to_string());
+        assert_eq!(app.runs[0].status, RunStatus::Succeeded);
+    }
+
+    #[test]
+    fn test_handle_status_update_prevent_downgrade() {
+        let mut app = setup_app();
+        let run_id = RunId::new(Uuid::new_v4());
+
+        let run = mock_run_detail(run_id, RunStatus::Succeeded);
+        app.runs.push(run.clone());
+
+        app.handle_status_update(run_id, "running".to_string());
+        assert_eq!(app.runs[0].status, RunStatus::Succeeded);
+    }
+
+    #[test]
+    fn test_handle_full_run_update_preserves_logs() {
+        let mut app = setup_app();
+        let run_id = RunId::new(Uuid::new_v4());
+
+        let mut old_step = mock_step_detail("build", "running");
+        old_step.logs = vec!["compiling...".to_string()];
+
+        let old_detail = mock_full_detail(run_id, RunStatus::Running, vec![old_step]);
+        app.runs.push(old_detail.detail.clone());
+        app.selected_run = Some(old_detail);
+        app.runs_state.select(Some(0));
+
+        let new_step = mock_step_detail("build", "running");
+        let new_detail = mock_full_detail(run_id, RunStatus::Running, vec![new_step]);
+
+        app.handle_full_run_update(new_detail);
+
+        assert_eq!(
+            app.selected_run.as_ref().unwrap().steps[0].logs,
+            vec!["compiling..."]
+        );
     }
 }

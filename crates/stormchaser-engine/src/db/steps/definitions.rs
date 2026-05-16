@@ -1,4 +1,5 @@
 use serde_json::Value;
+use sqlx::postgres::PgQueryResult;
 use sqlx::{Executor, Postgres};
 
 /// Stepdefinitioninput.
@@ -18,7 +19,7 @@ pub async fn upsert_step_definition<'a, E>(
     step_type: &str,
     schema: &Value,
     documentation: Option<&str>,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
+) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
@@ -48,7 +49,7 @@ pub async fn upsert_step_definition_with_wasm<'a, E>(
     wasm_module: &str,
     wasm_function: &str,
     wasm_config: &Value,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error>
+) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {

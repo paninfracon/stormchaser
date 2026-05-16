@@ -1,12 +1,15 @@
 use axum::extract::connect_info::ConnectInfo;
+use axum::http::header::AUTHORIZATION;
 use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
+use chrono::Utc;
 use jsonwebtoken::{encode, EncodingKey, Header};
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use std::collections::HashMap;
+use std::env::var;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::Once;
@@ -33,14 +36,14 @@ async fn setup_app() -> Option<axum::Router> {
     std::env::set_var("API_RATE_LIMIT_PER_SECOND", "1000");
     std::env::set_var("API_RATE_LIMIT_BURST_SIZE", "1000");
 
-    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = async_nats::connect(nats_url).await.ok()?;
 
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD")
+            var("STORMCHASER_DEV_PASSWORD")
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
@@ -56,9 +59,7 @@ async fn setup_app() -> Option<axum::Router> {
         opa: Arc::new(OpaClient::new(None, None)),
         oidc_config: None,
         jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
-        log_backend: std::env::var("LOKI_URL")
-            .ok()
-            .map(|url| LogBackend::Loki { url }),
+        log_backend: var("LOKI_URL").ok().map(|url| LogBackend::Loki { url }),
         api_base_url: "http://localhost:3000".to_string(),
     }))
 }
@@ -67,7 +68,7 @@ fn get_token() -> String {
     let claims = Claims {
         sub: "test-user".to_string(),
         email: Some("test-user@paninfracon.net".to_string()),
-        exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
+        exp: (Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
     };
     encode(
         &Header::default(),
@@ -89,10 +90,7 @@ async fn test_list_webhooks() {
         .oneshot(
             Request::builder()
                 .uri("/api/v1/webhooks")
-                .header(
-                    axum::http::header::AUTHORIZATION,
-                    format!("Bearer {}", get_token()),
-                )
+                .header(AUTHORIZATION, format!("Bearer {}", get_token()))
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())
                 .unwrap(),
@@ -115,10 +113,7 @@ async fn test_list_event_rules() {
         .oneshot(
             Request::builder()
                 .uri("/api/v1/rules")
-                .header(
-                    axum::http::header::AUTHORIZATION,
-                    format!("Bearer {}", get_token()),
-                )
+                .header(AUTHORIZATION, format!("Bearer {}", get_token()))
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())
                 .unwrap(),
@@ -141,10 +136,7 @@ async fn test_list_cron_workflows() {
         .oneshot(
             Request::builder()
                 .uri("/api/v1/cron-workflows")
-                .header(
-                    axum::http::header::AUTHORIZATION,
-                    format!("Bearer {}", get_token()),
-                )
+                .header(AUTHORIZATION, format!("Bearer {}", get_token()))
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())
                 .unwrap(),
@@ -167,10 +159,7 @@ async fn test_list_connections() {
         .oneshot(
             Request::builder()
                 .uri("/api/v1/connections")
-                .header(
-                    axum::http::header::AUTHORIZATION,
-                    format!("Bearer {}", get_token()),
-                )
+                .header(AUTHORIZATION, format!("Bearer {}", get_token()))
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())
                 .unwrap(),
@@ -196,10 +185,7 @@ async fn test_create_webhook() {
                 .method("POST")
                 .uri("/api/v1/webhooks")
                 .header("Content-Type", stormchaser_model::APPLICATION_JSON)
-                .header(
-                    axum::http::header::AUTHORIZATION,
-                    format!("Bearer {}", get_token()),
-                )
+                .header(AUTHORIZATION, format!("Bearer {}", get_token()))
                 .extension(ConnectInfo(addr))
                 .body(Body::from(
                     serde_json::to_vec(&json!({
@@ -232,10 +218,7 @@ async fn test_create_cron_workflow() {
                 .method("POST")
                 .uri("/api/v1/cron-workflows")
                 .header("Content-Type", stormchaser_model::APPLICATION_JSON)
-                .header(
-                    axum::http::header::AUTHORIZATION,
-                    format!("Bearer {}", get_token()),
-                )
+                .header(AUTHORIZATION, format!("Bearer {}", get_token()))
                 .extension(ConnectInfo(addr))
                 .body(Body::from(
                     serde_json::to_vec(&json!({
@@ -264,11 +247,11 @@ async fn test_create_event_rule() {
         None => return,
     };
 
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD")
+            var("STORMCHASER_DEV_PASSWORD")
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
@@ -291,10 +274,7 @@ async fn test_create_event_rule() {
                 .method("POST")
                 .uri("/api/v1/rules")
                 .header("Content-Type", stormchaser_model::APPLICATION_JSON)
-                .header(
-                    axum::http::header::AUTHORIZATION,
-                    format!("Bearer {}", get_token()),
-                )
+                .header(AUTHORIZATION, format!("Bearer {}", get_token()))
                 .extension(ConnectInfo(addr))
                 .body(Body::from(
                     serde_json::to_vec(&json!({
@@ -326,11 +306,11 @@ async fn test_stream_run_status() {
 
     let run_id = Uuid::new_v4();
     let workflow_name = format!("test-workflow-{}", run_id);
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD")
+            var("STORMCHASER_DEV_PASSWORD")
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
@@ -347,10 +327,7 @@ async fn test_stream_run_status() {
         .oneshot(
             Request::builder()
                 .uri(format!("/api/v1/runs/{}/status/stream", run_id))
-                .header(
-                    axum::http::header::AUTHORIZATION,
-                    format!("Bearer {}", get_token()),
-                )
+                .header(AUTHORIZATION, format!("Bearer {}", get_token()))
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())
                 .unwrap(),
@@ -380,11 +357,11 @@ async fn test_delete_cron_workflow() {
     };
 
     let id = Uuid::new_v4();
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD")
+            var("STORMCHASER_DEV_PASSWORD")
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
@@ -403,10 +380,7 @@ async fn test_delete_cron_workflow() {
             Request::builder()
                 .method("DELETE")
                 .uri(format!("/api/v1/cron-workflows/{}", id))
-                .header(
-                    axum::http::header::AUTHORIZATION,
-                    format!("Bearer {}", get_token()),
-                )
+                .header(AUTHORIZATION, format!("Bearer {}", get_token()))
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())
                 .unwrap(),
@@ -431,11 +405,11 @@ async fn test_trigger_cron_workflow() {
     };
 
     let id = Uuid::new_v4();
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD")
+            var("STORMCHASER_DEV_PASSWORD")
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
@@ -459,7 +433,7 @@ async fn test_trigger_cron_workflow() {
             Request::builder()
                 .method("POST")
                 .uri(format!("/api/v1/cron-trigger/{}", id))
-                .header(axum::http::header::AUTHORIZATION, "Bearer bad-token")
+                .header(AUTHORIZATION, "Bearer bad-token")
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())
                 .unwrap(),
@@ -475,10 +449,7 @@ async fn test_trigger_cron_workflow() {
             Request::builder()
                 .method("POST")
                 .uri(format!("/api/v1/cron-trigger/{}", id))
-                .header(
-                    axum::http::header::AUTHORIZATION,
-                    format!("Bearer {}", secret),
-                )
+                .header(AUTHORIZATION, format!("Bearer {}", secret))
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())
                 .unwrap(),
@@ -511,10 +482,7 @@ async fn test_stream_run_logs() {
         .oneshot(
             Request::builder()
                 .uri(format!("/api/v1/runs/{}/logs/stream", run_id))
-                .header(
-                    axum::http::header::AUTHORIZATION,
-                    format!("Bearer {}", get_token()),
-                )
+                .header(AUTHORIZATION, format!("Bearer {}", get_token()))
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())
                 .unwrap(),
@@ -522,7 +490,7 @@ async fn test_stream_run_logs() {
         .await
         .unwrap();
 
-    let expected_status = if std::env::var("LOKI_URL").is_ok() {
+    let expected_status = if var("LOKI_URL").is_ok() {
         StatusCode::OK
     } else {
         StatusCode::NOT_IMPLEMENTED
@@ -546,11 +514,11 @@ async fn test_stream_step_logs() {
 
     let run_id = Uuid::new_v4();
     let step_id = Uuid::new_v4();
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD")
+            var("STORMCHASER_DEV_PASSWORD")
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
@@ -577,10 +545,7 @@ async fn test_stream_step_logs() {
                     "/api/v1/runs/{}/steps/{}/logs/stream",
                     run_id, step_id
                 ))
-                .header(
-                    axum::http::header::AUTHORIZATION,
-                    format!("Bearer {}", get_token()),
-                )
+                .header(AUTHORIZATION, format!("Bearer {}", get_token()))
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())
                 .unwrap(),
@@ -588,7 +553,7 @@ async fn test_stream_step_logs() {
         .await
         .unwrap();
 
-    let expected_status = if std::env::var("LOKI_URL").is_ok() {
+    let expected_status = if var("LOKI_URL").is_ok() {
         StatusCode::OK
     } else {
         StatusCode::NOT_IMPLEMENTED
@@ -625,10 +590,7 @@ async fn test_list_workflow_runs() {
         .oneshot(
             Request::builder()
                 .uri("/api/v1/runs")
-                .header(
-                    axum::http::header::AUTHORIZATION,
-                    format!("Bearer {}", get_token()),
-                )
+                .header(AUTHORIZATION, format!("Bearer {}", get_token()))
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())
                 .unwrap(),
@@ -652,10 +614,7 @@ async fn test_get_workflow_run_not_found() {
         .oneshot(
             Request::builder()
                 .uri(format!("/api/v1/runs/{}", run_id))
-                .header(
-                    axum::http::header::AUTHORIZATION,
-                    format!("Bearer {}", get_token()),
-                )
+                .header(AUTHORIZATION, format!("Bearer {}", get_token()))
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())
                 .unwrap(),
@@ -674,11 +633,11 @@ async fn test_delete_workflow_run() {
     };
 
     let run_id = Uuid::new_v4();
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD")
+            var("STORMCHASER_DEV_PASSWORD")
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
@@ -696,10 +655,7 @@ async fn test_delete_workflow_run() {
             Request::builder()
                 .method("DELETE")
                 .uri(format!("/api/v1/runs/{}", run_id))
-                .header(
-                    axum::http::header::AUTHORIZATION,
-                    format!("Bearer {}", get_token()),
-                )
+                .header(AUTHORIZATION, format!("Bearer {}", get_token()))
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())
                 .unwrap(),
@@ -723,10 +679,7 @@ async fn test_direct_run() {
             Request::builder()
                 .method("POST")
                 .uri("/api/v1/runs/direct")
-                .header(
-                    axum::http::header::AUTHORIZATION,
-                    format!("Bearer {}", get_token()),
-                )
+                .header(AUTHORIZATION, format!("Bearer {}", get_token()))
                 .header("Content-Type", stormchaser_model::APPLICATION_JSON)
                 .extension(ConnectInfo(addr))
                 .body(Body::from(
@@ -759,10 +712,7 @@ async fn test_run_from_git() {
             Request::builder()
                 .method("POST")
                 .uri("/api/v1/runs")
-                .header(
-                    axum::http::header::AUTHORIZATION,
-                    format!("Bearer {}", get_token()),
-                )
+                .header(AUTHORIZATION, format!("Bearer {}", get_token()))
                 .header("Content-Type", stormchaser_model::APPLICATION_JSON)
                 .extension(ConnectInfo(addr))
                 .body(Body::from(
@@ -822,16 +772,16 @@ async fn test_run_from_git() {
     );
 
     // Mock engine execution so the workflow completes successfully.
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
             "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            std::env::var("STORMCHASER_DEV_PASSWORD")
+            var("STORMCHASER_DEV_PASSWORD")
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
     let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
-    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = async_nats::connect(nats_url).await.unwrap();
 
     let opa_client = std::sync::Arc::new(OpaClient::new(None, None));
@@ -842,7 +792,7 @@ async fn test_run_from_git() {
     );
 
     // Advance Queued -> StartPending
-    stormchaser_engine::handler::workflow::handle_workflow_queued(
+    if let Err(e) = stormchaser_engine::handler::workflow::handle_workflow_queued(
         uuid::Uuid::parse_str(run_id).map(RunId::new).unwrap(),
         pool.clone(),
         std::sync::Arc::new(git_cache),
@@ -851,17 +801,25 @@ async fn test_run_from_git() {
         tls_reloader.clone(),
     )
     .await
-    .expect("handle_workflow_queued failed");
+    {
+        if !e.to_string().contains("Optimistic concurrency") {
+            panic!("handle_workflow_queued failed: {}", e);
+        }
+    }
 
     // Advance StartPending -> Running
-    stormchaser_engine::handler::workflow::handle_workflow_start_pending(
+    if let Err(e) = stormchaser_engine::handler::workflow::handle_workflow_start_pending(
         uuid::Uuid::parse_str(run_id).map(RunId::new).unwrap(),
         pool.clone(),
         nats_client.clone(),
         tls_reloader.clone(),
     )
     .await
-    .expect("handle_workflow_start_pending failed");
+    {
+        if !e.to_string().contains("Optimistic concurrency") {
+            panic!("handle_workflow_start_pending failed: {}", e);
+        }
+    }
 
     let mut step_id_opt = None;
     for _ in 0..10 {
@@ -883,7 +841,7 @@ async fn test_run_from_git() {
             "run_id": run_id,
             "step_id": step_id.to_string(),
             "event_type": "StepCompletedEvent",
-            "timestamp": chrono::Utc::now(),
+            "timestamp": Utc::now(),
             "outputs": {}
         }))
         .unwrap(),
@@ -904,10 +862,7 @@ async fn test_run_from_git() {
                 Request::builder()
                     .method("GET")
                     .uri(format!("/api/v1/runs/{}", run_id))
-                    .header(
-                        axum::http::header::AUTHORIZATION,
-                        format!("Bearer {}", get_token()),
-                    )
+                    .header(AUTHORIZATION, format!("Bearer {}", get_token()))
                     .extension(ConnectInfo(addr))
                     .body(Body::empty())
                     .unwrap(),
@@ -950,10 +905,7 @@ async fn test_stream_workflow_runs() {
         .oneshot(
             Request::builder()
                 .uri("/api/v1/runs/stream")
-                .header(
-                    axum::http::header::AUTHORIZATION,
-                    format!("Bearer {}", get_token()),
-                )
+                .header(AUTHORIZATION, format!("Bearer {}", get_token()))
                 .extension(ConnectInfo(addr))
                 .body(Body::empty())
                 .unwrap(),

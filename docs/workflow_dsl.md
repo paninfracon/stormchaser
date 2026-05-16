@@ -151,7 +151,6 @@ inputs {
         environment {
             type = "string"
             description = "Deployment environment"
-            query = "sql://SELECT name FROM envs WHERE active = true"
         }
     }
     required = ["service_name", "environment"]
@@ -160,13 +159,77 @@ inputs {
 
 #### 3.1 Dynamic Options via Queries
 
-Stormchaser supports dynamic options populated via external systems (e.g., Rundeck-style). You can add a `query` property to any field in the schema. When the TUI or Web UI requests the schema, the API (`/api/v1/schema/hydrate`) dynamically resolves the query (e.g., `sql://...`, `api://...`) and converts the result into an `enum` list, replacing the `query` field before returning it to the UI.
+Stormchaser supports dynamic options populated via external systems (e.g., Rundeck-style). First, define a `query` block with the data source details. Then, reference the query results in your inputs using the `${queries.QUERY_NAME}` interpolator within an `enum` constraint (or using the shorthand type function `enum("${queries.QUERY_NAME}")`).
+
+When the TUI or Web UI requests the schema, the Query microservice (`/api/v1/schema/hydrate`) dynamically resolves these queries and converts the result into an `enum` list, embedding it back into the schema before returning it to the UI.
+
+##### Mock Data
+
+Useful for testing or static lists.
+
+```hcl
+query "env_options" {
+    type = "mock"
+    params = {
+        items = "dev,staging,prod"
+    }
+}
+
+inputs {
+    environment = string(enum("${queries.env_options}"))
+}
+```
+
+##### SQL Database
+
+Fetch options directly from a database configured as a storage backend in Stormchaser.
+
+```hcl
+query "db_envs" {
+    type = "sql"
+    params = {
+        connection = "my-postgres-db"
+        query      = "SELECT name FROM environments WHERE active = true"
+    }
+}
+```
+
+##### REST API
+
+Fetch options from an HTTP endpoint. You can optionally use `jq_filter` to extract a list of strings if the API returns a complex object.
+
+```hcl
+query "api_options" {
+    type = "api"
+    params = {
+        url                  = "https://api.example.com/v1/options"
+        method               = "GET"
+        header_Authorization = "Bearer token"
+        jq_filter            = ".data[] | .name"
+    }
+}
+```
+
+##### AWS Cloud Control
+
+Query AWS resources dynamically via the AWS API.
+
+```hcl
+query "aws_vpcs" {
+    type = "aws_cloudcontrol"
+    params = {
+        type_name         = "AWS::EC2::VPC"
+        region            = "us-east-1"
+        assume_role_arn   = "arn:aws:iam::123456789012:role/StormchaserQuery"
+    }
+}
+```
 
 #### 3.2 TUI Integration
 
-The Stormchaser TUI utilizes the `schemaui` crate to dynamically render interactive, schema-driven forms for workflow inputs. It reads the hydrated JSON Schema and provides immediate visual feedback, dropdown lists for enums, and comprehensive validation before execution.
+The Stormchaser TUI dynamically renders interactive forms for workflow inputs. Because input schemas support dynamic queries and inter-field dependencies, the TUI abandons static blocking runners (like `schemaui`) in favor of a native, reactive dependency graph built directly into the asynchronous Tokio event loop. This allows the TUI to render dropdown lists for enums, provide immediate visual feedback, and fetch data from the Query microservice without freezing the application.
 
-#### 3.1 Type System
+#### 3.3 Type System
 
 Stormchaser uses a type system derived from the **HCL Expression Language**. All inputs, variables, and outputs must belong to one of the following types:
 
@@ -861,7 +924,9 @@ You can mark a workflow as a template by using the `workflow_template` block ins
 
 ```hcl
 workflow_template "standard_build" {
-  input "repo" { type = "string" }
+  inputs {
+    repo = string()
+  }
 
   step "build" "RunContainer" {
     // ...
