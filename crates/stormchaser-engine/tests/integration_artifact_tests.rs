@@ -107,9 +107,16 @@ async fn test_artifact_persistence_on_completion() {
     .unwrap();
 
     // 3. Mock completion with artifacts
+    let fencing_token: i64 =
+        sqlx::query_scalar("SELECT fencing_token FROM workflow_runs WHERE id = $1")
+            .bind(run_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap_or(0);
+
     let completed_payload = json!({
         "run_id": run_id,
-        "step_id": step.id,"event_type": "StepCompletedEvent",
+        "step_id": step.id,"event_type": "StepCompletedEvent", "fencing_token": fencing_token,
         "timestamp": Utc::now(),
         "status": StepStatus::Succeeded,
         "exit_code": 0,
@@ -235,9 +242,16 @@ async fn test_test_report_persistence_on_completion() {
     .unwrap();
 
     // 2. Mock completion with test reports
+    let fencing_token: i64 =
+        sqlx::query_scalar("SELECT fencing_token FROM workflow_runs WHERE id = $1")
+            .bind(run_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap_or(0);
+
     let completed_payload = json!({
         "run_id": run_id,
-        "step_id": step.id,"event_type": "StepCompletedEvent",
+        "step_id": step.id,"event_type": "StepCompletedEvent", "fencing_token": fencing_token,
         "timestamp": Utc::now(),
         "status": StepStatus::Succeeded,
         "exit_code": 0,

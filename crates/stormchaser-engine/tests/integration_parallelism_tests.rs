@@ -103,9 +103,16 @@ async fn test_dynamic_parallelism_with_batching() {
     let generate_id = instances[0].id;
 
     // 3. Complete "generate" step -> should trigger "process" with 4 iterations, 2 Pending, 2 Waiting
+    let fencing_token: i64 =
+        sqlx::query_scalar("SELECT fencing_token FROM workflow_runs WHERE id = $1")
+            .bind(run_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap_or(0);
+
     let completed_payload = json!({
         "run_id": run_id,
-        "step_id": generate_id,"event_type": "StepCompletedEvent",
+        "step_id": generate_id,"event_type": "StepCompletedEvent", "fencing_token": fencing_token,
         "timestamp": Utc::now(),
         "exit_code": 0
     });
@@ -149,9 +156,16 @@ async fn test_dynamic_parallelism_with_batching() {
     assert_eq!(process_instances[3].status, StepStatus::WaitingForEvent);
 
     // 4. Complete iteration 0 -> should trigger iteration 2
+    let fencing_token: i64 =
+        sqlx::query_scalar("SELECT fencing_token FROM workflow_runs WHERE id = $1")
+            .bind(run_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap_or(0);
+
     let completed_payload = json!({
         "run_id": run_id,
-        "step_id": process_instances[0].id,"event_type": "StepCompletedEvent",
+        "step_id": process_instances[0].id,"event_type": "StepCompletedEvent", "fencing_token": fencing_token,
         "timestamp": Utc::now(),
         "exit_code": 0
     });

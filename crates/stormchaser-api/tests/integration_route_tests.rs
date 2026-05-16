@@ -835,12 +835,19 @@ async fn test_run_from_git() {
     }
     let step_id: uuid::Uuid = step_id_opt.expect("Step instance was never created");
 
+    let fencing_token: i64 =
+        sqlx::query_scalar("SELECT fencing_token FROM workflow_runs WHERE id = $1")
+            .bind(uuid::Uuid::parse_str(run_id).unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap_or(0);
+
     // Mock runner completing the step
     stormchaser_engine::handler::step::events::handle_step_completed(
         serde_json::from_value(serde_json::json!({
             "run_id": run_id,
             "step_id": step_id.to_string(),
-            "fencing_token": 0,
+            "fencing_token": fencing_token,
             "event_type": "StepCompletedEvent",
             "timestamp": Utc::now(),
             "outputs": {}
