@@ -57,10 +57,7 @@ fn create_test_metadata(image: &str, cmd: Vec<&str>) -> ContainerMetadata {
 #[tokio::test]
 async fn test_container_lifecycle_success() {
     let docker = get_docker().await;
-    let metadata = create_test_metadata(
-        "public.ecr.aws/docker/library/alpine:latest",
-        vec!["echo", "hello"],
-    );
+    let metadata = create_test_metadata("ubuntu:latest", vec!["echo", "hello"]);
 
     let machine = DockerContainerMachine::new(docker.clone(), metadata, None);
 
@@ -95,8 +92,7 @@ async fn test_container_lifecycle_success() {
 #[tokio::test]
 async fn test_container_lifecycle_failure() {
     let docker = get_docker().await;
-    let metadata =
-        create_test_metadata("public.ecr.aws/docker/library/alpine:latest", vec!["false"]);
+    let metadata = create_test_metadata("ubuntu:latest", vec!["false"]);
 
     let machine = DockerContainerMachine::new(docker.clone(), metadata, None);
 
@@ -134,10 +130,7 @@ async fn test_container_lifecycle_failure() {
 #[tokio::test]
 async fn test_adopt_container() {
     let docker = get_docker().await;
-    let metadata = create_test_metadata(
-        "public.ecr.aws/docker/library/alpine:latest",
-        vec!["echo", "hello"],
-    );
+    let metadata = create_test_metadata("ubuntu:latest", vec!["echo", "hello"]);
     let machine = DockerContainerMachine::new(docker.clone(), metadata, None);
 
     let running_machine = machine.adopt("my-adopted-container".to_string());
@@ -155,7 +148,7 @@ async fn test_clean_up_orphaned_container() {
     let _ = docker
         .create_image(
             Some(bollard::image::CreateImageOptions {
-                from_image: "public.ecr.aws/docker/library/alpine:latest",
+                from_image: "ubuntu:latest",
                 ..Default::default()
             }),
             None,
@@ -171,7 +164,7 @@ async fn test_clean_up_orphaned_container() {
                 ..Default::default()
             }),
             bollard::container::Config {
-                image: Some("public.ecr.aws/docker/library/alpine:latest".to_string()),
+                image: Some("ubuntu:latest".to_string()),
                 cmd: Some(vec!["sleep".to_string(), "1000".to_string()]),
                 ..Default::default()
             },
@@ -179,10 +172,7 @@ async fn test_clean_up_orphaned_container() {
         .await
         .unwrap();
 
-    let metadata = create_test_metadata(
-        "public.ecr.aws/docker/library/alpine:latest",
-        vec!["sleep", "1000"],
-    );
+    let metadata = create_test_metadata("ubuntu:latest", vec!["sleep", "1000"]);
     let machine = DockerContainerMachine::new(docker.clone(), metadata, None);
 
     machine.clean_up(&container_name).await.unwrap();
@@ -196,10 +186,7 @@ async fn test_clean_up_orphaned_container() {
 async fn test_into_result() {
     use super::super::{state, ContainerMetrics, ContainerState, DockerContainerMachine};
     let docker = get_docker().await;
-    let metadata = create_test_metadata(
-        "public.ecr.aws/docker/library/alpine:latest",
-        vec!["echo", "hello"],
-    );
+    let metadata = create_test_metadata("ubuntu:latest", vec!["echo", "hello"]);
     let machine = DockerContainerMachine {
         nats: None,
         docker,
