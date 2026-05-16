@@ -41,7 +41,30 @@ pub async fn handle_workflow_direct(
         }
     };
 
-    // 1.5 Schema Validation and Default Value Hydration
+    // 1.5 OPA Policy Check — runs before any query execution so denied requests
+    // cannot trigger SQL/API/AWS side-effects from DSL-supplied query parameters.
+    let opa_context = EngineOpaContext {
+        run_id,
+        initiating_user: initiating_user.clone(),
+        workflow_ast: serde_json::to_value(&parsed_workflow)?,
+        inputs: inputs.clone(),
+    };
+
+    match opa_client.check_context(opa_context).await {
+        Ok(true) => debug!("OPA allowed execution for direct run {}", run_id),
+        Ok(false) => {
+            let err_msg = "Execution denied by OPA policy".to_string();
+            info!("Direct run {}: {}", run_id, err_msg);
+            return Err(anyhow::anyhow!(err_msg));
+        }
+        Err(e) => {
+            let err_msg = format!("OPA check failed: {}", e);
+            error!("Direct run {}: {}", run_id, err_msg);
+            return Err(anyhow::anyhow!(err_msg));
+        }
+    }
+
+    // 1.6 Schema Validation and Default Value Hydration
     let mut query_results = serde_json::Map::new();
     for query in &parsed_workflow.queries {
         let hcl_ctx = crate::hcl_eval::create_context(
@@ -129,29 +152,7 @@ pub async fn handle_workflow_direct(
         }
     }
 
-    // 2. OPA Policy Check
-    let opa_context = EngineOpaContext {
-        run_id,
-        initiating_user: initiating_user.clone(),
-        workflow_ast: serde_json::to_value(&parsed_workflow)?,
-        inputs: inputs.clone(),
-    };
-
-    match opa_client.check_context(opa_context).await {
-        Ok(true) => debug!("OPA allowed execution for direct run {}", run_id),
-        Ok(false) => {
-            let err_msg = "Execution denied by OPA policy".to_string();
-            info!("Direct run {}: {}", run_id, err_msg);
-            return Err(anyhow::anyhow!(err_msg));
-        }
-        Err(e) => {
-            let err_msg = format!("OPA check failed: {}", e);
-            error!("Direct run {}: {}", run_id, err_msg);
-            return Err(anyhow::anyhow!(err_msg));
-        }
-    }
-
-    // 3. Create WorkflowRun and RunContext in DB
+    // 2. Create WorkflowRun and RunContext in DB
     // Direct runs have no repo_url or workflow_path in the traditional sense
     let run = WorkflowRun {
         id: run_id,
@@ -179,7 +180,7 @@ pub async fn handle_workflow_direct(
         &parsed_workflow.dsl_version,
         serde_json::to_value(&parsed_workflow)?,
         Some(workflow_content),
-        inputs,
+        inputs_to_save,
         10,
         "1",
         "4Gi",

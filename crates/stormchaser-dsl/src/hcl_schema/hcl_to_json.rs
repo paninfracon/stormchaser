@@ -143,8 +143,8 @@ pub fn hcl_expr_to_json(expr: &Expression) -> Result<Value> {
             } else if s.starts_with("<<") {
                 let lines: Vec<&str> = s.lines().collect();
                 if lines.len() >= 2 {
-                    let content = lines[1..lines.len() - 1].join("\n");
-                    Ok(Value::String(content.trim().to_string()))
+                    let content = lines[1..lines.len() - 1].join("\n") + "\n";
+                    Ok(Value::String(content))
                 } else {
                     Ok(Value::String(s))
                 }

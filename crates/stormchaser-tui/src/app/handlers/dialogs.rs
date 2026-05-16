@@ -47,11 +47,6 @@ impl<'a> App<'a> {
         if should_submit {
             if let Some(dialog) = self.pending_schema_ui.take() {
                 let inputs = dialog.get_inputs();
-                std::fs::write(
-                    "debug_inputs.txt",
-                    serde_json::to_string_pretty(&inputs).unwrap_or_default(),
-                )
-                .ok();
                 let dsl = dialog.dsl.clone();
                 let schema = dialog.base_schema.clone();
                 let mut queries_val = None;
@@ -62,11 +57,6 @@ impl<'a> App<'a> {
                     .hydrate_schema_blocking(&schema, &inputs, queries_val.as_ref())
                     .await;
                 if let Ok((new_schema, status)) = res {
-                    std::fs::write(
-                        "debug_status.txt",
-                        format!("Status: {}\nSchema: {}", status, new_schema),
-                    )
-                    .ok();
                     if status == "Completed" {
                         self.direct_submit_dsl = Some(dsl);
                         let _ = self.submit_direct_form(inputs).await;
