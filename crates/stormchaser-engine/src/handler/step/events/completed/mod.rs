@@ -57,6 +57,12 @@ pub async fn handle_step_completed(
     }
 
     let workflow_run = crate::handler::fetch_run(run_id, &mut *tx).await?;
+    if event.fencing_token == 0 {
+        debug!(
+            "Completion event for run {} step {} arrived without fencing token; allowing for compatibility",
+            run_id, step_id
+        );
+    }
     if event.fencing_token > 0 && event.fencing_token < workflow_run.fencing_token {
         tracing::warn!(
             "Rejecting stale completion event for run {} step {} due to fencing token mismatch (event: {}, run: {})",

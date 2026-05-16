@@ -46,6 +46,10 @@ pub fn do_build_job_spec(
             "stormchaser-step-id".to_string(),
             metadata.step_id.to_string(),
         ),
+        (
+            "stormchaser-fencing-token".to_string(),
+            metadata.fencing_token.to_string(),
+        ),
     ]);
     if let Some(el) = step_spec.extra_labels {
         labels.extend(el);

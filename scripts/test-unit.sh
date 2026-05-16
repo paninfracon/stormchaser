@@ -1,9 +1,12 @@
 #!/bin/bash
 set -e
 
-# Source test environment variables and bring up isolated infrastructure
+# Source test environment variables
 source ./scripts/test-env.sh
-./scripts/test-env-up.sh
+
+if [ "${STORMCHASER_UNIT_TEST_WITH_ENV:-0}" = "1" ]; then
+  ./scripts/test-env-up.sh
+fi
 
 echo "Running Unit Tests..."
 export SQLX_OFFLINE=true

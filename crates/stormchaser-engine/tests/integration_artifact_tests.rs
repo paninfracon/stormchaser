@@ -112,7 +112,7 @@ async fn test_artifact_persistence_on_completion() {
             .bind(run_id)
             .fetch_one(&pool)
             .await
-            .unwrap_or(0);
+            .expect("workflow run fencing token should be queryable");
 
     let completed_payload = json!({
         "run_id": run_id,
@@ -247,7 +247,7 @@ async fn test_test_report_persistence_on_completion() {
             .bind(run_id)
             .fetch_one(&pool)
             .await
-            .unwrap_or(0);
+            .expect("workflow run fencing token should be queryable");
 
     let completed_payload = json!({
         "run_id": run_id,

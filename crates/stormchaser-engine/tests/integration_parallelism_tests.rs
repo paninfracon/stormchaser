@@ -108,7 +108,7 @@ async fn test_dynamic_parallelism_with_batching() {
             .bind(run_id)
             .fetch_one(&pool)
             .await
-            .unwrap_or(0);
+            .expect("workflow run fencing token should be queryable");
 
     let completed_payload = json!({
         "run_id": run_id,
@@ -161,7 +161,7 @@ async fn test_dynamic_parallelism_with_batching() {
             .bind(run_id)
             .fetch_one(&pool)
             .await
-            .unwrap_or(0);
+            .expect("workflow run fencing token should be queryable");
 
     let completed_payload = json!({
         "run_id": run_id,

@@ -88,6 +88,7 @@ async fn test_intrinsic_steps_dispatch() {
     let dispatched = rest_api::try_dispatch(
         run_id,
         step_id,
+        1,
         "RestApi",
         &spec,
         pool.clone(),
@@ -100,6 +101,7 @@ async fn test_intrinsic_steps_dispatch() {
     let dispatched = rest_api::try_dispatch(
         run_id,
         step_id,
+        1,
         "Other",
         &spec,
         pool.clone(),
@@ -142,6 +144,7 @@ async fn test_intrinsic_steps_dispatch() {
     let dispatched = wasm::try_dispatch(
         run_id,
         step_id,
+        1,
         "Other",
         &spec,
         &params,
@@ -180,6 +183,7 @@ async fn test_intrinsic_steps_dispatch() {
     let dispatched = wasm::try_dispatch(
         run_id,
         step_id,
+        1,
         "Wasm",
         &wasm_spec,
         &params,

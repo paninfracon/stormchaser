@@ -15,7 +15,8 @@ export PORT_REG=32001
 export PORT_API=3004
 export PORT_QUERY=3005
 
-export STORMCHASER_DEV_PASSWORD=${STORMCHASER_DEV_PASSWORD:-stormchaser_test_password}
+export STORMCHASER_TEST_DB_PASSWORD=${STORMCHASER_TEST_DB_PASSWORD:-stormchaser_test_password}
+export STORMCHASER_DEV_PASSWORD=${STORMCHASER_TEST_DB_PASSWORD}
 
 export DATABASE_URL="postgres://stormchaser:${STORMCHASER_DEV_PASSWORD}@localhost:${PORT_DB}/stormchaser"
 export NATS_URL="nats://localhost:${PORT_NATS}"

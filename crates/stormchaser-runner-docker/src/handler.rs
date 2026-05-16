@@ -235,6 +235,10 @@ async fn handle_orphaned_container(
         .unwrap_or(false);
 
     let raw_step_dsl = labels.get("stormchaser.v1.io/step-dsl");
+    let fencing_token = labels
+        .get("stormchaser-fencing-token")
+        .and_then(|token| token.parse::<i64>().ok())
+        .unwrap_or(0);
 
     let step_dsl = match parse_step_from_docker_labels(
         &container_name,
@@ -307,7 +311,7 @@ async fn handle_orphaned_container(
                         ContainerMetadata {
                             run_id,
                             step_id,
-                            fencing_token: 0,
+                            fencing_token,
                             step_dsl,
                             storage: None,
                             test_report_urls: None,
@@ -330,7 +334,7 @@ async fn handle_orphaned_container(
         let metadata = ContainerMetadata {
             run_id,
             step_id,
-            fencing_token: 0,
+            fencing_token,
             step_dsl: step_dsl.clone(),
             storage: None,
             test_report_urls: None,
@@ -347,7 +351,7 @@ async fn handle_orphaned_container(
                     finished_machine.into_result(),
                     run_id,
                     step_id,
-                    0, // Fencing token
+                    fencing_token,
                     r_id,
                     nats.clone(),
                 )
@@ -507,7 +511,7 @@ pub async fn handle_task(
         ContainerMetadata {
             run_id,
             step_id,
-            fencing_token: 0,
+            fencing_token,
             step_dsl,
             storage,
             test_report_urls,

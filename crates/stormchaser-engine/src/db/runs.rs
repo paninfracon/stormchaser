@@ -290,6 +290,20 @@ where
     .await
 }
 
+/// Get workflow run fencing token by id.
+pub async fn get_workflow_run_fencing_token_by_id<'a, E>(
+    executor: E,
+    id: RunId,
+) -> Result<i64, sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    sqlx::query_scalar("SELECT fencing_token FROM workflow_runs WHERE id = $1")
+        .bind(id)
+        .fetch_one(executor)
+        .await
+}
+
 #[allow(clippy::too_many_arguments)]
 /// Get run context by id.
 pub async fn get_run_context_by_id<'a, E, O>(executor: E, run_id: RunId) -> Result<O, sqlx::Error>

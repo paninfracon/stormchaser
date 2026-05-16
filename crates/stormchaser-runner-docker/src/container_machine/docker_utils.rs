@@ -93,6 +93,10 @@ impl<S> DockerContainerMachine<S> {
             self.metadata.step_id.to_string(),
         );
         labels.insert(
+            "stormchaser-fencing-token".to_string(),
+            self.metadata.fencing_token.to_string(),
+        );
+        labels.insert(
             "stormchaser.v1.io/received-at".to_string(),
             self.metadata.received_at.to_rfc3339(),
         );

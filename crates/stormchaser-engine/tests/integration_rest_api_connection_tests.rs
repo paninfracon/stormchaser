@@ -188,6 +188,7 @@ async fn test_rest_api_with_httpapi_connection() {
     stormchaser_engine::handler::step::intrinsic::rest_api::try_dispatch(
         run_id,
         step_id,
+        1,
         "RestApi",
         &spec,
         pool.clone(),

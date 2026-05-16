@@ -840,7 +840,7 @@ async fn test_run_from_git() {
             .bind(uuid::Uuid::parse_str(run_id).unwrap())
             .fetch_one(&pool)
             .await
-            .unwrap_or(0);
+            .expect("workflow run fencing token should be queryable");
 
     // Mock runner completing the step
     stormchaser_engine::handler::step::events::handle_step_completed(
