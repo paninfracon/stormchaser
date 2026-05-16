@@ -309,7 +309,7 @@ async fn test_stream_run_status() {
     let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
-            "postgres://stormchaser:{}@localhost:5432/stormchaser",
+            "postgres://stormchaser:{}@127.0.0.1:5432/stormchaser",
             var("STORMCHASER_DEV_PASSWORD")
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
@@ -318,6 +318,12 @@ async fn test_stream_run_status() {
     sqlx::query("INSERT INTO workflow_runs (id, workflow_name, initiating_user, repo_url, workflow_path, git_ref, status, fencing_token) VALUES ($1, $2, 'user', 'url', 'path', 'ref', 'running'::run_status, 1)")
         .bind(run_id)
         .bind(&workflow_name)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO run_contexts (run_id, dsl_version, workflow_definition, source_code, inputs) VALUES ($1, '1.0', '{}', '', '{}')")
+        .bind(run_id)
         .execute(&pool)
         .await
         .unwrap();
@@ -339,6 +345,32 @@ async fn test_stream_run_status() {
     assert_eq!(
         response.headers().get("content-type").unwrap(),
         "text/event-stream"
+    );
+
+    use futures::StreamExt;
+    let mut stream = response.into_body().into_data_stream();
+
+    let timeout = tokio::time::sleep(std::time::Duration::from_secs(5));
+    tokio::pin!(timeout);
+
+    let found = loop {
+        tokio::select! {
+            chunk_opt = stream.next() => {
+                let chunk = chunk_opt.expect("Stream closed").unwrap();
+                let text = String::from_utf8_lossy(&chunk);
+                println!("RECEIVED SSE CHUNK: {}", text);
+                if text.contains("run_status") && text.contains("running") {
+                    break true;
+                }
+            }
+            _ = &mut timeout => {
+                break false;
+            }
+        }
+    };
+    assert!(
+        found,
+        "Did not receive the initial SSE run_status event via DB polling"
     );
 
     // Cleanup
@@ -909,6 +941,30 @@ async fn test_stream_workflow_runs() {
         None => return,
     };
 
+    let run_id = Uuid::new_v4();
+    let workflow_name = format!("test-workflow-{}", run_id);
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
+        dotenvy::dotenv().ok();
+        format!(
+            "postgres://stormchaser:{}@127.0.0.1:5432/stormchaser",
+            var("STORMCHASER_DEV_PASSWORD")
+                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
+        )
+    });
+    let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
+    sqlx::query("INSERT INTO workflow_runs (id, workflow_name, initiating_user, repo_url, workflow_path, git_ref, status, fencing_token) VALUES ($1, $2, 'user', 'url', 'path', 'ref', 'running'::run_status, 1)")
+        .bind(run_id)
+        .bind(&workflow_name)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO run_contexts (run_id, dsl_version, workflow_definition, source_code, inputs) VALUES ($1, '1.0', '{}', '', '{}')")
+        .bind(run_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
     let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
     let response = app
         .oneshot(
@@ -927,4 +983,63 @@ async fn test_stream_workflow_runs() {
         response.headers().get("content-type").unwrap(),
         "text/event-stream"
     );
+
+    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into());
+    let nats_client = async_nats::connect(&nats_url).await.unwrap();
+    let js = async_nats::jetstream::new(nats_client.clone());
+
+    // Sleep briefly to ensure the server's SSE task has time to subscribe to NATS
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    use stormchaser_model::events::{
+        EventSource, EventType, SchemaVersion, WorkflowCompletedEvent, WorkflowEventType,
+    };
+    use stormchaser_model::nats::{publish_cloudevent, NatsSubject};
+    let completion_event = WorkflowCompletedEvent {
+        run_id: stormchaser_model::RunId::new(run_id),
+        event_type: EventType::Workflow(WorkflowEventType::Completed),
+        timestamp: chrono::Utc::now(),
+    };
+
+    publish_cloudevent(
+        &js,
+        NatsSubject::RunCompleted(Some(stormchaser_model::nats::compute_shard_id(
+            &stormchaser_model::RunId::new(run_id),
+        ))),
+        EventType::Workflow(WorkflowEventType::Completed),
+        EventSource::System,
+        serde_json::to_value(completion_event).unwrap(),
+        Some(SchemaVersion::new("1.0".to_string())),
+        None,
+    )
+    .await
+    .unwrap();
+
+    use futures::StreamExt;
+    let mut stream = response.into_body().into_data_stream();
+
+    let timeout = tokio::time::sleep(std::time::Duration::from_secs(5));
+    tokio::pin!(timeout);
+
+    let found = loop {
+        tokio::select! {
+            chunk_opt = stream.next() => {
+                let chunk = chunk_opt.expect("Stream closed").unwrap();
+                let text = String::from_utf8_lossy(&chunk);
+                if text.contains(&run_id.to_string()) {
+                    break true;
+                }
+            }
+            _ = &mut timeout => {
+                break false;
+            }
+        }
+    };
+    assert!(found, "Did not receive the SSE event via NATS routing");
+
+    sqlx::query("DELETE FROM workflow_runs WHERE id = $1")
+        .bind(run_id)
+        .execute(&pool)
+        .await
+        .unwrap();
 }
