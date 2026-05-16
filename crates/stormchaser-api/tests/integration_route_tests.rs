@@ -840,6 +840,7 @@ async fn test_run_from_git() {
         serde_json::from_value(serde_json::json!({
             "run_id": run_id,
             "step_id": step_id.to_string(),
+            "fencing_token": 0,
             "event_type": "StepCompletedEvent",
             "timestamp": Utc::now(),
             "outputs": {}
