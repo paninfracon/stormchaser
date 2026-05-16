@@ -67,6 +67,7 @@ pub async fn handle_workflow_start_pending(
     let hcl_ctx = crate::hcl_eval::create_context(
         context.inputs.clone(),
         run_id,
+        context.secrets.clone(),
         serde_json::json!({}),
         Some(&workflow),
         None,

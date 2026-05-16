@@ -70,12 +70,14 @@ fn secret_lookup(args: hcl::eval::FuncArgs) -> Result<HclValue, String> {
 pub fn create_context(
     inputs: Value,
     run_id: RunId,
+    secrets: Value,
     steps: Value,
     workflow: Option<&stormchaser_dsl::ast::Workflow>,
     step: Option<&stormchaser_dsl::ast::Step>,
 ) -> HclContext<'static> {
     let mut ctx = HclContext::new();
     ctx.declare_var("inputs", json_to_hcl(inputs));
+    ctx.declare_var("secrets", json_to_hcl(secrets));
     ctx.declare_var(
         "run",
         json_to_hcl(serde_json::json!({"id": run_id.to_string()})),
@@ -135,6 +137,7 @@ mod tests {
         let ctx = create_context(
             serde_json::json!({}),
             RunId::new_v4(),
+            serde_json::json!({}),
             serde_json::json!({}),
             None,
             None,

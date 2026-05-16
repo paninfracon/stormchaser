@@ -17,6 +17,7 @@ use tracing::{debug, error, info};
 /// Handles the event when a workflow is queued and ready for resolution.
 pub async fn handle_workflow_queued(
     run_id: RunId,
+    payload: serde_json::Value,
     pool: PgPool,
     git_cache: Arc<GitCache>,
     opa_client: Arc<OpaClient>,
@@ -192,7 +193,8 @@ pub async fn handle_workflow_queued(
         let hcl_ctx = crate::hcl_eval::create_context(
             inputs.clone(),
             run_id,
-            serde_json::json!({}),
+            serde_json::json!({}), // secrets
+            serde_json::json!({}), // steps
             Some(&parsed_workflow),
             None,
         );
@@ -239,7 +241,8 @@ pub async fn handle_workflow_queued(
         let mut schema_ctx = crate::hcl_eval::create_context(
             inputs.clone(),
             run_id,
-            serde_json::json!({}),
+            serde_json::json!({}), // secrets
+            serde_json::json!({}), // steps
             Some(&parsed_workflow),
             None,
         );
@@ -311,6 +314,21 @@ pub async fn handle_workflow_queued(
         }
     }
 
+    let sops_file: Option<String> = serde_json::from_value(payload["sops_file"].clone()).ok();
+    let sops_role_arn: Option<String> =
+        serde_json::from_value(payload["sops_role_arn"].clone()).ok();
+
+    let (secrets, sensitive_values) = crate::handler::workflow::sops::decrypt_sops_secrets(
+        &repo_path,
+        sops_file.as_deref(),
+        sops_role_arn.as_deref(),
+    )
+    .await
+    .unwrap_or_else(|e| {
+        error!("Failed to decrypt SOPS secrets for run {}: {:?}", run_id, e);
+        (serde_json::json!({}), vec![])
+    });
+
     // 7. Update RunContext with the definition and source code
     crate::db::update_run_context(
         &pool,
@@ -318,6 +336,8 @@ pub async fn handle_workflow_queued(
         Some(&workflow_content).map(|s| s.as_str()),
         &parsed_workflow.dsl_version,
         inputs,
+        secrets,
+        sensitive_values,
         run_id,
     )
     .await

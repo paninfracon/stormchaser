@@ -70,7 +70,8 @@ pub async fn handle_workflow_direct(
         let hcl_ctx = crate::hcl_eval::create_context(
             inputs.clone(),
             run_id,
-            serde_json::json!({}),
+            serde_json::json!({}), // secrets
+            serde_json::json!({}), // steps
             Some(&parsed_workflow),
             None,
         );
@@ -112,7 +113,8 @@ pub async fn handle_workflow_direct(
         let mut schema_ctx = crate::hcl_eval::create_context(
             inputs.clone(),
             run_id,
-            serde_json::json!({}),
+            serde_json::json!({}), // secrets
+            serde_json::json!({}), // steps
             Some(&parsed_workflow),
             None,
         );

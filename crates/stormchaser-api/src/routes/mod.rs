@@ -74,6 +74,10 @@ pub struct EnqueueRequest {
     pub inputs: Value,
     /// The overrides.
     pub overrides: Option<RunOverrides>,
+    /// Optional custom SOPS file name.
+    pub sops_file: Option<String>,
+    /// Optional AWS IAM Role ARN to assume for SOPS decryption.
+    pub sops_role_arn: Option<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

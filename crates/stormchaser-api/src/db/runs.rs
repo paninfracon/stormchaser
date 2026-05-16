@@ -39,18 +39,21 @@ pub async fn insert_workflow_run(
 
 /// Inserts the context details of a workflow run.
 /// Insert run context.
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_run_context(
-    tx: &mut Transaction<'_, Postgres>,
+    executor: impl sqlx::Executor<'_, Database = Postgres>,
     run_id: RunId,
     dsl_version: &str,
     workflow_definition: Value,
     source_code: &str,
     inputs: &Value,
+    secrets: Value,
+    sensitive_values: Vec<String>,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"
-        INSERT INTO run_contexts (run_id, dsl_version, workflow_definition, source_code, inputs)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO run_contexts (run_id, dsl_version, workflow_definition, source_code, inputs, secrets, sensitive_values)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         "#,
     )
     .bind(run_id)
@@ -58,11 +61,13 @@ pub async fn insert_run_context(
     .bind(workflow_definition)
     .bind(source_code)
     .bind(inputs)
-    .execute(&mut **tx)
+    .bind(secrets)
+    .bind(sensitive_values)
+    .execute(executor)
     .await?;
+
     Ok(())
 }
-
 /// Inserts the resource quotas for a workflow run.
 /// Insert run quotas.
 pub async fn insert_run_quotas(

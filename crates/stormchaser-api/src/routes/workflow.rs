@@ -79,12 +79,14 @@ pub async fn enqueue_workflow(
 
     // Create RunContext (placeholder for dsl_version and workflow_definition)
     db::insert_run_context(
-        &mut tx,
+        &mut *tx,
         run_id,
         "v1",
         serde_json::json!({}),
         "",
         &payload.inputs,
+        serde_json::json!({}),
+        vec![],
     )
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -112,6 +114,8 @@ pub async fn enqueue_workflow(
         dsl: None,
         inputs: None,
         initiating_user: None,
+        sops_file: payload.sops_file.clone(),
+        sops_role_arn: payload.sops_role_arn.clone(),
     };
 
     publish_cloudevent(

@@ -213,12 +213,14 @@ pub async fn trigger_cron_workflow(
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     db::insert_run_context(
-        &mut tx,
+        &mut *tx,
         run_id,
         "v1",
         serde_json::json!({}),
         "",
         &cron.inputs,
+        serde_json::json!({}),
+        vec![],
     )
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -239,6 +241,8 @@ pub async fn trigger_cron_workflow(
         dsl: None,
         inputs: None,
         initiating_user: None,
+        sops_file: None, // Cron jobs might need these later, but default to None for now
+        sops_role_arn: None,
     };
 
     publish_cloudevent(
