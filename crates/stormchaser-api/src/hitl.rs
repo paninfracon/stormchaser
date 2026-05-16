@@ -126,34 +126,67 @@ pub async fn approve_step_link(
     )
     .await;
 
-    // 7. Publish to NATS simulating step completion/failure
-    let nats_payload = if is_approve {
-        json!({
-            "run_id": payload.run_id.to_string(),
-            "step_id": payload.step_id.to_string(),
-            "exit_code": 0,
-            "outputs": payload.inputs,
-        })
-    } else {
-        json!({
-            "run_id": payload.run_id.to_string(),
-            "step_id": payload.step_id.to_string(),
-            "exit_code": 1,
-            "error": "Rejected by human via link",
-        })
+    let fencing_token = match resolve_fencing_token_or_response(&state, payload.run_id).await {
+        Ok(token) => token,
+        Err(response) => return response,
     };
 
-    let subject = if is_approve {
-        "stormchaser.v1.step.completed"
-    } else {
-        "stormchaser.v1.step.failed"
-    };
-
-    match state
-        .nats
-        .publish(subject, nats_payload.to_string().into())
+    let publish_result = if is_approve {
+        let completion_event = StepCompletedEvent {
+            run_id: payload.run_id,
+            step_id: payload.step_id,
+            fencing_token,
+            event_type: EventType::Step(StepEventType::Completed),
+            runner_id: None,
+            exit_code: Some(0),
+            storage_hashes: None,
+            artifacts: None,
+            test_reports: None,
+            outputs: serde_json::from_value(payload.inputs).ok(),
+            timestamp: Utc::now(),
+        };
+        publish_cloudevent(
+            &new_jetstream(state.nats.clone()),
+            NatsSubject::StepCompleted(Some(stormchaser_model::nats::compute_shard_id(
+                &payload.run_id,
+            ))),
+            EventType::Step(StepEventType::Completed),
+            EventSource::Api,
+            serde_json::to_value(completion_event).unwrap(),
+            Some(SchemaVersion::new("1.0".to_string())),
+            None,
+        )
         .await
-    {
+    } else {
+        let failure_event = StepFailedEvent {
+            run_id: payload.run_id,
+            step_id: payload.step_id,
+            fencing_token,
+            event_type: EventType::Step(StepEventType::Failed),
+            error: "Rejected by human via link".to_string(),
+            exit_code: Some(1),
+            runner_id: None,
+            storage_hashes: None,
+            artifacts: None,
+            test_reports: None,
+            outputs: None,
+            timestamp: Utc::now(),
+        };
+        publish_cloudevent(
+            &new_jetstream(state.nats.clone()),
+            NatsSubject::StepFailed(Some(stormchaser_model::nats::compute_shard_id(
+                &payload.run_id,
+            ))),
+            EventType::Step(StepEventType::Failed),
+            EventSource::Api,
+            serde_json::to_value(failure_event).unwrap(),
+            Some(SchemaVersion::new("1.0".to_string())),
+            None,
+        )
+        .await
+    };
+
+    match publish_result {
         Ok(_) => (StatusCode::OK, format!("Successfully {}", status_str)).into_response(),
         Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Failed to publish").into_response(),
     }

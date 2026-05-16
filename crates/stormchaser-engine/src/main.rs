@@ -284,7 +284,7 @@ async fn setup_nats_consumers(
             async_nats::jetstream::consumer::pull::MessagesError,
         >,
     >,
-    async_nats::Subscriber,
+    tokio::sync::mpsc::Receiver<async_nats::Message>,
 )> {
     let js = crate::nats::init_jetstream(nats_client).await?;
     let stream = js.get_stream("stormchaser").await?;
@@ -293,10 +293,7 @@ async fn setup_nats_consumers(
 
     let assigned_shards_env =
         std::env::var("STORMCHASER_ASSIGNED_SHARDS").unwrap_or_else(|_| "0".to_string());
-    let assigned_shards: Vec<u32> = assigned_shards_env
-        .split(',')
-        .filter_map(|s| s.parse().ok())
-        .collect();
+    let assigned_shards = parse_assigned_shards(&assigned_shards_env)?;
 
     for shard in assigned_shards {
         let consumer_name = format!("orchestration-engine-shard-{}", shard);
@@ -348,8 +345,89 @@ async fn setup_nats_consumers(
         }
     }
 
-    let query_subscriber = nats_client.subscribe("stormchaser.v1.*.step.query").await?;
-    Ok((rx, query_subscriber))
+    for (consumer_name, filter_subject) in [
+        ("orchestration-engine-legacy-run", "stormchaser.v1.run.>"),
+        (
+            "orchestration-engine-legacy-runner",
+            "stormchaser.v1.runner.>",
+        ),
+        ("orchestration-engine-legacy-step", "stormchaser.v1.step.>"),
+    ] {
+        let consumer = stream
+            .get_or_create_consumer(
+                consumer_name,
+                async_nats::jetstream::consumer::pull::Config {
+                    durable_name: Some(consumer_name.to_string()),
+                    filter_subject: filter_subject.to_string(),
+                    ..Default::default()
+                },
+            )
+            .await?;
+
+        let mut messages = consumer.messages().await?;
+        let tx_clone = tx.clone();
+        tokio::spawn(async move {
+            while let Some(msg) = messages.next().await {
+                if tx_clone.send(msg).await.is_err() {
+                    break;
+                }
+            }
+        });
+    }
+
+    let (query_tx, query_rx) = tokio::sync::mpsc::channel(1000);
+    for subject in ["stormchaser.v1.*.step.query", "stormchaser.v1.step.query"] {
+        let mut query_subscriber = nats_client.subscribe(subject).await?;
+        let query_tx_clone = query_tx.clone();
+        tokio::spawn(async move {
+            while let Some(message) = query_subscriber.next().await {
+                if query_tx_clone.send(message).await.is_err() {
+                    break;
+                }
+            }
+        });
+    }
+    drop(query_tx);
+
+    Ok((rx, query_rx))
+}
+
+fn parse_assigned_shards(assigned_shards_env: &str) -> anyhow::Result<Vec<u32>> {
+    let mut assigned_shards = Vec::new();
+    for raw_entry in assigned_shards_env.split(',') {
+        let entry = raw_entry.trim();
+        if entry.is_empty() {
+            anyhow::bail!(
+                "Invalid STORMCHASER_ASSIGNED_SHARDS value '{}': empty shard entry",
+                assigned_shards_env
+            );
+        }
+        let shard = entry.parse::<u32>().with_context(|| {
+            format!(
+                "Invalid STORMCHASER_ASSIGNED_SHARDS value '{}': '{}' is not a valid shard ID",
+                assigned_shards_env, entry
+            )
+        })?;
+        assigned_shards.push(shard);
+    }
+
+    if assigned_shards.is_empty() {
+        anyhow::bail!(
+            "Invalid STORMCHASER_ASSIGNED_SHARDS value '{}': at least one shard is required",
+            assigned_shards_env
+        );
+    }
+
+    Ok(assigned_shards)
+}
+
+fn normalize_subject(subject: &str) -> String {
+    let parts: Vec<&str> = subject.split('.').collect();
+    if parts.len() > 3 && (parts[2] == "global" || parts[2].parse::<u32>().is_ok()) {
+        format!("{}.{}.{}", parts[0], parts[1], parts[3..].join("."))
+    } else {
+        subject.to_string()
+    }
 }
 
 fn process_query_message(
@@ -404,7 +482,7 @@ async fn run_event_loop(
             async_nats::jetstream::consumer::pull::MessagesError,
         >,
     >,
-    mut query_subscriber: async_nats::Subscriber,
+    mut query_messages: tokio::sync::mpsc::Receiver<async_nats::Message>,
     pool: sqlx::PgPool,
     git_cache: Arc<GitCache>,
     opa_client: Arc<OpaClient>,
@@ -421,7 +499,8 @@ async fn run_event_loop(
                 match message {
                     Some(Ok(message)) => {
                         let subject = message.subject.to_string();
-                        if subject.starts_with("stormchaser.v1.step.scheduled.") {
+                        let normalized_subject = normalize_subject(&subject);
+                        if normalized_subject.starts_with("stormchaser.v1.step.scheduled.") {
                             let _ = message.ack().await;
                             continue;
                         }
@@ -446,7 +525,7 @@ async fn run_event_loop(
                         };
 
                         let schema = subject_schema_map
-                            .get(subject.as_str())
+                            .get(normalized_subject.as_str())
                             .and_then(|name| event_schemas.get(*name));
                         if let Err(e) = stormchaser_model::nats::validate_against_schema(&payload, schema) {
                             tracing::error!("Rejecting CloudEvent on {}: schema validation failed: {}", subject, e);
@@ -455,7 +534,7 @@ async fn run_event_loop(
                         }
 
                         handle_message(
-                            subject.as_str(),
+                            normalized_subject.as_str(),
                             payload,
                             message,
                             pool.clone(),
@@ -476,7 +555,7 @@ async fn run_event_loop(
                     }
                 }
             }
-            message = query_subscriber.next() => {
+            message = query_messages.recv() => {
                 if let Some(message) = message {
                     process_query_message(message, pool.clone(), nats_client.clone());
                 }
@@ -521,13 +600,13 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
     start_timeout_worker(pool.clone(), nats_client.clone(), tls_reloader.clone());
     start_resolver_crash_recovery_worker(pool.clone(), nats_client.clone());
 
-    let (messages, query_subscriber) = setup_nats_consumers(&nats_client).await?;
+    let (messages, query_messages) = setup_nats_consumers(&nats_client).await?;
 
     info!("Engine listening for events and queries");
 
     run_event_loop(
         messages,
-        query_subscriber,
+        query_messages,
         pool,
         git_cache,
         opa_client,
@@ -538,4 +617,33 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
     .await;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_subject, parse_assigned_shards};
+
+    #[test]
+    fn parse_assigned_shards_trims_values() {
+        let shards = parse_assigned_shards("0, 1,2").expect("shards should parse");
+        assert_eq!(shards, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn parse_assigned_shards_rejects_invalid_entries() {
+        let error = parse_assigned_shards("0, nope").expect_err("parsing should fail");
+        assert!(error.to_string().contains("not a valid shard ID"));
+    }
+
+    #[test]
+    fn normalize_subject_removes_shard_segment() {
+        assert_eq!(
+            normalize_subject("stormchaser.v1.3.step.completed"),
+            "stormchaser.v1.step.completed"
+        );
+        assert_eq!(
+            normalize_subject("stormchaser.v1.global.runner.heartbeat"),
+            "stormchaser.v1.runner.heartbeat"
+        );
+    }
 }

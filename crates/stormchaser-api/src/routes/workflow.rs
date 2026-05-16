@@ -415,13 +415,24 @@ pub async fn stream_workflow_runs_api(
     let pool = state.pool.clone();
 
     tokio::spawn(async move {
-        let mut subscriber = match nats.subscribe("stormchaser.v1.run.>").await {
+        let legacy_subscriber = match nats.subscribe("stormchaser.v1.run.>").await {
             Ok(sub) => sub,
             Err(e) => {
                 tracing::error!("Failed to subscribe to NATS for workflow runs: {:?}", e);
                 return;
             }
         };
+        let sharded_subscriber = match nats.subscribe("stormchaser.v1.*.run.>").await {
+            Ok(sub) => sub,
+            Err(e) => {
+                tracing::error!(
+                    "Failed to subscribe to sharded NATS subject for workflow runs: {:?}",
+                    e
+                );
+                return;
+            }
+        };
+        let mut subscriber = futures::stream::select(legacy_subscriber, sharded_subscriber);
 
         while let Some(msg) = subscriber.next().await {
             let ce: cloudevents::Event = match serde_json::from_slice(&msg.payload) {
