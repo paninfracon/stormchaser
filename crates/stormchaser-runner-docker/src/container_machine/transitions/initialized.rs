@@ -108,7 +108,9 @@ impl DockerContainerMachine<state::Initialized> {
             };
             let _ = publish_cloudevent(
                 &async_nats::jetstream::new(nats.clone()),
-                NatsSubject::StepRunning,
+                NatsSubject::StepRunning(Some(stormchaser_model::nats::compute_shard_id(
+                    &RunId::new(self.metadata.run_id),
+                ))),
                 EventType::Step(StepEventType::Running),
                 EventSource::System,
                 serde_json::to_value(running_event).unwrap(),

@@ -277,7 +277,11 @@ async fn handle_orphaned_job(
                     };
                     let _ = publish_cloudevent(
                         &async_nats::jetstream::new(nats.clone()),
-                        NatsSubject::StepCompleted,
+                        NatsSubject::StepCompleted(Some(
+                            stormchaser_model::nats::compute_shard_id(
+                                &stormchaser_model::RunId::new(run_id),
+                            ),
+                        )),
                         EventType::Step(StepEventType::Completed),
                         EventSource::System,
                         serde_json::to_value(event).unwrap(),
@@ -322,7 +326,9 @@ async fn handle_orphaned_job(
                     };
                     let _ = publish_cloudevent(
                         &async_nats::jetstream::new(nats.clone()),
-                        NatsSubject::StepFailed,
+                        NatsSubject::StepFailed(Some(stormchaser_model::nats::compute_shard_id(
+                            &stormchaser_model::RunId::new(run_id),
+                        ))),
                         EventType::Step(StepEventType::Failed),
                         EventSource::System,
                         serde_json::to_value(event).unwrap(),

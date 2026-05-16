@@ -89,7 +89,7 @@ async fn test_resolve_storage_provision() {
     let opa_client = Arc::new(OpaClient::new(None, None));
 
     let mut sub = nats_client
-        .subscribe("stormchaser.v1.step.scheduled.runcontainer")
+        .subscribe("stormchaser.v1.*.step.scheduled.runcontainer")
         .await
         .unwrap();
 

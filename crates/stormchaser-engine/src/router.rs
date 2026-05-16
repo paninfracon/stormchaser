@@ -246,6 +246,15 @@ pub async fn handle_message(
     tls_reloader: Arc<TlsReloader>,
     log_backend: Arc<Option<LogBackend>>,
 ) {
+    let parts: Vec<&str> = subject.split('.').collect();
+    let normalized_subject =
+        if parts.len() > 3 && (parts[2] == "global" || parts[2].parse::<u32>().is_ok()) {
+            format!("{}.{}.{}", parts[0], parts[1], parts[3..].join("."))
+        } else {
+            subject.to_string()
+        };
+    let subject = normalized_subject.as_str();
+
     if subject.starts_with("stormchaser.v1.run.") {
         handle_run_events(
             subject,

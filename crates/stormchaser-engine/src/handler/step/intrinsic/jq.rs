@@ -203,7 +203,9 @@ async fn dispatch_jq_internal(
             use stormchaser_model::nats::NatsSubject;
             let _ = stormchaser_model::nats::publish_cloudevent(
                 &js,
-                NatsSubject::StepCompleted,
+                NatsSubject::StepCompleted(Some(stormchaser_model::nats::compute_shard_id(
+                    &run_id,
+                ))),
                 EventType::Step(StepEventType::Completed),
                 EventSource::System,
                 serde_json::to_value(event).unwrap(),
@@ -230,7 +232,7 @@ async fn dispatch_jq_internal(
             let js = async_nats::jetstream::new(nats_client);
             let _ = stormchaser_model::nats::publish_cloudevent(
                 &js,
-                NatsSubject::StepFailed,
+                NatsSubject::StepFailed(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
                 EventType::Step(StepEventType::Failed),
                 EventSource::System,
                 serde_json::to_value(event).unwrap(),

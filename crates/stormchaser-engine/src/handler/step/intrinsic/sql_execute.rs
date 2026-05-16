@@ -52,7 +52,9 @@ pub async fn try_dispatch(
                 };
                 let _ = publish_cloudevent(
                     &async_nats::jetstream::new(nats_client),
-                    NatsSubject::StepFailed,
+                    NatsSubject::StepFailed(Some(stormchaser_model::nats::compute_shard_id(
+                        &run_id,
+                    ))),
                     EventType::Step(StepEventType::Failed),
                     EventSource::System,
                     serde_json::to_value(fail_event).unwrap(),
@@ -157,7 +159,7 @@ async fn handle_sql_execute(
 
     publish_cloudevent(
         &async_nats::jetstream::new(nats_client),
-        NatsSubject::StepCompleted,
+        NatsSubject::StepCompleted(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
         EventType::Step(StepEventType::Completed),
         EventSource::System,
         serde_json::to_value(completed_event).unwrap(),
@@ -228,7 +230,7 @@ mod tests {
         let password = std::env::var("STORMCHASER_DEV_PASSWORD")
             .expect("STORMCHASER_DEV_PASSWORD must be set when DATABASE_URL is unset");
         format!(
-            "postgres://stormchaser:{}@localhost:5432/stormchaser",
+            "postgres://stormchaser:{}@127.0.0.1:5432/stormchaser",
             password
         )
     }

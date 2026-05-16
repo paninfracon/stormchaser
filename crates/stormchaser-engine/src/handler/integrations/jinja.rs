@@ -132,7 +132,7 @@ async fn save_output_and_complete(
     let js = async_nats::jetstream::new(nats_client);
     stormchaser_model::nats::publish_cloudevent(
         &js,
-        NatsSubject::StepCompleted,
+        NatsSubject::StepCompleted(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
         EventType::Step(StepEventType::Completed),
         EventSource::System,
         serde_json::to_value(event).unwrap(),

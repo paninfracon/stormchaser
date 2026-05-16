@@ -18,6 +18,6 @@ export PORT_QUERY=3005
 export STORMCHASER_TEST_DB_PASSWORD=${STORMCHASER_TEST_DB_PASSWORD:-stormchaser_test_password}
 export STORMCHASER_DEV_PASSWORD=${STORMCHASER_TEST_DB_PASSWORD}
 
-export DATABASE_URL="postgres://stormchaser:${STORMCHASER_DEV_PASSWORD}@localhost:${PORT_DB}/stormchaser"
-export NATS_URL="nats://localhost:${PORT_NATS}"
-export OPA_URL="http://localhost:${PORT_OPA}/v1/data/stormchaser/allow"
+export DATABASE_URL="postgres://stormchaser:${STORMCHASER_DEV_PASSWORD}@127.0.0.1:${PORT_DB}/stormchaser"
+export NATS_URL="nats://127.0.0.1:${PORT_NATS}"
+export OPA_URL="http://127.0.0.1:${PORT_OPA}/v1/data/stormchaser/allow"

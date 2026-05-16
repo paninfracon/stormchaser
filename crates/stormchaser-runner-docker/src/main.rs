@@ -243,7 +243,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
             "docker-runner",
             async_nats::jetstream::consumer::pull::Config {
                 durable_name: Some("docker-runner".to_string()),
-                filter_subject: "stormchaser.v1.step.scheduled.runcontainer".to_string(),
+                filter_subject: "stormchaser.v1.*.step.scheduled.runcontainer".to_string(),
                 ..Default::default()
             },
         )
@@ -256,7 +256,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
         .context("Failed to get consumer messages")?;
 
     info!(
-        "Listening for tasks on {} and JetStream subject stormchaser.step.scheduled.runcontainer",
+        "Listening for tasks on {} and JetStream subject stormchaser.v1.*.step.scheduled.runcontainer",
         nats_subject
     );
 

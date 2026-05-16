@@ -94,7 +94,7 @@ async fn test_rest_api_step_execution() {
 
     // Subscribe to completion events before dispatching
     let mut completion_sub = nats_client
-        .subscribe("stormchaser.v1.step.>")
+        .subscribe("stormchaser.v1.*.step.>")
         .await
         .unwrap();
 

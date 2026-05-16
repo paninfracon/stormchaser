@@ -287,7 +287,7 @@ async fn test_workflow_step_completion_dispatches_next_step() {
     // Subscribe to NATS to verify dispatch happens
     use futures::StreamExt;
     let mut subscriber = nats_client
-        .subscribe("stormchaser.v1.step.scheduled.>")
+        .subscribe("stormchaser.v1.*.step.scheduled.>")
         .await
         .unwrap();
 
