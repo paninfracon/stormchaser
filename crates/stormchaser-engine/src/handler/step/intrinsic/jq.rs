@@ -59,6 +59,7 @@ pub fn mutate_if_has_files(step_type: &mut String, resolved_spec: &mut Value) {
 }
 
 /// Attempts to dispatch a jq step instance directly if it operates on strings (instead of files).
+#[allow(clippy::too_many_arguments)]
 pub async fn try_dispatch(
     run_id: RunId,
     step_instance_id: StepInstanceId,

@@ -14,7 +14,8 @@ use stormchaser_model::StepInstanceId;
 use stormchaser_tls::TlsReloader;
 use tracing::{info, warn};
 
-/// Attempts to dispatch a REST API step instance.
+/// Attempts to dispatch a REST API step instance directly.
+#[allow(clippy::too_many_arguments)]
 pub async fn try_dispatch(
     run_id: RunId,
     step_instance_id: StepInstanceId,
