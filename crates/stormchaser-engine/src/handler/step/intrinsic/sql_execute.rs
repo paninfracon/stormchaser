@@ -176,10 +176,33 @@ async fn execute_sql_query(
 ) -> Result<u64> {
     match connection_type {
         stormchaser_model::connections::ConnectionType::Postgres => {
-            let mut conn =
-                tokio::time::timeout(Duration::from_secs(30), sqlx::PgConnection::connect(url))
-                    .await
-                    .context("Connection attempt timed out")??;
+            let mut retries = 5;
+            let mut conn = loop {
+                match tokio::time::timeout(
+                    Duration::from_secs(10),
+                    sqlx::PgConnection::connect(url),
+                )
+                .await
+                {
+                    Ok(Ok(c)) => break c,
+                    Ok(Err(e)) => {
+                        if retries == 0 {
+                            return Err(e.into());
+                        }
+                        tracing::warn!("Transient SQL connection error: {}. Retrying...", e);
+                        retries -= 1;
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                    }
+                    Err(_) => {
+                        if retries == 0 {
+                            anyhow::bail!("Connection attempt timed out");
+                        }
+                        tracing::warn!("SQL connection attempt timed out. Retrying...");
+                        retries -= 1;
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                    }
+                }
+            };
 
             let result = sqlx::query(query).execute(&mut conn).await?;
             let affected = result.rows_affected();
