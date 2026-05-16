@@ -111,7 +111,7 @@ async fn test_rest_api_with_httpapi_connection() {
     );
 
     let mut completion_sub = nats_client
-        .subscribe("stormchaser.v1.step.>")
+        .subscribe("stormchaser.v1.*.step.>")
         .await
         .unwrap();
 

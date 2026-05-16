@@ -256,7 +256,7 @@ fn start_resolver_crash_recovery_worker(pool: sqlx::PgPool, nats_client: async_n
                                         let js = async_nats::jetstream::new(nats_client.clone());
                                         let _ = stormchaser_model::nats::publish_cloudevent(
                                             &js,
-                                            stormchaser_model::nats::NatsSubject::RunFailed,
+                                            stormchaser_model::nats::NatsSubject::RunFailed(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
                                             stormchaser_model::events::EventType::Workflow(stormchaser_model::events::WorkflowEventType::Failed),
                                             stormchaser_model::events::EventSource::System,
                                             serde_json::to_value(event).unwrap(),
@@ -278,26 +278,78 @@ fn start_resolver_crash_recovery_worker(pool: sqlx::PgPool, nats_client: async_n
 async fn setup_nats_consumers(
     nats_client: &async_nats::Client,
 ) -> anyhow::Result<(
-    async_nats::jetstream::consumer::pull::Stream,
+    tokio::sync::mpsc::Receiver<
+        Result<
+            async_nats::jetstream::message::Message,
+            async_nats::jetstream::consumer::pull::MessagesError,
+        >,
+    >,
     async_nats::Subscriber,
 )> {
-    let js = nats::init_jetstream(nats_client).await?;
+    let js = crate::nats::init_jetstream(nats_client).await?;
     let stream = js.get_stream("stormchaser").await?;
-    let consumer = stream
-        .get_or_create_consumer(
-            "orchestration-engine",
-            async_nats::jetstream::consumer::pull::Config {
-                durable_name: Some("orchestration-engine".to_string()),
-                filter_subject: "stormchaser.v1.>".to_string(),
-                ..Default::default()
-            },
-        )
-        .await?;
 
-    let messages = consumer.messages().await?;
-    let query_subscriber = nats_client.subscribe("stormchaser.v1.step.query").await?;
+    let (tx, rx) = tokio::sync::mpsc::channel(1000);
 
-    Ok((messages, query_subscriber))
+    let assigned_shards_env =
+        std::env::var("STORMCHASER_ASSIGNED_SHARDS").unwrap_or_else(|_| "0".to_string());
+    let assigned_shards: Vec<u32> = assigned_shards_env
+        .split(',')
+        .filter_map(|s| s.parse().ok())
+        .collect();
+
+    for shard in assigned_shards {
+        let consumer_name = format!("orchestration-engine-shard-{}", shard);
+        let filter_subject = format!("stormchaser.v1.{}.>", shard);
+
+        let consumer = stream
+            .get_or_create_consumer(
+                &consumer_name,
+                async_nats::jetstream::consumer::pull::Config {
+                    durable_name: Some(consumer_name.clone()),
+                    filter_subject,
+                    ..Default::default()
+                },
+            )
+            .await?;
+
+        use futures::StreamExt;
+        let mut messages = consumer.messages().await?;
+        let tx_clone = tx.clone();
+        tokio::spawn(async move {
+            while let Some(msg) = messages.next().await {
+                if tx_clone.send(msg).await.is_err() {
+                    break;
+                }
+            }
+        });
+
+        if shard == 0 {
+            let global_consumer_name = "orchestration-engine-global";
+            let consumer = stream
+                .get_or_create_consumer(
+                    global_consumer_name,
+                    async_nats::jetstream::consumer::pull::Config {
+                        durable_name: Some(global_consumer_name.to_string()),
+                        filter_subject: "stormchaser.v1.global.>".to_string(),
+                        ..Default::default()
+                    },
+                )
+                .await?;
+            let mut messages = consumer.messages().await?;
+            let tx_clone = tx.clone();
+            tokio::spawn(async move {
+                while let Some(msg) = messages.next().await {
+                    if tx_clone.send(msg).await.is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+    }
+
+    let query_subscriber = nats_client.subscribe("stormchaser.v1.*.step.query").await?;
+    Ok((rx, query_subscriber))
 }
 
 fn process_query_message(
@@ -346,7 +398,12 @@ fn build_subject_schema_map() -> std::collections::HashMap<&'static str, &'stati
 
 #[allow(clippy::too_many_arguments)]
 async fn run_event_loop(
-    mut messages: async_nats::jetstream::consumer::pull::Stream,
+    mut messages: tokio::sync::mpsc::Receiver<
+        Result<
+            async_nats::jetstream::message::Message,
+            async_nats::jetstream::consumer::pull::MessagesError,
+        >,
+    >,
     mut query_subscriber: async_nats::Subscriber,
     pool: sqlx::PgPool,
     git_cache: Arc<GitCache>,
@@ -360,7 +417,7 @@ async fn run_event_loop(
 
     loop {
         tokio::select! {
-            message = messages.next() => {
+            message = messages.recv() => {
                 match message {
                     Some(Ok(message)) => {
                         let subject = message.subject.to_string();

@@ -369,7 +369,7 @@ pub async fn handle_webhook(
 
         publish_cloudevent(
             &jetstream::new(state.nats.clone()),
-            NatsSubject::RunQueued,
+            NatsSubject::RunQueued(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
             EventType::Workflow(WorkflowEventType::Queued),
             EventSource::System,
             serde_json::to_value(event).unwrap(),

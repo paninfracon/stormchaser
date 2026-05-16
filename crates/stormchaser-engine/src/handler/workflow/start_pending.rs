@@ -98,7 +98,7 @@ pub async fn handle_workflow_start_pending(
     use stormchaser_model::nats::NatsSubject;
     if let Err(e) = stormchaser_model::nats::publish_cloudevent(
         &js,
-        NatsSubject::RunRunning,
+        NatsSubject::RunRunning(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
         EventType::Workflow(WorkflowEventType::Running),
         EventSource::Engine,
         serde_json::to_value(WorkflowRunningEvent {

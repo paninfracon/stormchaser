@@ -1,4 +1,5 @@
 use crate::id::EventId;
+use crate::RunId;
 use anyhow::Result;
 use async_nats::jetstream;
 use async_nats::HeaderMap;
@@ -7,6 +8,21 @@ use schemars::schema::RootSchema;
 use serde_json::Value;
 use std::borrow::Cow;
 use tracing::error;
+
+pub fn get_total_shards() -> u32 {
+    std::env::var("STORMCHASER_TOTAL_SHARDS")
+        .unwrap_or_else(|_| "1".to_string())
+        .parse()
+        .unwrap_or(1)
+}
+
+pub fn compute_shard_id(run_id: &RunId) -> u32 {
+    let total_shards = get_total_shards();
+    if total_shards <= 1 {
+        return 0;
+    }
+    crc32fast::hash(run_id.to_string().as_bytes()) % total_shards
+}
 
 /// Validates a JSON value against a compiled JSON Schema.
 ///
@@ -68,49 +84,96 @@ pub fn extract_and_validate(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NatsSubject {
-    RunQueued,
-    RunDirect,
-    RunRunning,
-    RunCompleted,
-    RunFailed,
-    RunAborted,
+    RunQueued(Option<u32>),
+    RunDirect(Option<u32>),
+    RunRunning(Option<u32>),
+    RunCompleted(Option<u32>),
+    RunFailed(Option<u32>),
+    RunAborted(Option<u32>),
     RunnerRegister,
     RunnerHeartbeat,
     RunnerOffline,
-    StepScheduled(String),
-    StepRunning,
-    StepCompleted,
-    StepFailed,
-    StepQuery,
-    StepUnpackingSfs,
-    StepPackingSfs,
-    RunStartPending,
+    StepScheduled(String, Option<u32>),
+    StepRunning(Option<u32>),
+    StepCompleted(Option<u32>),
+    StepFailed(Option<u32>),
+    StepQuery(Option<u32>),
+    StepUnpackingSfs(Option<u32>),
+    StepPackingSfs(Option<u32>),
+    RunStartPending(Option<u32>),
     Custom(String),
 }
 
 impl NatsSubject {
     pub fn as_str(&self) -> Cow<'static, str> {
+        let get_shard_str = |shard: &Option<u32>| -> String {
+            match shard {
+                Some(id) => id.to_string(),
+                None => "global".to_string(),
+            }
+        };
+
         match self {
-            NatsSubject::RunQueued => Cow::Borrowed("stormchaser.v1.run.queued"),
-            NatsSubject::RunStartPending => Cow::Borrowed("stormchaser.v1.run.start_pending"),
-            NatsSubject::RunDirect => Cow::Borrowed("stormchaser.v1.run.direct"),
-            NatsSubject::RunRunning => Cow::Borrowed("stormchaser.v1.run.running"),
-            NatsSubject::RunCompleted => Cow::Borrowed("stormchaser.v1.run.completed"),
-            NatsSubject::RunFailed => Cow::Borrowed("stormchaser.v1.run.failed"),
-            NatsSubject::RunAborted => Cow::Borrowed("stormchaser.v1.run.aborted"),
-            NatsSubject::RunnerRegister => Cow::Borrowed("stormchaser.v1.runner.register"),
-            NatsSubject::RunnerHeartbeat => Cow::Borrowed("stormchaser.v1.runner.heartbeat"),
-            NatsSubject::RunnerOffline => Cow::Borrowed("stormchaser.v1.runner.offline"),
-            NatsSubject::StepScheduled(ty) => Cow::Owned(format!(
-                "stormchaser.v1.step.scheduled.{}",
+            NatsSubject::RunQueued(shard) => Cow::Owned(format!(
+                "stormchaser.v1.{}.run.queued",
+                get_shard_str(shard)
+            )),
+            NatsSubject::RunStartPending(shard) => Cow::Owned(format!(
+                "stormchaser.v1.{}.run.start_pending",
+                get_shard_str(shard)
+            )),
+            NatsSubject::RunDirect(shard) => Cow::Owned(format!(
+                "stormchaser.v1.{}.run.direct",
+                get_shard_str(shard)
+            )),
+            NatsSubject::RunRunning(shard) => Cow::Owned(format!(
+                "stormchaser.v1.{}.run.running",
+                get_shard_str(shard)
+            )),
+            NatsSubject::RunCompleted(shard) => Cow::Owned(format!(
+                "stormchaser.v1.{}.run.completed",
+                get_shard_str(shard)
+            )),
+            NatsSubject::RunFailed(shard) => Cow::Owned(format!(
+                "stormchaser.v1.{}.run.failed",
+                get_shard_str(shard)
+            )),
+            NatsSubject::RunAborted(shard) => Cow::Owned(format!(
+                "stormchaser.v1.{}.run.aborted",
+                get_shard_str(shard)
+            )),
+            NatsSubject::RunnerRegister => Cow::Borrowed("stormchaser.v1.global.runner.register"),
+            NatsSubject::RunnerHeartbeat => Cow::Borrowed("stormchaser.v1.global.runner.heartbeat"),
+            NatsSubject::RunnerOffline => Cow::Borrowed("stormchaser.v1.global.runner.offline"),
+            NatsSubject::StepScheduled(ty, shard) => Cow::Owned(format!(
+                "stormchaser.v1.{}.step.scheduled.{}",
+                get_shard_str(shard),
                 ty.to_lowercase()
             )),
-            NatsSubject::StepRunning => Cow::Borrowed("stormchaser.v1.step.running"),
-            NatsSubject::StepCompleted => Cow::Borrowed("stormchaser.v1.step.completed"),
-            NatsSubject::StepFailed => Cow::Borrowed("stormchaser.v1.step.failed"),
-            NatsSubject::StepQuery => Cow::Borrowed("stormchaser.v1.step.query"),
-            NatsSubject::StepUnpackingSfs => Cow::Borrowed("stormchaser.v1.step.unpacking_sfs"),
-            NatsSubject::StepPackingSfs => Cow::Borrowed("stormchaser.v1.step.packing_sfs"),
+            NatsSubject::StepRunning(shard) => Cow::Owned(format!(
+                "stormchaser.v1.{}.step.running",
+                get_shard_str(shard)
+            )),
+            NatsSubject::StepCompleted(shard) => Cow::Owned(format!(
+                "stormchaser.v1.{}.step.completed",
+                get_shard_str(shard)
+            )),
+            NatsSubject::StepFailed(shard) => Cow::Owned(format!(
+                "stormchaser.v1.{}.step.failed",
+                get_shard_str(shard)
+            )),
+            NatsSubject::StepQuery(shard) => Cow::Owned(format!(
+                "stormchaser.v1.{}.step.query",
+                get_shard_str(shard)
+            )),
+            NatsSubject::StepUnpackingSfs(shard) => Cow::Owned(format!(
+                "stormchaser.v1.{}.step.unpacking_sfs",
+                get_shard_str(shard)
+            )),
+            NatsSubject::StepPackingSfs(shard) => Cow::Owned(format!(
+                "stormchaser.v1.{}.step.packing_sfs",
+                get_shard_str(shard)
+            )),
             NatsSubject::Custom(s) => Cow::Owned(s.clone()),
         }
     }

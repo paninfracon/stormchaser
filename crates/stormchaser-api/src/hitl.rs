@@ -337,7 +337,7 @@ pub async fn approve_step(
 
     match publish_cloudevent(
         &new_jetstream(state.nats.clone()),
-        NatsSubject::StepCompleted,
+        NatsSubject::StepCompleted(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
         EventType::Step(StepEventType::Completed),
         EventSource::Api,
         serde_json::to_value(completion_event).unwrap(),
@@ -413,7 +413,7 @@ pub async fn reject_step(
 
     match publish_cloudevent(
         &new_jetstream(state.nats.clone()),
-        NatsSubject::StepFailed,
+        NatsSubject::StepFailed(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
         EventType::Step(StepEventType::Failed),
         EventSource::Api,
         serde_json::to_value(event).unwrap(),
@@ -468,7 +468,9 @@ pub async fn correlate_event(
 
     match publish_cloudevent(
         &new_jetstream(state.nats.clone()),
-        NatsSubject::StepCompleted,
+        NatsSubject::StepCompleted(Some(stormchaser_model::nats::compute_shard_id(
+            &corr.run_id,
+        ))),
         EventType::Step(StepEventType::Completed),
         EventSource::Api,
         serde_json::to_value(completion_event).unwrap(),

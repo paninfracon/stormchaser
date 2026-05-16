@@ -104,7 +104,7 @@ pub async fn handle_workflow_timeout(
     use stormchaser_model::nats::NatsSubject;
     stormchaser_model::nats::publish_cloudevent(
         &js,
-        NatsSubject::RunAborted,
+        NatsSubject::RunAborted(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
         EventType::Workflow(WorkflowEventType::Aborted),
         EventSource::System,
         serde_json::to_value(event).unwrap(),

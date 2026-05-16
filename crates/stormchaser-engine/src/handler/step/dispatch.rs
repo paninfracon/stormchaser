@@ -599,11 +599,14 @@ pub async fn dispatch_step_instance(
     };
 
     let js = async_nats::jetstream::new(nats_client);
-    let subject = format!("stormchaser.v1.step.scheduled.{}", step_type.to_lowercase());
     use stormchaser_model::nats::NatsSubject;
+    let subject = NatsSubject::StepScheduled(
+        step_type.clone(),
+        Some(stormchaser_model::nats::compute_shard_id(&run_id)),
+    );
     publish_cloudevent(
         &js,
-        NatsSubject::Custom(subject.clone()),
+        subject,
         EventType::Step(StepEventType::Scheduled),
         EventSource::System,
         serde_json::to_value(payload).unwrap(),

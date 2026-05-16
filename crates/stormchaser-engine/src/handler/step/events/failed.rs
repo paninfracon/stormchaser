@@ -118,7 +118,7 @@ pub async fn handle_step_failed(
     use stormchaser_model::nats::NatsSubject;
     if let Err(e) = publish_cloudevent(
         &js,
-        NatsSubject::RunFailed,
+        NatsSubject::RunFailed(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
         EventType::Workflow(WorkflowEventType::Failed),
         EventSource::Engine,
         serde_json::to_value(WorkflowFailedEvent {

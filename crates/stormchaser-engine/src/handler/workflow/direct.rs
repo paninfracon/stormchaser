@@ -203,7 +203,7 @@ pub async fn handle_workflow_direct(
     use stormchaser_model::nats::NatsSubject;
     stormchaser_model::nats::publish_cloudevent(
         &js,
-        NatsSubject::RunStartPending,
+        NatsSubject::RunStartPending(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
         EventType::Workflow(WorkflowEventType::StartPending),
         EventSource::System,
         serde_json::to_value(event).unwrap(),

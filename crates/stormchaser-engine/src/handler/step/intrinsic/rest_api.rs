@@ -367,7 +367,9 @@ async fn execute_request(
 
             stormchaser_model::nats::publish_cloudevent(
                 &js,
-                NatsSubject::StepCompleted,
+                NatsSubject::StepCompleted(Some(stormchaser_model::nats::compute_shard_id(
+                    &run_id,
+                ))),
                 EventType::Step(StepEventType::Completed),
                 EventSource::System,
                 event_payload,

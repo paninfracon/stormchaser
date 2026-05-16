@@ -62,7 +62,7 @@ async fn test_jq_step_execution() {
 
     // Subscribe to completion events before dispatching
     let mut completion_sub = nats_client
-        .subscribe("stormchaser.v1.step.completed")
+        .subscribe("stormchaser.v1.*.step.completed")
         .await
         .unwrap();
 

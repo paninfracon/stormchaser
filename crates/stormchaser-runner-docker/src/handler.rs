@@ -107,7 +107,9 @@ fn build_container_result_event(
                 timestamp: Utc::now(),
             };
             (
-                NatsSubject::StepCompleted,
+                NatsSubject::StepCompleted(Some(stormchaser_model::nats::compute_shard_id(
+                    &stormchaser_model::RunId::new(run_id),
+                ))),
                 event_type,
                 serde_json::to_value(event).unwrap(),
             )
@@ -134,7 +136,9 @@ fn build_container_result_event(
                 timestamp: Utc::now(),
             };
             (
-                NatsSubject::StepFailed,
+                NatsSubject::StepFailed(Some(stormchaser_model::nats::compute_shard_id(
+                    &stormchaser_model::RunId::new(run_id),
+                ))),
                 event_type,
                 serde_json::to_value(event).unwrap(),
             )
@@ -497,7 +501,9 @@ pub async fn handle_task(
     };
     let _ = publish_cloudevent(
         &async_nats::jetstream::new(nats_client.clone()),
-        NatsSubject::StepRunning,
+        NatsSubject::StepRunning(Some(stormchaser_model::nats::compute_shard_id(
+            &stormchaser_model::RunId::new(run_id),
+        ))),
         EventType::Step(StepEventType::Running),
         EventSource::System,
         serde_json::to_value(running_event).unwrap(),
@@ -567,7 +573,9 @@ pub async fn handle_task(
             error!("Error running container for step {}: {:?}", step_id, e);
             let _ = publish_cloudevent(
                 &async_nats::jetstream::new(nats_client.clone()),
-                NatsSubject::StepFailed,
+                NatsSubject::StepFailed(Some(stormchaser_model::nats::compute_shard_id(
+                    &stormchaser_model::RunId::new(run_id),
+                ))),
                 EventType::Step(StepEventType::Failed),
                 EventSource::System,
                 build_container_execution_error_event(
@@ -634,7 +642,12 @@ mod tests_handler_ext {
             "runner-1".to_string(),
         );
 
-        assert_eq!(subject, NatsSubject::StepCompleted);
+        assert_eq!(
+            subject,
+            NatsSubject::StepCompleted(Some(stormchaser_model::nats::compute_shard_id(
+                &stormchaser_model::RunId::new(run_id)
+            )))
+        );
         assert_eq!(event_type, EventType::Step(StepEventType::Completed));
         assert_eq!(event["run_id"], run_id.to_string());
         assert_eq!(event["step_id"], step_id.to_string());
@@ -667,7 +680,12 @@ mod tests_handler_ext {
             "runner-2".to_string(),
         );
 
-        assert_eq!(subject, NatsSubject::StepFailed);
+        assert_eq!(
+            subject,
+            NatsSubject::StepFailed(Some(stormchaser_model::nats::compute_shard_id(
+                &stormchaser_model::RunId::new(run_id)
+            )))
+        );
         assert_eq!(event_type, EventType::Step(StepEventType::Failed));
         assert_eq!(event["error"], "boom");
         assert!(event["test_reports"].is_null());
