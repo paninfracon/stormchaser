@@ -2,6 +2,7 @@ use crate::handler::{fetch_outputs, fetch_run_context, fetch_step_instance};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use serde_json::Value;
+use sqlx::Connection;
 use sqlx::PgPool;
 use std::time::Duration;
 use stormchaser_model::dsl::SqlExecuteSpec;
@@ -175,14 +176,13 @@ async fn execute_sql_query(
 ) -> Result<u64> {
     match connection_type {
         stormchaser_model::connections::ConnectionType::Postgres => {
-            let pg_pool = sqlx::postgres::PgPoolOptions::new()
-                .max_connections(1)
-                .acquire_timeout(Duration::from_secs(30))
-                .connect(url)
-                .await?;
-            let result = sqlx::query(query).execute(&pg_pool).await?;
+            let mut conn =
+                tokio::time::timeout(Duration::from_secs(30), sqlx::PgConnection::connect(url))
+                    .await
+                    .context("Connection attempt timed out")??;
+
+            let result = sqlx::query(query).execute(&mut conn).await?;
             let affected = result.rows_affected();
-            pg_pool.close().await;
             Ok(affected)
         }
         other => anyhow::bail!(
