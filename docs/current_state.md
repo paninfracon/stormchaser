@@ -43,21 +43,7 @@ Pod Identity). This is available behind the `aws-ses` feature gate.
 
 **Code Coverage Summary:**
 
-Overall, the project has approximately 46% line coverage. Refactoring efforts
-and new unit tests have improved visibility into core logic across the engine,
-agent, and runner.
-
-- **Total Regions Covered:** 41.6% (13,699 missed / 23,458 total)
-- **Total Functions Covered:** 46.9% (784 missed / 1,477 total)
-- **Total Lines Covered:** 45.6% (9,069 missed / 16,673 total)
-
-| Component | Line Coverage (%) |
-| :--- | :--- |
-| `stormchaser-agent` | ~60-98% (varies by module) |
-| `stormchaser-engine` | ~45-98% (varies by module) |
-| `stormchaser-api` | ~35-85% |
-| `stormchaser-runner-k8s` | ~69% |
-| `stormchaser-tui` / `stormchaser-cli` | ~10-25% |
+Code coverage is now automatically tracked via our GitHub coverage integration (Codecov). Refactoring efforts and new unit tests have improved visibility into core logic across the engine, agent, and runner. For the most up-to-date coverage statistics, please refer to the Codecov badge in the `README.md` or the automated PR comments.
 
 **Next Steps:**
 

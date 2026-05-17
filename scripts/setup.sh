@@ -269,6 +269,7 @@ elif [ "$MODE" == "microk8s" ]; then
     declare -A COMPONENTS
     COMPONENTS=(
         ["stormchaser-api"]="stormchaser-api"
+        ["stormchaser-query"]="stormchaser-query"
         ["stormchaser-engine"]="stormchaser-engine"
         ["stormchaser-runner-k8s"]="stormchaser-runner-k8s"
         ["stormchaser-agent"]="stormchaser-agent"
@@ -295,7 +296,7 @@ elif [ "$MODE" == "microk8s" ]; then
         rm -f charts/stormchaser-*.tgz
         helm dependency update
 
-        helm upgrade --install stormchaser .           --namespace "$NAMESPACE"           --create-namespace           --set "stormchaser-orchestration.api.image.repository=stormchaser-api"           --set "stormchaser-orchestration.api.image.tag=latest"           --set "stormchaser-orchestration.api.image.pullPolicy=Never"           --set "stormchaser-orchestration.engine.image.repository=stormchaser-engine"           --set "stormchaser-orchestration.engine.image.tag=latest"           --set "stormchaser-orchestration.engine.image.pullPolicy=Never"           --set "stormchaser-runner-k8s.image.repository=stormchaser-runner-k8s"           --set "stormchaser-runner-k8s.image.tag=latest"           --set "stormchaser-runner-k8s.image.pullPolicy=Never"           --set "global.agent.image.repository=stormchaser-agent"           --set "global.agent.image.tag=latest"           --set "global.agent.image.pullPolicy=Never"
+        helm upgrade --install stormchaser .           --namespace "$NAMESPACE"           --create-namespace           --set "stormchaser-orchestration.api.image.repository=stormchaser-api"           --set "stormchaser-orchestration.api.image.tag=latest"           --set "stormchaser-orchestration.api.image.pullPolicy=Never"           --set "stormchaser-orchestration.query.image.repository=stormchaser-query"           --set "stormchaser-orchestration.query.image.tag=v2"           --set "stormchaser-orchestration.query.image.pullPolicy=Never"           --set "stormchaser-orchestration.engine.image.repository=stormchaser-engine"           --set "stormchaser-orchestration.engine.image.tag=latest"           --set "stormchaser-orchestration.engine.image.pullPolicy=Never"           --set "stormchaser-runner-k8s.image.repository=stormchaser-runner-k8s"           --set "stormchaser-runner-k8s.image.tag=latest"           --set "stormchaser-runner-k8s.image.pullPolicy=Never"           --set "global.agent.image.repository=stormchaser-agent"           --set "global.agent.image.tag=latest"           --set "global.agent.image.pullPolicy=Never"
     )
 
     echo -e "${BLUE}>>> Deploying Dex Identity Provider...${NC}"
@@ -341,10 +342,10 @@ if command -v python3 >/dev/null 2>&1 && [ -f "$REPO_ROOT/scripts/generate_dev_t
             echo -e "${BLUE}>>> Registering cluster MinIO backend for SFS...${NC}"
             MINIO_PASSWORD=$(microk8s kubectl get secret -n stormchaser stormchaser-minio -o jsonpath='{.data.root-password}' | base64 -d)
             API_IP=$(microk8s kubectl get svc -n stormchaser stormchaser-stormchaser-orchestration-api -o jsonpath='{.spec.clusterIP}')
-            API_URL="http://${API_IP}:3000"
+            API_URL="http://${API_IP}:${PORT_API}"
 
             # Wait for API to be ready
-            echo -e "${BLUE}>>> Waiting for API to become ready...${NC}"
+            echo -e "${BLUE}>>> Waiting for API to become ready at ${API_URL}...${NC}"
             API_READY=false
             for _ in {1..30}; do
                 if curl -s -o /dev/null -w "%{http_code}" "$API_URL/api/health" | grep -q "200" || \
