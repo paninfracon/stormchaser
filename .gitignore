@@ -50,3 +50,8 @@ tests/certs/*.csr
 deploy/dex/config.generated.yaml
 deploy/dex/credentials.generated
 lcov.info
+
+# Test Inventory
+test_inventory.md
+generate_test_inventory.py
+validate_tests.py
