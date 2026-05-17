@@ -88,7 +88,7 @@ workflow "WORKFLOW_NAME_PLACEHOLDER" {
     )
     .await;
     let err = res.expect_err("Validation should fail for wrong type: {:?}");
-    assert!(err.to_string().contains("validation errors"));
+    assert!(err.to_string().contains("Input validation failed:"));
 }
 
 #[tokio::test]

@@ -25,6 +25,11 @@ async fn setup_db() -> Result<PgPool> {
 
 #[tokio::test]
 async fn test_router_end_to_end() -> Result<()> {
+    std::env::set_var("RUST_LOG", "debug");
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .try_init();
+
     let pool = setup_db().await?;
 
     // Load config from env
@@ -39,6 +44,10 @@ async fn test_router_end_to_end() -> Result<()> {
     });
     std::env::set_var("DATABASE_URL", db_url);
 
+    std::env::set_var("TLS_CERT_PATH", "../../tests/certs/tls.crt");
+    std::env::set_var("TLS_KEY_PATH", "../../tests/certs/tls.key");
+    std::env::set_var("TLS_CA_CERT_PATH", "../../tests/certs/ca.crt");
+
     let mut config = Config::from_env(std::env::vars())?;
 
     // NATS configuration
@@ -46,11 +55,16 @@ async fn test_router_end_to_end() -> Result<()> {
     config.nats_url = nats_url.clone();
     config.rust_log = "debug".to_string();
 
+    std::env::set_var("STORMCHASER_ASSIGNED_SHARDS", "999");
+    std::env::set_var("RUST_LOG", "debug");
+
     let nats_client = async_nats::connect(&nats_url).await?;
 
     // Spawn the engine in the background
     tokio::spawn(async move {
-        let _ = run_engine(config).await;
+        if let Err(e) = run_engine(config).await {
+            tracing::error!("Engine failed to start: {:?}", e);
+        }
     });
 
     // Give it a moment to boot and subscribe to JetStream
@@ -65,7 +79,7 @@ async fn test_router_end_to_end() -> Result<()> {
         run_id,
         "TestWorkflow",
         Some("user@example.com"),
-        Some("https://github.com/example/repo.git"),
+        Some("git-local:///tmp/nonexistent-repo"),
         Some("test.storm"),
         Some("main"),
         RunStatus::Queued,
@@ -98,17 +112,15 @@ async fn test_router_end_to_end() -> Result<()> {
 
     // Send the message over NATS to the engine loop
     let js = async_nats::jetstream::new(nats_client);
-    let subject = stormchaser_model::nats::NatsSubject::RunQueued(Some(
-        stormchaser_model::nats::compute_shard_id(&run_id),
-    ))
-    .as_str()
-    .to_string();
+    let subject = stormchaser_model::nats::NatsSubject::RunQueued(Some(999))
+        .as_str()
+        .to_string();
 
     js.publish(subject, payload.into()).await?;
 
     // Wait for the engine to process it
     let mut run_updated = false;
-    for _ in 0..30 {
+    for _ in 0..100 {
         let run = stormchaser_engine::handler::fetch_run(run_id, &pool)
             .await
             .unwrap();

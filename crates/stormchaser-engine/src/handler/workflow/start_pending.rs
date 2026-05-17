@@ -42,8 +42,13 @@ pub async fn handle_workflow_start_pending(
     let context = fetch_run_context(run_id, &mut *tx).await?;
 
     // 2. Parse AST from context
-    let workflow: Workflow = serde_json::from_value(context.workflow_definition)
-        .context("Failed to parse workflow definition from DB")?;
+    let workflow: Workflow = serde_json::from_value(context.workflow_definition.clone())
+        .with_context(|| {
+            format!(
+                "Failed to parse workflow definition from DB. Payload was: {}",
+                context.workflow_definition
+            )
+        })?;
 
     // 3. Identify starting steps (steps that are not in anyone's 'next' list)
     let all_next_steps: HashSet<String> = workflow
