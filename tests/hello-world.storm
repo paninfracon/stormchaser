@@ -1,11 +1,19 @@
 workflow "hello_world" {
   description = "A simple hello world workflow to verify the K8s runner"
 
+  inputs {
+    input "target" {
+      type        = "string"
+      description = "A test target input"
+      default     = "world"
+    }
+  }
+
   steps {
     step "log_inputs" "RunContainer" {
       image   = "alpine:latest"
       command = ["/bin/sh", "-c"]
-      args    = ["echo \"Inputs: ${jsonencode(inputs)}\""]
+      args    = ["echo 'Inputs: ${jsonencode(inputs)}'"]
       next    = ["hello"]
     }
 
