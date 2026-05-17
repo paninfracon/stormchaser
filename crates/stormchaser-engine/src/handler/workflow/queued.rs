@@ -351,6 +351,7 @@ pub async fn handle_workflow_queued(
         run_id,
         event_type: EventType::Workflow(WorkflowEventType::StartPending),
         timestamp: chrono::Utc::now(),
+        status: stormchaser_model::workflow::RunStatus::StartPending,
     };
     let js = async_nats::jetstream::new(nats_client);
     use stormchaser_model::nats::NatsSubject;

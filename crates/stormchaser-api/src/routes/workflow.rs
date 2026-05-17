@@ -111,6 +111,7 @@ pub async fn enqueue_workflow(
         run_id,
         event_type: EventType::Workflow(WorkflowEventType::Queued),
         timestamp: Utc::now(),
+        status: stormchaser_model::workflow::RunStatus::Queued,
         dsl: None,
         inputs: None,
         initiating_user: None,
@@ -453,7 +454,15 @@ pub async fn stream_workflow_runs_api(
                             .await
                             .unwrap_or(None);
 
-                    if let Some(run) = detail {
+                    if let Some(mut run) = detail {
+                        if let Some(status_str) = payload.get("status").and_then(|s| s.as_str()) {
+                            if let Ok(status) = serde_json::from_value(serde_json::Value::String(
+                                status_str.to_string(),
+                            )) {
+                                run.status = status;
+                            }
+                        }
+
                         let data = serde_json::to_string(&run).unwrap_or_default();
                         let event = Event::default().event("workflow_run").data(data);
                         if tx.send(Ok(event)).await.is_err() {

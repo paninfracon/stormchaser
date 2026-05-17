@@ -238,6 +238,7 @@ pub async fn trigger_cron_workflow(
         run_id,
         event_type: EventType::Workflow(WorkflowEventType::Queued),
         timestamp: Utc::now(),
+        status: stormchaser_model::workflow::RunStatus::Queued,
         dsl: None,
         inputs: None,
         initiating_user: None,

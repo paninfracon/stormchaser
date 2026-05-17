@@ -125,6 +125,7 @@ pub async fn handle_step_failed(
             run_id,
             event_type: EventType::Workflow(WorkflowEventType::Failed),
             timestamp: chrono::Utc::now(),
+            status: stormchaser_model::workflow::RunStatus::Failed,
         })
         .unwrap(),
         None,
