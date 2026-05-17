@@ -76,14 +76,15 @@ async fn test_router_end_to_end() -> Result<()> {
     let consumer_name = "orchestration-engine-shard-999";
     let mut consumer_ready = false;
     for _ in 0..MAX_CONSUMER_READY_RETRIES {
-        if js_poll
-            .get_consumer::<async_nats::jetstream::consumer::pull::Config>(
-                "stormchaser",
-                consumer_name,
-            )
-            .await
-            .is_ok()
-        {
+        let consumer_res: Result<
+            async_nats::jetstream::consumer::Consumer<
+                async_nats::jetstream::consumer::pull::Config,
+            >,
+            _,
+        > = js_poll
+            .get_consumer_from_stream(consumer_name, "stormchaser")
+            .await;
+        if consumer_res.is_ok() {
             consumer_ready = true;
             break;
         }
