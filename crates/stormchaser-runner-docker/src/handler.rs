@@ -714,16 +714,4 @@ mod tests_handler_ext {
             .unwrap_or_default()
             .contains("execution failed"));
     }
-
-    #[tokio::test]
-    #[ignore]
-    async fn test_handle_orphaned_container_compiles() {
-        let _f = handle_orphaned_container;
-    }
-
-    #[tokio::test]
-    #[ignore]
-    async fn test_publish_container_result_compiles() {
-        let _f = publish_container_result;
-    }
 }

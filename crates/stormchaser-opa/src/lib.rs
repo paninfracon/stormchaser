@@ -73,10 +73,4 @@ mod tests {
         let result = OpaWasmInstance::new(b"not a wasm module");
         assert!(result.is_err());
     }
-
-    #[tokio::test]
-    async fn test_opa_wasm_evaluate_fails_on_empty_module() {
-        // We can't easily test a real evaluation without a valid OPA WASM module,
-        // but we can at least test that we handle invalid states.
-    }
 }

@@ -73,11 +73,4 @@ mod tests {
         // Should return the inserted value
         assert_eq!(cache.get(&schema_id).await, Some(schema_val));
     }
-
-    #[tokio::test]
-    async fn test_schema_cache_start_background_sync() {
-        let cache = SchemaCache::new();
-        // Since it's a mock implementation, we just verify it runs without panicking.
-        cache.start_background_sync("dummy_url".to_string());
-    }
 }

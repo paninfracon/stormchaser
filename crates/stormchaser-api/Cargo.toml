@@ -86,6 +86,8 @@ tempfile = "3.27.0"
 walkdir = "2.5.0"
 rsa = { version = "0.9.10", features = ["getrandom", "pem"] }
 base64.workspace = true
+futures-util = "0.3.32"
+bytes = "1.11.1"
 
 [build-dependencies]
 vergen = { workspace = true }

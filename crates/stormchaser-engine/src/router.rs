@@ -284,16 +284,3 @@ pub async fn handle_message(
         let _ = message.double_ack().await;
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    #[ignore]
-    async fn test_routing_helpers() {
-        let _a = handle_run_events;
-        let _b = handle_runner_events;
-        let _c = handle_step_events;
-    }
-}

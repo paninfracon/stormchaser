@@ -248,7 +248,9 @@ workflow "test_workflow" {{
         };
 
         let http_client = ClientBuilder::new(reqwest::Client::new()).build();
-        handle("http://localhost", &http_client, cmd).await?;
+        handle("http://localhost", &http_client, cmd)
+            .await
+            .expect("Valid workflow should lint successfully");
         Ok(())
     }
 

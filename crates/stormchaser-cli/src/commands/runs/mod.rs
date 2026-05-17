@@ -234,9 +234,17 @@ mod tests {
         ];
 
         for cmd in commands {
-            let _ = handle(url, token, &client, cmd).await;
-            // We ignore the result since it'll fail with a connection error,
-            // but we achieve 100% line coverage for the match arms!
+            let res = handle(url, token, &client, cmd).await;
+            assert!(res.is_err(), "Expected an error but got Ok for command");
+            let err_msg = res.unwrap_err().to_string();
+            assert!(
+                err_msg.contains("Connection refused")
+                    || err_msg.contains("error sending request")
+                    || err_msg.contains("builder error")
+                    || err_msg.contains("ConnectError"),
+                "Unexpected error: {}",
+                err_msg
+            );
         }
     }
 }

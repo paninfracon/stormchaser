@@ -441,18 +441,6 @@ pub async fn handle_task(
 #[cfg(test)]
 mod tests {
 
-    #[tokio::test]
-    #[ignore]
-    async fn test_execute_job_on_cluster_compiles() {
-        let _f = execute_job_on_cluster;
-    }
-
-    #[tokio::test]
-    #[ignore]
-    async fn test_publish_job_result_compiles() {
-        let _f = publish_job_result;
-    }
-
     use super::*;
     use crate::job_machine::JobMetrics;
     use serde_json::json;

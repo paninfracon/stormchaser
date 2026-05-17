@@ -197,8 +197,9 @@ async fn test_into_result() {
         },
     };
     let state = machine.into_result();
-    match state {
-        ContainerState::Succeeded(_) => {}
-        _ => panic!("Expected Succeeded"),
-    }
+    assert!(
+        matches!(state, ContainerState::Succeeded(_)),
+        "Expected Succeeded, got {:?}",
+        state
+    );
 }
