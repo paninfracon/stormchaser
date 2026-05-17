@@ -40,12 +40,12 @@ The script identified 22 tests that do not contain a single `assert!`, `assert_e
 
 To restore confidence in the test suite, we will execute the following remediation steps:
 
-### Phase 1: Verify Un-bypassed Integration Tests
+### Phase 1: Verify Un-bypassed Integration Tests (COMPLETED)
 
 1. Run the previously bypassed tests in `integration_step_machine_tests.rs` to see if they pass in a real environment.
 2. If they fail, fix the underlying logic or the test setup to ensure they correctly validate the step machine behavior.
 
-### Phase 2: Remediate Assertion-less Tests
+### Phase 2: Remediate Assertion-less Tests (COMPLETED)
 
 Iterate through the 22 identified tests that lack assertions:
 
