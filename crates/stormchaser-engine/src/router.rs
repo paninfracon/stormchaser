@@ -1,7 +1,7 @@
+use crate::git_cache;
+use crate::handler;
 use serde_json::Value;
 use std::sync::Arc;
-use stormchaser_engine::git_cache;
-use stormchaser_engine::handler;
 use stormchaser_model::auth;
 use stormchaser_model::LogBackend;
 use stormchaser_tls::TlsReloader;
@@ -280,7 +280,5 @@ pub async fn handle_message(
             log_backend,
         )
         .await;
-    } else {
-        let _ = message.double_ack().await;
     }
 }
