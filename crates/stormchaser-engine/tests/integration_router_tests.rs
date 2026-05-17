@@ -70,10 +70,12 @@ async fn test_router_end_to_end() -> Result<()> {
     // Poll for the consumer to become available rather than using a fixed sleep.
     // When the consumer exists the engine has finished setup_nats_consumers and is
     // ready to receive messages.
+    const MAX_CONSUMER_READY_RETRIES: u32 = 60;
+    const CONSUMER_POLL_INTERVAL_MS: u64 = 200;
     let js_poll = async_nats::jetstream::new(nats_client.clone());
     let consumer_name = "orchestration-engine-shard-999";
     let mut consumer_ready = false;
-    for _ in 0..60 {
+    for _ in 0..MAX_CONSUMER_READY_RETRIES {
         if js_poll
             .get_consumer::<async_nats::jetstream::consumer::pull::Config>(
                 "stormchaser",
@@ -85,12 +87,13 @@ async fn test_router_end_to_end() -> Result<()> {
             consumer_ready = true;
             break;
         }
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        tokio::time::sleep(Duration::from_millis(CONSUMER_POLL_INTERVAL_MS)).await;
     }
     assert!(
         consumer_ready,
-        "NATS consumer '{}' did not become ready within 12 seconds",
-        consumer_name
+        "NATS consumer '{}' did not become ready within {}ms",
+        consumer_name,
+        MAX_CONSUMER_READY_RETRIES as u64 * CONSUMER_POLL_INTERVAL_MS
     );
 
     // We generate a unique RunId
