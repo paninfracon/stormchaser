@@ -331,8 +331,12 @@ pub(crate) fn render_run_detail(
         .collect();
 
     let log_height = log_inner.height as usize;
-    if app.log_auto_scroll && log_lines.len() > log_height {
-        app.log_scroll = log_lines.len() - log_height;
+    if app.log_auto_scroll {
+        if log_lines.len() > log_height {
+            app.log_scroll = log_lines.len() - log_height;
+        } else {
+            app.log_scroll = 0;
+        }
     }
 
     let log_paragraph =

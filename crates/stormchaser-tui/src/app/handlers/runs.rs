@@ -54,33 +54,35 @@ impl<'a> App<'a> {
         }
 
         let parsed_status = if let Ok(payload) = serde_json::from_str::<Value>(&status) {
-            payload
-                .get("status")
-                .and_then(|s| s.as_str())
-                .map(|s| s.to_string())
-                .unwrap_or(status.clone())
+            payload.as_str().map(|s| s.to_string()).unwrap_or_else(|| {
+                payload
+                    .get("status")
+                    .and_then(|s| s.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or(status.clone())
+            })
         } else {
             status.clone()
-        };
+        }
+        .trim_matches('"')
+        .to_string();
 
         if let Some(run) = self.runs.iter_mut().find(|r| r.id == run_id) {
-            if let Ok(s) = serde_json::from_value(Value::String(parsed_status.clone())) {
-                // Prevent downgrading terminal statuses
-                match run.status {
-                    RunStatus::Succeeded | RunStatus::Failed | RunStatus::Aborted => {
-                        // Do not overwrite a terminal status with a non-terminal one
-                    }
-                    _ => run.status = s,
+            let s = RunStatus::from(parsed_status.clone());
+            // Prevent downgrading terminal statuses
+            match run.status {
+                RunStatus::Succeeded | RunStatus::Failed | RunStatus::Aborted => {
+                    // Do not overwrite a terminal status with a non-terminal one
                 }
+                _ => run.status = s,
             }
         }
         if let Some(run) = &mut self.selected_run {
             if run.detail.id == run_id {
-                if let Ok(s) = serde_json::from_value(Value::String(parsed_status)) {
-                    match run.detail.status {
-                        RunStatus::Succeeded | RunStatus::Failed | RunStatus::Aborted => {}
-                        _ => run.detail.status = s,
-                    }
+                let s = RunStatus::from(parsed_status);
+                match run.detail.status {
+                    RunStatus::Succeeded | RunStatus::Failed | RunStatus::Aborted => {}
+                    _ => run.detail.status = s,
                 }
             }
         }
