@@ -267,17 +267,14 @@ mod tests {
         )
         .await;
 
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Loki returned status"));
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Loki returned status"));
     }
 
     #[tokio::test]
     async fn test_stream_step_logs_loki_connection_refused() {
         let result = stream_loki_logs("http://127.0.0.1:1", "storm-test-step-12345678").await;
         // The connection should fail
-        assert!(result.is_err());
+        result.unwrap_err();
     }
 }

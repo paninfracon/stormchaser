@@ -144,7 +144,7 @@ mod tests {
         );
 
         let result = app.refresh_webhooks().await;
-        assert!(result.is_ok());
+        result.unwrap();
         assert_eq!(app.webhooks.len(), 1);
         assert_eq!(app.webhooks[0].id, webhook.id);
         assert!(app.error.is_none());
@@ -181,7 +181,7 @@ mod tests {
         ];
 
         let result = app.submit_webhook_form().await;
-        assert!(result.is_ok());
+        result.unwrap();
         assert!(!app.webhook_dialog_active);
         assert!(app.error.is_none());
     }
@@ -227,7 +227,7 @@ mod tests {
         app.selected_webhook = Some(webhook);
 
         let result = app.delete_selected_webhook().await;
-        assert!(result.is_ok());
+        result.unwrap();
         assert!(app.error.is_none());
     }
 }

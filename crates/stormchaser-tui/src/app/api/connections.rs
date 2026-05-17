@@ -255,7 +255,7 @@ mod tests {
         );
 
         let result = app.refresh_connections().await;
-        assert!(result.is_ok());
+        result.unwrap();
         assert_eq!(app.connections.len(), 1);
         assert_eq!(app.connections[0].id, backend.id);
         assert!(app.error.is_none());
@@ -294,7 +294,7 @@ mod tests {
         ];
 
         let result = app.submit_connection_form().await;
-        assert!(result.is_ok());
+        result.unwrap();
         assert!(!app.connection_dialog_active);
         assert!(app.error.is_none());
     }
@@ -316,7 +316,7 @@ mod tests {
         ];
 
         let result = app.submit_connection_form().await;
-        assert!(result.is_ok());
+        result.unwrap();
         assert_eq!(app.error, Some("Invalid JSON configuration.".to_string()));
     }
 
@@ -363,7 +363,7 @@ mod tests {
         app.selected_connection = Some(backend);
 
         let result = app.delete_selected_connection().await;
-        assert!(result.is_ok());
+        result.unwrap();
         assert!(app.error.is_none());
     }
 }

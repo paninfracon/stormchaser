@@ -302,7 +302,7 @@ mod tests {
         );
 
         let result = app.refresh_runs().await;
-        assert!(result.is_ok());
+        result.unwrap();
         assert_eq!(app.runs.len(), 1);
         assert_eq!(app.runs[0].id, run_detail.id);
         assert!(app.error.is_none());
@@ -329,7 +329,7 @@ mod tests {
         app.filter_status = Some("failed".to_string());
 
         let result = app.refresh_runs().await;
-        assert!(result.is_ok());
+        result.unwrap();
 
         let requests = server.received_requests().await.unwrap();
         assert_eq!(requests.len(), 1);
@@ -378,7 +378,7 @@ mod tests {
         app.runs_state.select(Some(0));
 
         let result = app.fetch_run_detail(run_id).await;
-        assert!(result.is_ok());
+        result.unwrap();
         assert!(app.selected_run.is_some());
         assert_eq!(app.selected_run.unwrap().detail.id, run_id);
     }
@@ -483,7 +483,7 @@ mod tests {
         app.runs_state.select(Some(5));
 
         let result = app.refresh_runs().await;
-        assert!(result.is_ok());
+        result.unwrap();
         assert_eq!(app.runs_state.selected(), Some(0));
     }
 
@@ -558,7 +558,7 @@ mod tests {
 
         let result = app.delete_selected_run().await;
 
-        assert!(result.is_ok());
+        result.unwrap();
         assert_eq!(app.runs.len(), 1);
         assert_eq!(app.runs_state.selected(), Some(0));
         assert_eq!(

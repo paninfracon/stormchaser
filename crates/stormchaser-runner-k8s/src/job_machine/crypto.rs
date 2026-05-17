@@ -74,6 +74,6 @@ mod tests {
 
         let encrypted = encrypt_state(secret, key1).unwrap();
         let result = decrypt_state(&encrypted, key2);
-        assert!(result.is_err());
+        result.unwrap_err();
     }
 }

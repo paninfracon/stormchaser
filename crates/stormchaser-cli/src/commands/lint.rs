@@ -218,7 +218,7 @@ mod tests {
 
     #[test]
     fn test_parse_step_schema_invalid() {
-        assert!(parse_step_schema("InvalidFormatWithoutEquals").is_err());
+        parse_step_schema("InvalidFormatWithoutEquals").unwrap_err();
     }
 
     #[tokio::test]

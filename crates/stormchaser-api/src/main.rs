@@ -88,8 +88,8 @@ mod tests {
     fn test_config_from_env_missing_database_url() {
         let env: Vec<(&str, &str)> = vec![];
         let config = Config::from_env(env);
-        assert!(config.is_err());
-        assert_eq!(config.unwrap_err().to_string(), "DATABASE_URL must be set");
+        let err = config.unwrap_err();
+        assert_eq!(err.to_string(), "DATABASE_URL must be set");
     }
 
     #[test]

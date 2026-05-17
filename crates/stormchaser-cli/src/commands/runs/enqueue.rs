@@ -70,6 +70,6 @@ mod tests {
         };
 
         let result = enqueue_run(&server.uri(), Some("test-token"), &client, params).await;
-        assert!(result.is_ok());
+        result.unwrap();
     }
 }

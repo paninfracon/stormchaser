@@ -249,7 +249,7 @@ mod tests {
         let cmd = ConnectionCommands::List;
 
         let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
-        assert!(result.is_ok());
+        result.unwrap();
     }
 
     #[tokio::test]
@@ -280,7 +280,7 @@ mod tests {
         };
 
         let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
-        assert!(result.is_ok());
+        result.unwrap();
     }
 
     #[tokio::test]
@@ -298,6 +298,6 @@ mod tests {
         let cmd = ConnectionCommands::Delete { id };
 
         let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
-        assert!(result.is_ok());
+        result.unwrap();
     }
 }

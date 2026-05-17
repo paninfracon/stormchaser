@@ -63,7 +63,7 @@ mod tests {
 
         let client = build_client();
         let res = list_reports(&mock_server.uri(), Some("test_token"), &client, id).await;
-        assert!(res.is_ok());
+        res.unwrap();
     }
 
     #[tokio::test]
@@ -72,7 +72,7 @@ mod tests {
         let id = RunId::new_v4();
         let client = build_client();
         let res = list_reports(&mock_server.uri(), None, &client, id).await;
-        assert!(res.is_err());
+        res.unwrap_err();
     }
 
     #[tokio::test]
@@ -97,7 +97,7 @@ mod tests {
             report_id,
         )
         .await;
-        assert!(res.is_ok());
+        res.unwrap();
     }
 
     #[tokio::test]
@@ -107,6 +107,6 @@ mod tests {
         let report_id = stormchaser_model::TestReportId::new_v4();
         let client = build_client();
         let res = get_report(&mock_server.uri(), None, &client, id, report_id).await;
-        assert!(res.is_err());
+        res.unwrap_err();
     }
 }

@@ -103,10 +103,7 @@ mod tests {
         let step_id = StepInstanceId::new_v4();
 
         let result = backend.stream_step_logs("test-step", step_id).await;
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("not currently supported"));
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("not currently supported"));
     }
 }

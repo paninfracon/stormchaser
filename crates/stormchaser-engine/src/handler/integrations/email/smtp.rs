@@ -71,9 +71,9 @@ mod tests {
             use_mtls: true,
         };
         let res = build_smtp_transport(params);
-        assert!(res.is_err());
+        let err = res.unwrap_err();
         assert_eq!(
-            res.unwrap_err().to_string(),
+            err.to_string(),
             "mTLS for SMTP is currently unsupported due to lettre limitations."
         );
     }

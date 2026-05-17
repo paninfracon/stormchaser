@@ -179,6 +179,6 @@ mod tests {
         };
 
         let result = handle(&server.uri(), &client, cmd).await;
-        assert!(result.is_ok());
+        result.unwrap();
     }
 }

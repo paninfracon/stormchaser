@@ -71,6 +71,6 @@ mod tests {
     #[test]
     fn test_opa_wasm_instance_new_invalid_bytes() {
         let result = OpaWasmInstance::new(b"not a wasm module");
-        assert!(result.is_err());
+        let _err = result.err().unwrap();
     }
 }

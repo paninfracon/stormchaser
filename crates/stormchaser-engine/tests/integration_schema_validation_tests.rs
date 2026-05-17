@@ -88,11 +88,8 @@ async fn test_headless_validation_dynamic_query_failure() {
     )
     .await;
 
-    assert!(res.is_err());
-    assert!(res
-        .unwrap_err()
-        .to_string()
-        .contains("Input validation failed"));
+    let err = res.unwrap_err();
+    assert!(err.to_string().contains("Input validation failed"));
 }
 
 #[tokio::test]
@@ -139,11 +136,8 @@ workflow "bad-schema" {
     )
     .await;
 
-    assert!(res.is_err());
-    assert!(res
-        .unwrap_err()
-        .to_string()
-        .contains("Failed to compile input schema"));
+    let err = res.unwrap_err();
+    assert!(err.to_string().contains("Failed to compile input schema"));
 }
 
 #[tokio::test]
@@ -177,9 +171,8 @@ workflow "bad-schema-eval" {
     )
     .await;
 
-    assert!(res.is_err());
-    assert!(res
-        .unwrap_err()
+    let err = res.unwrap_err();
+    assert!(err
         .to_string()
         .contains("Failed to evaluate expressions in inputs schema"));
 }
