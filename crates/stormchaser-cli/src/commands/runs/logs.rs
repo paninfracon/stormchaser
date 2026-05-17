@@ -89,6 +89,6 @@ mod tests {
         )
         .await;
 
-        assert!(result.is_ok());
+        result.unwrap();
     }
 }

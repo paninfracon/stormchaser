@@ -71,7 +71,7 @@ mod tests {
             format: SchemaFormat::Json,
         };
         let result = handle(cmd);
-        assert!(result.is_ok());
+        result.unwrap();
     }
 
     #[test]
@@ -80,6 +80,6 @@ mod tests {
             format: SchemaFormat::Hcl,
         };
         let result = handle(cmd);
-        assert!(result.is_ok());
+        result.unwrap();
     }
 }

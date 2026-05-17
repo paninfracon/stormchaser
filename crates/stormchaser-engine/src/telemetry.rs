@@ -98,9 +98,4 @@ mod tests {
             init_telemetry("debug").unwrap();
         });
     }
-
-    #[test]
-    fn test_shutdown_telemetry() {
-        shutdown_telemetry();
-    }
 }

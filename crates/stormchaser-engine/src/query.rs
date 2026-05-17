@@ -401,10 +401,7 @@ mod tests {
     #[tokio::test]
     async fn test_execute_query_unsupported() {
         let res = execute_query("unknown", &HashMap::new(), None, None).await;
-        assert!(res.is_err());
-        assert!(res
-            .unwrap_err()
-            .to_string()
-            .contains("Unsupported query protocol"));
+        let err = res.unwrap_err();
+        assert!(err.to_string().contains("Unsupported query protocol"));
     }
 }

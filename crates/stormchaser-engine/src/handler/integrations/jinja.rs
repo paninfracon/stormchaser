@@ -188,6 +188,6 @@ mod tests {
     fn test_render_template_error() {
         let ctx = json!({});
         let result = render_template("Hello {{ name", &ctx);
-        assert!(result.is_err());
+        result.unwrap_err();
     }
 }

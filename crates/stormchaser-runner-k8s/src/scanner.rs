@@ -396,12 +396,6 @@ pub async fn scan_for_orphans(
 #[cfg(test)]
 mod tests {
 
-    #[tokio::test]
-    #[ignore]
-    async fn test_handle_orphaned_job_compiles() {
-        let _f = handle_orphaned_job;
-    }
-
     use super::*;
     use serde_json::json;
 

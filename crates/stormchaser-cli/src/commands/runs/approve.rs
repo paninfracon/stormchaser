@@ -104,7 +104,7 @@ mod tests {
             vec![],
         )
         .await;
-        assert!(result.is_ok());
+        result.unwrap();
     }
 
     #[tokio::test]
@@ -125,7 +125,7 @@ mod tests {
         let client = ClientBuilder::new(reqwest::Client::new()).build();
 
         let result = reject_step(&server.uri(), Some("test-token"), &client, run_id, step_id).await;
-        assert!(result.is_ok());
+        result.unwrap();
     }
 
     #[tokio::test]
@@ -141,7 +141,7 @@ mod tests {
         let client = ClientBuilder::new(reqwest::Client::new()).build();
 
         let result = list_pending(&server.uri(), Some("test-token"), &client).await;
-        assert!(result.is_ok());
+        result.unwrap();
     }
 
     #[tokio::test]
@@ -156,6 +156,6 @@ mod tests {
         let client = ClientBuilder::new(reqwest::Client::new()).build();
 
         let result = approve_link(&server.uri(), &client, "my-secret-token".to_string()).await;
-        assert!(result.is_ok());
+        result.unwrap();
     }
 }

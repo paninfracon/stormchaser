@@ -72,6 +72,6 @@ mod tests {
 
         let result = watch_run(&server.uri(), Some("fake_token"), &client, id).await;
 
-        assert!(result.is_ok());
+        result.unwrap();
     }
 }

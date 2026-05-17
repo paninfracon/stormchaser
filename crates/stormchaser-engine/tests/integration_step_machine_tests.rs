@@ -24,10 +24,6 @@ async fn setup_db() -> Result<PgPool> {
 
 #[tokio::test]
 async fn test_step_machine_pending_fail() -> Result<()> {
-    if var("SQL_OFFLINE").is_ok() {
-        return Ok(());
-    }
-
     let pool = setup_db().await?;
 
     let mut tx = pool.begin().await?;
@@ -86,10 +82,6 @@ async fn test_step_machine_pending_fail() -> Result<()> {
 
 #[tokio::test]
 async fn test_step_machine_waiting_for_event_fail() -> Result<()> {
-    if var("SQL_OFFLINE").is_ok() {
-        return Ok(());
-    }
-
     let pool = setup_db().await?;
 
     let mut tx = pool.begin().await?;

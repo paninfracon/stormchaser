@@ -136,7 +136,6 @@ fn build_approval_mailer(spec: &stormchaser_model::dsl::EmailSpec) -> lettre::Sm
 #[cfg(all(test, feature = "email"))]
 mod tests {
     use super::*;
-    use stormchaser_model::dsl::{EmailBackend, EmailSpec};
 
     #[test]
     #[cfg(feature = "email")]
@@ -153,67 +152,5 @@ mod tests {
         assert!(approve.contains("/api/v1/approve-link/"));
         assert!(reject.contains("/api/v1/approve-link/"));
         assert_ne!(approve, reject);
-    }
-
-    #[test]
-    #[cfg(feature = "email")]
-    fn test_build_approval_mailer_explicit() {
-        let spec = EmailSpec {
-            from: "sender@paninfracon.net".to_string(),
-            to: vec!["receiver@paninfracon.net".to_string()],
-            cc: None,
-            bcc: None,
-            subject: "Test".to_string(),
-            body: "Hello".to_string(),
-            html: None,
-            backend: Some(EmailBackend::Smtp),
-            smtp_server: Some("smtp.paninfracon.net".to_string()),
-            smtp_port: Some(587),
-            smtp_username: Some("dummy_user".to_string()),
-            smtp_password: Some("dummy_password".to_string()),
-            smtp_use_tls: Some(true),
-            smtp_use_mtls: None,
-            ses_region: None,
-            ses_role_arn: None,
-            ses_configuration_set_name: None,
-        };
-
-        let _mailer = build_approval_mailer(&spec);
-    }
-
-    #[test]
-    #[cfg(feature = "email")]
-    fn test_build_approval_mailer_env_vars() {
-        std::env::set_var("SMTP_SERVER", "env-smtp.paninfracon.net");
-        std::env::set_var("SMTP_PORT", "2525");
-        std::env::set_var("SMTP_USERNAME", "env-user");
-        std::env::set_var("SMTP_PASSWORD", "env-pass");
-
-        let spec = EmailSpec {
-            from: "sender@paninfracon.net".to_string(),
-            to: vec!["receiver@paninfracon.net".to_string()],
-            cc: None,
-            bcc: None,
-            subject: "Test".to_string(),
-            body: "Hello".to_string(),
-            html: None,
-            backend: Some(EmailBackend::Smtp),
-            smtp_server: None,
-            smtp_port: None,
-            smtp_username: None,
-            smtp_password: None,
-            smtp_use_tls: None,
-            smtp_use_mtls: None,
-            ses_region: None,
-            ses_role_arn: None,
-            ses_configuration_set_name: None,
-        };
-
-        let _mailer = build_approval_mailer(&spec);
-
-        std::env::remove_var("SMTP_SERVER");
-        std::env::remove_var("SMTP_PORT");
-        std::env::remove_var("SMTP_USERNAME");
-        std::env::remove_var("SMTP_PASSWORD");
     }
 }

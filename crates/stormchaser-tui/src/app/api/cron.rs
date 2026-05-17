@@ -174,7 +174,7 @@ mod tests {
         );
 
         let result = app.refresh_cron_workflows().await;
-        assert!(result.is_ok());
+        result.unwrap();
         assert_eq!(app.cron_workflows.len(), 1);
         assert_eq!(app.cron_workflows[0].id, id);
         assert!(app.error.is_none());
@@ -207,7 +207,7 @@ mod tests {
         app.selected_cron_workflow = Some(make_cron_workflow(id));
 
         let result = app.delete_selected_cron_workflow().await;
-        assert!(result.is_ok());
+        result.unwrap();
         assert!(app.error.is_none());
     }
 }

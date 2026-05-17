@@ -147,6 +147,6 @@ mod tests {
         )
         .await;
 
-        assert!(result.is_err());
+        result.unwrap_err();
     }
 }

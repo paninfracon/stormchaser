@@ -210,18 +210,3 @@ pub async fn persist_step_test_reports(
     }
     Ok(())
 }
-
-#[cfg(test)]
-mod tests_helpers {
-    use super::*;
-
-    #[tokio::test]
-    #[ignore]
-    async fn test_process_legacy_report() {
-        // Dummy test to exercise the new method
-        let _val = serde_json::json!({"content": "foo"});
-        // Without real tx and pool, we just check compilation
-        let _f = process_legacy_report;
-        let _g = process_claim_report;
-    }
-}

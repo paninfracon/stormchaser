@@ -305,12 +305,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
-    async fn test_handle_app_event_key_compiles() {
-        let _f = handle_app_event_key;
-    }
-
-    #[tokio::test]
     async fn test_handle_app_event_key_prioritizes_delete_dialog() {
         let (tx, _rx) = mpsc::channel(1);
         let mut app = App::new(

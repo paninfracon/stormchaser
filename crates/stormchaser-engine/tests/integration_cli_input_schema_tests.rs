@@ -59,7 +59,7 @@ workflow "WORKFLOW_NAME_PLACEHOLDER" {
   }
 }
 "#;
-    let res = run_validation_test(
+    run_validation_test(
         dsl,
         json!({
             "str_val": "hello",
@@ -67,8 +67,8 @@ workflow "WORKFLOW_NAME_PLACEHOLDER" {
             "bool_val": true
         }),
     )
-    .await;
-    assert!(res.is_ok(), "Validation should succeed: {:?}", res);
+    .await
+    .expect("Validation should succeed for all basic data types");
 }
 
 #[tokio::test]
@@ -88,15 +88,8 @@ workflow "WORKFLOW_NAME_PLACEHOLDER" {
         }),
     )
     .await;
-    assert!(
-        res.is_err(),
-        "Validation should fail for wrong type: {:?}",
-        res
-    );
-    assert!(res
-        .unwrap_err()
-        .to_string()
-        .contains("Input validation failed"));
+    let err = res.expect_err("Validation should fail for wrong type: {:?}");
+    assert!(err.to_string().contains("Input validation failed:"));
 }
 
 #[tokio::test]
@@ -118,11 +111,7 @@ workflow "WORKFLOW_NAME_PLACEHOLDER" {
         }),
     )
     .await;
-    assert!(
-        res.is_ok(),
-        "Validation should succeed with valid constraints: {:?}",
-        res
-    );
+    res.expect("Validation should succeed with valid constraints: {:?}");
 }
 
 #[tokio::test]
@@ -137,11 +126,11 @@ workflow "WORKFLOW_NAME_PLACEHOLDER" {
 "#;
     // Test pattern failure
     let res1 = run_validation_test(dsl, json!({"name": "JOHN123"})).await;
-    assert!(res1.is_err(), "Validation should fail pattern constraint");
+    let _err = res1.expect_err("Validation should fail pattern constraint");
 
     // Test minimum failure
     let res2 = run_validation_test(dsl, json!({"age": 10})).await;
-    assert!(res2.is_err(), "Validation should fail minimum constraint");
+    let _err = res2.expect_err("Validation should fail minimum constraint");
 }
 
 #[tokio::test]
@@ -154,7 +143,7 @@ workflow "WORKFLOW_NAME_PLACEHOLDER" {
 }
 "#;
     let res = run_validation_test(dsl, json!({"color": "green"})).await;
-    assert!(res.is_ok(), "Validation should succeed with valid enum");
+    res.expect("Validation should succeed with valid enum");
 }
 
 #[tokio::test]
@@ -167,11 +156,7 @@ workflow "WORKFLOW_NAME_PLACEHOLDER" {
 }
 "#;
     let res = run_validation_test(dsl, json!({"color": "yellow"})).await;
-    assert!(
-        res.is_err(),
-        "Validation should fail with invalid enum: {:?}",
-        res
-    );
+    let _err = res.expect_err("Validation should fail with invalid enum: {:?}");
 }
 
 #[tokio::test]
@@ -198,11 +183,7 @@ workflow "WORKFLOW_NAME_PLACEHOLDER" {
         }),
     )
     .await;
-    assert!(
-        res.is_ok(),
-        "Validation should succeed with conditional field present: {:?}",
-        res
-    );
+    res.expect("Validation should succeed with conditional field present: {:?}");
 }
 
 #[tokio::test]
@@ -229,10 +210,7 @@ workflow "WORKFLOW_NAME_PLACEHOLDER" {
         }),
     )
     .await;
-    assert!(
-        res.is_err(),
-        "Validation should fail when conditional field is missing"
-    );
+    let _err = res.expect_err("Validation should fail when conditional field is missing");
 }
 
 #[tokio::test]
@@ -252,18 +230,10 @@ workflow "WORKFLOW_NAME_PLACEHOLDER" {
 }
 "#;
     let res_success = run_validation_test(dsl, json!({"environment": "staging"})).await;
-    assert!(
-        res_success.is_ok(),
-        "Mock provider query success failed: {:?}",
-        res_success
-    );
+    res_success.expect("Mock provider query success failed: {:?}");
 
     let res_fail = run_validation_test(dsl, json!({"environment": "local"})).await;
-    assert!(
-        res_fail.is_err(),
-        "Mock provider query failure failed: {:?}",
-        res_fail
-    );
+    let _err = res_fail.expect_err("Mock provider query failure failed: {:?}");
 }
 
 #[tokio::test]
@@ -302,18 +272,10 @@ workflow "WORKFLOW_NAME_PLACEHOLDER" {{
     );
 
     let res_success = run_validation_test(&dsl, json!({"feature_flag": "alpha"})).await;
-    assert!(
-        res_success.is_ok(),
-        "API query success failed: {:?}",
-        res_success
-    );
+    res_success.expect("API query success failed: {:?}");
 
     let res_fail = run_validation_test(&dsl, json!({"feature_flag": "gamma"})).await;
-    assert!(
-        res_fail.is_err(),
-        "API query failure failed: {:?}",
-        res_fail
-    );
+    let _err = res_fail.expect_err("API query failure failed: {:?}");
 }
 
 #[tokio::test]
@@ -380,9 +342,5 @@ workflow "WORKFLOW_NAME_PLACEHOLDER" {
         .await
         .unwrap();
 
-    assert!(
-        res_success.is_ok(),
-        "DB query success failed: {:?}",
-        res_success
-    );
+    res_success.expect("DB query success failed: {:?}");
 }

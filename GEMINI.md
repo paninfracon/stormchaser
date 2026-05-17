@@ -185,3 +185,26 @@ git commit -F commit_msg.txt
 ## 7. Privilage escalation
 
 When you need to use sudo for local privilage escalation, e.g. when cleaning up environments, use pkexec instead to get the desktop integration
+
+## 8. High Quality Unit Tests
+
+A high-quality unit test in this project must adhere to the following principles:
+
+- **Isolation**: Tests must not depend on external systems (e.g., live databases, network services). Use mocks, stubs, or in-memory equivalents. For filesystem interactions, use the `tempfile` crate to ensure isolation and automatic cleanup.
+- **Determinism**: Tests must consistently pass or fail. Avoid dependencies on system time, random number generators without fixed seeds, or external state.
+- **Clear Structure**: Follow the Arrange-Act-Assert (or Given-When-Then) pattern to clearly separate test setup, execution, and validation.
+- **Descriptive Naming**: Test names should clearly communicate what is being tested and under what conditions (e.g., `test_parse_schema_rejects_invalid_json`).
+- **Single Responsibility**: Each test should verify a single logical behavior or edge case. If a test fails, it should be immediately obvious which behavior is broken.
+- **Meaningful Assertions**: Assert against specific error types or structural states, not just generic `is_err()` or `is_ok()`, to ensure the failure mode is exactly as expected.
+- **Fast Execution**: Unit tests should be extremely fast. Avoid operations that introduce artificial delays.
+
+## 9. High Quality Integration Tests
+
+A high-quality integration test in this project must adhere to the following principles:
+
+- **Realistic Environments**: Test against real instances of dependencies (e.g., PostgreSQL, NATS, OPA) using Docker or similar containerization, rather than relying on mocks, to accurately reflect production behavior.
+- **State Management**: Ensure each test starts with a known, clean state. Use isolated database schemas, unique namespaces, or robust teardown routines to prevent test pollution. Do not share mutable state across tests.
+- **End-to-End Scenarios**: Focus on critical user journeys or system flows that span multiple components or services. Verify the wiring and interaction between modules.
+- **Resilience to Timing**: When dealing with asynchronous systems (like message queues or eventual consistency), avoid fixed sleep durations (`thread::sleep`). Use robust polling or wait mechanisms with timeouts.
+- **Observability in Failure**: Ensure that when an integration test fails, it captures sufficient context (logs, container output) to aid in debugging without needing to rerun the test manually.
+- **Data Integrity**: Validate side-effects and persistent state changes, not just API responses. Ensure the system reaches the correct terminal state.

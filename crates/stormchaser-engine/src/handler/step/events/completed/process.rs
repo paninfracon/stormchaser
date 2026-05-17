@@ -193,14 +193,3 @@ async fn evaluate_successors(
     }
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    #[ignore]
-    async fn test_process_step_completion_compiles() {
-        let _f = process_step_completion;
-    }
-}

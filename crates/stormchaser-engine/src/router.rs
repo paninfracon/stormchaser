@@ -1,7 +1,7 @@
+use crate::git_cache;
+use crate::handler;
 use serde_json::Value;
 use std::sync::Arc;
-use stormchaser_engine::git_cache;
-use stormchaser_engine::handler;
 use stormchaser_model::auth;
 use stormchaser_model::LogBackend;
 use stormchaser_tls::TlsReloader;
@@ -281,19 +281,10 @@ pub async fn handle_message(
         )
         .await;
     } else {
+        tracing::warn!(
+            "Unhandled subject '{}', acknowledging to prevent redelivery",
+            subject
+        );
         let _ = message.double_ack().await;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    #[ignore]
-    async fn test_routing_helpers() {
-        let _a = handle_run_events;
-        let _b = handle_runner_events;
-        let _c = handle_step_events;
     }
 }

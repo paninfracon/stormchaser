@@ -148,6 +148,6 @@ mod tests {
         };
 
         let client = get_s3_client(&backend).await;
-        assert!(client.is_ok());
+        client.unwrap();
     }
 }

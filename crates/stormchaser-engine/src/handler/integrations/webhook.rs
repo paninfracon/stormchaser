@@ -193,7 +193,7 @@ mod tests {
         };
         let ctx = json!({"inputs": {"name": "World"}});
         let result = render_webhook_body(&spec_invalid, &ctx);
-        assert!(result.is_err());
+        result.unwrap_err();
     }
 
     #[test]

@@ -126,6 +126,6 @@ mod tests {
         };
 
         let result = list_runs(&server.uri(), Some("test-token"), &client, filters).await;
-        assert!(result.is_ok());
+        result.unwrap();
     }
 }

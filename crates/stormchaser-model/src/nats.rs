@@ -250,7 +250,7 @@ mod tests {
     fn test_validate_against_schema_valid() {
         let schema = schema_for!(TestEvent);
         let data = serde_json::json!({"id": 1, "name": "test"});
-        assert!(validate_against_schema(&data, Some(&schema)).is_ok());
+        validate_against_schema(&data, Some(&schema)).unwrap();
     }
 
     #[test]
@@ -258,13 +258,13 @@ mod tests {
         let schema = schema_for!(TestEvent);
         // `id` must be a number, not a string
         let data = serde_json::json!({"id": "not-a-number", "name": "test"});
-        assert!(validate_against_schema(&data, Some(&schema)).is_err());
+        validate_against_schema(&data, Some(&schema)).unwrap_err();
     }
 
     #[test]
     fn test_validate_against_schema_none_is_permissive() {
         let data = serde_json::json!({"anything": true});
-        assert!(validate_against_schema(&data, None).is_ok());
+        validate_against_schema(&data, None).unwrap();
     }
 
     #[test]

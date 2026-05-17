@@ -6,6 +6,9 @@ use std::path::{Path, PathBuf};
 use stormchaser_dsl::StormchaserParser;
 use stormchaser_model::schema_gen::{apply_step_extensibility, generate_dsl_schema};
 
+/// Filename used to cache the downloaded DSL JSON schema locally.
+const SCHEMA_CACHE_FILE: &str = ".stormchaser-schema.json";
+
 /// CLI command to lint a workflow file against the JSON schema.
 #[derive(clap::Parser)]
 pub struct LintCommand {
@@ -53,11 +56,11 @@ pub async fn handle(
             .error_for_status()
             .with_context(|| format!("Failed to fetch remote schema from {}", req_url))?;
         let json: Value = resp.json().await?;
-        std::fs::write(
-            ".stormchaser-schema.json",
-            serde_json::to_string_pretty(&json)?,
-        )?;
-        println!("✓ Downloaded and saved remote schema to .stormchaser-schema.json");
+        std::fs::write(SCHEMA_CACHE_FILE, serde_json::to_string_pretty(&json)?)?;
+        println!(
+            "✓ Downloaded and saved remote schema to {}",
+            SCHEMA_CACHE_FILE
+        );
         return Ok(());
     }
 
@@ -126,18 +129,18 @@ async fn resolve_base_schema(
         let json: Value = resp.json().await?;
 
         if command.prepare {
-            std::fs::write(
-                ".stormchaser-schema.json",
-                serde_json::to_string_pretty(&json)?,
-            )?;
-            println!("✓ Downloaded and saved remote schema to .stormchaser-schema.json");
+            std::fs::write(SCHEMA_CACHE_FILE, serde_json::to_string_pretty(&json)?)?;
+            println!(
+                "✓ Downloaded and saved remote schema to {}",
+                SCHEMA_CACHE_FILE
+            );
         }
 
         serde_json::from_value(json).context("Failed to parse remote schema")
-    } else if Path::new(".stormchaser-schema.json").exists() {
-        let content = std::fs::read_to_string(".stormchaser-schema.json")
-            .context("Failed to read .stormchaser-schema.json")?;
-        serde_json::from_str(&content).context("Failed to parse .stormchaser-schema.json")
+    } else if Path::new(SCHEMA_CACHE_FILE).exists() {
+        let content =
+            std::fs::read_to_string(SCHEMA_CACHE_FILE).context("Failed to read cached schema")?;
+        serde_json::from_str(&content).context("Failed to parse cached schema")
     } else {
         Ok(generate_dsl_schema())
     }
@@ -204,6 +207,16 @@ mod tests {
 
     static LINT_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+    /// A guard that restores the process working directory when dropped, ensuring test
+    /// isolation even when a test panics or returns an error before restoring cwd.
+    struct CwdGuard(std::path::PathBuf);
+
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.0);
+        }
+    }
+
     #[test]
     fn test_parse_step_schema_valid() {
         let (t, p) = parse_step_schema("CustomType=local.json").unwrap();
@@ -218,7 +231,7 @@ mod tests {
 
     #[test]
     fn test_parse_step_schema_invalid() {
-        assert!(parse_step_schema("InvalidFormatWithoutEquals").is_err());
+        parse_step_schema("InvalidFormatWithoutEquals").unwrap_err();
     }
 
     #[tokio::test]
@@ -248,14 +261,17 @@ workflow "test_workflow" {{
         };
 
         let http_client = ClientBuilder::new(reqwest::Client::new()).build();
-        handle("http://localhost", &http_client, cmd).await?;
+        handle("http://localhost", &http_client, cmd)
+            .await
+            .expect("Valid workflow should lint successfully");
         Ok(())
     }
 
     #[tokio::test]
     async fn test_lint_handle_invalid_spec() -> Result<()> {
         let _guard = LINT_MUTEX.lock().await;
-        let _ = std::fs::remove_file(".stormchaser-schema.json");
+        let _ = std::fs::remove_file(SCHEMA_CACHE_FILE);
+
         let mut file = NamedTempFile::new()?;
         writeln!(
             file,
@@ -281,15 +297,9 @@ workflow "test_workflow" {{
 
         let http_client = ClientBuilder::new(reqwest::Client::new()).build();
         let result = handle("http://localhost", &http_client, cmd).await;
+        let err = result.expect_err("Expected invalid schema to fail validation");
         assert!(
-            result.is_err(),
-            "Expected invalid schema to fail validation"
-        );
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("schema validation"),
+            err.to_string().contains("schema validation"),
             "Error should indicate schema validation failure"
         );
         Ok(())
@@ -310,7 +320,11 @@ workflow "test_workflow" {{
     #[tokio::test]
     async fn test_lint_handle_prepare() -> Result<()> {
         let _guard = LINT_MUTEX.lock().await;
-        let _ = std::fs::remove_file(".stormchaser-schema.json");
+        let temp_dir = tempfile::tempdir()?;
+        let current_dir = std::env::current_dir()?;
+        std::env::set_current_dir(temp_dir.path())?;
+        let _cwd_guard = CwdGuard(current_dir);
+
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/api/v1/schema"))
@@ -328,11 +342,11 @@ workflow "test_workflow" {{
         };
 
         let http_client = ClientBuilder::new(reqwest::Client::new()).build();
-        handle(&server.uri(), &http_client, cmd).await?;
+        handle(&server.uri(), &http_client, cmd).await.unwrap();
 
-        let saved = std::fs::read_to_string(".stormchaser-schema.json")?;
+        let saved = std::fs::read_to_string(SCHEMA_CACHE_FILE)?;
+
         assert!(saved.contains("\"type\": \"object\""));
-        std::fs::remove_file(".stormchaser-schema.json")?;
 
         Ok(())
     }

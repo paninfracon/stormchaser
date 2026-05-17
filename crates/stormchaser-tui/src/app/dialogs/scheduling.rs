@@ -302,7 +302,7 @@ mod tests {
         app.schedule_git_inputs[2].insert_str("main");
 
         let res = app.submit_schedule_git().await;
-        assert!(res.is_ok());
+        res.unwrap();
         assert!(app.error.is_none());
         assert!(!app.schedule_git_dialog_active);
     }
@@ -326,7 +326,7 @@ mod tests {
         app.direct_submit_dsl = Some("test dsl".to_string());
 
         let res = app.submit_direct_form(json!({"key": "val"})).await;
-        assert!(res.is_ok());
+        res.unwrap();
         assert!(app.error.is_none());
         assert!(app.direct_submit_dsl.is_none()); // Taken
     }
@@ -345,7 +345,7 @@ mod tests {
         app.direct_submit_dsl = Some("test dsl".to_string());
 
         let res = app.submit_direct_form(json!({})).await;
-        assert!(res.is_ok());
+        res.unwrap();
         assert!(app.error.is_some());
         assert!(app.error.unwrap().contains("Failed to submit workflow"));
     }

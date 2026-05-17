@@ -39,6 +39,6 @@ mod tests {
         let client = ClientBuilder::new(reqwest::Client::new()).build();
 
         let result = list_artifacts(&server.uri(), Some("test-token"), &client, id).await;
-        assert!(result.is_ok());
+        result.unwrap();
     }
 }

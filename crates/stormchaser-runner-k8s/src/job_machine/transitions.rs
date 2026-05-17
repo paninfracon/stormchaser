@@ -548,14 +548,14 @@ mod tests {
             K8sJobMachine::<state::Initialized>::do_parse_version("1.25.0+xyz").unwrap(),
             vec![1, 25, 0]
         );
-        assert!(K8sJobMachine::<state::Initialized>::do_parse_version("invalid").is_err());
+        K8sJobMachine::<state::Initialized>::do_parse_version("invalid").unwrap_err();
     }
 
     #[test]
     fn test_do_check_version() {
-        assert!(K8sJobMachine::<state::Initialized>::do_check_version("1.25.0", "1.24.0").is_ok());
-        assert!(K8sJobMachine::<state::Initialized>::do_check_version("1.25.0", "1.25.0").is_ok());
-        assert!(K8sJobMachine::<state::Initialized>::do_check_version("1.25.1", "1.25.0").is_ok());
+        K8sJobMachine::<state::Initialized>::do_check_version("1.25.0", "1.24.0").unwrap();
+        K8sJobMachine::<state::Initialized>::do_check_version("1.25.0", "1.25.0").unwrap();
+        K8sJobMachine::<state::Initialized>::do_check_version("1.25.1", "1.25.0").unwrap();
 
         let err =
             K8sJobMachine::<state::Initialized>::do_check_version("1.24.0", "1.25.0").unwrap_err();
