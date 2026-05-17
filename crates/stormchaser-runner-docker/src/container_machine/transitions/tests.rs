@@ -87,7 +87,7 @@ async fn test_container_lifecycle_success() {
 
     // Ensure container is cleaned up
     let inspect = docker.inspect_container(&container_name, None).await;
-    assert!(inspect.is_err(), "Container should be removed");
+    let _err = inspect.expect_err("Container should be removed");
 }
 
 #[tokio::test]
@@ -125,7 +125,7 @@ async fn test_container_lifecycle_failure() {
 
     // Ensure container is cleaned up
     let inspect = docker.inspect_container(&container_name, None).await;
-    assert!(inspect.is_err(), "Container should be removed");
+    let _err = inspect.expect_err("Container should be removed");
 }
 
 #[tokio::test]
@@ -180,7 +180,7 @@ async fn test_clean_up_orphaned_container() {
 
     // Verify it is gone
     let inspect = docker.inspect_container(&container_name, None).await;
-    assert!(inspect.is_err(), "Container should be cleaned up");
+    let _err = inspect.expect_err("Container should be cleaned up");
 }
 
 #[tokio::test]

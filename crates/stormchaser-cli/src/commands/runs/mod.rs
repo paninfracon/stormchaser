@@ -235,8 +235,8 @@ mod tests {
 
         for cmd in commands {
             let res = handle(url, token, &client, cmd).await;
-            assert!(res.is_err(), "Expected an error but got Ok for command");
-            let err_msg = res.unwrap_err().to_string();
+            let err = res.expect_err("Expected an error but got Ok for command");
+            let err_msg = err.to_string();
             assert!(
                 err_msg.contains("Connection refused")
                     || err_msg.contains("error sending request")

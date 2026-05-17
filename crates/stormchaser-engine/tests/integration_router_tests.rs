@@ -107,15 +107,20 @@ async fn test_router_end_to_end() -> Result<()> {
     js.publish(subject, payload.into()).await?;
 
     // Wait for the engine to process it
-    tokio::time::sleep(Duration::from_secs(3)).await;
-
-    // Check if the run was updated by the engine
-    let run = stormchaser_engine::handler::fetch_run(run_id, &pool)
-        .await
-        .unwrap();
+    let mut run_updated = false;
+    for _ in 0..30 {
+        let run = stormchaser_engine::handler::fetch_run(run_id, &pool)
+            .await
+            .unwrap();
+        if run.status != RunStatus::Queued {
+            run_updated = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 
     assert!(
-        run.status != RunStatus::Queued,
+        run_updated,
         "The router failed to process the NATS message. Run {} status did not change from Queued.",
         run_id
     );

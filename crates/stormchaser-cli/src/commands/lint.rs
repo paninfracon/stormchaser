@@ -257,7 +257,7 @@ workflow "test_workflow" {{
     #[tokio::test]
     async fn test_lint_handle_invalid_spec() -> Result<()> {
         let _guard = LINT_MUTEX.lock().await;
-        let _ = std::fs::remove_file(".stormchaser-schema.json");
+
         let mut file = NamedTempFile::new()?;
         writeln!(
             file,
@@ -283,15 +283,9 @@ workflow "test_workflow" {{
 
         let http_client = ClientBuilder::new(reqwest::Client::new()).build();
         let result = handle("http://localhost", &http_client, cmd).await;
+        let err = result.expect_err("Expected invalid schema to fail validation");
         assert!(
-            result.is_err(),
-            "Expected invalid schema to fail validation"
-        );
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("schema validation"),
+            err.to_string().contains("schema validation"),
             "Error should indicate schema validation failure"
         );
         Ok(())
@@ -312,7 +306,10 @@ workflow "test_workflow" {{
     #[tokio::test]
     async fn test_lint_handle_prepare() -> Result<()> {
         let _guard = LINT_MUTEX.lock().await;
-        let _ = std::fs::remove_file(".stormchaser-schema.json");
+        let temp_dir = tempfile::tempdir()?;
+        let current_dir = std::env::current_dir()?;
+        std::env::set_current_dir(temp_dir.path())?;
+
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/api/v1/schema"))
@@ -330,11 +327,13 @@ workflow "test_workflow" {{
         };
 
         let http_client = ClientBuilder::new(reqwest::Client::new()).build();
-        handle(&server.uri(), &http_client, cmd).await?;
+        handle(&server.uri(), &http_client, cmd).await.unwrap();
 
         let saved = std::fs::read_to_string(".stormchaser-schema.json")?;
+
+        std::env::set_current_dir(current_dir)?;
+
         assert!(saved.contains("\"type\": \"object\""));
-        std::fs::remove_file(".stormchaser-schema.json")?;
 
         Ok(())
     }
