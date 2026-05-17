@@ -67,8 +67,31 @@ async fn test_router_end_to_end() -> Result<()> {
         }
     });
 
-    // Give it a moment to boot and subscribe to JetStream
-    tokio::time::sleep(Duration::from_secs(4)).await;
+    // Poll for the consumer to become available rather than using a fixed sleep.
+    // When the consumer exists the engine has finished setup_nats_consumers and is
+    // ready to receive messages.
+    let js_poll = async_nats::jetstream::new(nats_client.clone());
+    let consumer_name = "orchestration-engine-shard-999";
+    let mut consumer_ready = false;
+    for _ in 0..60 {
+        if js_poll
+            .get_consumer::<async_nats::jetstream::consumer::pull::Config>(
+                "stormchaser",
+                consumer_name,
+            )
+            .await
+            .is_ok()
+        {
+            consumer_ready = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    assert!(
+        consumer_ready,
+        "NATS consumer '{}' did not become ready within 12 seconds",
+        consumer_name
+    );
 
     // We generate a unique RunId
     let run_id = RunId::new_v4();

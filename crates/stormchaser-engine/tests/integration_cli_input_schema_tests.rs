@@ -59,7 +59,7 @@ workflow "WORKFLOW_NAME_PLACEHOLDER" {
   }
 }
 "#;
-    let _res = run_validation_test(
+    run_validation_test(
         dsl,
         json!({
             "str_val": "hello",
@@ -67,7 +67,8 @@ workflow "WORKFLOW_NAME_PLACEHOLDER" {
             "bool_val": true
         }),
     )
-    .await;
+    .await
+    .expect("Validation should succeed for all basic data types");
 }
 
 #[tokio::test]

@@ -280,5 +280,11 @@ pub async fn handle_message(
             log_backend,
         )
         .await;
+    } else {
+        tracing::warn!(
+            "Unhandled subject '{}', acknowledging to prevent redelivery",
+            subject
+        );
+        let _ = message.double_ack().await;
     }
 }

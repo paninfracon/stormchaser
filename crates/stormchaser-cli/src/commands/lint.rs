@@ -204,6 +204,16 @@ mod tests {
 
     static LINT_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+    /// A guard that restores the process working directory when dropped, ensuring test
+    /// isolation even when a test panics or returns an error before restoring cwd.
+    struct CwdGuard(std::path::PathBuf);
+
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.0);
+        }
+    }
+
     #[test]
     fn test_parse_step_schema_valid() {
         let (t, p) = parse_step_schema("CustomType=local.json").unwrap();
@@ -257,6 +267,7 @@ workflow "test_workflow" {{
     #[tokio::test]
     async fn test_lint_handle_invalid_spec() -> Result<()> {
         let _guard = LINT_MUTEX.lock().await;
+        let _ = std::fs::remove_file(".stormchaser-schema.json");
 
         let mut file = NamedTempFile::new()?;
         writeln!(
@@ -309,6 +320,7 @@ workflow "test_workflow" {{
         let temp_dir = tempfile::tempdir()?;
         let current_dir = std::env::current_dir()?;
         std::env::set_current_dir(temp_dir.path())?;
+        let _cwd_guard = CwdGuard(current_dir);
 
         let server = MockServer::start().await;
         Mock::given(method("GET"))
@@ -330,8 +342,6 @@ workflow "test_workflow" {{
         handle(&server.uri(), &http_client, cmd).await.unwrap();
 
         let saved = std::fs::read_to_string(".stormchaser-schema.json")?;
-
-        std::env::set_current_dir(current_dir)?;
 
         assert!(saved.contains("\"type\": \"object\""));
 

@@ -45,8 +45,8 @@ pub async fn handle_workflow_start_pending(
     let workflow: Workflow = serde_json::from_value(context.workflow_definition.clone())
         .with_context(|| {
             format!(
-                "Failed to parse workflow definition from DB. Payload was: {}",
-                context.workflow_definition
+                "Failed to parse workflow definition from DB for run {}",
+                run_id
             )
         })?;
 
