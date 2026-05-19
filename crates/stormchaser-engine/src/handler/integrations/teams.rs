@@ -9,6 +9,7 @@ use crate::handler::fetch_step_instance;
 pub async fn handle_teams_message(
     run_id: stormchaser_model::RunId,
     step_instance_id: stormchaser_model::StepInstanceId,
+    fencing_token: i64,
     spec: Value,
     pool: PgPool,
     nats_client: async_nats::Client,
@@ -54,27 +55,57 @@ pub async fn handle_teams_message(
     let client = reqwest::Client::new();
 
     // Adaptive Card format for generic text
-    let payload = serde_json::json!({
-        "type": "message",
-        "attachments": [
-            {
-                "contentType": "application/vnd.microsoft.card.adaptive",
-                "contentUrl": null,
-                "content": {
-                    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                    "type": "AdaptiveCard",
-                    "version": "1.2",
-                    "body": [
-                        {
-                            "type": "TextBlock",
-                            "text": spec.message,
-                            "wrap": true
-                        }
-                    ]
-                }
-            }
-        ]
-    });
+    #[derive(serde::Serialize)]
+    struct TeamsTextBlock {
+        #[serde(rename = "type")]
+        block_type: String,
+        text: String,
+        wrap: bool,
+    }
+
+    #[derive(serde::Serialize)]
+    struct TeamsAdaptiveCard {
+        #[serde(rename = "$schema")]
+        schema: String,
+        #[serde(rename = "type")]
+        card_type: String,
+        version: String,
+        body: Vec<TeamsTextBlock>,
+    }
+
+    #[derive(serde::Serialize)]
+    struct TeamsAttachment {
+        #[serde(rename = "contentType")]
+        content_type: String,
+        #[serde(rename = "contentUrl")]
+        content_url: Option<String>,
+        content: TeamsAdaptiveCard,
+    }
+
+    #[derive(serde::Serialize)]
+    struct TeamsPayload {
+        #[serde(rename = "type")]
+        payload_type: String,
+        attachments: Vec<TeamsAttachment>,
+    }
+
+    let payload = TeamsPayload {
+        payload_type: "message".to_string(),
+        attachments: vec![TeamsAttachment {
+            content_type: "application/vnd.microsoft.card.adaptive".to_string(),
+            content_url: None,
+            content: TeamsAdaptiveCard {
+                schema: "http://adaptivecards.io/schemas/adaptive-card.json".to_string(),
+                card_type: "AdaptiveCard".to_string(),
+                version: "1.2".to_string(),
+                body: vec![TeamsTextBlock {
+                    block_type: "TextBlock".to_string(),
+                    text: spec.message,
+                    wrap: true,
+                }],
+            },
+        }],
+    };
 
     let res = client.post(&webhook_url).json(&payload).send().await?;
 
@@ -87,16 +118,28 @@ pub async fn handle_teams_message(
             );
         let _ = machine.succeed(&mut *pool.acquire().await?).await?;
 
-        let event = serde_json::json!({
-            "run_id": run_id,
-            "step_id": step_instance_id,
-            "event_type": "step_completed",
-            "outputs": {},
-            "timestamp": Utc::now(),
-        });
+        let event = stormchaser_model::events::StepCompletedEvent {
+            run_id,
+            step_id: step_instance_id,
+            fencing_token,
+            event_type: stormchaser_model::events::EventType::Step(
+                stormchaser_model::events::StepEventType::Completed,
+            ),
+            runner_id: None,
+            storage_hashes: None,
+            artifacts: None,
+            test_reports: None,
+            outputs: Some(std::collections::HashMap::new()),
+            exit_code: None,
+            timestamp: Utc::now(),
+        };
+
         let js = async_nats::jetstream::new(nats_client);
-        js.publish("stormchaser.step.completed", event.to_string().into())
-            .await?;
+        js.publish(
+            "stormchaser.step.completed",
+            serde_json::to_vec(&event)?.into(),
+        )
+        .await?;
         Ok(())
     } else {
         let error_body = res

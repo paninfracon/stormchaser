@@ -386,6 +386,7 @@ async fn try_dispatch_intrinsic(
     if super::intrinsic::slack::try_dispatch(
         run_id,
         step_instance_id,
+        fencing_token,
         step_type,
         resolved_spec,
         pool.clone(),
@@ -399,6 +400,7 @@ async fn try_dispatch_intrinsic(
     if super::intrinsic::teams::try_dispatch(
         run_id,
         step_instance_id,
+        fencing_token,
         step_type,
         resolved_spec,
         pool.clone(),

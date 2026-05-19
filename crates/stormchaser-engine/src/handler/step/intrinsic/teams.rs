@@ -12,9 +12,11 @@ use crate::handler::fetch_step_instance;
 use crate::handler::handle_teams_message;
 
 /// Attempts to dispatch a Teams message step instance.
+#[allow(clippy::too_many_arguments)]
 pub async fn try_dispatch(
     _run_id: RunId,
     _step_instance_id: StepInstanceId,
+    _fencing_token: i64,
     step_type: &str,
     _resolved_spec: &Value,
     _pool: PgPool,
@@ -32,6 +34,7 @@ pub async fn try_dispatch(
                 if let Err(e) = handle_teams_message(
                     _run_id,
                     _step_instance_id,
+                    _fencing_token,
                     spec,
                     pool.clone(),
                     nats_client.clone(),

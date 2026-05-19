@@ -9,6 +9,7 @@ use crate::handler::fetch_step_instance;
 pub async fn handle_slack_message(
     run_id: stormchaser_model::RunId,
     step_instance_id: stormchaser_model::StepInstanceId,
+    fencing_token: i64,
     spec: Value,
     pool: PgPool,
     nats_client: async_nats::Client,
@@ -53,13 +54,17 @@ pub async fn handle_slack_message(
     // Post to Slack Webhook
     let client = reqwest::Client::new();
 
-    let mut payload = serde_json::json!({
-        "text": spec.message
-    });
-
-    if let Some(blocks) = spec.blocks {
-        payload["blocks"] = blocks;
+    #[derive(serde::Serialize)]
+    struct SlackPayload {
+        text: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        blocks: Option<Value>,
     }
+
+    let payload = SlackPayload {
+        text: spec.message,
+        blocks: spec.blocks,
+    };
 
     let res = client.post(&webhook_url).json(&payload).send().await?;
 
@@ -72,16 +77,28 @@ pub async fn handle_slack_message(
             );
         let _ = machine.succeed(&mut *pool.acquire().await?).await?;
 
-        let event = serde_json::json!({
-            "run_id": run_id,
-            "step_id": step_instance_id,
-            "event_type": "step_completed",
-            "outputs": {},
-            "timestamp": Utc::now(),
-        });
+        let event = stormchaser_model::events::StepCompletedEvent {
+            run_id,
+            step_id: step_instance_id,
+            fencing_token,
+            event_type: stormchaser_model::events::EventType::Step(
+                stormchaser_model::events::StepEventType::Completed,
+            ),
+            runner_id: None,
+            storage_hashes: None,
+            artifacts: None,
+            test_reports: None,
+            outputs: Some(std::collections::HashMap::new()),
+            exit_code: None,
+            timestamp: Utc::now(),
+        };
+
         let js = async_nats::jetstream::new(nats_client);
-        js.publish("stormchaser.step.completed", event.to_string().into())
-            .await?;
+        js.publish(
+            "stormchaser.step.completed",
+            serde_json::to_vec(&event)?.into(),
+        )
+        .await?;
         Ok(())
     } else {
         let error_body = res
