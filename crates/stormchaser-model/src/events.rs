@@ -159,11 +159,14 @@ impl schemars::JsonSchema for EventType {
     }
 }
 
+use crate::workflow::RunStatus;
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WorkflowQueuedEvent {
     pub run_id: RunId,
     pub event_type: EventType,
     pub timestamp: DateTime<Utc>,
+    pub status: RunStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dsl: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -181,6 +184,7 @@ pub struct WorkflowStartPendingEvent {
     pub run_id: RunId,
     pub event_type: EventType,
     pub timestamp: DateTime<Utc>,
+    pub status: RunStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -188,6 +192,7 @@ pub struct WorkflowRunningEvent {
     pub run_id: RunId,
     pub event_type: EventType,
     pub timestamp: DateTime<Utc>,
+    pub status: RunStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -195,6 +200,7 @@ pub struct WorkflowCompletedEvent {
     pub run_id: RunId,
     pub event_type: EventType,
     pub timestamp: DateTime<Utc>,
+    pub status: RunStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -202,6 +208,7 @@ pub struct WorkflowFailedEvent {
     pub run_id: RunId,
     pub event_type: EventType,
     pub timestamp: DateTime<Utc>,
+    pub status: RunStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -209,6 +216,7 @@ pub struct WorkflowAbortedEvent {
     pub run_id: RunId,
     pub event_type: EventType,
     pub timestamp: DateTime<Utc>,
+    pub status: RunStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

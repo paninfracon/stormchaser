@@ -110,6 +110,7 @@ pub async fn handle_workflow_start_pending(
             run_id,
             event_type: EventType::Workflow(WorkflowEventType::Running),
             timestamp: chrono::Utc::now(),
+            status: stormchaser_model::workflow::RunStatus::Running,
         })
         .unwrap(),
         None,

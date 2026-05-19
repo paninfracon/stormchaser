@@ -133,6 +133,7 @@ pub fn start_resolver_crash_recovery_worker(pool: sqlx::PgPool, nats_client: asy
                                             run_id,
                                             event_type: stormchaser_model::events::EventType::Workflow(stormchaser_model::events::WorkflowEventType::Failed),
                                             timestamp: chrono::Utc::now(),
+                                            status: stormchaser_model::workflow::RunStatus::Failed,
                                         };
                                         let js = async_nats::jetstream::new(nats_client.clone());
                                         let _ = stormchaser_model::nats::publish_cloudevent(

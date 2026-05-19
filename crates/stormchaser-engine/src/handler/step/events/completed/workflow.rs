@@ -59,6 +59,7 @@ pub async fn check_workflow_completion(
                 run_id,
                 event_type: EventType::Workflow(WorkflowEventType::Completed),
                 timestamp: chrono::Utc::now(),
+                status: stormchaser_model::workflow::RunStatus::Succeeded,
             })
             .unwrap(),
             None,

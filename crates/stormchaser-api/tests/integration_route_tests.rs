@@ -999,6 +999,7 @@ async fn test_stream_workflow_runs() {
         run_id: stormchaser_model::RunId::new(run_id),
         event_type: EventType::Workflow(WorkflowEventType::Completed),
         timestamp: chrono::Utc::now(),
+        status: stormchaser_model::workflow::RunStatus::Succeeded,
     };
 
     publish_cloudevent(

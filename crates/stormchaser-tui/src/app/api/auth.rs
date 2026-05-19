@@ -194,11 +194,39 @@ impl<'a> App<'a> {
 }
 
 async fn simulate_browser_login(login_url: &str, email: &str, password: &str) -> Result<()> {
+    let client_no_redirect = reqwest::Client::builder()
+        .cookie_store(true)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()?;
+
+    let res_redirect = client_no_redirect.get(login_url).send().await?;
+
+    let mut dex_auth_url = res_redirect
+        .headers()
+        .get(reqwest::header::LOCATION)
+        .ok_or_else(|| anyhow::anyhow!("No location header in login response"))?
+        .to_str()?
+        .to_string();
+
+    if let Ok(host_dex) = std::env::var("HOST_DEX") {
+        if dex_auth_url.starts_with("http://localhost:") {
+            dex_auth_url = dex_auth_url.replacen("localhost", &host_dex, 1);
+        } else if dex_auth_url.starts_with("http://127.0.0.1:") {
+            dex_auth_url = dex_auth_url.replacen("127.0.0.1", &host_dex, 1);
+        }
+    }
+
     let client = reqwest::Client::builder().cookie_store(true).build()?;
 
-    let res1 = client.get(login_url).send().await?;
+    let res1 = client.get(&dex_auth_url).send().await?;
     let url1 = res1.url().clone();
     let html = res1.text().await?;
+
+    if html.contains("Login Successful") {
+        // reqwest followed the redirect back to our local listener successfully
+        // without needing to submit a login form (e.g. user was remembered).
+        return Ok(());
+    }
 
     let action_start = html
         .find("action=\"")
@@ -243,6 +271,9 @@ async fn simulate_browser_login(login_url: &str, email: &str, password: &str) ->
             .form(&[("approval", "approve"), ("req", req_val)])
             .send()
             .await?;
+    } else if html2.contains("Login Successful") {
+        // reqwest followed the redirect back to our local listener successfully
+        return Ok(());
     } else if html2.contains("Invalid login or password") || !html2.contains("Log in to") {
         return Err(anyhow::anyhow!(
             "Invalid login credentials or unexpected Dex response"

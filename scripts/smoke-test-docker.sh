@@ -91,7 +91,7 @@ else
 fi
 
 echo -e "${BLUE}>>> Running test workflow (tests/hello-world.storm)...${NC}"
-RUN_JSON=$(cargo run -q -p stormchaser-cli -- --url "$API_URL" --token "$TOKEN" run "$REPO_ROOT/tests/hello-world.storm")
+RUN_JSON=$(cargo run -q -p stormchaser-cli -- --url "$API_URL" --token "$TOKEN" run "$REPO_ROOT/tests/hello-world.storm" --input target="smoke-test-docker")
 RUN_ID=$(echo "$RUN_JSON" | grep -oP '(?<="run_id": ")[^"]*')
 
 if [ -z "$RUN_ID" ]; then

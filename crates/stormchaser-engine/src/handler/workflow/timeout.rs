@@ -1,7 +1,6 @@
 use crate::handler::{archive_workflow, fetch_run};
 use crate::workflow_machine::{state, WorkflowMachine};
 use anyhow::Result;
-use chrono::Utc;
 use sqlx::PgPool;
 use std::sync::Arc;
 use stormchaser_model::events::WorkflowAbortedEvent;
@@ -98,7 +97,8 @@ pub async fn handle_workflow_timeout(
     let event = WorkflowAbortedEvent {
         run_id,
         event_type: EventType::Workflow(WorkflowEventType::Aborted),
-        timestamp: Utc::now(),
+        timestamp: chrono::Utc::now(),
+        status: stormchaser_model::workflow::RunStatus::Aborted,
     };
     let js = async_nats::jetstream::new(nats_client);
     use stormchaser_model::nats::NatsSubject;

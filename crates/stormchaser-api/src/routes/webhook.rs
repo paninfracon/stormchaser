@@ -359,7 +359,8 @@ pub async fn handle_webhook(
         let event = WorkflowQueuedEvent {
             run_id,
             event_type: EventType::Workflow(WorkflowEventType::Queued),
-            timestamp: Utc::now(),
+            timestamp: chrono::Utc::now(),
+            status: stormchaser_model::workflow::RunStatus::Queued,
             dsl: None,
             inputs: None,
             initiating_user: None,
