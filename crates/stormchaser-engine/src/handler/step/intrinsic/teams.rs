@@ -41,10 +41,12 @@ pub async fn try_dispatch(
                 )
                 .await
                 {
+                    use crate::step_machine::{
+                        state::{Pending, Running},
+                        StepMachine,
+                    };
                     if let Ok(instance) = fetch_step_instance(_step_instance_id, &pool).await {
-                        let machine = crate::step_machine::StepMachine::<
-                            crate::step_machine::state::Pending,
-                        >::from_instance(instance);
+                        let machine = StepMachine::<Pending>::from_instance(instance);
                         if let Ok(mut conn) = pool.acquire().await {
                             if let Ok(_machine) = machine
                                 .start("error-recovery".to_string(), &mut *conn)
@@ -53,11 +55,7 @@ pub async fn try_dispatch(
                                 if let Ok(instance) =
                                     fetch_step_instance(_step_instance_id, &pool).await
                                 {
-                                    let machine = crate::step_machine::StepMachine::<
-                                        crate::step_machine::state::Running,
-                                    >::from_instance(
-                                        instance
-                                    );
+                                    let machine = StepMachine::<Running>::from_instance(instance);
                                     let _ = machine
                                         .fail(
                                             format!("TeamsMessage error: {:?}", e),

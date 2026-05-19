@@ -69,16 +69,19 @@ pub async fn handle_teams_message(
     pool: PgPool,
     nats_client: async_nats::Client,
 ) -> Result<()> {
+    use crate::step_machine::{
+        state::{Pending, Running},
+        StepMachine,
+    };
+    use std::collections::HashMap;
     use stormchaser_model::dsl::TeamsMessageSpec;
+
     let spec: TeamsMessageSpec = serde_json::from_value(spec)?;
 
     // Fetch instance
     let instance = fetch_step_instance(step_instance_id, &pool).await?;
 
-    let machine =
-        crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::from_instance(
-            instance,
-        );
+    let machine = StepMachine::<Pending>::from_instance(instance);
     let mut conn = pool.acquire().await?;
     let _machine = machine.start("system".to_string(), &mut *conn).await?;
 
@@ -94,17 +97,14 @@ pub async fn handle_teams_message(
     let status = res.status();
     if status.is_success() {
         let instance = fetch_step_instance(step_instance_id, &pool).await?;
-        let machine =
-            crate::step_machine::StepMachine::<crate::step_machine::state::Running>::from_instance(
-                instance,
-            );
+        let machine = StepMachine::<Running>::from_instance(instance);
         let _ = machine.succeed(&mut *pool.acquire().await?).await?;
 
         super::utils::publish_step_completed_event(
             run_id,
             step_instance_id,
             fencing_token,
-            Some(std::collections::HashMap::new()),
+            Some(HashMap::new()),
             nats_client,
         )
         .await?;
