@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Prepare `stormchaser-tui` for publishing by removing the `publish = false` directive.
+- Add ChatOps Slack/Teams intrinsic dispatch updates to publish v1 CloudEvents and avoid duplicate step-completion transitions.
+- Document that schema hydration is served by `stormchaser-query` at `/api/v1/schema/hydrate` (the API service only serves `/api/v1/schema`).
 
 ## [1.3.2] - 2026-05-09
 

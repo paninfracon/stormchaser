@@ -1,8 +1,4 @@
-use anyhow::Result;
 use serde_json::Value;
-use sqlx::PgPool;
-
-use crate::handler::fetch_step_instance;
 
 // Adaptive Card format for generic text
 #[derive(serde::Serialize)]
@@ -61,6 +57,12 @@ fn build_teams_payload(spec: &stormchaser_model::dsl::TeamsMessageSpec) -> Value
 }
 
 #[cfg(feature = "chatops-teams")]
+use crate::handler::fetch_step_instance;
+#[cfg(feature = "chatops-teams")]
+use anyhow::Result;
+#[cfg(feature = "chatops-teams")]
+use sqlx::PgPool;
+#[cfg(feature = "chatops-teams")]
 pub async fn handle_teams_message(
     run_id: stormchaser_model::RunId,
     step_instance_id: stormchaser_model::StepInstanceId,
@@ -69,10 +71,7 @@ pub async fn handle_teams_message(
     pool: PgPool,
     nats_client: async_nats::Client,
 ) -> Result<()> {
-    use crate::step_machine::{
-        state::{Pending, Running},
-        StepMachine,
-    };
+    use crate::step_machine::{state::Pending, StepMachine};
     use std::collections::HashMap;
     use stormchaser_model::dsl::TeamsMessageSpec;
 
@@ -96,10 +95,6 @@ pub async fn handle_teams_message(
 
     let status = res.status();
     if status.is_success() {
-        let instance = fetch_step_instance(step_instance_id, &pool).await?;
-        let machine = StepMachine::<Running>::from_instance(instance);
-        let _ = machine.succeed(&mut *pool.acquire().await?).await?;
-
         super::utils::publish_step_completed_event(
             run_id,
             step_instance_id,

@@ -340,17 +340,22 @@ if command -v python3 >/dev/null 2>&1 && [ -f "$REPO_ROOT/scripts/generate_dev_t
             # For microk8s, we need the dynamically generated password and cluster-internal DNS
             echo -e "${BLUE}>>> Registering cluster MinIO backend for SFS...${NC}"
             MINIO_PASSWORD=$(microk8s kubectl get secret -n stormchaser stormchaser-minio -o jsonpath='{.data.root-password}' | base64 -d)
-            API_IP=$(microk8s kubectl get svc -n stormchaser stormchaser-stormchaser-orchestration-api -o jsonpath='{.spec.clusterIP}')
-            API_URL="http://${API_IP}:3000"
+            API_URL="http://localhost:${PORT_API}"
 
             # Wait for API to be ready
             echo -e "${BLUE}>>> Waiting for API to become ready...${NC}"
+            API_READY=false
             for _ in {1..30}; do
-                if curl -s -o /dev/null -w "%{http_code}" "$API_URL/api/health" | grep -q "200"; then
+                if curl -s -o /dev/null -w "%{http_code}" "$API_URL/healthz" | grep -q "200"; then
+                    API_READY=true
                     break
                 fi
                 sleep 5
             done
+            if [[ "$API_READY" != "true" ]]; then
+                echo -e "${RED}Error: API did not become ready at ${API_URL} within timeout.${NC}"
+                exit 1
+            fi
 
             curl -s -X POST "$API_URL/api/v1/connections" \
               -H "Authorization: Bearer $STORMCHASER_TOKEN" \

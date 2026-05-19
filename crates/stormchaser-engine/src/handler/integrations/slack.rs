@@ -1,8 +1,4 @@
-use anyhow::Result;
 use serde_json::Value;
-use sqlx::PgPool;
-
-use crate::handler::fetch_step_instance;
 
 #[derive(serde::Serialize)]
 struct SlackPayload {
@@ -20,6 +16,12 @@ fn build_slack_payload(spec: &stormchaser_model::dsl::SlackMessageSpec) -> Value
 }
 
 #[cfg(feature = "chatops-slack")]
+use crate::handler::fetch_step_instance;
+#[cfg(feature = "chatops-slack")]
+use anyhow::Result;
+#[cfg(feature = "chatops-slack")]
+use sqlx::PgPool;
+#[cfg(feature = "chatops-slack")]
 pub async fn handle_slack_message(
     run_id: stormchaser_model::RunId,
     step_instance_id: stormchaser_model::StepInstanceId,
@@ -28,10 +30,7 @@ pub async fn handle_slack_message(
     pool: PgPool,
     nats_client: async_nats::Client,
 ) -> Result<()> {
-    use crate::step_machine::{
-        state::{Pending, Running},
-        StepMachine,
-    };
+    use crate::step_machine::{state::Pending, StepMachine};
     use std::collections::HashMap;
     use stormchaser_model::dsl::SlackMessageSpec;
 
@@ -55,10 +54,6 @@ pub async fn handle_slack_message(
 
     let status = res.status();
     if status.is_success() {
-        let instance = fetch_step_instance(step_instance_id, &pool).await?;
-        let machine = StepMachine::<Running>::from_instance(instance);
-        let _ = machine.succeed(&mut *pool.acquire().await?).await?;
-
         super::utils::publish_step_completed_event(
             run_id,
             step_instance_id,
