@@ -9,12 +9,12 @@ use std::path::PathBuf;
 
 #[derive(Subcommand)]
 pub enum ConnectionCommands {
-    /// List storage backends
+    /// List configured connections
     List,
-    /// Create a storage backend
+    /// Create a connection
     Create {
         name: String,
-        /// The type of storage backend (e.g., s3, oci)
+        /// The type of connection (e.g., s3, oci, postgres, http_api)
         #[arg(long)]
         connection_type: String,
         /// Path to JSON configuration file
@@ -34,9 +34,9 @@ pub enum ConnectionCommands {
         #[arg(long)]
         test: bool,
     },
-    /// Get storage backend details
+    /// Get connection details
     Get { id: stormchaser_model::ConnectionId },
-    /// Update a storage backend
+    /// Update a connection
     Update {
         id: stormchaser_model::ConnectionId,
         #[arg(long)]
@@ -55,7 +55,7 @@ pub enum ConnectionCommands {
         #[arg(long)]
         encrypted_credentials: Option<String>,
     },
-    /// Delete a storage backend
+    /// Delete a connection
     Delete { id: stormchaser_model::ConnectionId },
     /// Test a connection payload without saving it
     Test {
