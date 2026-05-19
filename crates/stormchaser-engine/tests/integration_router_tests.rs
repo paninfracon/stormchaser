@@ -122,6 +122,7 @@ async fn test_router_end_to_end() -> Result<()> {
         "run_id": run_id.to_string(),
         "event_type": "queued",
         "timestamp": Utc::now().to_rfc3339(),
+        "status": "queued",
         "step_definitions": {},
         "inputs": {}
     });
