@@ -24,6 +24,7 @@ pub async fn fetch_http_api_url_from_connection(
                 .config
                 .get("base_url")
                 .and_then(|u| u.as_str())
+                // Keep legacy `url` support for existing HttpApi connections.
                 .or_else(|| connection.config.get("url").and_then(|u| u.as_str()))
             {
                 Ok(url.to_string())

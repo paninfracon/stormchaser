@@ -346,7 +346,8 @@ if command -v python3 >/dev/null 2>&1 && [ -f "$REPO_ROOT/scripts/generate_dev_t
             echo -e "${BLUE}>>> Waiting for API to become ready...${NC}"
             API_READY=false
             for _ in {1..30}; do
-                if curl -s -o /dev/null -w "%{http_code}" "$API_URL/healthz" | grep -q "200"; then
+                if curl -s -o /dev/null -w "%{http_code}" "$API_URL/api/health" | grep -q "200" || \
+                   curl -s -o /dev/null -w "%{http_code}" "$API_URL/healthz" | grep -q "200"; then
                     API_READY=true
                     break
                 fi

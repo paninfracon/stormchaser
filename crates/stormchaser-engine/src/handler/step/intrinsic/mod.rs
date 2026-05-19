@@ -22,6 +22,7 @@ pub mod teams;
 pub mod terraform;
 /// JUnit test report email step.
 pub mod test_report_email;
+mod utils;
 /// WebAssembly module execution step.
 pub mod wasm;
 /// HTTP Webhook dispatching step.

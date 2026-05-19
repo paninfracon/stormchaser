@@ -7,32 +7,9 @@ use stormchaser_model::StepInstanceId;
 use stormchaser_tls::TlsReloader;
 use tracing::error;
 
-use crate::handler::fetch_step_instance;
+use super::utils::fail_step_instance;
 #[cfg(feature = "chatops-teams")]
 use crate::handler::handle_teams_message;
-
-async fn fail_step_instance(
-    step_instance_id: StepInstanceId,
-    pool: &PgPool,
-    error_message: String,
-) -> Result<()> {
-    use crate::step_machine::{
-        state::{Pending, Running},
-        StepMachine,
-    };
-
-    let instance = fetch_step_instance(step_instance_id, pool).await?;
-    let machine = StepMachine::<Pending>::from_instance(instance);
-    let mut conn = pool.acquire().await?;
-    let _machine = machine
-        .start("error-recovery".to_string(), &mut *conn)
-        .await?;
-
-    let instance = fetch_step_instance(step_instance_id, pool).await?;
-    let machine = StepMachine::<Running>::from_instance(instance);
-    let _ = machine.fail(error_message, None, &mut *conn).await?;
-    Ok(())
-}
 
 /// Attempts to dispatch a Teams message step instance.
 #[allow(clippy::too_many_arguments)]
