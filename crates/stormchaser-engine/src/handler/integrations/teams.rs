@@ -14,6 +14,7 @@ pub async fn handle_teams_message(
     nats_client: async_nats::Client,
 ) -> Result<()> {
     use stormchaser_model::dsl::TeamsMessageSpec;
+    use stormchaser_model::Connection;
     let spec: TeamsMessageSpec = serde_json::from_value(spec)?;
 
     // Fetch instance
@@ -25,6 +26,29 @@ pub async fn handle_teams_message(
         );
     let mut conn = pool.acquire().await?;
     let _machine = machine.start("system".to_string(), &mut *conn).await?;
+
+    let webhook_url = if let Some(connection) =
+        crate::db::connections::get_storage_backend_by_name::<&mut sqlx::PgConnection, Connection>(
+            &mut *conn,
+            &spec.connection,
+        )
+        .await?
+    {
+        if connection.connection_type == stormchaser_model::ConnectionType::HttpApi {
+            if let Some(url) = connection.config.get("url").and_then(|u| u.as_str()) {
+                url.to_string()
+            } else {
+                anyhow::bail!(
+                    "Connection {} is missing 'url' in its config",
+                    spec.connection
+                );
+            }
+        } else {
+            anyhow::bail!("Connection {} must be of type HttpApi", spec.connection);
+        }
+    } else {
+        anyhow::bail!("Connection {} not found", spec.connection);
+    };
 
     // Post to Teams Webhook
     let client = reqwest::Client::new();
@@ -52,7 +76,7 @@ pub async fn handle_teams_message(
         ]
     });
 
-    let res = client.post(&spec.webhook_url).json(&payload).send().await?;
+    let res = client.post(&webhook_url).json(&payload).send().await?;
 
     let status = res.status();
     if status.is_success() {
