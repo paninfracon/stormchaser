@@ -1,0 +1,69 @@
+use anyhow::Result;
+use chrono::Utc;
+use serde_json::Value;
+use sqlx::PgPool;
+
+use crate::handler::fetch_step_instance;
+
+#[cfg(feature = "chatops-slack")]
+pub async fn handle_slack_message(
+    run_id: stormchaser_model::RunId,
+    step_instance_id: stormchaser_model::StepInstanceId,
+    spec: Value,
+    pool: PgPool,
+    nats_client: async_nats::Client,
+) -> Result<()> {
+    use stormchaser_model::dsl::SlackMessageSpec;
+    let spec: SlackMessageSpec = serde_json::from_value(spec)?;
+
+    // Fetch instance
+    let instance = fetch_step_instance(step_instance_id, &pool).await?;
+
+    let machine =
+        crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::from_instance(
+            instance,
+        );
+    let mut conn = pool.acquire().await?;
+    let _machine = machine.start("system".to_string(), &mut *conn).await?;
+
+    // Post to Slack Webhook
+    let client = reqwest::Client::new();
+
+    let mut payload = serde_json::json!({
+        "text": spec.message
+    });
+
+    if let Some(blocks) = spec.blocks {
+        payload["blocks"] = blocks;
+    }
+
+    let res = client.post(&spec.webhook_url).json(&payload).send().await?;
+
+    let status = res.status();
+    if status.is_success() {
+        let instance = fetch_step_instance(step_instance_id, &pool).await?;
+        let machine =
+            crate::step_machine::StepMachine::<crate::step_machine::state::Running>::from_instance(
+                instance,
+            );
+        let _ = machine.succeed(&mut *pool.acquire().await?).await?;
+
+        let event = serde_json::json!({
+            "run_id": run_id,
+            "step_id": step_instance_id,
+            "event_type": "step_completed",
+            "outputs": {},
+            "timestamp": Utc::now(),
+        });
+        let js = async_nats::jetstream::new(nats_client);
+        js.publish("stormchaser.step.completed", event.to_string().into())
+            .await?;
+        Ok(())
+    } else {
+        let error_body = res
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        anyhow::bail!("Slack API error {}: {}", status, error_body);
+    }
+}

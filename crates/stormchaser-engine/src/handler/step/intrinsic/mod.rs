@@ -12,8 +12,12 @@ pub mod jq;
 pub mod lambda;
 /// REST API step.
 pub mod rest_api;
+/// Slack ChatOps step.
+pub mod slack;
 /// SQL Execution step.
 pub mod sql_execute;
+/// Teams ChatOps step.
+pub mod teams;
 /// Terraform step orchestration.
 pub mod terraform;
 /// JUnit test report email step.

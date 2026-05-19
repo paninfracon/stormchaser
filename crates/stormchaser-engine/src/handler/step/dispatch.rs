@@ -383,6 +383,32 @@ async fn try_dispatch_intrinsic(
     {
         return Ok(true);
     }
+    if super::intrinsic::slack::try_dispatch(
+        run_id,
+        step_instance_id,
+        step_type,
+        resolved_spec,
+        pool.clone(),
+        nats_client.clone(),
+        tls_reloader.clone(),
+    )
+    .await?
+    {
+        return Ok(true);
+    }
+    if super::intrinsic::teams::try_dispatch(
+        run_id,
+        step_instance_id,
+        step_type,
+        resolved_spec,
+        pool.clone(),
+        nats_client.clone(),
+        tls_reloader.clone(),
+    )
+    .await?
+    {
+        return Ok(true);
+    }
     if super::intrinsic::jinja::try_dispatch(
         run_id,
         step_instance_id,
