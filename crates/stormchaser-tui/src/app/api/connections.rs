@@ -143,6 +143,10 @@ impl<'a> App<'a> {
             "Jfrog" => ConnectionType::Jfrog,
             "Gcs" => ConnectionType::Gcs,
             "Azure" => ConnectionType::Azure,
+            "Postgres" => ConnectionType::Postgres,
+            "Mysql" => ConnectionType::Mysql,
+            "HttpApi" => ConnectionType::HttpApi,
+            "Git" => ConnectionType::Git,
             _ => ConnectionType::S3, // Fallback
         };
 

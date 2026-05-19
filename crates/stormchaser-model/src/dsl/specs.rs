@@ -207,6 +207,26 @@ pub struct WasmStepSpec {
     pub args: Option<Value>,
 }
 
+/// Specification for sending a Slack message via ChatOps.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SlackMessageSpec {
+    /// Connection name for Slack.
+    pub connection: String,
+    /// The message text to send.
+    pub message: String, // MiniJinja template
+    /// Optional Block Kit JSON blocks.
+    pub blocks: Option<Value>,
+}
+
+/// Specification for sending a Microsoft Teams message via ChatOps.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TeamsMessageSpec {
+    /// Connection name for Microsoft Teams.
+    pub connection: String,
+    /// The message text to send.
+    pub message: String, // MiniJinja template
+}
+
 /// Specification for invoking a Webhook.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WebhookInvokeSpec {

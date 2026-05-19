@@ -32,10 +32,13 @@ fn test_do_extract_pod_metrics() {
         ..Default::default()
     };
 
-    let (exit_code, attempts, reason) = do_extract_pod_metrics_with_reason(vec![pod]);
-    assert_eq!(exit_code, Some(1));
-    assert_eq!(attempts, 3);
-    assert_eq!(reason, Some("Error: Something went wrong".to_string()));
+    let metrics = do_extract_pod_metrics_with_reason(vec![pod]);
+    assert_eq!(metrics.exit_code, Some(1));
+    assert_eq!(metrics.attempts, 3);
+    assert_eq!(
+        metrics.failure_reason,
+        Some("Error: Something went wrong".to_string())
+    );
 }
 
 #[test]

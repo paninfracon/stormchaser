@@ -30,8 +30,13 @@ pub fn parse_memory(memory_str: &str) -> Option<i64> {
 
 use serde_json::Value;
 
+pub struct StepResourceRequirements {
+    pub cpu: f64,
+    pub memory: i64,
+}
+
 /// Extracts CPU (in cores) and memory (in bytes) requirements from a step's specification.
-pub fn get_step_resource_requirements(step_type: &str, spec: &Value) -> (f64, i64) {
+pub fn get_step_resource_requirements(step_type: &str, spec: &Value) -> StepResourceRequirements {
     let mut cpu_req = 0.0;
     let mut mem_req = 0;
 
@@ -58,5 +63,8 @@ pub fn get_step_resource_requirements(step_type: &str, spec: &Value) -> (f64, i6
         }
     }
 
-    (cpu_req, mem_req)
+    StepResourceRequirements {
+        cpu: cpu_req,
+        memory: mem_req,
+    }
 }

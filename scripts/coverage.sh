@@ -10,6 +10,9 @@ if [ -f ".env" ]; then
     set +a
 fi
 
+source ./scripts/test-env.sh
+./scripts/test-env-up.sh
+
 export API_RATE_LIMIT_BURST_SIZE=1000
 export API_RATE_LIMIT_PER_SECOND=1000
 

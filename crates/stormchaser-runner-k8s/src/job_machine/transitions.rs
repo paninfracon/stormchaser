@@ -310,17 +310,21 @@ impl K8sJobMachine<state::Running> {
 
             if status.succeeded.unwrap_or(0) > 0 {
                 info!("Job {} completed successfully", job_name);
-                let (exit_code, attempts, _) =
+                let metrics =
                     self.get_pod_metrics(job_name)
                         .await
-                        .unwrap_or((Some(0), 1, None));
+                        .unwrap_or(k8s_utils::PodMetrics {
+                            exit_code: Some(0),
+                            attempts: 1,
+                            failure_reason: None,
+                        });
                 let storage_hashes = self.get_storage_hashes(job_name).await.unwrap_or(None);
                 let artifacts = self.get_artifact_meta(job_name).await.unwrap_or(None);
                 let test_reports = self.get_test_reports(job_name).await.unwrap_or(None);
 
                 return Ok(Some(JobState::Succeeded(JobMetrics {
-                    exit_code,
-                    attempts,
+                    exit_code: metrics.exit_code,
+                    attempts: metrics.attempts,
                     duration_ms,
                     latency_ms,
                     storage_hashes,
@@ -329,10 +333,14 @@ impl K8sJobMachine<state::Running> {
                 })));
             }
             if status.failed.unwrap_or(0) > 0 {
-                let (exit_code, attempts, pod_reason) = self
-                    .get_pod_metrics(job_name)
-                    .await
-                    .unwrap_or((None, 1, None));
+                let metrics =
+                    self.get_pod_metrics(job_name)
+                        .await
+                        .unwrap_or(k8s_utils::PodMetrics {
+                            exit_code: None,
+                            attempts: 1,
+                            failure_reason: None,
+                        });
                 let storage_hashes = self.get_storage_hashes(job_name).await.unwrap_or(None);
                 let artifacts = self.get_artifact_meta(job_name).await.unwrap_or(None);
                 let test_reports = self.get_test_reports(job_name).await.unwrap_or(None);
@@ -345,13 +353,13 @@ impl K8sJobMachine<state::Running> {
                         .and_then(|c| c.message.clone())
                         .unwrap_or_else(|| "Job failed".to_string());
 
-                    let reason = pod_reason.unwrap_or(job_reason);
+                    let reason = metrics.failure_reason.unwrap_or(job_reason);
                     error!("Job {} failed: {}", job_name, reason);
                     return Ok(Some(JobState::Failed(
                         reason,
                         JobMetrics {
-                            exit_code,
-                            attempts,
+                            exit_code: metrics.exit_code,
+                            attempts: metrics.attempts,
                             duration_ms,
                             latency_ms,
                             storage_hashes,
@@ -365,7 +373,7 @@ impl K8sJobMachine<state::Running> {
         Ok(None)
     }
 
-    async fn get_pod_metrics(&self, job_name: &str) -> Result<(Option<i32>, i32, Option<String>)> {
+    async fn get_pod_metrics(&self, job_name: &str) -> Result<k8s_utils::PodMetrics> {
         let pods: Api<Pod> = Api::namespaced(self.client.clone(), &self.metadata.namespace);
         let lp = ListParams::default().labels(&format!("job-name={}", job_name));
         let pod_list = pods.list(&lp).await?;

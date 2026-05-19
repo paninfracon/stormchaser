@@ -1,6 +1,12 @@
 use k8s_openapi::api::core::v1::Pod;
 
-pub fn do_extract_pod_metrics_with_reason(pods: Vec<Pod>) -> (Option<i32>, i32, Option<String>) {
+pub struct PodMetrics {
+    pub exit_code: Option<i32>,
+    pub attempts: i32,
+    pub failure_reason: Option<String>,
+}
+
+pub fn do_extract_pod_metrics_with_reason(pods: Vec<Pod>) -> PodMetrics {
     let mut max_restart_count = 0;
     let mut exit_code = None;
     let mut failure_reason = None;
@@ -37,5 +43,9 @@ pub fn do_extract_pod_metrics_with_reason(pods: Vec<Pod>) -> (Option<i32>, i32, 
         }
     }
 
-    (exit_code, 1 + max_restart_count, failure_reason)
+    PodMetrics {
+        exit_code,
+        attempts: 1 + max_restart_count,
+        failure_reason,
+    }
 }

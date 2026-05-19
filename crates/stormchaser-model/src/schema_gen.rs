@@ -182,6 +182,14 @@ pub fn generate_dsl_schema() -> RootSchema {
         generator.subschema_for::<WasmStepSpec>(),
     );
     spec_schemas.insert(
+        "SlackMessage".to_string(),
+        generator.subschema_for::<SlackMessageSpec>(),
+    );
+    spec_schemas.insert(
+        "TeamsMessage".to_string(),
+        generator.subschema_for::<TeamsMessageSpec>(),
+    );
+    spec_schemas.insert(
         "WebhookInvoke".to_string(),
         generator.subschema_for::<WebhookInvokeSpec>(),
     );

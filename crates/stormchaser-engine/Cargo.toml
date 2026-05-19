@@ -8,7 +8,7 @@ repository.workspace = true
 license.workspace = true
 
 [features]
-default = ["aws-lambda", "aws-ses", "aws-s3-sts", "email", "vault", "aws-sdk-sts", "rustls-native-certs", "aws-cloudcontrol", "aws-sops"]
+default = ["aws-lambda", "aws-ses", "aws-s3-sts", "email", "vault", "aws-sdk-sts", "rustls-native-certs", "aws-cloudcontrol", "aws-sops", "chatops-slack", "chatops-teams"]
 aws-lambda = ["dep:aws-sdk-lambda", "aws-sdk-sts"]
 aws-ses = ["dep:aws-sdk-ses", "aws-sdk-sts"]
 aws-s3-sts = ["aws-sdk-sts"]
@@ -18,6 +18,8 @@ aws-sdk-sts = ["dep:aws-sdk-sts"]
 rustls-native-certs = ["dep:rustls-native-certs"]
 aws-cloudcontrol = ["dep:aws-sdk-cloudcontrol", "aws-sdk-sts"]
 aws-sops = ["aws-sdk-sts"]
+chatops-slack = []
+chatops-teams = []
 
 [lib]
 name = "stormchaser_engine"
