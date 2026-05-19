@@ -4,6 +4,7 @@ mod jinja;
 mod lambda;
 mod slack;
 mod teams;
+pub mod utils;
 mod webhook;
 
 pub use approval::handle_approval_notification;

@@ -1,9 +1,64 @@
 use anyhow::Result;
-use chrono::Utc;
 use serde_json::Value;
 use sqlx::PgPool;
 
 use crate::handler::fetch_step_instance;
+
+// Adaptive Card format for generic text
+#[derive(serde::Serialize)]
+struct TeamsTextBlock {
+    #[serde(rename = "type")]
+    block_type: String,
+    text: String,
+    wrap: bool,
+}
+
+#[derive(serde::Serialize)]
+struct TeamsAdaptiveCard {
+    #[serde(rename = "$schema")]
+    schema: String,
+    #[serde(rename = "type")]
+    card_type: String,
+    version: String,
+    body: Vec<TeamsTextBlock>,
+}
+
+#[derive(serde::Serialize)]
+struct TeamsAttachment {
+    #[serde(rename = "contentType")]
+    content_type: String,
+    #[serde(rename = "contentUrl")]
+    content_url: Option<String>,
+    content: TeamsAdaptiveCard,
+}
+
+#[derive(serde::Serialize)]
+struct TeamsPayload {
+    #[serde(rename = "type")]
+    payload_type: String,
+    attachments: Vec<TeamsAttachment>,
+}
+
+fn build_teams_payload(spec: &stormchaser_model::dsl::TeamsMessageSpec) -> Value {
+    let payload = TeamsPayload {
+        payload_type: "message".to_string(),
+        attachments: vec![TeamsAttachment {
+            content_type: "application/vnd.microsoft.card.adaptive".to_string(),
+            content_url: None,
+            content: TeamsAdaptiveCard {
+                schema: "http://adaptivecards.io/schemas/adaptive-card.json".to_string(),
+                card_type: "AdaptiveCard".to_string(),
+                version: "1.2".to_string(),
+                body: vec![TeamsTextBlock {
+                    block_type: "TextBlock".to_string(),
+                    text: spec.message.clone(),
+                    wrap: true,
+                }],
+            },
+        }],
+    };
+    serde_json::to_value(payload).unwrap()
+}
 
 #[cfg(feature = "chatops-teams")]
 pub async fn handle_teams_message(
@@ -15,7 +70,6 @@ pub async fn handle_teams_message(
     nats_client: async_nats::Client,
 ) -> Result<()> {
     use stormchaser_model::dsl::TeamsMessageSpec;
-    use stormchaser_model::Connection;
     let spec: TeamsMessageSpec = serde_json::from_value(spec)?;
 
     // Fetch instance
@@ -28,84 +82,12 @@ pub async fn handle_teams_message(
     let mut conn = pool.acquire().await?;
     let _machine = machine.start("system".to_string(), &mut *conn).await?;
 
-    let webhook_url = if let Some(connection) =
-        crate::db::connections::get_storage_backend_by_name::<&mut sqlx::PgConnection, Connection>(
-            &mut *conn,
-            &spec.connection,
-        )
-        .await?
-    {
-        if connection.connection_type == stormchaser_model::ConnectionType::HttpApi {
-            if let Some(url) = connection.config.get("url").and_then(|u| u.as_str()) {
-                url.to_string()
-            } else {
-                anyhow::bail!(
-                    "Connection {} is missing 'url' in its config",
-                    spec.connection
-                );
-            }
-        } else {
-            anyhow::bail!("Connection {} must be of type HttpApi", spec.connection);
-        }
-    } else {
-        anyhow::bail!("Connection {} not found", spec.connection);
-    };
+    let webhook_url =
+        super::utils::fetch_http_api_url_from_connection(&pool, &spec.connection).await?;
 
     // Post to Teams Webhook
     let client = reqwest::Client::new();
-
-    // Adaptive Card format for generic text
-    #[derive(serde::Serialize)]
-    struct TeamsTextBlock {
-        #[serde(rename = "type")]
-        block_type: String,
-        text: String,
-        wrap: bool,
-    }
-
-    #[derive(serde::Serialize)]
-    struct TeamsAdaptiveCard {
-        #[serde(rename = "$schema")]
-        schema: String,
-        #[serde(rename = "type")]
-        card_type: String,
-        version: String,
-        body: Vec<TeamsTextBlock>,
-    }
-
-    #[derive(serde::Serialize)]
-    struct TeamsAttachment {
-        #[serde(rename = "contentType")]
-        content_type: String,
-        #[serde(rename = "contentUrl")]
-        content_url: Option<String>,
-        content: TeamsAdaptiveCard,
-    }
-
-    #[derive(serde::Serialize)]
-    struct TeamsPayload {
-        #[serde(rename = "type")]
-        payload_type: String,
-        attachments: Vec<TeamsAttachment>,
-    }
-
-    let payload = TeamsPayload {
-        payload_type: "message".to_string(),
-        attachments: vec![TeamsAttachment {
-            content_type: "application/vnd.microsoft.card.adaptive".to_string(),
-            content_url: None,
-            content: TeamsAdaptiveCard {
-                schema: "http://adaptivecards.io/schemas/adaptive-card.json".to_string(),
-                card_type: "AdaptiveCard".to_string(),
-                version: "1.2".to_string(),
-                body: vec![TeamsTextBlock {
-                    block_type: "TextBlock".to_string(),
-                    text: spec.message,
-                    wrap: true,
-                }],
-            },
-        }],
-    };
+    let payload = build_teams_payload(&spec);
 
     let res = client.post(&webhook_url).json(&payload).send().await?;
 
@@ -118,26 +100,12 @@ pub async fn handle_teams_message(
             );
         let _ = machine.succeed(&mut *pool.acquire().await?).await?;
 
-        let event = stormchaser_model::events::StepCompletedEvent {
+        super::utils::publish_step_completed_event(
             run_id,
-            step_id: step_instance_id,
+            step_instance_id,
             fencing_token,
-            event_type: stormchaser_model::events::EventType::Step(
-                stormchaser_model::events::StepEventType::Completed,
-            ),
-            runner_id: None,
-            storage_hashes: None,
-            artifacts: None,
-            test_reports: None,
-            outputs: Some(std::collections::HashMap::new()),
-            exit_code: None,
-            timestamp: Utc::now(),
-        };
-
-        let js = async_nats::jetstream::new(nats_client);
-        js.publish(
-            "stormchaser.step.completed",
-            serde_json::to_vec(&event)?.into(),
+            Some(std::collections::HashMap::new()),
+            nats_client,
         )
         .await?;
         Ok(())
@@ -147,5 +115,37 @@ pub async fn handle_teams_message(
             .await
             .unwrap_or_else(|_| "Unknown error".to_string());
         anyhow::bail!("Teams API error {}: {}", status, error_body);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use stormchaser_model::dsl::TeamsMessageSpec;
+
+    #[test]
+    fn test_build_teams_payload() {
+        let spec = TeamsMessageSpec {
+            connection: "teams_conn".to_string(),
+            message: "Hello, Teams!".to_string(),
+        };
+
+        let payload = build_teams_payload(&spec);
+
+        assert_eq!(payload["type"], "message");
+        let attachments = payload["attachments"]
+            .as_array()
+            .expect("attachments array");
+        assert_eq!(attachments.len(), 1);
+
+        let card = &attachments[0]["content"];
+        assert_eq!(card["type"], "AdaptiveCard");
+        assert_eq!(card["version"], "1.2");
+
+        let body = card["body"].as_array().expect("body array");
+        assert_eq!(body.len(), 1);
+        assert_eq!(body[0]["type"], "TextBlock");
+        assert_eq!(body[0]["text"], "Hello, Teams!");
+        assert_eq!(body[0]["wrap"], true);
     }
 }

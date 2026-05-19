@@ -1,9 +1,23 @@
 use anyhow::Result;
-use chrono::Utc;
 use serde_json::Value;
 use sqlx::PgPool;
 
 use crate::handler::fetch_step_instance;
+
+#[derive(serde::Serialize)]
+struct SlackPayload {
+    text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    blocks: Option<Value>,
+}
+
+fn build_slack_payload(spec: &stormchaser_model::dsl::SlackMessageSpec) -> Value {
+    let payload = SlackPayload {
+        text: spec.message.clone(),
+        blocks: spec.blocks.clone(),
+    };
+    serde_json::to_value(payload).unwrap()
+}
 
 #[cfg(feature = "chatops-slack")]
 pub async fn handle_slack_message(
@@ -15,7 +29,6 @@ pub async fn handle_slack_message(
     nats_client: async_nats::Client,
 ) -> Result<()> {
     use stormchaser_model::dsl::SlackMessageSpec;
-    use stormchaser_model::Connection;
     let spec: SlackMessageSpec = serde_json::from_value(spec)?;
 
     // Fetch instance
@@ -28,43 +41,12 @@ pub async fn handle_slack_message(
     let mut conn = pool.acquire().await?;
     let _machine = machine.start("system".to_string(), &mut *conn).await?;
 
-    let webhook_url = if let Some(connection) =
-        crate::db::connections::get_storage_backend_by_name::<&mut sqlx::PgConnection, Connection>(
-            &mut *conn,
-            &spec.connection,
-        )
-        .await?
-    {
-        if connection.connection_type == stormchaser_model::ConnectionType::HttpApi {
-            if let Some(url) = connection.config.get("url").and_then(|u| u.as_str()) {
-                url.to_string()
-            } else {
-                anyhow::bail!(
-                    "Connection {} is missing 'url' in its config",
-                    spec.connection
-                );
-            }
-        } else {
-            anyhow::bail!("Connection {} must be of type HttpApi", spec.connection);
-        }
-    } else {
-        anyhow::bail!("Connection {} not found", spec.connection);
-    };
+    let webhook_url =
+        super::utils::fetch_http_api_url_from_connection(&pool, &spec.connection).await?;
 
     // Post to Slack Webhook
     let client = reqwest::Client::new();
-
-    #[derive(serde::Serialize)]
-    struct SlackPayload {
-        text: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        blocks: Option<Value>,
-    }
-
-    let payload = SlackPayload {
-        text: spec.message,
-        blocks: spec.blocks,
-    };
+    let payload = build_slack_payload(&spec);
 
     let res = client.post(&webhook_url).json(&payload).send().await?;
 
@@ -77,26 +59,12 @@ pub async fn handle_slack_message(
             );
         let _ = machine.succeed(&mut *pool.acquire().await?).await?;
 
-        let event = stormchaser_model::events::StepCompletedEvent {
+        super::utils::publish_step_completed_event(
             run_id,
-            step_id: step_instance_id,
+            step_instance_id,
             fencing_token,
-            event_type: stormchaser_model::events::EventType::Step(
-                stormchaser_model::events::StepEventType::Completed,
-            ),
-            runner_id: None,
-            storage_hashes: None,
-            artifacts: None,
-            test_reports: None,
-            outputs: Some(std::collections::HashMap::new()),
-            exit_code: None,
-            timestamp: Utc::now(),
-        };
-
-        let js = async_nats::jetstream::new(nats_client);
-        js.publish(
-            "stormchaser.step.completed",
-            serde_json::to_vec(&event)?.into(),
+            Some(std::collections::HashMap::new()),
+            nats_client,
         )
         .await?;
         Ok(())
@@ -106,5 +74,41 @@ pub async fn handle_slack_message(
             .await
             .unwrap_or_else(|_| "Unknown error".to_string());
         anyhow::bail!("Slack API error {}: {}", status, error_body);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use stormchaser_model::dsl::SlackMessageSpec;
+
+    #[test]
+    fn test_build_slack_payload() {
+        let spec = SlackMessageSpec {
+            connection: "slack_conn".to_string(),
+            message: "Hello, World!".to_string(),
+            blocks: Some(json!([{"type": "section"}])),
+        };
+
+        let payload = build_slack_payload(&spec);
+
+        assert_eq!(payload["text"], "Hello, World!");
+        assert_eq!(payload["blocks"].as_array().unwrap().len(), 1);
+        assert_eq!(payload["blocks"][0]["type"], "section");
+    }
+
+    #[test]
+    fn test_build_slack_payload_no_blocks() {
+        let spec = SlackMessageSpec {
+            connection: "slack_conn".to_string(),
+            message: "Hello, World!".to_string(),
+            blocks: None,
+        };
+
+        let payload = build_slack_payload(&spec);
+
+        assert_eq!(payload["text"], "Hello, World!");
+        assert!(payload.get("blocks").is_none());
     }
 }
