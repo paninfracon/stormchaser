@@ -95,6 +95,13 @@ pub async fn handle_teams_message(
 
     let status = res.status();
     if status.is_success() {
+        let instance = fetch_step_instance(step_instance_id, &pool).await?;
+        let machine =
+            crate::step_machine::StepMachine::<crate::step_machine::state::Running>::from_instance(
+                instance,
+            );
+        let _ = machine.succeed(&mut *pool.acquire().await?).await?;
+
         super::utils::publish_step_completed_event(
             run_id,
             step_instance_id,

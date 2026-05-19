@@ -302,7 +302,9 @@ pub const FILTER_STATUS_OPTIONS: &[&str] = &[
 ];
 
 /// The available storage backend types.
-pub const BACKEND_TYPE_OPTIONS: &[&str] = &["S3", "Oci", "Jfrog", "Gcs", "Azure"];
+pub const BACKEND_TYPE_OPTIONS: &[&str] = &[
+    "S3", "Oci", "Jfrog", "Gcs", "Azure", "Postgres", "Mysql", "HttpApi", "Git",
+];
 
 /// The available webhook source types.
 pub const WEBHOOK_SOURCE_TYPE_OPTIONS: &[&str] = &["github", "generic"];

@@ -340,7 +340,8 @@ if command -v python3 >/dev/null 2>&1 && [ -f "$REPO_ROOT/scripts/generate_dev_t
             # For microk8s, we need the dynamically generated password and cluster-internal DNS
             echo -e "${BLUE}>>> Registering cluster MinIO backend for SFS...${NC}"
             MINIO_PASSWORD=$(microk8s kubectl get secret -n stormchaser stormchaser-minio -o jsonpath='{.data.root-password}' | base64 -d)
-            API_URL="http://localhost:${PORT_API}"
+            API_IP=$(microk8s kubectl get svc -n stormchaser stormchaser-stormchaser-orchestration-api -o jsonpath='{.spec.clusterIP}')
+            API_URL="http://${API_IP}:3000"
 
             # Wait for API to be ready
             echo -e "${BLUE}>>> Waiting for API to become ready...${NC}"
