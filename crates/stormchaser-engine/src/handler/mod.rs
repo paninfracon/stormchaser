@@ -152,12 +152,12 @@ pub async fn dispatch_pending_steps(
         let inst_data: (Value, Value) = crate::db::get_step_spec_and_params(&pool, step.id).await?;
 
         // 3. Enforce CPU and Memory quotas before dispatching
-        let (cpu_req, mem_req) =
+        let req =
             crate::resource_utils::get_step_resource_requirements(&step.step_type, &inst_data.0);
 
         let can_dispatch = if max_cpu > 0.0 || max_mem > 0 {
             let mut conn = pool.acquire().await?;
-            crate::db::claim_step_quota(&mut *conn, run_id, cpu_req, mem_req, max_cpu, max_mem)
+            crate::db::claim_step_quota(&mut *conn, run_id, req.cpu, req.memory, max_cpu, max_mem)
                 .await?
         } else {
             true // If no quota configured, allow dispatch
@@ -192,7 +192,8 @@ pub async fn dispatch_pending_steps(
             error!("Failed to dispatch step {}: {:?}", step.id, e);
             if max_cpu > 0.0 || max_mem > 0 {
                 let mut conn = pool.acquire().await?;
-                let _ = crate::db::release_step_quota(&mut *conn, run_id, cpu_req, mem_req).await;
+                let _ =
+                    crate::db::release_step_quota(&mut *conn, run_id, req.cpu, req.memory).await;
             }
         }
     }
