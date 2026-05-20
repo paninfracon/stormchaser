@@ -47,7 +47,12 @@ pub fn start_liveness_worker(pool: sqlx::PgPool, nats_client: async_nats::Client
                         let fail_event = stormchaser_model::events::StepFailedEvent {
                             run_id: zombie.run_id,
                             step_id: zombie.id,
-                            fencing_token: crate::db::runs::get_workflow_run_fencing_token_by_id(&pool, zombie.run_id).await.unwrap_or(0),
+                            fencing_token: crate::db::runs::get_workflow_run_fencing_token_by_id(
+                                &pool,
+                                zombie.run_id,
+                            )
+                            .await
+                            .unwrap_or(0),
                             event_type: stormchaser_model::events::EventType::Step(
                                 stormchaser_model::events::StepEventType::Failed,
                             ),
@@ -64,7 +69,9 @@ pub fn start_liveness_worker(pool: sqlx::PgPool, nats_client: async_nats::Client
                         let js = async_nats::jetstream::new(nats_client.clone());
                         let _ = stormchaser_model::nats::publish_cloudevent(
                             &js,
-                            stormchaser_model::nats::NatsSubject::StepFailed(Some(stormchaser_model::nats::compute_shard_id(&zombie.run_id))),
+                            stormchaser_model::nats::NatsSubject::StepFailed(Some(
+                                stormchaser_model::nats::compute_shard_id(&zombie.run_id),
+                            )),
                             stormchaser_model::events::EventType::Step(
                                 stormchaser_model::events::StepEventType::Failed,
                             ),

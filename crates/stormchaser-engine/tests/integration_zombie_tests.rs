@@ -84,6 +84,7 @@ async fn test_zombie_step_handler() {
     let event = StepFailedEvent {
         run_id,
         step_id,
+        fencing_token: 1, // Matches the inserted run's fencing_token
         event_type: EventType::Step(StepEventType::Failed),
         error: "lost_zombie".to_string(),
         runner_id: Some("offline-runner-id".to_string()),
