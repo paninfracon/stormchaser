@@ -8,13 +8,12 @@ use std::sync::Arc;
 use stormchaser_model::events::WorkflowFailedEvent;
 use stormchaser_model::events::{EventSource, EventType, WorkflowEventType};
 use stormchaser_model::nats::publish_cloudevent;
-use stormchaser_model::step::StepStatus;
 use stormchaser_tls::TlsReloader;
 use tracing::{error, info};
 
 use crate::handler::step::quota::release_step_quota_for_instance;
 
-use super::helpers::persist_step_test_reports;
+use super::helpers::{is_terminal_step_status, persist_step_test_reports};
 
 #[tracing::instrument(skip(event, pool, nats_client, tls_reloader), fields(run_id = tracing::field::Empty, step_id = tracing::field::Empty))]
 /// Handle step failed.
@@ -62,7 +61,7 @@ pub async fn handle_step_failed(
     let instance = fetch_step_instance(step_id, &mut *tx).await?;
 
     // Ensure we don't process duplicate completion events
-    if instance.status == StepStatus::Succeeded || instance.status == StepStatus::Failed {
+    if is_terminal_step_status(&instance.status) {
         return Ok(());
     }
 

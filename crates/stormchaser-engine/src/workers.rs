@@ -36,6 +36,7 @@ pub fn start_liveness_worker(pool: sqlx::PgPool, nats_client: async_nats::Client
             // 2. Detect zombie steps and fail them out
             match crate::db::steps::fetch_zombie_steps(&pool).await {
                 Ok(zombies) => {
+                    let js = async_nats::jetstream::new(nats_client.clone());
                     for zombie in zombies {
                         tracing::warn!(
                             "Detected zombie step {} (Run {}) on dead runner {}",
@@ -47,12 +48,7 @@ pub fn start_liveness_worker(pool: sqlx::PgPool, nats_client: async_nats::Client
                         let fail_event = stormchaser_model::events::StepFailedEvent {
                             run_id: zombie.run_id,
                             step_id: zombie.id,
-                            fencing_token: crate::db::runs::get_workflow_run_fencing_token_by_id(
-                                &pool,
-                                zombie.run_id,
-                            )
-                            .await
-                            .unwrap_or(0),
+                            fencing_token: zombie.fencing_token,
                             event_type: stormchaser_model::events::EventType::Step(
                                 stormchaser_model::events::StepEventType::Failed,
                             ),
@@ -66,8 +62,20 @@ pub fn start_liveness_worker(pool: sqlx::PgPool, nats_client: async_nats::Client
                             timestamp: chrono::Utc::now(),
                         };
 
-                        let js = async_nats::jetstream::new(nats_client.clone());
-                        let _ = stormchaser_model::nats::publish_cloudevent(
+                        let event_payload = match serde_json::to_value(&fail_event) {
+                            Ok(value) => value,
+                            Err(error) => {
+                                tracing::error!(
+                                    "Failed to serialize zombie failure event for run {} step {}: {:?}",
+                                    fail_event.run_id,
+                                    fail_event.step_id,
+                                    error
+                                );
+                                continue;
+                            }
+                        };
+
+                        if let Err(error) = stormchaser_model::nats::publish_cloudevent(
                             &js,
                             stormchaser_model::nats::NatsSubject::StepFailed(Some(
                                 stormchaser_model::nats::compute_shard_id(&zombie.run_id),
@@ -76,13 +84,21 @@ pub fn start_liveness_worker(pool: sqlx::PgPool, nats_client: async_nats::Client
                                 stormchaser_model::events::StepEventType::Failed,
                             ),
                             stormchaser_model::events::EventSource::System,
-                            serde_json::to_value(fail_event).unwrap(),
+                            event_payload,
                             Some(stormchaser_model::events::SchemaVersion::new(
                                 "1.0".to_string(),
                             )),
                             None,
                         )
-                        .await;
+                        .await
+                        {
+                            tracing::error!(
+                                "Failed to publish zombie failure event for run {} step {}: {:?}",
+                                zombie.run_id,
+                                zombie.id,
+                                error
+                            );
+                        }
                     }
                 }
                 Err(e) => tracing::error!("Failed to fetch zombie steps: {:?}", e),

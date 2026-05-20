@@ -3,9 +3,17 @@ use serde_json::Value;
 use sqlx::postgres::PgQueryResult;
 use sqlx::postgres::PgRow;
 use sqlx::{Executor, Postgres};
-use stormchaser_model::step::{StepInstance, StepStatus};
+use stormchaser_model::step::StepStatus;
 use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct ZombieStep {
+    pub id: StepInstanceId,
+    pub run_id: RunId,
+    pub runner_id: Option<String>,
+    pub fencing_token: i64,
+}
 
 #[allow(clippy::too_many_arguments)]
 /// Complete step instance.
@@ -385,13 +393,15 @@ where
 }
 
 /// Fetch steps that are currently running on offline runners.
-pub async fn fetch_zombie_steps<'a, E>(executor: E) -> Result<Vec<StepInstance>, sqlx::Error>
+pub async fn fetch_zombie_steps<'a, E>(executor: E) -> Result<Vec<ZombieStep>, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
     sqlx::query_as(
         r#"
-        SELECT s.* FROM step_instances s
+        SELECT s.id, s.run_id, s.runner_id, wr.fencing_token
+        FROM step_instances s
+        JOIN workflow_runs wr ON s.run_id = wr.id
         JOIN runners r ON s.runner_id = r.id
         WHERE s.status IN ('running', 'unpacking_sfs', 'packing_sfs')
         AND (r.status = 'offline' OR r.last_heartbeat_at < NOW() - INTERVAL '30 seconds')

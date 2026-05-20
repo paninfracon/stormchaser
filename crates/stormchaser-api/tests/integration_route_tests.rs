@@ -873,7 +873,7 @@ async fn test_run_from_git() {
         .unwrap();
         println!("ITERATION: Steps in DB: {:?}", steps);
 
-        if let Ok(step_id) = sqlx::query_scalar::<_, uuid::Uuid>("SELECT id FROM step_instances WHERE run_id = $1 AND status NOT IN ('succeeded', 'failed', 'aborted', 'lost_zombie'::step_status) LIMIT 1")
+        if let Ok(step_id) = sqlx::query_scalar::<_, uuid::Uuid>("SELECT id FROM step_instances WHERE run_id = $1 AND status NOT IN ('succeeded', 'failed', 'failed_ignored', 'skipped', 'aborted', 'lost_zombie'::step_status) LIMIT 1")
             .bind(uuid::Uuid::parse_str(run_id).unwrap())
             .fetch_one(&pool)
             .await
