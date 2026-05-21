@@ -18,8 +18,10 @@ Before cutting a new release tag, ensure the following steps are meticulously fo
     * In the root `Cargo.toml` under `[workspace.dependencies]`, update the versions of internal crates (e.g., `stormchaser-model`, `stormchaser-dsl`, `stormchaser-tls`) to `"X.Y.Z"`.
 
 3. **Bump Individual Crate Dependencies:**
-    * Search through all `crates/*/Cargo.toml` files for hardcoded version strings of internal dependencies (e.g., `stormchaser-opa = { version = "0.1.0", path = ... }`).
+    * Search through all `crates/*/Cargo.toml` files for internal path dependencies (e.g., `stormchaser-opa = { version = "0.1.0", path = ... }`).
     * Update these to point to the new `"X.Y.Z"` version.
+    > [!WARNING]
+    > **Crates.io Publishing:** If any internal dependency is missing the `version` specifier (e.g. it only has `path = "../crate"`), the `cargo publish` step will fail and break the release CI. You must ensure all internal path dependencies have `version = "X.Y.Z"` explicitly defined if the crate is published.
 
 4. **Update Helm Chart Versions:**
     * In all `Chart.yaml` files under `deploy/charts/` (e.g., `stormchaser`, `stormchaser-orchestration`, `stormchaser-runner-k8s`, `stormchaser-runner-docker`, `stormchaser-telemetry`), update the `version` and `appVersion` fields to `"X.Y.Z"`.
