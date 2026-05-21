@@ -90,7 +90,10 @@ async fn test_intrinsic_steps_dispatch() {
     loop {
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         if remaining.is_zero() {
-            panic!("Timed out waiting for Jinja NATS emission for step {}", step_id_str);
+            panic!(
+                "Timed out waiting for Jinja NATS emission for step {}",
+                step_id_str
+            );
         }
         let timeout = tokio::time::timeout(remaining, subscriber.next()).await;
         let msg = timeout
