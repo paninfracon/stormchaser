@@ -12,7 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 stormchaser-model = { workspace = true }
-stormchaser-engine = { version = "1.4.1", path = "../stormchaser-engine" }
+stormchaser-engine = { version = "1.4.2", path = "../stormchaser-engine" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -26,7 +26,7 @@ axum = { workspace = true }
 tokio-stream = "0.1.18"
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-stormchaser-api = { version = "1.4.1", path = "../stormchaser-api" }
-stormchaser-tls = { version = "1.4.1", path = "../stormchaser-tls" }
-stormchaser-opa = { version = "1.4.1", path = "../stormchaser-opa" }
+stormchaser-api = { version = "1.4.2", path = "../stormchaser-api" }
+stormchaser-tls = { version = "1.4.2", path = "../stormchaser-tls" }
+stormchaser-opa = { version = "1.4.2", path = "../stormchaser-opa" }
 async-nats.workspace = true

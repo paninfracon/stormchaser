@@ -2,14 +2,14 @@ apiVersion: v2
 name: stormchaser
 description: A Helm chart for deploying the complete Stormchaser stack
 type: application
-version: 1.4.1
-appVersion: "1.4.1"
+version: 1.4.2
+appVersion: "1.4.2"
 dependencies:
   - name: stormchaser-orchestration
-    version: ">=1.4.1"
+    version: ">=1.4.2"
     repository: file://../stormchaser-orchestration
   - name: stormchaser-runner-k8s
-    version: ">=1.4.1"
+    version: ">=1.4.2"
     repository: file://../stormchaser-runner-k8s
   - name: postgresql
     version: 15.x.x
@@ -24,7 +24,7 @@ dependencies:
     repository: https://charts.bitnami.com/bitnami
     condition: minio.enabled
   - name: stormchaser-telemetry
-    version: ">=1.4.1"
+    version: ">=1.4.2"
     repository: file://../stormchaser-telemetry
     condition: stormchaser-telemetry.enabled
   - name: loki
