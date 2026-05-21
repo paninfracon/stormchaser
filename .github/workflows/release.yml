@@ -44,7 +44,7 @@ jobs:
       - name: Package Linux Binaries
         run: |
           mkdir -p dist
-          for BIN in stormchaser-api stormchaser-engine stormchaser-runner-k8s stormchaser-runner-docker stormchaser-agent stormchaser stormchaser-tui; do
+          for BIN in stormchaser-api stormchaser-engine stormchaser-query stormchaser-runner-k8s stormchaser-runner-docker stormchaser-agent stormchaser stormchaser-tui; do
             if [ -f "target/release/$BIN" ]; then
               tar -czvf dist/$BIN-x86_64-unknown-linux-gnu.tar.gz -C target/release $BIN
             fi
@@ -73,6 +73,7 @@ jobs:
         include:
           - image: stormchaser-api
           - image: stormchaser-engine
+          - image: stormchaser-query
           - image: stormchaser-runner-k8s
           - image: stormchaser-runner-docker
           - image: stormchaser-agent

@@ -4,6 +4,9 @@ This document outlines the complete checklist for preparing a new release and pr
 
 ## 1. Release Preparation
 
+> [!IMPORTANT]
+> **Branch Requirement:** All releases must be initiated from the `trunk` branch or a branch originating directly from `trunk` (e.g. `release-vX.Y.Z`). Do not cut releases from unmerged feature branches.
+
 Before cutting a new release tag, ensure the following steps are meticulously followed to prepare the codebase:
 
 1. **Update `CHANGELOG.md`:**
@@ -73,7 +76,7 @@ cp target/x86_64-unknown-linux-musl/release/stormchaser-agent target/release/sto
 
 ```bash
 mkdir -p dist
-for BIN in stormchaser-api stormchaser-engine stormchaser-runner-k8s stormchaser-runner-docker stormchaser-agent stormchaser stormchaser-tui; do
+for BIN in stormchaser-api stormchaser-engine stormchaser-query stormchaser-runner-k8s stormchaser-runner-docker stormchaser-agent stormchaser stormchaser-tui; do
   if [ -f "target/release/$BIN" ]; then
     tar -czvf dist/$BIN-x86_64-unknown-linux-gnu.tar.gz -C target/release $BIN
   fi
@@ -92,7 +95,7 @@ We use `Dockerfile.prebuilt` to quickly containerize the binaries compiled local
 docker login ghcr.io -u <your-github-username>
 
 # Define the components to build
-COMPONENTS=("stormchaser-api" "stormchaser-engine" "stormchaser-runner-k8s" "stormchaser-runner-docker" "stormchaser-agent")
+COMPONENTS=("stormchaser-api" "stormchaser-engine" "stormchaser-query" "stormchaser-runner-k8s" "stormchaser-runner-docker" "stormchaser-agent")
 
 export VERSION="X.Y.Z" # Replace with actual version
 

@@ -26,7 +26,7 @@ axum = { workspace = true }
 tokio-stream = "0.1.18"
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-stormchaser-api = { version = "1.3.2", path = "../stormchaser-api" }
-stormchaser-tls = { version = "1.3.2", path = "../stormchaser-tls" }
-stormchaser-opa = { version = "1.3.2", path = "../stormchaser-opa" }
+stormchaser-api = { version = "1.4.0", path = "../stormchaser-api" }
+stormchaser-tls = { version = "1.4.0", path = "../stormchaser-tls" }
+stormchaser-opa = { version = "1.4.0", path = "../stormchaser-opa" }
 async-nats.workspace = true

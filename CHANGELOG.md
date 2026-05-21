@@ -7,14 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-05-21
+
 ### Added
 
+- Add Zombie execution detection for runners losing connection.
+- Add SOPS secrets integration.
+- Add Fencing tokens for concurrency control.
+- Add Sticky sharding support.
 - Add Workflow Input Schemas to define schema properties for inputs and workspace parameters.
 - Add the intrinsic `SqlExecute` step for engine-side database query execution.
 - Add the intrinsic `RestApi` step for engine-side HTTP calls with templated requests and response extraction.
 
 ### Changed
 
+- Refactor connections handling and dynamic queries security.
+- Refine TUI and DSL.
 - Prepare `stormchaser-tui` for publishing by removing the `publish = false` directive.
 - Add ChatOps Slack/Teams intrinsic dispatch updates to publish v1 CloudEvents and avoid duplicate step-completion transitions.
 - Document that schema hydration is served by `stormchaser-query` at `/api/v1/schema/hydrate` (the API service only serves `/api/v1/schema`).
