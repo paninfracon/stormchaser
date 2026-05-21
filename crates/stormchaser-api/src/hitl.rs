@@ -99,18 +99,10 @@ pub async fn approve_step_link(
     };
 
     // 5. Verify step exists and is WaitingForEvent
-    let step = get_step_instance_for_approval(&state.pool, payload.step_id, payload.run_id)
-        .await
-        .unwrap_or(None);
-
-    let step = match step {
-        Some(s) => s,
-        None => return (StatusCode::NOT_FOUND, "Step not found").into_response(),
+    let _step = match verify_step_for_approval(&state.pool, payload.run_id, payload.step_id).await {
+        Ok(s) => s,
+        Err(r) => return r,
     };
-
-    if step.status != StepStatus::WaitingForEvent {
-        return (StatusCode::BAD_REQUEST, "Step is not waiting for approval").into_response();
-    }
 
     let is_approve = payload.action.to_lowercase() == "approve";
     let status_str = if is_approve { "approved" } else { "rejected" };
@@ -328,28 +320,8 @@ pub async fn approve_step(
     Path((run_id, step_id)): Path<(RunId, StepInstanceId)>,
     Json(inputs): Json<Value>,
 ) -> impl IntoResponse {
-    let token = headers
-        .get(AUTHORIZATION)
-        .and_then(|h| h.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer "));
-
-    // 1. Verify step exists and is WaitingForEvent
-    let step = get_step_instance_for_approval(&state.pool, step_id, run_id)
-        .await
-        .unwrap_or(None);
-
-    let step = match step {
-        Some(s) => s,
-        None => return (StatusCode::NOT_FOUND, "Step not found").into_response(),
-    };
-
-    if step.status != StepStatus::WaitingForEvent {
-        return (StatusCode::BAD_REQUEST, "Step is not waiting for approval").into_response();
-    }
-
-    // 1.5 OPA ABAC Engine check
-    if let Err((status, msg)) = check_approval_opa(&state, run_id, &step.step_name, token).await {
-        return (status, msg).into_response();
+    if let Err(r) = validate_approval_state(&state, run_id, step_id, &headers).await {
+        return r;
     }
 
     // 2. Insert into approval_registry
@@ -406,27 +378,8 @@ pub async fn reject_step(
     headers: HeaderMap,
     Path((run_id, step_id)): Path<(RunId, StepInstanceId)>,
 ) -> impl IntoResponse {
-    let token = headers
-        .get(AUTHORIZATION)
-        .and_then(|h| h.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer "));
-
-    let step = get_step_instance_for_approval(&state.pool, step_id, run_id)
-        .await
-        .unwrap_or(None);
-
-    let step = match step {
-        Some(s) => s,
-        None => return (StatusCode::NOT_FOUND, "Step not found").into_response(),
-    };
-
-    if step.status != StepStatus::WaitingForEvent {
-        return (StatusCode::BAD_REQUEST, "Step is not waiting for approval").into_response();
-    }
-
-    // 1.5 OPA ABAC Engine check
-    if let Err((status, msg)) = check_approval_opa(&state, run_id, &step.step_name, token).await {
-        return (status, msg).into_response();
+    if let Err(r) = validate_approval_state(&state, run_id, step_id, &headers).await {
+        return r;
     }
 
     let _ = insert_approval_registry(
@@ -534,4 +487,40 @@ pub async fn correlate_event(
         }
         Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Failed to publish").into_response(),
     }
+}
+
+async fn verify_step_for_approval(
+    pool: &sqlx::PgPool,
+    run_id: RunId,
+    step_id: StepInstanceId,
+) -> Result<stormchaser_model::step::StepInstance, axum::response::Response> {
+    let step = match get_step_instance_for_approval(pool, step_id, run_id).await {
+        Ok(Some(s)) => s,
+        _ => return Err((StatusCode::NOT_FOUND, "Step not found").into_response()),
+    };
+
+    if step.status != StepStatus::WaitingForEvent {
+        return Err((StatusCode::BAD_REQUEST, "Step is not waiting for approval").into_response());
+    }
+
+    Ok(step)
+}
+
+async fn validate_approval_state(
+    state: &AppState,
+    run_id: RunId,
+    step_id: StepInstanceId,
+    headers: &HeaderMap,
+) -> Result<(), axum::response::Response> {
+    let step = verify_step_for_approval(&state.pool, run_id, step_id).await?;
+    let token = headers
+        .get(AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "));
+
+    if let Err((status, msg)) = check_approval_opa(state, run_id, &step.step_name, token).await {
+        return Err((status, msg).into_response());
+    }
+
+    Ok(())
 }
