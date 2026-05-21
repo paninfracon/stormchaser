@@ -26,6 +26,13 @@ jobs:
           sudo rm -rf /usr/local/share/boost
           sudo rm -rf "$AGENT_TOOLSDIRECTORY"
 
+      - name: Create Swap File
+        run: |
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
