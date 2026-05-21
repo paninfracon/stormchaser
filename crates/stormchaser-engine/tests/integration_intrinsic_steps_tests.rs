@@ -62,7 +62,7 @@ async fn test_intrinsic_steps_dispatch() {
         .await
         .unwrap();
 
-    sqlx::query("INSERT INTO step_instances (id, run_id, step_name, step_type, status, spec, params) VALUES ($1, $2, 'test-step', 'JinjaRender', 'pending', 'null', 'null')")
+    sqlx::query("INSERT INTO step_instances (id, run_id, step_name, step_type, status, spec, params) VALUES ($1, $2, 'test-step', 'JinjaRender', 'pending', '{}', '{}')")
         .bind(step_id)
         .bind(run_id)
         .execute(&pool)
@@ -83,16 +83,24 @@ async fn test_intrinsic_steps_dispatch() {
     .unwrap();
     assert!(dispatched);
 
-    // Verify NATS emission for the dispatched Jinja step
-    let timeout = tokio::time::timeout(std::time::Duration::from_secs(5), subscriber.next()).await;
-    let msg = timeout
-        .expect("Timed out waiting for Jinja NATS emission")
-        .expect("NATS stream closed");
-    let response: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
-    assert_eq!(
-        response["data"]["step_id"].as_str(),
-        Some(step_id.to_string().as_str())
-    );
+    // Verify NATS emission for the dispatched Jinja step by looping until a message
+    // for this specific step_id is found (other messages from concurrent tests may arrive first)
+    let step_id_str = step_id.to_string();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            panic!("Timed out waiting for Jinja NATS emission for step {}", step_id_str);
+        }
+        let timeout = tokio::time::timeout(remaining, subscriber.next()).await;
+        let msg = timeout
+            .expect("Timed out waiting for Jinja NATS emission")
+            .expect("NATS stream closed");
+        let response: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+        if response["data"]["step_id"].as_str() == Some(step_id_str.as_str()) {
+            break;
+        }
+    }
 
     let dispatched = jinja::try_dispatch(
         run_id,

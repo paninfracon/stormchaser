@@ -41,7 +41,7 @@ async fn test_handle_step_query_ephemeral_reply() {
     .unwrap();
 
     sqlx::query(
-        "INSERT INTO step_instances (id, run_id, step_name, step_type, status, spec, params) VALUES ($1, $2, 'test-step', 'RunContainer', 'pending', 'null', 'null')"
+        "INSERT INTO step_instances (id, run_id, step_name, step_type, status, spec, params) VALUES ($1, $2, 'test-step', 'RunContainer', 'pending', '{}', '{}')"
     )
     .bind(step_id)
     .bind(run_id)

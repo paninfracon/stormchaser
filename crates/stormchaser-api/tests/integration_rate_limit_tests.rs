@@ -65,6 +65,7 @@ async fn test_rate_limiting() {
         .unwrap();
 
     let mut rate_limited = false;
+    let mut allowed_count = 0;
     for _ in 0..10 {
         let response = app
             .clone()
@@ -83,8 +84,13 @@ async fn test_rate_limiting() {
             rate_limited = true;
             break;
         }
+        allowed_count += 1;
     }
 
+    assert!(
+        allowed_count > 0,
+        "At least one request should have been allowed before rate limiting"
+    );
     assert!(
         rate_limited,
         "Request should have been rate limited after burst"

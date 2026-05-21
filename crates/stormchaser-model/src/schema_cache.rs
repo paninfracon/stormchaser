@@ -97,7 +97,6 @@ impl SchemaCache {
         {
             Ok(data) => data,
             Err(e) => {
-                println!("Failed to pull OCI artifact from '{}': {}", url, e);
                 tracing::error!("Failed to pull OCI artifact from '{}': {}", url, e);
                 return vec![];
             }
@@ -107,6 +106,7 @@ impl SchemaCache {
         for layer in image_data.layers {
             // Read layer data
             let bytes = layer.data;
+            let media_type = layer.media_type;
 
             // For now, assume it's just raw JSON or try to parse directly.
             // If the layer is a tarball, we might need to extract it.
@@ -118,13 +118,20 @@ impl SchemaCache {
                 }
             }
 
-            // If it's tar.gz, extract JSON files
-            use flate2::read::GzDecoder;
+            // Extract JSON files from tar or tar+gzip layer
             use std::io::Read;
             use tar::Archive;
 
-            let tar = GzDecoder::new(std::io::Cursor::new(&bytes));
-            let mut archive = Archive::new(tar);
+            // Detect if the layer is gzip-compressed. Other compression formats (e.g., zstd)
+            // and plain uncompressed tar both fall through to the uncompressed tar path.
+            let is_gzip = media_type == "application/vnd.oci.image.layer.v1.tar+gzip";
+            let reader: Box<dyn Read> = if is_gzip {
+                use flate2::read::GzDecoder;
+                Box::new(GzDecoder::new(std::io::Cursor::new(bytes)))
+            } else {
+                Box::new(std::io::Cursor::new(bytes))
+            };
+            let mut archive = Archive::new(reader);
 
             if let Ok(entries) = archive.entries() {
                 for file in entries.flatten() {

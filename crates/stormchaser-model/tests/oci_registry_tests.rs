@@ -20,8 +20,7 @@ async fn test_oci_fetch_integration() {
         .await
         .expect("Failed to get port");
 
-    // Give it an extra moment to be fully ready to accept connections
-    tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+    // WaitFor::message_on_stderr already ensures the registry is ready; no extra delay needed.
 
     // Build the registry URL
     let reference_str = format!("127.0.0.1:{}/integration-test-schema:latest", port);
@@ -58,9 +57,19 @@ async fn test_oci_fetch_integration() {
     let cache = SchemaCache::default();
     cache.start_background_sync(url.clone());
 
-    // Wait for sync to happen
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
-    let schema = cache.get("real_integration_schema").await;
+    // Poll with backoff until the schema appears, instead of a fixed sleep
+    let schema = {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let result = cache.get("real_integration_schema").await;
+            if result.is_some() {
+                break result;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                break None;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    };
     assert!(schema.is_some(), "Schema was not fetched correctly");
 }

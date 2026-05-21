@@ -26,8 +26,26 @@ async fn handle_orphaned_container(
     runner_id: String,
     encryption_key: Option<String>,
 ) {
-    let run_id = Uuid::parse_str(run_id_s).unwrap_or_default();
-    let step_id = Uuid::parse_str(step_id_s).unwrap_or_default();
+    let run_id = match Uuid::parse_str(run_id_s) {
+        Ok(id) => id,
+        Err(e) => {
+            error!(
+                "Invalid run_id label '{}' on container {}: {}",
+                run_id_s, container_id, e
+            );
+            return;
+        }
+    };
+    let step_id = match Uuid::parse_str(step_id_s) {
+        Ok(id) => id,
+        Err(e) => {
+            error!(
+                "Invalid step_id label '{}' on container {}: {}",
+                step_id_s, container_id, e
+            );
+            return;
+        }
+    };
 
     let container_name = container
         .names
