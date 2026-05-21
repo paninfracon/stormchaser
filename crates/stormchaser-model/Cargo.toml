@@ -37,6 +37,10 @@ async-nats.workspace = true
 jsonschema.workspace = true
 nutype = { version = "0.7.0", features = ["serde", "schemars08"] }
 crc32fast = "1.5.0"
+oci-distribution = { version = "0.11.0", default-features = false, features = ["rustls-tls"] }
+tar = { workspace = true }
+flate2 = { workspace = true }
 
 [dev-dependencies]
+testcontainers = "0.23"
 wiremock = "0.6.5"
