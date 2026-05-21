@@ -8,6 +8,7 @@ use stormchaser_model::ConnectionId;
 use tar::Archive;
 
 use std::collections::HashMap;
+use stormchaser_model::step::StepStatus;
 
 #[allow(clippy::too_many_arguments)]
 async fn process_claim_report(
@@ -163,6 +164,18 @@ async fn process_legacy_report(
         .await?;
     }
     Ok(())
+}
+
+pub fn is_terminal_step_status(status: &StepStatus) -> bool {
+    matches!(
+        *status,
+        StepStatus::Succeeded
+            | StepStatus::Failed
+            | StepStatus::FailedIgnored
+            | StepStatus::Skipped
+            | StepStatus::Aborted
+            | StepStatus::LostZombie
+    )
 }
 
 pub async fn persist_step_test_reports(

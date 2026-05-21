@@ -27,6 +27,8 @@ pub mod state {
     pub struct FailedIgnored;
     /// State representing a step that has been aborted.
     pub struct Aborted;
+    /// State representing a step whose runner went offline.
+    pub struct LostZombie;
 }
 
 /// A state machine for managing the lifecycle of a `StepInstance`.
@@ -184,6 +186,24 @@ impl StepMachine<state::UnpackingSfs> {
 
 #[allow(dead_code)]
 impl StepMachine<state::Running> {
+    #[tracing::instrument(skip(self, executor), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
+    /// Zombify.
+    pub async fn zombify(
+        mut self,
+        executor: &mut sqlx::PgConnection,
+    ) -> Result<StepMachine<state::LostZombie>> {
+        self.instance.status = StepStatus::LostZombie;
+        self.instance.finished_at = Some(Utc::now());
+        self.instance.error = Some("lost_zombie".to_string());
+
+        persist_step_instance(&self.instance, executor).await?;
+
+        Ok(StepMachine {
+            instance: self.instance,
+            _state: PhantomData,
+        })
+    }
+
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
     /// Start packing.
     pub async fn start_packing(

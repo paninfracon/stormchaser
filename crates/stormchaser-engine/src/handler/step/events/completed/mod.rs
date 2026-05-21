@@ -7,7 +7,6 @@ use opentelemetry::KeyValue;
 use sqlx::PgPool;
 use std::sync::Arc;
 use stormchaser_dsl::ast::Workflow;
-use stormchaser_model::step::StepStatus;
 use stormchaser_model::LogBackend;
 use stormchaser_tls::TlsReloader;
 use tracing::{debug, info};
@@ -15,7 +14,7 @@ use tracing::{debug, info};
 use crate::handler::step::dispatch::find_step;
 use crate::handler::step::quota::release_step_quota_for_instance;
 
-use super::helpers::persist_step_test_reports;
+use super::helpers::{is_terminal_step_status, persist_step_test_reports};
 
 mod artifacts;
 mod logs;
@@ -75,7 +74,7 @@ pub async fn handle_step_completed(
     let instance = fetch_step_instance(step_id, &mut *tx).await?;
 
     // Ensure we don't process duplicate completion events
-    if instance.status == StepStatus::Succeeded || instance.status == StepStatus::Failed {
+    if is_terminal_step_status(&instance.status) {
         return Ok(());
     }
 

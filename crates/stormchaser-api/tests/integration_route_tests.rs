@@ -854,49 +854,52 @@ async fn test_run_from_git() {
         }
     }
 
-    let mut step_id_opt = None;
-    for _ in 0..10 {
-        if let Ok(id) = sqlx::query_scalar("SELECT id FROM step_instances WHERE run_id = $1")
+    // Verify the workflow completes successfully.
+    let mut success = false;
+    for _ in 0..60 {
+        let fencing_token: i64 =
+            sqlx::query_scalar("SELECT fencing_token FROM workflow_runs WHERE id = $1")
+                .bind(uuid::Uuid::parse_str(run_id).unwrap())
+                .fetch_one(&pool)
+                .await
+                .expect("workflow run fencing token should be queryable");
+
+        let steps: Vec<(uuid::Uuid, String, String)> = sqlx::query_as(
+            "SELECT id, step_name, status::text FROM step_instances WHERE run_id = $1",
+        )
+        .bind(uuid::Uuid::parse_str(run_id).unwrap())
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        println!("ITERATION: Steps in DB: {:?}", steps);
+
+        if let Ok(step_id) = sqlx::query_scalar::<_, uuid::Uuid>("SELECT id FROM step_instances WHERE run_id = $1 AND status NOT IN ('succeeded', 'failed', 'failed_ignored', 'skipped', 'aborted', 'lost_zombie'::step_status) LIMIT 1")
             .bind(uuid::Uuid::parse_str(run_id).unwrap())
             .fetch_one(&pool)
             .await
         {
-            step_id_opt = Some(id);
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    }
-    let step_id: uuid::Uuid = step_id_opt.expect("Step instance was never created");
-
-    let fencing_token: i64 =
-        sqlx::query_scalar("SELECT fencing_token FROM workflow_runs WHERE id = $1")
-            .bind(uuid::Uuid::parse_str(run_id).unwrap())
-            .fetch_one(&pool)
+            println!("Mocking handle_step_completed for step_id: {}", step_id);
+            // Mock runner completing the step
+            stormchaser_engine::handler::step::events::handle_step_completed(
+                serde_json::from_value(serde_json::json!({
+                    "run_id": run_id,
+                    "step_id": step_id.to_string(),
+                    "fencing_token": fencing_token,
+                    "event_type": "StepCompletedEvent",
+                    "timestamp": Utc::now(),
+                    "outputs": {}
+                }))
+                .unwrap(),
+                pool.clone(),
+                nats_client.clone(),
+                std::sync::Arc::new(None),
+                tls_reloader.clone(),
+            )
             .await
-            .expect("workflow run fencing token should be queryable");
+            .expect("handle_step_completed failed");
+            println!("handle_step_completed succeeded for step_id: {}", step_id);
+        }
 
-    // Mock runner completing the step
-    stormchaser_engine::handler::step::events::handle_step_completed(
-        serde_json::from_value(serde_json::json!({
-            "run_id": run_id,
-            "step_id": step_id.to_string(),
-            "fencing_token": fencing_token,
-            "event_type": "StepCompletedEvent",
-            "timestamp": Utc::now(),
-            "outputs": {}
-        }))
-        .unwrap(),
-        pool.clone(),
-        nats_client.clone(),
-        std::sync::Arc::new(None),
-        tls_reloader.clone(),
-    )
-    .await
-    .expect("handle_step_completed failed");
-
-    // Verify the workflow completes successfully.
-    let mut success = false;
-    for _ in 0..60 {
         let resp = app
             .clone()
             .oneshot(
