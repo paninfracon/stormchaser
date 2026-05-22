@@ -23,6 +23,10 @@ staticClients:
     redirectURIs:
       - 'http://localhost:8080/callback'
       - 'http://127.0.0.1:8080/callback'
+      - 'http://localhost:3003/auth/callback'
+      - 'http://127.0.0.1:3003/auth/callback'
+      - 'http://localhost:3004/auth/callback'
+      - 'http://127.0.0.1:3004/auth/callback'
     name: 'Stormchaser CLI'
     secret: DEX_CLIENT_SECRET
     public: false

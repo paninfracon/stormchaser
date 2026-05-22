@@ -227,6 +227,20 @@ services:
     ports:
       - "${PORT_API:-3000}:3000"
 
+  stormchaser-web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    environment:
+      API_URL: http://orchestration-api:3000
+      EXTERNAL_API_URL: http://localhost:${PORT_API:-3000}
+      WEB_URL: http://localhost:${PORT_WEB:-3003}
+      RUST_LOG: stormchaser_web=debug
+    depends_on:
+      - orchestration-api
+    ports:
+      - "${PORT_WEB:-3003}:3000"
+
   docker-runner:
     build:
       context: .
