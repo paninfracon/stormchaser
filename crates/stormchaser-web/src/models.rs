@@ -110,3 +110,110 @@ pub struct WorkflowRunFullDetail {
     /// Individual test cases executed during the run.
     pub test_cases: Vec<Value>,
 }
+
+pub type ConnectionId = Uuid;
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectionType {
+    S3,
+    Oci,
+    Jfrog,
+    Gcs,
+    Azure,
+    Postgres,
+    Mysql,
+    HttpApi,
+    Git,
+}
+
+impl std::fmt::Display for ConnectionType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            ConnectionType::S3 => "S3",
+            ConnectionType::Oci => "OCI Registry",
+            ConnectionType::Jfrog => "JFrog",
+            ConnectionType::Gcs => "GCS",
+            ConnectionType::Azure => "Azure Blob",
+            ConnectionType::Postgres => "PostgreSQL",
+            ConnectionType::Mysql => "MySQL",
+            ConnectionType::HttpApi => "HTTP API",
+            ConnectionType::Git => "Git",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct Connection {
+    pub id: ConnectionId,
+    pub name: String,
+    pub description: Option<String>,
+    pub connection_type: ConnectionType,
+    pub config: Value,
+    pub encrypted_credentials: Option<String>,
+    pub aws_assume_role_arn: Option<String>,
+    pub is_default_sfs: bool,
+    pub ca_cert: Option<String>,
+    pub client_cert: Option<String>,
+    pub client_key: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+pub type WebhookId = Uuid;
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct WebhookConfig {
+    pub id: WebhookId,
+    pub name: String,
+    pub description: Option<String>,
+    pub source_type: String,
+    pub secret_token: Option<String>,
+    pub is_active: bool,
+    pub ca_cert: Option<String>,
+    pub client_cert: Option<String>,
+    pub client_key: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+pub type RuleId = Uuid;
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct EventRule {
+    pub id: RuleId,
+    pub name: String,
+    pub description: Option<String>,
+    pub webhook_id: Option<WebhookId>,
+    pub event_type_pattern: String,
+    pub condition_expr: Option<String>,
+    pub workflow_name: String,
+    pub repo_url: String,
+    pub workflow_path: String,
+    pub git_ref: String,
+    pub input_mappings: Value,
+    pub is_active: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+pub type CronWorkflowId = Uuid;
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct CronWorkflow {
+    pub id: CronWorkflowId,
+    pub name: String,
+    pub description: Option<String>,
+    pub cronspec: String,
+    pub workflow_name: String,
+    pub repo_url: String,
+    pub workflow_path: String,
+    pub git_ref: String,
+    pub inputs: Value,
+    pub secret_token: String,
+    pub is_active: bool,
+    pub external_job_id: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}

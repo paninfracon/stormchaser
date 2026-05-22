@@ -35,6 +35,12 @@ async fn require_auth() -> Result<String, ServerFnError> {
 }
 
 #[server(input = Json, output = Json)]
+pub async fn check_auth() -> Result<bool, ServerFnError> {
+    let _ = require_auth().await?;
+    Ok(true)
+}
+
+#[server(input = Json, output = Json)]
 pub async fn fetch_workflow_runs(
     status: Option<String>,
 ) -> Result<Vec<WorkflowRunDetail>, ServerFnError> {
@@ -132,6 +138,122 @@ pub async fn fetch_step_logs(
     } else {
         Err(ServerFnError::new(format!(
             "Failed to fetch step logs: {}",
+            res.status()
+        )))
+    }
+}
+
+#[server(input = Json, output = Json)]
+pub async fn fetch_connections() -> Result<Vec<crate::models::Connection>, ServerFnError> {
+    let cookie = require_auth().await?;
+    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+
+    let client = reqwest::Client::new();
+    let url = format!("{}/api/v1/connections", api_url);
+
+    let res = client
+        .get(&url)
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
+        .send()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    if res.status().is_success() {
+        let connections = res
+            .json::<Vec<crate::models::Connection>>()
+            .await
+            .map_err(|e| ServerFnError::new(e.to_string()))?;
+        Ok(connections)
+    } else {
+        Err(ServerFnError::new(format!(
+            "Failed to fetch connections: {}",
+            res.status()
+        )))
+    }
+}
+
+#[server(input = Json, output = Json)]
+pub async fn fetch_webhooks() -> Result<Vec<crate::models::WebhookConfig>, ServerFnError> {
+    let cookie = require_auth().await?;
+    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+
+    let client = reqwest::Client::new();
+    let url = format!("{}/api/v1/webhooks", api_url);
+
+    let res = client
+        .get(&url)
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
+        .send()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    if res.status().is_success() {
+        let webhooks = res
+            .json::<Vec<crate::models::WebhookConfig>>()
+            .await
+            .map_err(|e| ServerFnError::new(e.to_string()))?;
+        Ok(webhooks)
+    } else {
+        Err(ServerFnError::new(format!(
+            "Failed to fetch webhooks: {}",
+            res.status()
+        )))
+    }
+}
+
+#[server(input = Json, output = Json)]
+pub async fn fetch_event_rules() -> Result<Vec<crate::models::EventRule>, ServerFnError> {
+    let cookie = require_auth().await?;
+    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+
+    let client = reqwest::Client::new();
+    let url = format!("{}/api/v1/rules", api_url);
+
+    let res = client
+        .get(&url)
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
+        .send()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    if res.status().is_success() {
+        let rules = res
+            .json::<Vec<crate::models::EventRule>>()
+            .await
+            .map_err(|e| ServerFnError::new(e.to_string()))?;
+        Ok(rules)
+    } else {
+        Err(ServerFnError::new(format!(
+            "Failed to fetch event rules: {}",
+            res.status()
+        )))
+    }
+}
+
+#[server(input = Json, output = Json)]
+pub async fn fetch_cron_workflows() -> Result<Vec<crate::models::CronWorkflow>, ServerFnError> {
+    let cookie = require_auth().await?;
+    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+
+    let client = reqwest::Client::new();
+    let url = format!("{}/api/v1/cron-workflows", api_url);
+
+    let res = client
+        .get(&url)
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
+        .send()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    if res.status().is_success() {
+        let crons = res
+            .json::<Vec<crate::models::CronWorkflow>>()
+            .await
+            .map_err(|e| ServerFnError::new(e.to_string()))?;
+        Ok(crons)
+    } else {
+        Err(ServerFnError::new(format!(
+            "Failed to fetch cron workflows: {}",
             res.status()
         )))
     }

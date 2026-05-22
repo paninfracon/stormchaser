@@ -167,3 +167,24 @@ tr:last-child td {
 .fade-in {
     animation: fadeIn 0.4s ease-out forwards;
 }
+
+/* Tab Links */
+.tab-link {
+    padding: 0.5rem 1rem;
+    text-decoration: none;
+    color: var(--text-primary);
+    border-bottom: 2px solid transparent;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.tab-link:hover {
+    color: var(--accent-color);
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 6px;
+}
+
+.active-tab {
+    border-bottom: 2px solid var(--accent-color);
+    color: var(--accent-color);
+}
