@@ -78,8 +78,14 @@ impl DockerContainerMachine<state::Initialized> {
         self.pull_image(&spec.image).await?;
 
         let network_mode = self.get_network_mode().await;
-        let config =
-            self.build_container_config(&spec, mounts.clone(), network_mode, &storage_names)?;
+        let config = self.build_container_config(
+            &spec,
+            mounts.clone(),
+            network_mode,
+            &storage_names,
+            &container_name,
+            self.metadata.loki_url.as_deref(),
+        )?;
 
         info!("Creating container {}", container_name);
         let dispatched_at = Utc::now();
@@ -609,6 +615,7 @@ mod tests {
             },
             received_at: Utc::now(),
             encryption_key: None,
+            loki_url: None,
             storage: None,
             test_report_urls: None,
             registry_auth: None,

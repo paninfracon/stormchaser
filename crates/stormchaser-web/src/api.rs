@@ -69,3 +69,70 @@ pub async fn fetch_workflow_runs(
         )))
     }
 }
+
+#[server(input = Json, output = Json)]
+pub async fn fetch_workflow_run_detail(
+    id: String,
+) -> Result<crate::models::WorkflowRunFullDetail, ServerFnError> {
+    let cookie = require_auth().await?;
+    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+
+    let client = reqwest::Client::new();
+    let url = format!("{}/api/v1/runs/{}", api_url, id);
+
+    let res = client
+        .get(&url)
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
+        .send()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    if res.status().is_success() {
+        let run = res
+            .json::<crate::models::WorkflowRunFullDetail>()
+            .await
+            .map_err(|e| ServerFnError::new(e.to_string()))?;
+        Ok(run)
+    } else {
+        Err(ServerFnError::new(format!(
+            "Failed to fetch workflow run detail: {}",
+            res.status()
+        )))
+    }
+}
+
+#[server(input = Json, output = Json)]
+pub async fn fetch_step_logs(
+    run_id: String,
+    step_id: String,
+    limit: Option<usize>,
+) -> Result<Vec<String>, ServerFnError> {
+    let cookie = require_auth().await?;
+    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+
+    let client = reqwest::Client::new();
+    let mut url = format!("{}/api/v1/runs/{}/steps/{}/logs", api_url, run_id, step_id);
+    if let Some(l) = limit {
+        url.push_str(&format!("?limit={}", l));
+    }
+
+    let res = client
+        .get(&url)
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
+        .send()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    if res.status().is_success() {
+        let logs = res
+            .json::<Vec<String>>()
+            .await
+            .map_err(|e| ServerFnError::new(e.to_string()))?;
+        Ok(logs)
+    } else {
+        Err(ServerFnError::new(format!(
+            "Failed to fetch step logs: {}",
+            res.status()
+        )))
+    }
+}

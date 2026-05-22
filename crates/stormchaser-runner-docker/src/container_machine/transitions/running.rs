@@ -493,6 +493,7 @@ mod tests {
             },
             received_at: Utc::now(),
             encryption_key: None,
+            loki_url: None,
             storage: Some(storage),
             test_report_urls: None,
             registry_auth: None,

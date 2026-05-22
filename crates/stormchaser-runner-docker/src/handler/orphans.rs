@@ -154,6 +154,7 @@ async fn handle_orphaned_container(
                             test_report_urls: None,
                             registry_auth: None,
                             encryption_key: key_clone,
+                            loki_url: None,
                             received_at,
                         },
                         Some(nats.clone()),
@@ -177,6 +178,7 @@ async fn handle_orphaned_container(
             test_report_urls: None,
             registry_auth: None,
             encryption_key: key_clone,
+            loki_url: None,
             received_at,
         };
 

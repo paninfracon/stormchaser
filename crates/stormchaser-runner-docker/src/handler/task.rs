@@ -32,6 +32,7 @@ pub async fn handle_task(
     nats_client: async_nats::Client,
     runner_id: String,
     encryption_key: Option<String>,
+    loki_url: Option<String>,
 ) {
     let received_at = Utc::now();
     info!("Received task message: {:?}", msg.subject);
@@ -135,6 +136,7 @@ pub async fn handle_task(
             test_report_urls,
             registry_auth,
             encryption_key,
+            loki_url,
             received_at,
         },
         Some(nats_client.clone()),

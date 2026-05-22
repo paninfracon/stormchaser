@@ -211,6 +211,10 @@ if [[ "$MODE" == "docker" || "$MODE" == "hybrid" ]]; then
         COMPOSE_PROFILES="$MODE"
     fi
 
+    # Ensure Loki docker driver is installed
+    echo -e "${BLUE}>>> Installing Loki Docker Driver plugin...${NC}"
+    run_privileged docker plugin install grafana/loki-docker-driver:latest --alias loki --grant-all-permissions 2>/dev/null || run_privileged docker plugin enable loki 2>/dev/null || true
+
     # Build and start
     docker compose -p "stormchaser-${MODE}" --profile "$COMPOSE_PROFILES" up -d --build
     docker compose -p "stormchaser-${MODE}" build stormchaser-agent # Ensure agent is built

@@ -1,3 +1,5 @@
+#![recursion_limit = "512"]
+
 #[cfg(feature = "ssr")]
 #[tokio::main]
 async fn main() {
@@ -13,6 +15,14 @@ async fn main() {
 
     let app = Router::new()
         .route("/api/v1/runs/stream", get(proxy_runs_stream_handler))
+        .route(
+            "/api/v1/runs/:id/status/stream",
+            get(proxy_run_status_stream_handler),
+        )
+        .route(
+            "/api/v1/runs/:run_id/steps/:step_id/logs/stream",
+            get(proxy_step_logs_stream_handler),
+        )
         .route("/api/*fn_name", post(leptos_axum::handle_server_fns))
         .route("/auth/login", get(auth_login_handler))
         .route("/auth/logout", get(auth_logout_handler))
@@ -150,6 +160,111 @@ async fn proxy_runs_stream_handler(
     let client = reqwest::Client::new();
     match client
         .get(format!("{}/api/v1/runs/stream", api_url))
+        .header(header::AUTHORIZATION, format!("Bearer {}", token))
+        .send()
+        .await
+    {
+        Ok(res) => {
+            if !res.status().is_success() {
+                return (res.status(), "Upstream error").into_response();
+            }
+            let stream = res.bytes_stream().map_err(std::io::Error::other);
+            let body = Body::from_stream(stream);
+            Response::builder()
+                .header(header::CONTENT_TYPE, "text/event-stream")
+                .header(header::CACHE_CONTROL, "no-cache")
+                .body(body)
+                .unwrap()
+        }
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Failed to connect").into_response(),
+    }
+}
+
+#[cfg(feature = "ssr")]
+async fn proxy_run_status_stream_handler(
+    axum::extract::Path(id): axum::extract::Path<String>,
+    headers: axum::http::HeaderMap,
+) -> impl axum::response::IntoResponse {
+    use axum::body::Body;
+    use axum::http::{header, Response, StatusCode};
+    use axum::response::IntoResponse;
+    use futures::TryStreamExt;
+
+    let cookie_str = headers
+        .get(header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let mut auth_token = None;
+    for part in cookie_str.split(';') {
+        let part = part.trim();
+        if let Some(token) = part.strip_prefix("auth_token=") {
+            auth_token = Some(token);
+            break;
+        }
+    }
+    let token = match auth_token {
+        Some(t) => t,
+        None => return (StatusCode::UNAUTHORIZED, "No active session").into_response(),
+    };
+
+    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+    let client = reqwest::Client::new();
+    match client
+        .get(format!("{}/api/v1/runs/{}/status/stream", api_url, id))
+        .header(header::AUTHORIZATION, format!("Bearer {}", token))
+        .send()
+        .await
+    {
+        Ok(res) => {
+            if !res.status().is_success() {
+                return (res.status(), "Upstream error").into_response();
+            }
+            let stream = res.bytes_stream().map_err(std::io::Error::other);
+            let body = Body::from_stream(stream);
+            Response::builder()
+                .header(header::CONTENT_TYPE, "text/event-stream")
+                .header(header::CACHE_CONTROL, "no-cache")
+                .body(body)
+                .unwrap()
+        }
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Failed to connect").into_response(),
+    }
+}
+
+#[cfg(feature = "ssr")]
+async fn proxy_step_logs_stream_handler(
+    axum::extract::Path((run_id, step_id)): axum::extract::Path<(String, String)>,
+    headers: axum::http::HeaderMap,
+) -> impl axum::response::IntoResponse {
+    use axum::body::Body;
+    use axum::http::{header, Response, StatusCode};
+    use axum::response::IntoResponse;
+    use futures::TryStreamExt;
+
+    let cookie_str = headers
+        .get(header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let mut auth_token = None;
+    for part in cookie_str.split(';') {
+        let part = part.trim();
+        if let Some(token) = part.strip_prefix("auth_token=") {
+            auth_token = Some(token);
+            break;
+        }
+    }
+    let token = match auth_token {
+        Some(t) => t,
+        None => return (StatusCode::UNAUTHORIZED, "No active session").into_response(),
+    };
+
+    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+    let client = reqwest::Client::new();
+    match client
+        .get(format!(
+            "{}/api/v1/runs/{}/steps/{}/logs/stream",
+            api_url, run_id, step_id
+        ))
         .header(header::AUTHORIZATION, format!("Bearer {}", token))
         .send()
         .await
