@@ -516,3 +516,150 @@ pub async fn hydrate_schema_complete(
         )))
     }
 }
+
+#[server(input = Json, output = Json)]
+pub async fn create_storage_backend(
+    name: String,
+    description: Option<String>,
+    connection_type: stormchaser_model::connections::ConnectionType,
+    config: serde_json::Value,
+    aws_assume_role_arn: Option<String>,
+    is_default_sfs: bool,
+) -> Result<(), ServerFnError> {
+    let cookie = require_auth().await?;
+    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{}/api/v1/connections", api_url))
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
+        .json(&serde_json::json!({
+            "name": name,
+            "description": description,
+            "connection_type": connection_type,
+            "config": config,
+            "aws_assume_role_arn": aws_assume_role_arn,
+            "is_default_sfs": is_default_sfs
+        }))
+        .send()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    if res.status().is_success() {
+        Ok(())
+    } else {
+        Err(ServerFnError::new(format!("Failed: {}", res.status())))
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+#[server(input = Json, output = Json)]
+pub async fn create_cron_workflow(
+    name: String,
+    description: Option<String>,
+    cronspec: String,
+    workflow_name: String,
+    repo_url: String,
+    workflow_path: String,
+    git_ref: String,
+    inputs: serde_json::Value,
+) -> Result<(), ServerFnError> {
+    let cookie = require_auth().await?;
+    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{}/api/v1/cron", api_url))
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
+        .json(&serde_json::json!({
+            "name": name,
+            "description": description,
+            "cronspec": cronspec,
+            "workflow_name": workflow_name,
+            "repo_url": repo_url,
+            "workflow_path": workflow_path,
+            "git_ref": git_ref,
+            "inputs": inputs
+        }))
+        .send()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    if res.status().is_success() {
+        Ok(())
+    } else {
+        Err(ServerFnError::new(format!("Failed: {}", res.status())))
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+#[server(input = Json, output = Json)]
+pub async fn create_event_rule(
+    name: String,
+    description: Option<String>,
+    webhook_id: String,
+    event_type_pattern: String,
+    condition_expr: Option<String>,
+    workflow_name: String,
+    repo_url: String,
+    workflow_path: String,
+    git_ref: String,
+    input_mappings: std::collections::HashMap<String, String>,
+) -> Result<(), ServerFnError> {
+    let cookie = require_auth().await?;
+    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{}/api/v1/rules", api_url))
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
+        .json(&serde_json::json!({
+            "name": name,
+            "description": description,
+            "webhook_id": webhook_id,
+            "event_type_pattern": event_type_pattern,
+            "condition_expr": condition_expr,
+            "workflow_name": workflow_name,
+            "repo_url": repo_url,
+            "workflow_path": workflow_path,
+            "git_ref": git_ref,
+            "input_mappings": input_mappings
+        }))
+        .send()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    if res.status().is_success() {
+        Ok(())
+    } else {
+        Err(ServerFnError::new(format!("Failed: {}", res.status())))
+    }
+}
+
+#[server(input = Json, output = Json)]
+pub async fn create_webhook(
+    name: String,
+    description: Option<String>,
+    source_type: String,
+    secret_token: Option<String>,
+) -> Result<(), ServerFnError> {
+    let cookie = require_auth().await?;
+    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{}/api/v1/webhooks", api_url))
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
+        .json(&serde_json::json!({
+            "name": name,
+            "description": description,
+            "source_type": source_type,
+            "secret_token": secret_token
+        }))
+        .send()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    if res.status().is_success() {
+        Ok(())
+    } else {
+        Err(ServerFnError::new(format!("Failed: {}", res.status())))
+    }
+}
