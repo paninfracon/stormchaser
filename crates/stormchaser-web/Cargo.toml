@@ -30,6 +30,8 @@ reqwest = { workspace = true, optional = true }
 serde_json = { workspace = true }
 urlencoding = "2.1"
 futures = { workspace = true, optional = true }
+stormchaser-dsl = { path = "../stormchaser-dsl", optional = true }
+stormchaser-model = { path = "../stormchaser-model" }
 
 [dependencies.web-sys]
 version = "0.3.72"
@@ -53,6 +55,7 @@ ssr = [
     "dep:leptos_axum",
     "dep:reqwest",
     "dep:futures",
+    "dep:stormchaser-dsl",
     "leptos/ssr",
     "leptos_meta/ssr",
     "leptos_router/ssr",

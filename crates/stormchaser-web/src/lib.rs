@@ -6,6 +6,7 @@ pub mod backends;
 pub mod cron;
 pub mod models;
 pub mod rules;
+pub mod run_modal;
 pub mod runs;
 pub mod webhooks;
 
