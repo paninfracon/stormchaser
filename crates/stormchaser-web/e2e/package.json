@@ -1,0 +1,14 @@
+{
+  "name": "stormchaser-web-e2e",
+  "version": "1.0.0",
+  "description": "E2E tests for stormchaser-web",
+  "scripts": {
+    "test": "playwright test",
+    "test:ui": "playwright test --ui",
+    "test:report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.44.0",
+    "@types/node": "^20.12.12"
+  }
+}

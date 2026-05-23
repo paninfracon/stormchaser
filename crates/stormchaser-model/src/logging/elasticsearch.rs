@@ -1,3 +1,4 @@
+#![cfg(not(target_arch = "wasm32"))]
 use crate::logging::LogBackend;
 use anyhow::Result;
 use chrono::Utc;

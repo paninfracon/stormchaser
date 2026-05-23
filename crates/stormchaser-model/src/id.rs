@@ -1,5 +1,6 @@
 use nutype::nutype;
 use schemars::{gen::SchemaGenerator, schema::Schema, JsonSchema};
+#[cfg(not(target_arch = "wasm32"))]
 use sqlx::{
     decode::Decode,
     encode::{Encode, IsNull},
@@ -10,12 +11,14 @@ use uuid::Uuid;
 
 macro_rules! impl_id_traits {
     ($t:ident) => {
+        #[cfg(not(target_arch = "wasm32"))]
         impl Type<Postgres> for $t {
             fn type_info() -> PgTypeInfo {
                 <Uuid as Type<Postgres>>::type_info()
             }
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
         impl<'r> Decode<'r, Postgres> for $t {
             fn decode(value: PgValueRef<'r>) -> Result<Self, sqlx::error::BoxDynError> {
                 let inner = <Uuid as Decode<'r, Postgres>>::decode(value)?;
@@ -23,6 +26,7 @@ macro_rules! impl_id_traits {
             }
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
         impl<'q> Encode<'q, Postgres> for $t {
             fn encode_by_ref(
                 &self,

@@ -3,11 +3,15 @@
 use crate::id::RunId;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+#[cfg(not(target_arch = "wasm32"))]
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
+#[cfg(not(target_arch = "wasm32"))]
 use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
 use tracing::debug;
 
 /// Extracted claims from a JWT token.
@@ -22,6 +26,7 @@ pub struct Claims {
 }
 
 /// Trait for executing Open Policy Agent (OPA) policies compiled to WebAssembly.
+#[cfg(not(target_arch = "wasm32"))]
 #[async_trait]
 pub trait OpaWasmExecutor: Send + Sync {
     /// Evaluates a WASM-compiled OPA policy against the given input.
@@ -29,6 +34,7 @@ pub trait OpaWasmExecutor: Send + Sync {
 }
 
 /// Client for interacting with an Open Policy Agent (OPA) server or WASM module.
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone)]
 pub struct OpaClient {
     url: Option<String>,
@@ -37,6 +43,7 @@ pub struct OpaClient {
     entrypoint: String,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl std::fmt::Debug for OpaClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OpaClient")
@@ -47,16 +54,19 @@ impl std::fmt::Debug for OpaClient {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Serialize)]
 struct OpaInput<T> {
     input: T,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Deserialize)]
 struct OpaResponse {
     result: bool,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl OpaClient {
     /// Creates a new OpaClient with the given URL and TLS configuration.
     pub fn new(url: Option<String>, tls_config: Option<Arc<rustls::ClientConfig>>) -> Self {
@@ -152,6 +162,7 @@ pub trait OpaAuthorizer: Send + Sync {
     fn is_configured(&self) -> bool;
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[async_trait]
 impl OpaAuthorizer for OpaClient {
     async fn check(&self, context: ApiOpaContext<'_>) -> Result<bool> {
@@ -217,7 +228,7 @@ pub struct ConnectionOpaContext<'a> {
     pub initiating_user: &'a str,
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
 
