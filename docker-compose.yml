@@ -233,6 +233,7 @@ services:
       dockerfile: Dockerfile.web
     environment:
       API_URL: http://orchestration-api:3000
+      QUERY_URL: http://orchestration-query:3001
       EXTERNAL_API_URL: http://localhost:${PORT_API:-3000}
       WEB_URL: http://localhost:${PORT_WEB:-3003}
       RUST_LOG: stormchaser_web=debug

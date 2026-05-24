@@ -102,10 +102,15 @@ pub async fn fetch_workflow_runs(
         .map_err(|e| ServerFnError::new(e.to_string()))?;
 
     if res.status().is_success() {
-        let runs = res
-            .json::<Vec<WorkflowRunDetail>>()
+        let text = res
+            .text()
             .await
             .map_err(|e| ServerFnError::new(e.to_string()))?;
+        println!("RAW RUNS JSON: {}", text);
+        let runs = serde_json::from_str::<Vec<WorkflowRunDetail>>(&text).map_err(|e| {
+            println!("DESERIALIZATION ERROR: {}", e);
+            ServerFnError::new(e.to_string())
+        })?;
         Ok(runs)
     } else {
         Err(ServerFnError::new(format!(
@@ -212,6 +217,47 @@ pub async fn fetch_connections() -> Result<Vec<crate::models::Connection>, Serve
 }
 
 #[server(input = Json, output = Json)]
+pub async fn test_connection(
+    connection_type: stormchaser_model::connections::ConnectionType,
+    config: serde_json::Value,
+) -> Result<(bool, String), ServerFnError> {
+    let cookie = require_auth().await?;
+    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+
+    let client = reqwest::Client::new();
+    let url = format!("{}/api/v1/connections/test", api_url);
+
+    let res = client
+        .post(&url)
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
+        .json(&serde_json::json!({
+            "connection_type": connection_type,
+            "config": config
+        }))
+        .send()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    if res.status().is_success() {
+        #[derive(serde::Deserialize)]
+        struct TestResp {
+            success: bool,
+            message: String,
+        }
+        let resp = res
+            .json::<TestResp>()
+            .await
+            .map_err(|e| ServerFnError::new(e.to_string()))?;
+        Ok((resp.success, resp.message))
+    } else {
+        Err(ServerFnError::new(format!(
+            "Failed to test connection: {}",
+            res.status()
+        )))
+    }
+}
+
+#[server(input = Json, output = Json)]
 pub async fn fetch_webhooks() -> Result<Vec<crate::models::WebhookConfig>, ServerFnError> {
     let cookie = require_auth().await?;
     let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
@@ -300,24 +346,32 @@ pub async fn fetch_cron_workflows() -> Result<Vec<crate::models::CronWorkflow>, 
 
 #[server(input = Json, output = Json)]
 pub async fn submit_run_git(
-    repo_url: String,
+    connection: String,
     workflow_path: String,
     git_ref: String,
+    inputs: serde_json::Value,
 ) -> Result<(), ServerFnError> {
     let cookie = require_auth().await?;
     let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
 
     let client = reqwest::Client::new();
-    let url = format!("{}/api/v1/runs/git", api_url);
+    let url = format!("{}/api/v1/runs", api_url);
+
+    let workflow_name = workflow_path
+        .split('/')
+        .next_back()
+        .unwrap_or("manual_run")
+        .to_string();
 
     let res = client
         .post(&url)
         .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
         .json(&serde_json::json!({
-            "repo_url": repo_url,
+            "workflow_name": workflow_name,
+            "connection": connection,
             "workflow_path": workflow_path,
             "git_ref": git_ref,
-            "inputs": {}
+            "inputs": inputs
         }))
         .send()
         .await
@@ -373,6 +427,45 @@ pub async fn submit_run_direct(
     }
 }
 
+#[server(input = Json, output = Json)]
+pub async fn fetch_dsl_from_git(
+    connection: String,
+    workflow_path: String,
+    git_ref: String,
+) -> Result<String, ServerFnError> {
+    let cookie = require_auth().await?;
+    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+
+    let client = reqwest::Client::new();
+    let url = format!("{}/api/v1/schema/parse-git", api_url);
+
+    let res = client
+        .post(&url)
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
+        .json(&serde_json::json!({
+            "connection": connection,
+            "workflow_path": workflow_path,
+            "git_ref": git_ref
+        }))
+        .send()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    if res.status().is_success() {
+        let text = res
+            .text()
+            .await
+            .map_err(|e| ServerFnError::new(e.to_string()))?;
+        tracing::info!("fetch_dsl_from_git returned DSL of length {}", text.len());
+        Ok(text)
+    } else {
+        Err(ServerFnError::new(format!(
+            "Failed to fetch DSL from git: {}",
+            res.status()
+        )))
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct ParseDslResult {
     pub inputs_schema: Option<serde_json::Value>,
@@ -391,7 +484,22 @@ pub async fn parse_dsl(dsl: String) -> Result<ParseDslResult, ServerFnError> {
                 let initial_inputs = serde_json::json!({});
                 let queries_val = serde_json::to_value(&workflow.queries).ok();
 
-                let inputs_schema = if let Some(schema) = workflow.inputs_schema {
+                let inputs_schema = if let Some(mut schema) = workflow.inputs_schema {
+                    if schema.get("properties").is_none() && schema.get("input").is_some() {
+                        let mut properties = serde_json::Map::new();
+                        if let Some(inputs_obj) = schema.get("input").and_then(|v| v.as_object()) {
+                            for (k, v) in inputs_obj {
+                                properties.insert(k.clone(), v.clone());
+                            }
+                        }
+                        if let Some(obj) = schema.as_object_mut() {
+                            obj.insert(
+                                "properties".to_string(),
+                                serde_json::Value::Object(properties),
+                            );
+                            obj.insert("type".to_string(), serde_json::json!("object"));
+                        }
+                    }
                     Some(schema)
                 } else if !workflow.inputs.is_empty() {
                     let mut properties = serde_json::Map::new();
@@ -423,6 +531,8 @@ pub async fn parse_dsl(dsl: String) -> Result<ParseDslResult, ServerFnError> {
                     None
                 };
 
+                tracing::info!("parse_dsl returning inputs_schema: {:?}", inputs_schema);
+
                 Ok(ParseDslResult {
                     inputs_schema,
                     inputs: initial_inputs,
@@ -446,7 +556,8 @@ pub async fn hydrate_schema_complete(
     queries: Option<serde_json::Value>,
 ) -> Result<(serde_json::Value, String, Vec<String>), ServerFnError> {
     let cookie = require_auth().await?;
-    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+    let query_url =
+        std::env::var("QUERY_URL").unwrap_or_else(|_| "http://127.0.0.1:3001".to_string());
 
     let client = reqwest::Client::new();
     let payload = if let Some(q) = queries {
@@ -456,7 +567,7 @@ pub async fn hydrate_schema_complete(
     };
 
     let res = client
-        .post(format!("{}/api/v1/schema/hydrate", api_url))
+        .post(format!("{}/api/v1/schema/hydrate", query_url))
         .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
         .json(&payload)
         .send()
@@ -559,7 +670,7 @@ pub async fn create_cron_workflow(
     description: Option<String>,
     cronspec: String,
     workflow_name: String,
-    repo_url: String,
+    connection: String,
     workflow_path: String,
     git_ref: String,
     inputs: serde_json::Value,
@@ -575,7 +686,7 @@ pub async fn create_cron_workflow(
             "description": description,
             "cronspec": cronspec,
             "workflow_name": workflow_name,
-            "repo_url": repo_url,
+            "connection": connection,
             "workflow_path": workflow_path,
             "git_ref": git_ref,
             "inputs": inputs
@@ -600,7 +711,7 @@ pub async fn create_event_rule(
     event_type_pattern: String,
     condition_expr: Option<String>,
     workflow_name: String,
-    repo_url: String,
+    connection: String,
     workflow_path: String,
     git_ref: String,
     input_mappings: std::collections::HashMap<String, String>,
@@ -618,7 +729,7 @@ pub async fn create_event_rule(
             "event_type_pattern": event_type_pattern,
             "condition_expr": condition_expr,
             "workflow_name": workflow_name,
-            "repo_url": repo_url,
+            "connection": connection,
             "workflow_path": workflow_path,
             "git_ref": git_ref,
             "input_mappings": input_mappings
@@ -653,6 +764,82 @@ pub async fn create_webhook(
             "source_type": source_type,
             "secret_token": secret_token
         }))
+        .send()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    if res.status().is_success() {
+        Ok(())
+    } else {
+        Err(ServerFnError::new(format!("Failed: {}", res.status())))
+    }
+}
+
+#[server(input = Json, output = Json)]
+pub async fn delete_connection(id: String) -> Result<(), ServerFnError> {
+    let cookie = require_auth().await?;
+    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+    let client = reqwest::Client::new();
+    let res = client
+        .delete(format!("{}/api/v1/connections/{}", api_url, id))
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
+        .send()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    if res.status().is_success() {
+        Ok(())
+    } else {
+        Err(ServerFnError::new(format!("Failed: {}", res.status())))
+    }
+}
+
+#[server(input = Json, output = Json)]
+pub async fn delete_cron_workflow(id: String) -> Result<(), ServerFnError> {
+    let cookie = require_auth().await?;
+    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+    let client = reqwest::Client::new();
+    let res = client
+        .delete(format!("{}/api/v1/cron-workflows/{}", api_url, id))
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
+        .send()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    if res.status().is_success() {
+        Ok(())
+    } else {
+        Err(ServerFnError::new(format!("Failed: {}", res.status())))
+    }
+}
+
+#[server(input = Json, output = Json)]
+pub async fn delete_event_rule(id: String) -> Result<(), ServerFnError> {
+    let cookie = require_auth().await?;
+    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+    let client = reqwest::Client::new();
+    let res = client
+        .delete(format!("{}/api/v1/rules/{}", api_url, id))
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
+        .send()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    if res.status().is_success() {
+        Ok(())
+    } else {
+        Err(ServerFnError::new(format!("Failed: {}", res.status())))
+    }
+}
+
+#[server(input = Json, output = Json)]
+pub async fn delete_webhook(id: String) -> Result<(), ServerFnError> {
+    let cookie = require_auth().await?;
+    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+    let client = reqwest::Client::new();
+    let res = client
+        .delete(format!("{}/api/v1/webhooks/{}", api_url, id))
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
         .send()
         .await
         .map_err(|e| ServerFnError::new(e.to_string()))?;

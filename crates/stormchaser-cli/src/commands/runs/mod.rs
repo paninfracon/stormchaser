@@ -53,7 +53,7 @@ pub enum RunCommands {
     Enqueue {
         workflow_name: String,
         #[arg(long)]
-        repo: String,
+        connection: String,
         #[arg(long)]
         path: String,
         #[arg(long)]
@@ -133,7 +133,7 @@ pub async fn handle(
         RunCommands::Watch { id } => watch::watch_run(url, token, http_client, id).await,
         RunCommands::Enqueue {
             workflow_name,
-            repo,
+            connection,
             path,
             git_ref,
             input,
@@ -146,7 +146,7 @@ pub async fn handle(
                 http_client,
                 enqueue::EnqueueRunParams {
                     workflow_name,
-                    repo,
+                    connection,
                     path,
                     git_ref,
                     input,
@@ -211,7 +211,7 @@ mod tests {
             RunCommands::Watch { id },
             RunCommands::Enqueue {
                 workflow_name: "test".to_string(),
-                repo: "test".to_string(),
+                connection: "test".to_string(),
                 path: "test".to_string(),
                 git_ref: "test".to_string(),
                 input: vec![],

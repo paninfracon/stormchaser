@@ -98,7 +98,7 @@ pub fn WorkflowRunsList() -> impl IntoView {
         });
 
         on_cleanup(move || {
-            std::mem::drop(_sse_effect);
+            let _ = _sse_effect;
         });
     }
 
@@ -248,7 +248,7 @@ fn RunDetailsPanel(
         });
 
         on_cleanup(move || {
-            std::mem::drop(_status_sse_effect);
+            let _ = _status_sse_effect;
         });
     }
 
@@ -691,7 +691,7 @@ fn RunsFilterPanel(
                             {statuses.into_iter().map(|s| {
                                 let s_clone = s.to_string();
                                 view! {
-                                    <option value=s selected=move || local_status.get() == s_clone>
+                                    <option value=s selected=move || local_status.get() == s_clone style="background: var(--surface-elevated); color: var(--text-primary);">
                                         {s}
                                     </option>
                                 }

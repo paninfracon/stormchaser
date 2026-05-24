@@ -1,6 +1,4 @@
-use crate::api::{
-    hydrate_schema_complete, parse_dsl, submit_run_direct, submit_run_git, ParseDslResult,
-};
+use crate::api::{hydrate_schema_complete, parse_dsl, ParseDslResult};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
@@ -47,63 +45,148 @@ pub fn CreateRunModal(on_close: Callback<()>, on_success: Callback<()>) -> impl 
 
 #[component]
 fn GitRunForm(on_success: Callback<()>) -> impl IntoView {
-    let (repo_url, set_repo_url) = signal(String::new());
+    let connections_res = Resource::new(
+        || (),
+        |_| async { crate::api::fetch_connections().await.unwrap_or_default() },
+    );
+
+    let (selected_connection, set_selected_connection) = signal(String::new());
     let (workflow_path, set_workflow_path) = signal(String::new());
     let (git_ref, set_git_ref) = signal(String::new());
-    let (error_msg, set_error_msg) = signal(Option::<String>::None);
-    let (is_submitting, set_is_submitting) = signal(false);
 
-    let submit = move |_| {
-        if repo_url.get().is_empty() || workflow_path.get().is_empty() || git_ref.get().is_empty() {
+    let (parsed_data, set_parsed_data) = signal(Option::<ParseDslResult>::None);
+    let (error_msg, set_error_msg) = signal(Option::<String>::None);
+    let (is_loading, set_is_loading) = signal(false);
+
+    let load_form = move |_| {
+        if selected_connection.get().is_empty()
+            || workflow_path.get().is_empty()
+            || git_ref.get().is_empty()
+        {
             set_error_msg.set(Some("All fields are required.".to_string()));
             return;
         }
 
-        set_is_submitting.set(true);
+        set_is_loading.set(true);
         set_error_msg.set(None);
 
-        let url = repo_url.get();
+        let conn = selected_connection.get();
         let path = workflow_path.get();
         let reference = git_ref.get();
 
         spawn_local(async move {
-            match submit_run_git(url, path, reference).await {
+            match crate::api::fetch_dsl_from_git(conn.clone(), path, reference).await {
+                Ok(dsl_content) => match parse_dsl(dsl_content).await {
+                    Ok(res) => set_parsed_data.set(Some(res)),
+                    Err(e) => set_error_msg.set(Some(format!("Failed to parse DSL: {}", e))),
+                },
+                Err(e) => set_error_msg.set(Some(e.to_string())),
+            }
+            set_is_loading.set(false);
+        });
+    };
+
+    let submit = move |inputs: serde_json::Value| {
+        let conn = selected_connection.get();
+        let path = workflow_path.get();
+        let reference = git_ref.get();
+
+        spawn_local(async move {
+            match crate::api::submit_run_git(conn, path, reference, inputs).await {
                 Ok(_) => on_success.run(()),
                 Err(e) => set_error_msg.set(Some(e.to_string())),
             }
-            set_is_submitting.set(false);
         });
     };
 
     view! {
-        <div style="display: flex; flex-direction: column; gap: 1rem;">
-            {move || error_msg.get().map(|msg| view! {
-                <div style="padding: 1rem; background: rgba(255, 59, 48, 0.1); color: var(--status-error); border-radius: 8px; border: 1px solid var(--status-error);">
-                    {msg}
-                </div>
-            })}
-            <div style="display: flex; flex-direction: column; gap: 0.5rem;">
-                <label>"Repository URL"</label>
-                <input type="text" placeholder="https://github.com/..." class="input-field" style="padding: 0.75rem; border-radius: 4px; border: 1px solid var(--surface-border); background: var(--surface-elevated); color: var(--text-primary); width: 100%;" on:input=move |ev| set_repo_url.set(event_target_value(&ev)) />
-            </div>
-            <div style="display: flex; flex-direction: column; gap: 0.5rem;">
-                <label>"Workflow Path"</label>
-                <input type="text" placeholder=".stormchaser/workflows/main.storm" class="input-field" style="padding: 0.75rem; border-radius: 4px; border: 1px solid var(--surface-border); background: var(--surface-elevated); color: var(--text-primary); width: 100%;" on:input=move |ev| set_workflow_path.set(event_target_value(&ev)) />
-            </div>
-            <div style="display: flex; flex-direction: column; gap: 0.5rem;">
-                <label>"Git Ref (Branch/Tag/Commit)"</label>
-                <input type="text" placeholder="main" class="input-field" style="padding: 0.75rem; border-radius: 4px; border: 1px solid var(--surface-border); background: var(--surface-elevated); color: var(--text-primary); width: 100%;" on:input=move |ev| set_git_ref.set(event_target_value(&ev)) />
-            </div>
+        <div style="display: flex; flex-direction: column; gap: 1rem; height: 100%;">
+            {move || if parsed_data.get().is_none() {
+                view! {
+                    <div style="display: flex; flex-direction: column; gap: 1rem; flex: 1;">
+                        {move || error_msg.get().map(|msg| view! {
+                            <div style="padding: 1rem; background: rgba(255, 59, 48, 0.1); color: var(--status-error); border-radius: 8px; border: 1px solid var(--status-error);">
+                                {msg}
+                            </div>
+                        })}
+                        <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                            <label>"Git Connection"</label>
+                            <Suspense fallback=|| view! { <div>"Loading connections..."</div> }>
+                                {move || {
+                                    let conns = connections_res.get().unwrap_or_default();
+                                    let git_conns: Vec<_> = conns.into_iter().filter(|c| matches!(c.connection_type, crate::models::ConnectionType::Git)).collect();
 
-            <div style="display: flex; justify-content: flex-end; margin-top: 1rem;">
-                <button
-                    style="padding: 0.75rem 1.5rem; border-radius: 4px; border: none; background: var(--primary-color); color: white; cursor: pointer; font-weight: 500;"
-                    disabled=move || is_submitting.get()
-                    on:click=submit
-                >
-                    {move || if is_submitting.get() { "Submitting..." } else { "Create Run" }}
-                </button>
-            </div>
+                                    view! {
+                                        <select
+                                            class="input-field"
+                                            style="padding: 0.75rem; border-radius: 4px; border: 1px solid var(--surface-border); background: var(--surface-elevated); color: var(--text-primary); width: 100%;"
+                                            on:change=move |ev| set_selected_connection.set(event_target_value(&ev))
+                                        >
+                                            <option value="" disabled=true selected=move || selected_connection.get().is_empty()>"Select a connection"</option>
+                                            {git_conns.into_iter().map(|c| {
+                                                let id_str = c.id.to_string();
+                                                view! {
+                                                    <option value={id_str.clone()} selected=move || selected_connection.get() == id_str>
+                                                        {c.name}
+                                                    </option>
+                                                }
+                                            }).collect::<Vec<_>>()}
+                                        </select>
+                                    }
+                                }}
+                            </Suspense>
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                            <label>"Workflow Path"</label>
+                            <input type="text" placeholder=".stormchaser/workflows/main.storm" class="input-field" style="padding: 0.75rem; border-radius: 4px; border: 1px solid var(--surface-border); background: var(--surface-elevated); color: var(--text-primary); width: 100%;" on:input=move |ev| set_workflow_path.set(event_target_value(&ev)) />
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                            <label>"Git Ref (Branch/Tag/Commit)"</label>
+                            <input type="text" placeholder="main" class="input-field" style="padding: 0.75rem; border-radius: 4px; border: 1px solid var(--surface-border); background: var(--surface-elevated); color: var(--text-primary); width: 100%;" on:input=move |ev| set_git_ref.set(event_target_value(&ev)) />
+                        </div>
+
+                        <div style="display: flex; justify-content: flex-end; margin-top: 1rem;">
+                            <button
+                                style="padding: 0.75rem 1.5rem; border-radius: 4px; border: none; background: var(--primary-color); color: white; cursor: pointer; font-weight: 500;"
+                                disabled=move || is_loading.get()
+                                on:click=load_form
+                            >
+                                {move || if is_loading.get() { "Loading Form..." } else { "Load Form" }}
+                            </button>
+                        </div>
+                    </div>
+                }.into_any()
+            } else {
+                let pd = parsed_data.get().unwrap();
+                view! {
+                    <div style="display: flex; flex-direction: column; gap: 1rem; flex: 1; min-height: 0;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <h3 style="margin: 0;">"Configure Run"</h3>
+                            <button
+                                style="background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 0.5rem;"
+                                on:click=move |_| set_parsed_data.set(None)
+                            >
+                                "← Back"
+                            </button>
+                        </div>
+                        {move || error_msg.get().map(|msg| view! {
+                            <div style="padding: 1rem; background: rgba(255, 59, 48, 0.1); color: var(--status-error); border-radius: 8px; border: 1px solid var(--status-error);">
+                                {msg}
+                            </div>
+                        })}
+                        <div style="flex: 1; overflow-y: auto; padding-right: 0.5rem;" class="custom-scrollbar">
+                            <SchemaForm
+                                base_schema=pd.inputs_schema
+                                initial_inputs=pd.inputs
+                                queries=pd.queries
+                                inputs_view=pd.inputs_view
+                                on_submit=Callback::new(submit)
+                                on_back=Callback::new(move |_| set_parsed_data.set(None))
+                            />
+                        </div>
+                    </div>
+                }.into_any()
+            }}
         </div>
     }
 }
@@ -167,12 +250,19 @@ fn DirectRunForm(on_success: Callback<()>) -> impl IntoView {
                 let data = parsed_data.get().unwrap();
                 view! {
                     <SchemaForm
-                        dsl=dsl
                         base_schema=data.inputs_schema.clone()
                         initial_inputs=data.inputs.clone()
                         queries=data.queries.clone()
                         inputs_view=data.inputs_view.clone()
-                        on_success=on_success
+                        on_submit=Callback::new(move |final_inputs| {
+                            let current_dsl = dsl.get();
+                            spawn_local(async move {
+                                match crate::api::submit_run_direct(current_dsl, final_inputs).await {
+                                    Ok(_) => on_success.run(()),
+                                    Err(e) => set_error_msg.set(Some(e.to_string())),
+                                }
+                            });
+                        })
                         on_back=Callback::new(move |_| set_parsed_data.set(None))
                     />
                 }.into_any()
@@ -183,12 +273,11 @@ fn DirectRunForm(on_success: Callback<()>) -> impl IntoView {
 
 #[component]
 fn SchemaForm(
-    #[prop(into)] dsl: Signal<String>,
     base_schema: Option<serde_json::Value>,
     initial_inputs: serde_json::Value,
     queries: Option<serde_json::Value>,
     inputs_view: Option<stormchaser_model::dsl::InputView>,
-    on_success: Callback<()>,
+    on_submit: Callback<serde_json::Value>,
     on_back: Callback<()>,
 ) -> impl IntoView {
     let (inputs, set_inputs) = signal(initial_inputs.clone());
@@ -197,10 +286,8 @@ fn SchemaForm(
             .clone()
             .unwrap_or_else(|| serde_json::json!({"type": "object", "properties": {}})),
     );
-    let (hydration_status, set_hydration_status) = signal("Ready".to_string());
+    let (hydration_status, set_hydration_status) = signal("Pending".to_string());
     let (validation_errors, set_validation_errors) = signal(Vec::<String>::new());
-    let (is_submitting, set_is_submitting) = signal(false);
-    let (error_msg, set_error_msg) = signal(Option::<String>::None);
 
     // Auto-hydrate on mount
     let schema_clone = base_schema.clone();
@@ -232,19 +319,8 @@ fn SchemaForm(
     });
 
     let submit = move |_| {
-        set_is_submitting.set(true);
-        set_error_msg.set(None);
-
-        let current_dsl = dsl.get();
         let current_inputs = inputs.get();
-
-        spawn_local(async move {
-            match submit_run_direct(current_dsl, current_inputs).await {
-                Ok(_) => on_success.run(()),
-                Err(e) => set_error_msg.set(Some(e.to_string())),
-            }
-            set_is_submitting.set(false);
-        });
+        on_submit.run(current_inputs);
     };
 
     let update_input = move |key: String, value: String| {
@@ -257,11 +333,6 @@ fn SchemaForm(
 
     view! {
         <div style="display: flex; flex-direction: column; gap: 1rem; height: 100%;">
-            {move || error_msg.get().map(|msg| view! {
-                <div style="padding: 1rem; background: rgba(255, 59, 48, 0.1); color: var(--status-error); border-radius: 8px; border: 1px solid var(--status-error);">
-                    {msg}
-                </div>
-            })}
 
             <div style="display: flex; justify-content: space-between; align-items: center; background: var(--surface-elevated); padding: 0.75rem 1rem; border-radius: 4px; border: 1px solid var(--surface-border);">
                 <span style="font-weight: 500;">"Workflow Inputs"</span>
@@ -398,10 +469,10 @@ fn SchemaForm(
                 </button>
                 <button
                     style="padding: 0.75rem 1.5rem; border-radius: 4px; border: none; background: var(--primary-color); color: white; cursor: pointer; font-weight: 500;"
-                    disabled=move || is_submitting.get() || hydration_status.get() != "Completed"
+                    disabled=move || hydration_status.get() != "Completed"
                     on:click=submit
                 >
-                    {move || if is_submitting.get() { "Submitting..." } else { "Create Run" }}
+                    "Create Run"
                 </button>
             </div>
         </div>

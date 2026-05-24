@@ -99,11 +99,30 @@ pub fn Layout() -> impl IntoView {
                     <button class="btn" style="background: transparent; color: var(--text-primary); border: 1px solid var(--surface-border);" on:click=toggle_theme>
                         {move || if is_dark.get() { "☀️ Light Mode" } else { "🌙 Dark Mode" }}
                     </button>
-                    <Suspense fallback=|| view! { <a href="/auth/login" class="btn" rel="external">"Login with Dex"</a> }>
-                        <a href="/auth/logout" class="btn" rel="external">
-                            "Logout"
-                        </a>
-                    </Suspense>
+                    {
+                        let auth_res = Resource::new(|| (), |_| async move {
+                            crate::api::check_auth().await.unwrap_or(false)
+                        });
+                        view! {
+                            <Suspense fallback=|| view! { <span>"..."</span> }>
+                                {move || {
+                                    if auth_res.get().unwrap_or(false) {
+                                        view! {
+                                            <a href="/auth/logout" class="btn" rel="external">
+                                                "Logout"
+                                            </a>
+                                        }.into_any()
+                                    } else {
+                                        view! {
+                                            <a href="/auth/login" class="btn" rel="external">
+                                                "Login with Dex"
+                                            </a>
+                                        }.into_any()
+                                    }
+                                }}
+                            </Suspense>
+                        }
+                    }
                 </div>
             </div>
 

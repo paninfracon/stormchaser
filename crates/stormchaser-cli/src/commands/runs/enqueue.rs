@@ -5,7 +5,7 @@ use serde_json::json;
 
 pub struct EnqueueRunParams {
     pub workflow_name: String,
-    pub repo: String,
+    pub connection: String,
     pub path: String,
     pub git_ref: String,
     pub input: Vec<String>,
@@ -26,7 +26,7 @@ pub async fn enqueue_run(
         .header(AUTHORIZATION, format!("Bearer {}", token_str))
         .json(&json!({
             "workflow_name": params.workflow_name,
-            "repo_url": params.repo,
+            "connection": params.connection,
             "workflow_path": params.path,
             "git_ref": params.git_ref,
             "inputs": inputs,
@@ -61,8 +61,8 @@ mod tests {
         let client = ClientBuilder::new(reqwest::Client::new()).build();
         let params = EnqueueRunParams {
             workflow_name: "test".to_string(),
-            repo: "http://git".to_string(),
-            path: "workflow.yaml".to_string(),
+            connection: "http://git".to_string(),
+            path: "main.storm".to_string(),
             git_ref: "main".to_string(),
             input: vec![],
             tail: false,

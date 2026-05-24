@@ -52,9 +52,17 @@ async fn test_api_enqueue_inserts_quotas() {
         api_base_url: "http://localhost:3000".to_string(),
     };
 
+    let conn_id = Uuid::new_v4();
+    let conn_name = format!("test-quota-conn-{}", conn_id);
+    sqlx::query("INSERT INTO connections (id, name, connection_type, config) VALUES ($1, $2, 'git', '{\"repo_url\": \"http://example.com\"}')")
+        .bind(conn_id)
+        .bind(conn_name)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
     let app = app(state);
 
-    // Generate token
     let claims = Claims {
         sub: "test-user".to_string(),
         email: Some("test-user@paninfracon.net".to_string()),
@@ -71,7 +79,7 @@ async fn test_api_enqueue_inserts_quotas() {
 
     let payload = json!({
         "workflow_name": format!("test-quota-api-{}", run_id_marker),
-        "repo_url": "http://example.com",
+        "connection": conn_id.to_string(),
         "workflow_path": "test.storm",
         "git_ref": "main",
         "inputs": {}

@@ -4,7 +4,10 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 #[component]
-pub fn WebhooksTable(webhooks: Vec<WebhookConfig>) -> impl IntoView {
+pub fn WebhooksTable(
+    webhooks: Vec<WebhookConfig>,
+    on_delete_success: Callback<()>,
+) -> impl IntoView {
     if webhooks.is_empty() {
         return view! {
             <div style="padding: 2rem; text-align: center; color: var(--text-secondary);">
@@ -23,6 +26,7 @@ pub fn WebhooksTable(webhooks: Vec<WebhookConfig>) -> impl IntoView {
                     <th style="padding: 1rem; border-bottom: 1px solid var(--surface-border); text-align: left; font-weight: 600; color: var(--text-secondary);">"Description"</th>
                     <th style="padding: 1rem; border-bottom: 1px solid var(--surface-border); text-align: left; font-weight: 600; color: var(--text-secondary);">"Status"</th>
                     <th style="padding: 1rem; border-bottom: 1px solid var(--surface-border); text-align: right; font-weight: 600; color: var(--text-secondary);">"Last Updated"</th>
+                    <th style="padding: 1rem; border-bottom: 1px solid var(--surface-border); text-align: right; font-weight: 600; color: var(--text-secondary);">"Actions"</th>
                 </tr>
             </thead>
             <tbody>
@@ -49,6 +53,31 @@ pub fn WebhooksTable(webhooks: Vec<WebhookConfig>) -> impl IntoView {
                             </td>
                             <td style="padding: 1rem; border-bottom: 1px solid var(--surface-border); text-align: right; color: var(--text-secondary); font-variant-numeric: tabular-nums;">
                                 {wh.updated_at.format("%Y-%m-%d %H:%M:%S").to_string()}
+                            </td>
+                            <td style="padding: 1rem; border-bottom: 1px solid var(--surface-border); text-align: right;">
+                                <button
+                                    class="icon-btn"
+                                    style="color: var(--status-error); padding: 0.25rem;"
+                                    title="Delete"
+                                    on:click={
+                                        let id = wh.id.to_string();
+                                        let on_success = on_delete_success;
+                                        move |_| {
+                                            let id = id.clone();
+                                            spawn_local(async move {
+                                                if crate::api::delete_webhook(id).await.is_ok() {
+                                                    on_success.run(());
+                                                }
+                                            });
+                                        }
+                                    }
+                                >
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M3 6h18"></path>
+                                        <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+                                        <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
+                                    </svg>
+                                </button>
                             </td>
                         </tr>
                     }
@@ -214,7 +243,7 @@ pub fn WebhooksList() -> impl IntoView {
                 <Suspense fallback=|| view! { <div style="padding: 2rem; text-align: center; color: var(--text-secondary);">"Loading webhooks..."</div> }>
                     {move || match webhooks_resource.get() {
                         Some(Ok(webhooks)) => view! {
-                            <WebhooksTable webhooks=webhooks />
+                            <WebhooksTable webhooks=webhooks on_delete_success=Callback::new(move |_| webhooks_resource.refetch()) />
                         }.into_any(),
                         Some(Err(e)) => view! {
                             <div style="padding: 2rem; text-align: center; color: var(--status-error);">

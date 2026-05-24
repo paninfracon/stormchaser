@@ -88,6 +88,7 @@ pub async fn insert_cron_workflow(
     pool: &PgPool,
     id: CronWorkflowId,
     payload: &crate::routes::CreateCronWorkflowRequest,
+    repo_url: &str,
     secret_token: &str,
     external_job_id: Option<String>,
 ) -> Result<(), sqlx::Error> {
@@ -102,7 +103,7 @@ pub async fn insert_cron_workflow(
     .bind(&payload.description)
     .bind(&payload.cronspec)
     .bind(&payload.workflow_name)
-    .bind(&payload.repo_url)
+    .bind(repo_url)
     .bind(&payload.workflow_path)
     .bind(&payload.git_ref)
     .bind(&payload.inputs)

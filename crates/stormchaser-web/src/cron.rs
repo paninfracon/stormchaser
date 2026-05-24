@@ -4,7 +4,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 #[component]
-pub fn CronTable(crons: Vec<CronWorkflow>) -> impl IntoView {
+pub fn CronTable(crons: Vec<CronWorkflow>, on_delete_success: Callback<()>) -> impl IntoView {
     if crons.is_empty() {
         return view! {
             <div style="padding: 2rem; text-align: center; color: var(--text-secondary);">
@@ -23,6 +23,7 @@ pub fn CronTable(crons: Vec<CronWorkflow>) -> impl IntoView {
                     <th style="padding: 1rem; border-bottom: 1px solid var(--surface-border); text-align: left; font-weight: 600; color: var(--text-secondary);">"Workflow"</th>
                     <th style="padding: 1rem; border-bottom: 1px solid var(--surface-border); text-align: left; font-weight: 600; color: var(--text-secondary);">"Status"</th>
                     <th style="padding: 1rem; border-bottom: 1px solid var(--surface-border); text-align: right; font-weight: 600; color: var(--text-secondary);">"Last Updated"</th>
+                    <th style="padding: 1rem; border-bottom: 1px solid var(--surface-border); text-align: right; font-weight: 600; color: var(--text-secondary);">"Actions"</th>
                 </tr>
             </thead>
             <tbody>
@@ -50,6 +51,31 @@ pub fn CronTable(crons: Vec<CronWorkflow>) -> impl IntoView {
                             <td style="padding: 1rem; border-bottom: 1px solid var(--surface-border); text-align: right; color: var(--text-secondary); font-variant-numeric: tabular-nums;">
                                 {cron.updated_at.format("%Y-%m-%d %H:%M:%S").to_string()}
                             </td>
+                            <td style="padding: 1rem; border-bottom: 1px solid var(--surface-border); text-align: right;">
+                                <button
+                                    class="icon-btn"
+                                    style="color: var(--status-error); padding: 0.25rem;"
+                                    title="Delete"
+                                    on:click={
+                                        let id = cron.id.to_string();
+                                        let on_success = on_delete_success;
+                                        move |_| {
+                                            let id = id.clone();
+                                            spawn_local(async move {
+                                                if crate::api::delete_cron_workflow(id).await.is_ok() {
+                                                    on_success.run(());
+                                                }
+                                            });
+                                        }
+                                    }
+                                >
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M3 6h18"></path>
+                                        <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+                                        <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
+                                    </svg>
+                                </button>
+                            </td>
                         </tr>
                     }
                 }).collect_view()}
@@ -66,7 +92,7 @@ pub fn CreateCronModal(on_close: Callback<()>, on_success: Callback<()>) -> impl
     let (cronspec, set_cronspec) = signal(String::new());
 
     let (workflow_name, set_workflow_name) = signal(String::new());
-    let (repo_url, set_repo_url) = signal(String::new());
+    let (selected_connection, set_selected_connection) = signal(String::new());
     let (workflow_path, set_workflow_path) = signal(String::new());
     let (git_ref, set_git_ref) = signal(String::new());
 
@@ -75,11 +101,16 @@ pub fn CreateCronModal(on_close: Callback<()>, on_success: Callback<()>) -> impl
     let (is_submitting, set_is_submitting) = signal(false);
     let (error_message, set_error_message) = signal(Option::<String>::None);
 
+    let connections_res = Resource::new(
+        || (),
+        |_| async { crate::api::fetch_connections().await.unwrap_or_default() },
+    );
+
     let submit = move |_| {
         if name.get().is_empty()
             || cronspec.get().is_empty()
             || workflow_name.get().is_empty()
-            || repo_url.get().is_empty()
+            || selected_connection.get().is_empty()
             || workflow_path.get().is_empty()
             || git_ref.get().is_empty()
         {
@@ -107,12 +138,12 @@ pub fn CreateCronModal(on_close: Callback<()>, on_success: Callback<()>) -> impl
         let desc = if d.is_empty() { None } else { Some(d) };
         let c = cronspec.get();
         let w_n = workflow_name.get();
-        let r_u = repo_url.get();
+        let conn = selected_connection.get();
         let w_p = workflow_path.get();
         let g_r = git_ref.get();
 
         spawn_local(async move {
-            match create_cron_workflow(n, desc, c, w_n, r_u, w_p, g_r, inputs_val).await {
+            match create_cron_workflow(n, desc, c, w_n, conn, w_p, g_r, inputs_val).await {
                 Ok(_) => {
                     set_is_submitting.set(false);
                     on_success.run(());
@@ -170,8 +201,30 @@ pub fn CreateCronModal(on_close: Callback<()>, on_success: Callback<()>) -> impl
                             <input type="text" class="input-field" prop:value=workflow_name on:input=move |ev| set_workflow_name.set(event_target_value(&ev)) />
                         </div>
                         <div class="form-group">
-                            <label class="form-label">"Repository URL *"</label>
-                            <input type="text" class="input-field" prop:value=repo_url on:input=move |ev| set_repo_url.set(event_target_value(&ev)) />
+                            <label class="form-label">"Git Connection *"</label>
+                            <Suspense fallback=|| view! { <div>"Loading connections..."</div> }>
+                                {move || {
+                                    let conns = connections_res.get().unwrap_or_default();
+                                    let git_conns: Vec<_> = conns.into_iter().filter(|c| matches!(c.connection_type, crate::models::ConnectionType::Git)).collect();
+
+                                    view! {
+                                        <select
+                                            class="input-field"
+                                            on:change=move |ev| set_selected_connection.set(event_target_value(&ev))
+                                        >
+                                            <option value="" disabled=true selected=move || selected_connection.get().is_empty()>"Select a connection"</option>
+                                            {git_conns.into_iter().map(|c| {
+                                                let id_str = c.id.to_string();
+                                                view! {
+                                                    <option value={id_str.clone()} selected=move || selected_connection.get() == id_str>
+                                                        {c.name}
+                                                    </option>
+                                                }
+                                            }).collect_view()}
+                                        </select>
+                                    }
+                                }}
+                            </Suspense>
                         </div>
                     </div>
 
@@ -240,7 +293,7 @@ pub fn CronList() -> impl IntoView {
                 <Suspense fallback=|| view! { <div style="padding: 2rem; text-align: center; color: var(--text-secondary);">"Loading cron workflows..."</div> }>
                     {move || match crons_resource.get() {
                         Some(Ok(crons)) => view! {
-                            <CronTable crons=crons />
+                            <CronTable crons=crons on_delete_success=Callback::new(move |_| crons_resource.refetch()) />
                         }.into_any(),
                         Some(Err(e)) => view! {
                             <div style="padding: 2rem; text-align: center; color: var(--status-error);">

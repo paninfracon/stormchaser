@@ -16,10 +16,7 @@ use stormchaser_model::connections::ArtifactRegistry;
 use stormchaser_model::ConnectionId;
 use stormchaser_model::RunId;
 use stormchaser_model::TestReportId;
-use tokio::time::timeout;
-
 const HTTP_TEST_TIMEOUT: Duration = Duration::from_secs(10);
-const GIT_TEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Creates a storage backend.
 #[utoipa::path(
@@ -232,35 +229,23 @@ pub async fn test_connection(
                 .get("url")
                 .and_then(|v| v.as_str())
                 .or_else(|| payload.config.get("repo").and_then(|v| v.as_str()))
+                .or_else(|| payload.config.get("repo_url").and_then(|v| v.as_str()))
             {
-                let mut cmd = tokio::process::Command::new("git");
-                cmd.arg("ls-remote").arg(url);
-                cmd.kill_on_drop(true);
-
-                // Note: Full auth injection (SSH keys, etc.) is complex here without writing files.
                 // We'll just test if the repo is reachable.
-                match cmd.spawn() {
-                    Ok(mut child) => match timeout(GIT_TEST_TIMEOUT, child.wait()).await {
-                        Ok(Ok(status)) if status.success() => {
-                            (true, "Successfully reached Git repository".to_string())
+                match git2::Remote::create_detached(url) {
+                    Ok(mut remote) => {
+                        let cb = git2::RemoteCallbacks::new();
+                        match remote.connect_auth(git2::Direction::Fetch, Some(cb), None) {
+                            Ok(_) => (true, "Successfully reached Git repository".to_string()),
+                            Err(e) => {
+                                (false, format!("Failed to connect to Git repository: {}", e))
+                            }
                         }
-                        Ok(Ok(status)) => {
-                            (false, format!("Git command exited with status: {}", status))
-                        }
-                        Ok(Err(e)) => (false, format!("Failed while waiting for git: {}", e)),
-                        Err(_) => {
-                            let _ = child.start_kill();
-                            let _ = timeout(Duration::from_secs(3), child.wait()).await;
-                            (
-                                false,
-                                format!(
-                                    "Git connection test timed out after {}s",
-                                    GIT_TEST_TIMEOUT.as_secs()
-                                ),
-                            )
-                        }
-                    },
-                    Err(e) => (false, format!("Failed to execute git: {}", e)),
+                    }
+                    Err(e) => (
+                        false,
+                        format!("Failed to create detached Git remote: {}", e),
+                    ),
                 }
             } else {
                 (false, "Missing repo url".to_string())

@@ -61,13 +61,46 @@ pub async fn enqueue_workflow(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
+    let conn = if let Ok(id) = uuid::Uuid::parse_str(&payload.connection) {
+        crate::db::get_connection(&mut *tx, stormchaser_model::ConnectionId::new(id))
+            .await
+            .map_err(|_| StatusCode::NOT_FOUND)?
+            .ok_or(StatusCode::NOT_FOUND)?
+    } else {
+        crate::db::get_connection_by_name(&mut *tx, &payload.connection)
+            .await
+            .map_err(|_| StatusCode::NOT_FOUND)?
+            .ok_or(StatusCode::NOT_FOUND)?
+    };
+
+    if conn.connection_type != stormchaser_model::connections::ConnectionType::Git {
+        tracing::error!("Connection {} is not a Git connection", payload.connection);
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let repo_url = conn
+        .config
+        .get("repo_url")
+        .and_then(|v| v.as_str())
+        .or_else(|| conn.config.get("url").and_then(|v| v.as_str()))
+        .unwrap_or("")
+        .to_string();
+
+    if repo_url.is_empty() {
+        tracing::error!(
+            "Git connection {} is missing repo_url in config",
+            payload.connection
+        );
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     // Create WorkflowRun with initiating_user
     db::insert_workflow_run(
         &mut tx,
         run_id,
         &payload.workflow_name,
         &user_id,
-        &payload.repo_url,
+        &repo_url,
         &payload.workflow_path,
         &payload.git_ref,
         RunStatus::Queued,

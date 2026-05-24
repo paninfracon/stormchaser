@@ -46,6 +46,34 @@ pub async fn create_cron_workflow(
     let id = CronWorkflowId::new_v4();
     let secret_token = CronWorkflowId::new_v4().to_string();
 
+    let conn = if let Ok(id) = uuid::Uuid::parse_str(&payload.connection) {
+        crate::db::get_connection(&state.pool, stormchaser_model::ConnectionId::new(id))
+            .await
+            .map_err(|_| StatusCode::NOT_FOUND)?
+            .ok_or(StatusCode::NOT_FOUND)?
+    } else {
+        crate::db::get_connection_by_name(&state.pool, &payload.connection)
+            .await
+            .map_err(|_| StatusCode::NOT_FOUND)?
+            .ok_or(StatusCode::NOT_FOUND)?
+    };
+
+    let repo_url = conn
+        .config
+        .get("repo_url")
+        .and_then(|v| v.as_str())
+        .or_else(|| conn.config.get("url").and_then(|v| v.as_str()))
+        .unwrap_or("")
+        .to_string();
+
+    if repo_url.is_empty() {
+        tracing::error!(
+            "Git connection {} is missing repo_url in config",
+            payload.connection
+        );
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     // 1. Register with external cron engine
     let external_job_id =
         register_external_cron(id, &payload.name, &payload.cronspec, &secret_token).await?;
@@ -55,6 +83,7 @@ pub async fn create_cron_workflow(
         &state.pool,
         id,
         &payload,
+        &repo_url,
         &secret_token,
         external_job_id.clone(),
     )

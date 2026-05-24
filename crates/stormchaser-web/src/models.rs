@@ -69,18 +69,22 @@ impl From<StepStatus> for String {
 /// A summary of a workflow run, used for list views.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct WorkflowRunDetail {
-    /// Unique identifier for the run.
     pub id: RunId,
-    /// Name of the workflow.
     pub workflow_name: String,
-    /// The user who initiated the run.
     pub initiating_user: String,
-    /// The current status of the run.
+    pub repo_url: String,
+    pub workflow_path: String,
+    pub git_ref: String,
     pub status: RunStatus,
-    /// The time the run was created.
+    pub version: i32,
     pub created_at: DateTime<Utc>,
-    /// The time the run finished, if it has completed.
+    pub updated_at: DateTime<Utc>,
+    pub started_resolving_at: Option<DateTime<Utc>>,
+    pub started_at: Option<DateTime<Utc>>,
     pub finished_at: Option<DateTime<Utc>>,
+    pub error: Option<String>,
+    pub inputs: Value,
+    pub secrets: Value,
 }
 
 /// Detailed information about a single step within a workflow run.
