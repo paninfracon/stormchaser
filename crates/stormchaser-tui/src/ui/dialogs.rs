@@ -137,7 +137,11 @@ pub(crate) fn render_schedule_git_dialog(f: &mut Frame, app: &mut App) {
         )
         .split(area);
 
-    let labels = ["Repo URL:", "Workflow Path:", "Git Ref (branch/tag/sha):"];
+    let labels = [
+        "Git Connection (Name or ID):",
+        "Workflow Path:",
+        "Git Ref (branch/tag/sha):",
+    ];
 
     for i in 0..3 {
         let mut text_area = app.schedule_git_inputs[i].clone();

@@ -22,21 +22,28 @@ impl<'a> crate::app::App<'a> {
     /// Submits the data from the schedule git dialog to start a workflow run.
     pub async fn submit_schedule_git(&mut self) -> Result<()> {
         if self.schedule_git_inputs.len() == 3 {
-            let repo_url = self.schedule_git_inputs[0].lines()[0].trim().to_string();
+            let connection = self.schedule_git_inputs[0].lines()[0].trim().to_string();
             let workflow_path = self.schedule_git_inputs[1].lines()[0].trim().to_string();
             let git_ref = self.schedule_git_inputs[2].lines()[0].trim().to_string();
 
-            if repo_url.is_empty() || workflow_path.is_empty() || git_ref.is_empty() {
+            if connection.is_empty() || workflow_path.is_empty() || git_ref.is_empty() {
                 self.error = Some("All fields must be provided".to_string());
                 return Ok(());
             }
 
+            let workflow_name = workflow_path
+                .split('/')
+                .next_back()
+                .unwrap_or("manual_run")
+                .to_string();
+
             let res = self
                 .api_request(
                     reqwest::Method::POST,
-                    "/api/v1/runs/git",
+                    "/api/v1/runs",
                     Some(serde_json::json!({
-                    "repo_url": repo_url,
+                    "connection": connection,
+                    "workflow_name": workflow_name,
                     "workflow_path": workflow_path,
                     "git_ref": git_ref,
                     "inputs": {}
@@ -142,7 +149,28 @@ impl<'a> crate::app::App<'a> {
             let dsl = std::fs::read_to_string(path)?;
 
             if let Ok(workflow) = StormchaserParser.parse(&dsl) {
-                if let Some(schema_val) = workflow.inputs_schema {
+                let inputs_schema = if let Some(mut schema) = workflow.inputs_schema {
+                    if schema.get("properties").is_none() && schema.get("input").is_some() {
+                        let mut properties = serde_json::Map::new();
+                        if let Some(inputs_obj) = schema.get("input").and_then(|v| v.as_object()) {
+                            for (k, v) in inputs_obj {
+                                properties.insert(k.clone(), v.clone());
+                            }
+                        }
+                        if let Some(obj) = schema.as_object_mut() {
+                            obj.insert(
+                                "properties".to_string(),
+                                serde_json::Value::Object(properties),
+                            );
+                            obj.insert("type".to_string(), serde_json::json!("object"));
+                        }
+                    }
+                    Some(schema)
+                } else {
+                    None
+                };
+
+                if let Some(schema_val) = inputs_schema {
                     let initial_inputs = serde_json::json!({});
                     let queries_val = serde_json::to_value(&workflow.queries).ok();
                     let (hydrated_schema, status) = self
@@ -284,7 +312,7 @@ mod tests {
     async fn test_submit_schedule_git_success() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
-            .and(path("/api/v1/runs/git"))
+            .and(path("/api/v1/runs"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
             .mount(&server)
             .await;
