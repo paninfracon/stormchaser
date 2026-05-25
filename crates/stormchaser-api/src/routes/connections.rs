@@ -185,13 +185,103 @@ pub async fn test_connection(
     State(_state): State<AppState>,
     Json(payload): Json<TestConnectionRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let (success, message) = match payload.connection_type {
+    let (success, message) = validate_connection(&payload).await;
+
+    Ok((
+        StatusCode::OK,
+        Json(TestConnectionResponse { success, message }),
+    ))
+}
+
+/// Deletes a storage backend.
+#[utoipa::path(
+    delete,
+    path = "/api/v1/connections/{id}",
+    params(("id" = stormchaser_model::ConnectionId, Path, description="Backend ID")),
+    responses(
+        (status = 200, description = "Success"),
+        (status = 400, description = "Bad Request"),
+        (status = 404, description = "Not Found"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    tag = "storage"
+)]
+pub async fn delete_connection(
+    AuthClaims(_claims): AuthClaims,
+    State(state): State<AppState>,
+    Path(id): Path<ConnectionId>,
+) -> Result<impl IntoResponse, StatusCode> {
+    db::delete_connection(&state.pool, id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/runs/{id}/artifacts",
+    params(
+        ("id" = stormchaser_model::RunId, Path, description = "Run ID")
+    ),
+    responses(
+        (status = 200, description = "List of artifacts", body = [ArtifactRegistry]),
+        (status = 500, description = "Internal Server Error")
+    ),
+    security(
+        ("bearer_auth" = [])
+    ),
+    tag = "storage"
+)]
+/// Lists run artifacts.
+pub async fn list_run_artifacts(
+    AuthClaims(_claims): AuthClaims,
+    State(state): State<AppState>,
+    Path(run_id): Path<RunId>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let artifacts = db::list_run_artifacts(&state.pool, run_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(artifacts))
+}
+
+/// Lists run test reports.
+#[utoipa::path(
+    get,
+    path = "/api/v1/runs/{run_id}/reports",
+    params(("run_id" = stormchaser_model::RunId, Path, description="Run ID")),
+    responses(
+        (status = 200, description = "Success"),
+        (status = 400, description = "Bad Request"),
+        (status = 404, description = "Not Found"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    tag = "storage"
+)]
+pub async fn list_run_test_reports(
+    AuthClaims(_claims): AuthClaims,
+    State(state): State<AppState>,
+    Path(run_id): Path<RunId>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let reports = db::list_run_test_reports(&state.pool, run_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(reports))
+}
+
+async fn validate_connection(payload: &TestConnectionRequest) -> (bool, String) {
+    match payload.connection_type {
         stormchaser_model::connections::ConnectionType::HttpApi => {
             if let Some(base_url) = payload.config.get("base_url").and_then(|v| v.as_str()) {
-                let client = reqwest::Client::builder()
+                let client = match reqwest::Client::builder()
                     .timeout(HTTP_TEST_TIMEOUT)
                     .build()
-                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                {
+                    Ok(c) => c,
+                    Err(e) => return (false, format!("Failed to build client: {}", e)),
+                };
                 let mut req = client.get(base_url);
                 if let Some(headers) = payload.config.get("headers").and_then(|v| v.as_object()) {
                     for (k, v) in headers {
@@ -330,24 +420,14 @@ pub async fn test_connection(
                                     )
                                     .build();
                             } else {
-                                return Ok((
-                                    StatusCode::OK,
-                                    Json(TestConnectionResponse {
-                                        success: false,
-                                        message: "AssumeRole succeeded but returned no credentials"
-                                            .to_string(),
-                                    }),
-                                ));
+                                return (
+                                    false,
+                                    "AssumeRole succeeded but returned no credentials".to_string(),
+                                );
                             }
                         }
                         Err(e) => {
-                            return Ok((
-                                StatusCode::OK,
-                                Json(TestConnectionResponse {
-                                    success: false,
-                                    message: format!("Failed to assume role: {}", e),
-                                }),
-                            ));
+                            return (false, format!("Failed to assume role: {}", e));
                         }
                     }
                 }
@@ -377,90 +457,7 @@ pub async fn test_connection(
             true,
             "Connection type validation not implemented".to_string(),
         ),
-    };
-
-    Ok((
-        StatusCode::OK,
-        Json(TestConnectionResponse { success, message }),
-    ))
-}
-
-/// Deletes a storage backend.
-#[utoipa::path(
-    delete,
-    path = "/api/v1/connections/{id}",
-    params(("id" = stormchaser_model::ConnectionId, Path, description="Backend ID")),
-    responses(
-        (status = 200, description = "Success"),
-        (status = 400, description = "Bad Request"),
-        (status = 404, description = "Not Found"),
-        (status = 500, description = "Internal Server Error")
-    ),
-    tag = "storage"
-)]
-pub async fn delete_connection(
-    AuthClaims(_claims): AuthClaims,
-    State(state): State<AppState>,
-    Path(id): Path<ConnectionId>,
-) -> Result<impl IntoResponse, StatusCode> {
-    db::delete_connection(&state.pool, id)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    Ok(StatusCode::NO_CONTENT)
-}
-
-#[utoipa::path(
-    get,
-    path = "/api/v1/runs/{id}/artifacts",
-    params(
-        ("id" = stormchaser_model::RunId, Path, description = "Run ID")
-    ),
-    responses(
-        (status = 200, description = "List of artifacts", body = [ArtifactRegistry]),
-        (status = 500, description = "Internal Server Error")
-    ),
-    security(
-        ("bearer_auth" = [])
-    ),
-    tag = "storage"
-)]
-/// Lists run artifacts.
-pub async fn list_run_artifacts(
-    AuthClaims(_claims): AuthClaims,
-    State(state): State<AppState>,
-    Path(run_id): Path<RunId>,
-) -> Result<impl IntoResponse, StatusCode> {
-    let artifacts = db::list_run_artifacts(&state.pool, run_id)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    Ok(Json(artifacts))
-}
-
-/// Lists run test reports.
-#[utoipa::path(
-    get,
-    path = "/api/v1/runs/{run_id}/reports",
-    params(("run_id" = stormchaser_model::RunId, Path, description="Run ID")),
-    responses(
-        (status = 200, description = "Success"),
-        (status = 400, description = "Bad Request"),
-        (status = 404, description = "Not Found"),
-        (status = 500, description = "Internal Server Error")
-    ),
-    tag = "storage"
-)]
-pub async fn list_run_test_reports(
-    AuthClaims(_claims): AuthClaims,
-    State(state): State<AppState>,
-    Path(run_id): Path<RunId>,
-) -> Result<impl IntoResponse, StatusCode> {
-    let reports = db::list_run_test_reports(&state.pool, run_id)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    Ok(Json(reports))
+    }
 }
 
 /// Lists run test summaries.

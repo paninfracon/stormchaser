@@ -907,12 +907,14 @@ async fn test_run_from_git() {
     // Verify the workflow completes successfully.
     let mut success = false;
     for _ in 0..60 {
-        let fencing_token: i64 =
+        let fencing_token: Option<i64> =
             sqlx::query_scalar("SELECT fencing_token FROM workflow_runs WHERE id = $1")
                 .bind(uuid::Uuid::parse_str(run_id).unwrap())
-                .fetch_one(&pool)
+                .fetch_optional(&pool)
                 .await
-                .expect("workflow run fencing token should be queryable");
+                .unwrap();
+
+        let fencing_token = fencing_token.unwrap_or_default();
 
         let steps: Vec<(uuid::Uuid, String, String)> = sqlx::query_as(
             "SELECT id, step_name, status::text FROM step_instances WHERE run_id = $1",

@@ -51,92 +51,123 @@ pub async fn try_dispatch(
         let inputs = fetch_inputs(run_id, &pool).await?;
 
         tokio::spawn(async move {
-            let executor = crate::wasm::WasmExecutor::new();
-            if let Ok(instance) = fetch_step_instance(step_instance_id, &pool).await {
-                let machine = crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::from_instance(instance);
-                if let Ok(mut conn) = pool.acquire().await {
-                    let _ = machine.start("wasm".to_string(), &mut *conn).await;
-                }
-            }
-
-            let input = serde_json::json!({
-                "spec": spec,
-                "params": params,
-                "inputs": inputs,
-                "config": wasm_config,
-            });
-
-            match executor.execute(&module, &function, input).await {
-                Ok(outputs) => {
-                    use std::collections::HashMap;
-                    use stormchaser_model::events::{EventType, StepCompletedEvent, StepEventType};
-                    let outputs_map = match outputs {
-                        serde_json::Value::Object(m) => m
-                            .into_iter()
-                            .collect::<HashMap<String, serde_json::Value>>(),
-                        _ => HashMap::new(),
-                    };
-                    let event = StepCompletedEvent {
-                        run_id,
-                        step_id: step_instance_id,
-                        fencing_token,
-                        event_type: EventType::Step(StepEventType::Completed),
-                        runner_id: None,
-                        exit_code: Some(0),
-                        storage_hashes: None,
-                        artifacts: None,
-                        test_reports: None,
-                        outputs: Some(outputs_map),
-                        timestamp: Utc::now(),
-                    };
-                    let js = async_nats::jetstream::new(nats_client);
-                    let _ = stormchaser_model::nats::publish_cloudevent(
-                        &js,
-                        NatsSubject::StepCompleted(Some(
-                            stormchaser_model::nats::compute_shard_id(&run_id),
-                        )),
-                        EventType::Step(StepEventType::Completed),
-                        EventSource::System,
-                        serde_json::to_value(event).unwrap(),
-                        Some(SchemaVersion::new("1.0".to_string())),
-                        None,
-                    )
-                    .await;
-                }
-                Err(e) => {
-                    let event = StepFailedEvent {
-                        run_id,
-                        step_id: step_instance_id,
-                        fencing_token,
-                        event_type: EventType::Step(StepEventType::Failed),
-                        error: format!("WASM execution failed: {:?}", e),
-                        runner_id: None,
-                        exit_code: None,
-                        storage_hashes: None,
-                        artifacts: None,
-                        test_reports: None,
-                        outputs: None,
-                        timestamp: Utc::now(),
-                    };
-                    let js = async_nats::jetstream::new(nats_client);
-                    use stormchaser_model::nats::NatsSubject;
-                    let _ = stormchaser_model::nats::publish_cloudevent(
-                        &js,
-                        NatsSubject::StepFailed(Some(stormchaser_model::nats::compute_shard_id(
-                            &run_id,
-                        ))),
-                        EventType::Step(StepEventType::Failed),
-                        EventSource::System,
-                        serde_json::to_value(event).unwrap(),
-                        Some(SchemaVersion::new("1.0".to_string())),
-                        None,
-                    )
-                    .await;
-                }
-            }
+            execute_wasm_step(
+                run_id,
+                step_instance_id,
+                fencing_token,
+                module,
+                function,
+                wasm_config,
+                spec,
+                params,
+                inputs,
+                pool,
+                nats_client,
+            )
+            .await;
         });
         return Ok(true);
     }
 
     Ok(false)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn execute_wasm_step(
+    run_id: RunId,
+    step_instance_id: StepInstanceId,
+    fencing_token: i64,
+    module: String,
+    function: String,
+    wasm_config: Value,
+    spec: Value,
+    params: Value,
+    inputs: Value,
+    pool: PgPool,
+    nats_client: async_nats::Client,
+) {
+    let executor = crate::wasm::WasmExecutor::new();
+    if let Ok(instance) = fetch_step_instance(step_instance_id, &pool).await {
+        let machine =
+            crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::from_instance(
+                instance,
+            );
+        if let Ok(mut conn) = pool.acquire().await {
+            let _ = machine.start("wasm".to_string(), &mut *conn).await;
+        }
+    }
+
+    let input = serde_json::json!({
+        "spec": spec,
+        "params": params,
+        "inputs": inputs,
+        "config": wasm_config,
+    });
+
+    match executor.execute(&module, &function, input).await {
+        Ok(outputs) => {
+            use std::collections::HashMap;
+            use stormchaser_model::events::{EventType, StepCompletedEvent, StepEventType};
+            let outputs_map = match outputs {
+                serde_json::Value::Object(m) => m
+                    .into_iter()
+                    .collect::<HashMap<String, serde_json::Value>>(),
+                _ => HashMap::new(),
+            };
+            let event = StepCompletedEvent {
+                run_id,
+                step_id: step_instance_id,
+                fencing_token,
+                event_type: EventType::Step(StepEventType::Completed),
+                runner_id: None,
+                exit_code: Some(0),
+                storage_hashes: None,
+                artifacts: None,
+                test_reports: None,
+                outputs: Some(outputs_map),
+                timestamp: Utc::now(),
+            };
+            let js = async_nats::jetstream::new(nats_client);
+            let _ = stormchaser_model::nats::publish_cloudevent(
+                &js,
+                NatsSubject::StepCompleted(Some(stormchaser_model::nats::compute_shard_id(
+                    &run_id,
+                ))),
+                EventType::Step(StepEventType::Completed),
+                EventSource::System,
+                serde_json::to_value(event).unwrap(),
+                Some(SchemaVersion::new("1.0".to_string())),
+                None,
+            )
+            .await;
+        }
+        Err(e) => {
+            let event = StepFailedEvent {
+                run_id,
+                step_id: step_instance_id,
+                fencing_token,
+                event_type: EventType::Step(StepEventType::Failed),
+                error: format!("WASM execution failed: {:?}", e),
+                runner_id: None,
+                exit_code: None,
+                storage_hashes: None,
+                artifacts: None,
+                test_reports: None,
+                outputs: None,
+                timestamp: Utc::now(),
+            };
+            let js = async_nats::jetstream::new(nats_client);
+            use stormchaser_model::nats::NatsSubject;
+            let _ = stormchaser_model::nats::publish_cloudevent(
+                &js,
+                NatsSubject::StepFailed(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
+                EventType::Step(StepEventType::Failed),
+                EventSource::System,
+                serde_json::to_value(event).unwrap(),
+                Some(SchemaVersion::new("1.0".to_string())),
+                None,
+            )
+            .await;
+        }
+    }
 }

@@ -257,6 +257,137 @@ impl DockerContainerMachine<state::Initialized> {
         }
     }
 
+    async fn resume_storage(
+        &self,
+        mount: &StorageMount,
+        source_name: &str,
+        is_bind_mount: bool,
+        get_url: &str,
+    ) -> Result<()> {
+        info!(
+            "Unparking storage '{}' (resume state) for volume '{}'",
+            mount.name, source_name
+        );
+        if let Some(nats) = &self.nats {
+            let unpacking_event = serde_json::json!({
+                "run_id": self.metadata.run_id,
+                "step_id": self.metadata.step_id,
+                "status": StepStatus::UnpackingSfs,
+                "timestamp": Utc::now(),
+            });
+            if let Ok(ce) = cloudevents::EventBuilderV10::new()
+                .id(Uuid::new_v4().to_string())
+                .ty("stormchaser.v1.step.unpacking_sfs")
+                .source("/stormchaser/runner")
+                .time(Utc::now())
+                .data(APPLICATION_JSON, unpacking_event)
+                .build()
+            {
+                if let Ok(payload_bytes) = serde_json::to_vec(&ce) {
+                    let _ = nats
+                        .publish("stormchaser.v1.step.unpacking_sfs", payload_bytes.into())
+                        .await;
+                }
+            }
+        }
+        self.unpark_storage(UnparkParams {
+            source_name,
+            volume_mount_path: &mount.mount_path,
+            destination_path: &mount.mount_path,
+            get_url,
+            no_extract: false,
+            mode: None,
+            is_bind_mount,
+        })
+        .await
+    }
+
+    async fn provision_storage(
+        &self,
+        mount: &StorageMount,
+        source_name: &str,
+        is_bind_mount: bool,
+        provision: &Vec<serde_json::Value>,
+    ) -> Result<()> {
+        for prov in provision {
+            if let (Some(url), Some(dest)) = (
+                prov.get("url").and_then(|u| u.as_str()),
+                prov.get("destination").and_then(|d| d.as_str()),
+            ) {
+                info!(
+                    "Provisioning storage '{}' from URL '{}' into destination '{}'",
+                    mount.name, url, dest
+                );
+                if let Some(nats) = &self.nats {
+                    let unpacking_event = serde_json::json!({
+                        "run_id": self.metadata.run_id,
+                        "step_id": self.metadata.step_id,
+                        "status": StepStatus::UnpackingSfs,
+                        "timestamp": Utc::now(),
+                    });
+                    if let Ok(ce) = cloudevents::EventBuilderV10::new()
+                        .id(Uuid::new_v4().to_string())
+                        .ty("stormchaser.v1.step.unpacking_sfs")
+                        .source("/stormchaser/runner")
+                        .time(Utc::now())
+                        .data(APPLICATION_JSON, unpacking_event)
+                        .build()
+                    {
+                        if let Ok(payload_bytes) = serde_json::to_vec(&ce) {
+                            let _ = nats
+                                .publish("stormchaser.v1.step.unpacking_sfs", payload_bytes.into())
+                                .await;
+                        }
+                    }
+                }
+                let mut full_dest = PathBuf::from(&mount.mount_path);
+                if dest != "/" && !dest.is_empty() {
+                    let relative_dest = dest.trim_start_matches('/');
+                    // Reject path traversal and Windows-style drive prefixes.
+                    for component in Path::new(relative_dest).components() {
+                        match component {
+                            std::path::Component::ParentDir => {
+                                anyhow::bail!(
+                                    "Provision destination '{}' contains illegal path traversal (..)",
+                                    dest
+                                );
+                            }
+                            std::path::Component::Prefix(_) => {
+                                anyhow::bail!(
+                                    "Provision destination '{}' contains an illegal absolute path prefix",
+                                    dest
+                                );
+                            }
+                            _ => {}
+                        }
+                    }
+                    full_dest.push(relative_dest);
+                }
+
+                let resource_type = prov.get("resource_type").and_then(|r| r.as_str());
+                let is_extract = resource_type != Some("artifact");
+                let prov_mode = prov.get("mode").and_then(|m| m.as_str()).map(str::to_owned);
+                info!(
+                    "Provisioning resource_type: {:?}, is_extract: {}",
+                    resource_type, is_extract
+                );
+
+                let full_dest_str = full_dest.to_string_lossy().into_owned();
+                self.unpark_storage(UnparkParams {
+                    source_name,
+                    volume_mount_path: &mount.mount_path,
+                    destination_path: &full_dest_str,
+                    get_url: url,
+                    no_extract: !is_extract,
+                    mode: prov_mode.as_deref(),
+                    is_bind_mount,
+                })
+                .await?;
+            }
+        }
+        Ok(())
+    }
+
     async fn setup_single_mount(
         &self,
         mount: &StorageMount,
@@ -312,127 +443,12 @@ impl DockerContainerMachine<state::Initialized> {
                             mount.name
                         );
                     } else if let Some(get_url) = urls.get("get_url").and_then(|u| u.as_str()) {
-                        info!(
-                            "Unparking storage '{}' (resume state) for volume '{}'",
-                            mount.name, source_name
-                        );
-                        if let Some(nats) = &self.nats {
-                            let unpacking_event = serde_json::json!({
-                                "run_id": self.metadata.run_id,
-                                "step_id": self.metadata.step_id,
-                                "status": StepStatus::UnpackingSfs,
-                                "timestamp": Utc::now(),
-                            });
-                            if let Ok(ce) = cloudevents::EventBuilderV10::new()
-                                .id(Uuid::new_v4().to_string())
-                                .ty("stormchaser.v1.step.unpacking_sfs")
-                                .source("/stormchaser/runner")
-                                .time(Utc::now())
-                                .data(APPLICATION_JSON, unpacking_event)
-                                .build()
-                            {
-                                if let Ok(payload_bytes) = serde_json::to_vec(&ce) {
-                                    let _ = nats
-                                        .publish(
-                                            "stormchaser.v1.step.unpacking_sfs",
-                                            payload_bytes.into(),
-                                        )
-                                        .await;
-                                }
-                            }
-                        }
-                        self.unpark_storage(UnparkParams {
-                            source_name: &source_name,
-                            volume_mount_path: &mount.mount_path,
-                            destination_path: &mount.mount_path,
-                            get_url,
-                            no_extract: false,
-                            mode: None,
-                            is_bind_mount,
-                        })
-                        .await?;
+                        self.resume_storage(mount, &source_name, is_bind_mount, get_url)
+                            .await?;
                     }
                 } else if let Some(provision) = urls.get("provision").and_then(|p| p.as_array()) {
-                    for prov in provision {
-                        if let (Some(url), Some(dest)) = (
-                            prov.get("url").and_then(|u| u.as_str()),
-                            prov.get("destination").and_then(|d| d.as_str()),
-                        ) {
-                            info!(
-                                "Provisioning storage '{}' from URL '{}' into destination '{}'",
-                                mount.name, url, dest
-                            );
-                            if let Some(nats) = &self.nats {
-                                let unpacking_event = serde_json::json!({
-                                    "run_id": self.metadata.run_id,
-                                    "step_id": self.metadata.step_id,
-                                    "status": StepStatus::UnpackingSfs,
-                                    "timestamp": Utc::now(),
-                                });
-                                if let Ok(ce) = cloudevents::EventBuilderV10::new()
-                                    .id(Uuid::new_v4().to_string())
-                                    .ty("stormchaser.v1.step.unpacking_sfs")
-                                    .source("/stormchaser/runner")
-                                    .time(Utc::now())
-                                    .data(APPLICATION_JSON, unpacking_event)
-                                    .build()
-                                {
-                                    if let Ok(payload_bytes) = serde_json::to_vec(&ce) {
-                                        let _ = nats
-                                            .publish(
-                                                "stormchaser.v1.step.unpacking_sfs",
-                                                payload_bytes.into(),
-                                            )
-                                            .await;
-                                    }
-                                }
-                            }
-                            let mut full_dest = PathBuf::from(&mount.mount_path);
-                            if dest != "/" && !dest.is_empty() {
-                                let relative_dest = dest.trim_start_matches('/');
-                                // Reject path traversal and Windows-style drive prefixes.
-                                for component in Path::new(relative_dest).components() {
-                                    match component {
-                                        std::path::Component::ParentDir => {
-                                            anyhow::bail!(
-                                                        "Provision destination '{}' contains illegal path traversal (..)",
-                                                        dest
-                                                    );
-                                        }
-                                        std::path::Component::Prefix(_) => {
-                                            anyhow::bail!(
-                                                        "Provision destination '{}' contains an illegal absolute path prefix",
-                                                        dest
-                                                    );
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                                full_dest.push(relative_dest);
-                            }
-
-                            let resource_type = prov.get("resource_type").and_then(|r| r.as_str());
-                            let is_extract = resource_type != Some("artifact");
-                            let prov_mode =
-                                prov.get("mode").and_then(|m| m.as_str()).map(str::to_owned);
-                            info!(
-                                "Provisioning resource_type: {:?}, is_extract: {}",
-                                resource_type, is_extract
-                            );
-
-                            let full_dest_str = full_dest.to_string_lossy().into_owned();
-                            self.unpark_storage(UnparkParams {
-                                source_name: &source_name,
-                                volume_mount_path: &mount.mount_path,
-                                destination_path: &full_dest_str,
-                                get_url: url,
-                                no_extract: !is_extract,
-                                mode: prov_mode.as_deref(),
-                                is_bind_mount,
-                            })
-                            .await?;
-                        }
-                    }
+                    self.provision_storage(mount, &source_name, is_bind_mount, provision)
+                        .await?;
                 }
             }
         }
