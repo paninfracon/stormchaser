@@ -1,7 +1,9 @@
+use crate::approvals::ApprovalsList;
 use crate::backends::BackendsList;
 use crate::cron::CronList;
 use crate::rules::RulesList;
 use crate::runs::WorkflowRunsList;
+use crate::schema_lint::SchemaLinter;
 use crate::webhooks::WebhooksList;
 
 use leptos::prelude::*;
@@ -128,10 +130,12 @@ pub fn Layout() -> impl IntoView {
 
             <div style="display: flex; gap: 1rem; margin-bottom: 1.5rem; border-bottom: 1px solid var(--surface-border); padding-bottom: 0.5rem;">
                 <a href="/" class="tab-link">"Runs"</a>
+                <a href="/approvals" class="tab-link">"Approvals"</a>
                 <a href="/backends" class="tab-link">"Backends"</a>
                 <a href="/webhooks" class="tab-link">"Webhooks"</a>
                 <a href="/rules" class="tab-link">"Rules"</a>
                 <a href="/cron" class="tab-link">"Cron"</a>
+                <a href="/schema" class="tab-link">"Schema/Lint"</a>
             </div>
 
             <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
@@ -151,10 +155,12 @@ pub fn App() -> impl IntoView {
                 <Routes fallback=|| "Page not found.".into_view()>
                     <ParentRoute path=path!("") view=Layout>
                         <Route path=path!("") view=WorkflowRunsList/>
+                        <Route path=path!("approvals") view=ApprovalsList/>
                         <Route path=path!("backends") view=BackendsList/>
                         <Route path=path!("webhooks") view=WebhooksList/>
                         <Route path=path!("rules") view=RulesList/>
                         <Route path=path!("cron") view=CronList/>
+                        <Route path=path!("schema") view=SchemaLinter/>
                     </ParentRoute>
                 </Routes>
             </main>

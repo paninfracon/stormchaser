@@ -62,6 +62,40 @@ impl<'a> App<'a> {
         });
     }
 
+    pub fn next_pending_approval(&mut self) {
+        if self.pending_approvals.is_empty() {
+            return;
+        }
+        let i = match self.pending_approvals_state.selected() {
+            Some(i) => {
+                if i >= self.pending_approvals.len() - 1 {
+                    0
+                } else {
+                    i + 1
+                }
+            }
+            None => 0,
+        };
+        self.pending_approvals_state.select(Some(i));
+    }
+
+    pub fn previous_pending_approval(&mut self) {
+        if self.pending_approvals.is_empty() {
+            return;
+        }
+        let i = match self.pending_approvals_state.selected() {
+            Some(i) => {
+                if i == 0 {
+                    self.pending_approvals.len() - 1
+                } else {
+                    i - 1
+                }
+            }
+            None => 0,
+        };
+        self.pending_approvals_state.select(Some(i));
+    }
+
     /// Selects the next storage backend in the list.
     pub fn next_connection(&mut self) {
         if self.connections.is_empty() {
@@ -387,5 +421,67 @@ mod tests {
 
         app.previous_run();
         assert_eq!(app.runs_state.selected(), Some(0));
+    }
+
+    #[tokio::test]
+    async fn test_pending_approval_navigation_empty() {
+        let (tx, _rx) = mpsc::channel(1);
+        let mut app = App::new(
+            "http://localhost".to_string(),
+            "http://localhost".to_string(),
+            None,
+            tx,
+        );
+
+        app.next_pending_approval();
+        assert_eq!(app.pending_approvals_state.selected(), None);
+
+        app.previous_pending_approval();
+        assert_eq!(app.pending_approvals_state.selected(), None);
+    }
+
+    #[tokio::test]
+    async fn test_pending_approval_navigation() {
+        let (tx, _rx) = mpsc::channel(100);
+        let mut app = App::new(
+            "http://localhost".to_string(),
+            "http://localhost".to_string(),
+            None,
+            tx,
+        );
+
+        app.pending_approvals = vec![
+            WorkflowRunDetail {
+                id: RunId::new_v4(),
+                workflow_name: "1".to_string(),
+                initiating_user: "u".to_string(),
+                status: RunStatus::Running,
+                created_at: chrono::Utc::now(),
+                finished_at: None,
+            },
+            WorkflowRunDetail {
+                id: RunId::new_v4(),
+                workflow_name: "2".to_string(),
+                initiating_user: "u".to_string(),
+                status: RunStatus::Running,
+                created_at: chrono::Utc::now(),
+                finished_at: None,
+            },
+        ];
+
+        app.next_pending_approval();
+        assert_eq!(app.pending_approvals_state.selected(), Some(0));
+
+        app.next_pending_approval();
+        assert_eq!(app.pending_approvals_state.selected(), Some(1));
+
+        app.next_pending_approval();
+        assert_eq!(app.pending_approvals_state.selected(), Some(0));
+
+        app.previous_pending_approval();
+        assert_eq!(app.pending_approvals_state.selected(), Some(1));
+
+        app.previous_pending_approval();
+        assert_eq!(app.pending_approvals_state.selected(), Some(0));
     }
 }

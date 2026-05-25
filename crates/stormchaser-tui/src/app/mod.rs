@@ -119,6 +119,8 @@ pub enum Pane {
     CronWorkflowsList,
     /// The pane displaying detailed information for a selected cron workflow.
     CronWorkflowDetail,
+    /// The pane displaying the list of pending approvals.
+    PendingApprovalsList,
 }
 
 /// The main application state holding all data and UI status for the TUI.
@@ -153,6 +155,10 @@ pub struct App<'a> {
     pub runs_state: ListState,
     /// The full details of the currently selected run, if any.
     pub selected_run: Option<WorkflowRunFullDetail>,
+    /// The current list of pending approvals (runs in Running state).
+    pub pending_approvals: Vec<WorkflowRunDetail>,
+    /// The state of the pending approvals list widget.
+    pub pending_approvals_state: ListState,
     /// The current list of storage backends.
     pub connections: Vec<connections::Connection>,
     /// The state of the storage backends list widget.
@@ -364,6 +370,8 @@ impl<'a> App<'a> {
             runs: Vec::new(),
             runs_state: ListState::default(),
             selected_run: None,
+            pending_approvals: Vec::new(),
+            pending_approvals_state: ListState::default(),
             connections: Vec::new(),
             connections_state: ListState::default(),
             selected_connection: None,

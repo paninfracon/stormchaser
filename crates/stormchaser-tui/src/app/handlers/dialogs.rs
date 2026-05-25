@@ -364,6 +364,11 @@ impl<'a> App<'a> {
                     let _ = self.submit_file().await;
                 }
             }
+            KeyCode::Char('l') | KeyCode::Char('L') => {
+                if !self.file_explorer.current_entry().is_some_and(|e| e.is_dir) {
+                    let _ = self.lint_file().await;
+                }
+            }
             _ => {
                 let _ = self.file_explorer.handle_key(key);
             }

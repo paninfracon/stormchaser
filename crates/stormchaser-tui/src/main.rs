@@ -109,6 +109,9 @@ async fn handle_app_event<'a>(app: &mut App<'a>, event: AppEvent) -> bool {
             app.error = Some(err);
             app.state = AppState::LoggedOut;
         }
+        AppEvent::RefreshPendingApprovals => {
+            let _ = app.refresh_pending_approvals().await;
+        }
         _ => {}
     }
     false

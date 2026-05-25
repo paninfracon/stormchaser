@@ -196,7 +196,7 @@ pub fn WorkflowRunsList() -> impl IntoView {
                 {move || selected_run_id.get().map(|run_id| {
                     view! {
                         <div class="glass-panel" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
-                            <RunDetailsPanel run_id=run_id selected_step_id=selected_step_id set_selected_step_id=set_selected_step_id />
+                            <RunDetailsPanel run_id=run_id selected_step_id=selected_step_id set_selected_step_id=set_selected_step_id set_selected_run_id=set_selected_run_id />
                         </div>
                     }
                 })}

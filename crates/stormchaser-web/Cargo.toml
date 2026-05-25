@@ -41,6 +41,10 @@ features = [
     "Element",
     "HtmlElement",
     "Storage",
+    "HtmlInputElement",
+    "FileList",
+    "File",
+    "FileReader"
 ]
 
 [features]

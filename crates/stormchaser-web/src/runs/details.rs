@@ -1,12 +1,14 @@
-use crate::api::fetch_workflow_run_detail;
+use crate::api::{approve_step, delete_workflow_run, fetch_workflow_run_detail, reject_step};
 use crate::runs::StepLogsPanel;
 use leptos::prelude::*;
+use leptos::task::spawn_local;
 
 #[component]
 pub fn RunDetailsPanel(
     run_id: String,
     #[prop(into)] selected_step_id: Signal<Option<String>>,
     set_selected_step_id: WriteSignal<Option<String>>,
+    set_selected_run_id: WriteSignal<Option<String>>,
 ) -> impl IntoView {
     let run_id_clone = run_id.clone();
     let detail_resource = Resource::new(
@@ -84,7 +86,29 @@ pub fn RunDetailsPanel(
                                 let active_run_id = detail.detail.id.to_string();
                                 view! {
                                     <div style="padding: 1.5rem;">
-                                        <h3 style="margin: 0 0 0.5rem 0;">{detail.detail.workflow_name.clone()}</h3>
+                                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                                            <h3 style="margin: 0 0 0.5rem 0;">{detail.detail.workflow_name.clone()}</h3>
+                                            {
+                                                let delete_run_id = active_run_id.clone();
+                                                view! {
+                                                    <button
+                                                        class="btn btn-secondary"
+                                                        style="color: var(--status-error); border-color: var(--status-error); padding: 0.25rem 0.75rem; font-size: 0.85rem;"
+                                                        on:click=move |_| {
+                                                            let r_id = delete_run_id.clone();
+                                                            spawn_local(async move {
+                                                                if delete_workflow_run(r_id).await.is_ok() {
+                                                                    set_selected_step_id.set(None);
+                                                                    set_selected_run_id.set(None);
+                                                                }
+                                                            });
+                                                        }
+                                                    >
+                                                        "Delete Run"
+                                                    </button>
+                                                }
+                                            }
+                                        </div>
                                     <div style="display: flex; flex-direction: column; gap: 0.25rem; color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1.5rem;">
                                         <span>"Run ID: " {active_run_id.clone()}</span>
                                         <span>"Status: " {String::from(detail.detail.status.clone())}</span>
@@ -121,6 +145,39 @@ pub fn RunDetailsPanel(
                                                             {status_str.to_string()}
                                                         </span>
                                                     </div>
+
+                                                    {if status_str == "waiting_for_event" && is_selected {
+                                                        let s_run_id = active_run_id.clone();
+                                                        let s_step_id = step_id_clone.clone();
+                                                        let on_approve = move |_| {
+                                                            let r_id = s_run_id.clone();
+                                                            let s_id = s_step_id.clone();
+                                                            spawn_local(async move {
+                                                                if approve_step(r_id, s_id, serde_json::json!({})).await.is_ok() {
+                                                                    detail_resource.refetch();
+                                                                }
+                                                            });
+                                                        };
+                                                        let sr_run_id = active_run_id.clone();
+                                                        let sr_step_id = step_id_clone.clone();
+                                                        let on_reject = move |_| {
+                                                            let r_id = sr_run_id.clone();
+                                                            let s_id = sr_step_id.clone();
+                                                            spawn_local(async move {
+                                                                if reject_step(r_id, s_id).await.is_ok() {
+                                                                    detail_resource.refetch();
+                                                                }
+                                                            });
+                                                        };
+                                                        view! {
+                                                            <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+                                                                <button class="btn btn-primary" on:click=on_approve>"Approve"</button>
+                                                                <button class="btn btn-secondary" style="color: var(--status-error); border-color: var(--status-error);" on:click=on_reject>"Reject"</button>
+                                                            </div>
+                                                        }.into_any()
+                                                    } else {
+                                                        ().into_any()
+                                                    }}
 
                                                     {if is_selected {
                                                         let started = step.instance.get("started_at").and_then(|v| v.as_str()).unwrap_or("-").to_string();
@@ -196,6 +253,58 @@ pub fn RunDetailsPanel(
                                             }
                                         }).collect_view()}
                                     </ul>
+
+                                    {if !detail.artifacts.is_empty() {
+                                        view! {
+                                            <h4 style="margin: 1.5rem 0 1rem 0;">"Artifacts"</h4>
+                                            <ul style="list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.9rem;">
+                                                {detail.artifacts.clone().into_iter().map(|artifact| {
+                                                    let name = artifact.get("artifact_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                                    view! {
+                                                        <li style="padding: 0.75rem; border: 1px solid var(--surface-border); border-radius: 6px; background: var(--surface-default);">
+                                                            <strong>{name}</strong>
+                                                        </li>
+                                                    }
+                                                }).collect_view()}
+                                            </ul>
+                                        }.into_any()
+                                    } else {
+                                        ().into_any()
+                                    }}
+
+                                    {if !detail.test_cases.is_empty() {
+                                        let passed = detail.test_cases.iter().filter(|t| t.get("status").and_then(|v| v.as_str()) == Some("passed")).count();
+                                        let failed = detail.test_cases.iter().filter(|t| t.get("status").and_then(|v| v.as_str()) == Some("failed")).count();
+                                        let errors = detail.test_cases.iter().filter(|t| t.get("status").and_then(|v| v.as_str()) == Some("error")).count();
+                                        view! {
+                                            <h4 style="margin: 1.5rem 0 1rem 0;">"Test Reports"</h4>
+                                            <div style="margin-bottom: 1rem; font-size: 0.9rem; color: var(--text-secondary);">
+                                                "Passed: " {passed} " | Failed: " <span style="color: var(--status-error);">{failed}</span> " | Errors: " <span style="color: var(--status-error);">{errors}</span>
+                                            </div>
+                                            <div style="display: flex; flex-wrap: wrap; gap: 0.25rem;">
+                                                {detail.test_cases.clone().into_iter().map(|tc| {
+                                                    let status = tc.get("status").and_then(|v| v.as_str()).unwrap_or("skipped");
+                                                    let color = match status {
+                                                        "passed" => "var(--status-success)",
+                                                        "failed" | "error" => "var(--status-error)",
+                                                        _ => "var(--status-queued)",
+                                                    };
+                                                    let symbol = match status {
+                                                        "passed" => "✔",
+                                                        "failed" => "✘",
+                                                        "error" => "!",
+                                                        _ => "○",
+                                                    };
+                                                    let name = tc.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                                    view! {
+                                                        <span style=format!("color: {}; font-weight: bold; cursor: pointer;", color) title=name>{symbol}</span>
+                                                    }
+                                                }).collect_view()}
+                                            </div>
+                                        }.into_any()
+                                    } else {
+                                        ().into_any()
+                                    }}
                                     </div>
                         }.into_any()
                     },

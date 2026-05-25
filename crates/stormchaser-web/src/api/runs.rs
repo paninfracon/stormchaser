@@ -156,3 +156,89 @@ pub async fn fetch_step_logs(
         )))
     }
 }
+
+#[server(input = Json, output = Json)]
+pub async fn approve_step(
+    run_id: String,
+    step_name: String,
+    inputs: serde_json::Value,
+) -> Result<(), ServerFnError> {
+    let cookie = require_auth().await?;
+    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+
+    let client = reqwest::Client::new();
+    let url = format!(
+        "{}/api/v1/runs/{}/steps/{}/approve",
+        api_url, run_id, step_name
+    );
+
+    let res = client
+        .post(&url)
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
+        .json(&inputs)
+        .send()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    if res.status().is_success() {
+        Ok(())
+    } else {
+        Err(ServerFnError::new(format!(
+            "Failed to approve step: {}",
+            res.status()
+        )))
+    }
+}
+
+#[server(input = Json, output = Json)]
+pub async fn reject_step(run_id: String, step_name: String) -> Result<(), ServerFnError> {
+    let cookie = require_auth().await?;
+    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+
+    let client = reqwest::Client::new();
+    let url = format!(
+        "{}/api/v1/runs/{}/steps/{}/reject",
+        api_url, run_id, step_name
+    );
+
+    let res = client
+        .post(&url)
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
+        .send()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    if res.status().is_success() {
+        Ok(())
+    } else {
+        Err(ServerFnError::new(format!(
+            "Failed to reject step: {}",
+            res.status()
+        )))
+    }
+}
+
+#[server(input = Json, output = Json)]
+pub async fn delete_workflow_run(run_id: String) -> Result<(), ServerFnError> {
+    let cookie = require_auth().await?;
+    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+
+    let client = reqwest::Client::new();
+    let url = format!("{}/api/v1/runs/{}", api_url, run_id);
+
+    let res = client
+        .delete(&url)
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
+        .send()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    if res.status().is_success() {
+        Ok(())
+    } else {
+        Err(ServerFnError::new(format!(
+            "Failed to delete run: {}",
+            res.status()
+        )))
+    }
+}

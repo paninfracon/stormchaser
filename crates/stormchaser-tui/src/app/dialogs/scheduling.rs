@@ -272,6 +272,28 @@ impl<'a> crate::app::App<'a> {
         }
         Ok(())
     }
+
+    /// Lints the currently selected local `.storm` file.
+    pub async fn lint_file(&mut self) -> Result<()> {
+        let path = self
+            .file_explorer
+            .current_entry()
+            .map(|e| e.path.clone())
+            .unwrap_or_default();
+        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("storm") {
+            let dsl = std::fs::read_to_string(path)?;
+
+            match stormchaser_dsl::StormchaserParser.parse(&dsl) {
+                Ok(_) => {
+                    self.error = Some("Lint Successful: The file is valid.".to_string());
+                }
+                Err(e) => {
+                    self.error = Some(format!("Lint Error: {}", e));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

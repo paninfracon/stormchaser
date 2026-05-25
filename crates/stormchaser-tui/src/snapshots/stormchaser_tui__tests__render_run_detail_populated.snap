@@ -1,5 +1,6 @@
 ---
 source: crates/stormchaser-tui/src/tests.rs
+assertion_line: 354
 expression: terminal.backend()
 ---
 TestBackend {
@@ -32,7 +33,7 @@ TestBackend {
             "  │                           ││                                                                 │  ",
             "  └───────────────────────────┘└─────────────────────────────────────────────────────────────────┘  ",
             "  ┌──────────────────────────────────────────────────────────────────────────────────────────────┐  ",
-            "  │Tabs: 1-Runs 2-Backends 3-Webhooks 4-Rules 5-Cron | Panes: Tab/h/l | Nav: j/k | Scroll: [/]/Pg│  ",
+            "  │Tabs: 1-Runs 2-Backends 3-Webhooks 4-Rules 5-Cron P-Pending | Panes: Tab/h/l | Nav: j/k | Scro│  ",
             "  └──────────────────────────────────────────────────────────────────────────────────────────────┘  ",
             "                                                                                                    ",
             "                                                                                                    ",

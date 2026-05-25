@@ -28,6 +28,7 @@ impl<'a> App<'a> {
                     Pane::WebhooksList => self.next_webhook(),
                     Pane::EventRulesList => self.next_event_rule(),
                     Pane::CronWorkflowsList => self.next_cron_workflow(),
+                    Pane::PendingApprovalsList => self.next_pending_approval(),
                     _ => self.next_step(),
                 }
                 true
@@ -39,6 +40,7 @@ impl<'a> App<'a> {
                     Pane::WebhooksList => self.previous_webhook(),
                     Pane::EventRulesList => self.previous_event_rule(),
                     Pane::CronWorkflowsList => self.previous_cron_workflow(),
+                    Pane::PendingApprovalsList => self.previous_pending_approval(),
                     _ => self.previous_step(),
                 }
                 true
@@ -63,6 +65,14 @@ impl<'a> App<'a> {
                 self.active_pane = Pane::CronWorkflowsList;
                 true
             }
+            KeyCode::Char('P') => {
+                self.active_pane = Pane::PendingApprovalsList;
+                let tx = self.status_tx.clone();
+                tokio::spawn(async move {
+                    let _ = tx.send(crate::AppEvent::RefreshPendingApprovals).await;
+                });
+                true
+            }
             KeyCode::Tab => {
                 self.active_pane = match self.active_pane {
                     Pane::RunsList => Pane::RunDetail,
@@ -75,7 +85,8 @@ impl<'a> App<'a> {
                     Pane::EventRulesList => Pane::EventRuleDetail,
                     Pane::EventRuleDetail => Pane::CronWorkflowsList,
                     Pane::CronWorkflowsList => Pane::CronWorkflowDetail,
-                    Pane::CronWorkflowDetail => Pane::RunsList,
+                    Pane::CronWorkflowDetail => Pane::PendingApprovalsList,
+                    Pane::PendingApprovalsList => Pane::RunsList,
                 };
                 true
             }

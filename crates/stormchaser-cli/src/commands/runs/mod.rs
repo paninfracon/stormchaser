@@ -3,6 +3,7 @@ use clap::Subcommand;
 
 pub mod approve;
 pub mod artifacts;
+pub mod delete;
 pub mod enqueue;
 pub mod get;
 pub mod list;
@@ -31,6 +32,8 @@ pub enum RunCommands {
     },
     /// Get run details
     Get { id: stormchaser_model::RunId },
+    /// Delete a run
+    Delete { id: stormchaser_model::RunId },
     /// List artifacts for a run
     Artifacts { id: stormchaser_model::RunId },
     /// List test reports for a run
@@ -120,6 +123,7 @@ pub async fn handle(
             .await
         }
         RunCommands::Get { id } => get::get_run(url, token, http_client, id).await,
+        RunCommands::Delete { id } => delete::delete_run(url, token, http_client, id).await,
         RunCommands::Artifacts { id } => {
             artifacts::list_artifacts(url, token, http_client, id).await
         }
@@ -198,6 +202,7 @@ mod tests {
                 status: None,
             },
             RunCommands::Get { id },
+            RunCommands::Delete { id },
             RunCommands::Artifacts { id },
             RunCommands::Reports { id },
             RunCommands::Report {

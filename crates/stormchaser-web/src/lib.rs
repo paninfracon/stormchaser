@@ -2,12 +2,14 @@
 
 pub mod api;
 pub mod app;
+pub mod approvals;
 pub mod backends;
 pub mod cron;
 pub mod models;
 pub mod rules;
 pub mod run_modal;
 pub mod runs;
+pub mod schema_lint;
 pub mod webhooks;
 
 #[cfg(feature = "hydrate")]

@@ -36,4 +36,6 @@ pub enum AppEvent {
     LoginFailed(String),
     /// Token expired event requiring a new login or refresh.
     TokenExpired,
+    /// Request to refresh the list of pending approvals.
+    RefreshPendingApprovals,
 }

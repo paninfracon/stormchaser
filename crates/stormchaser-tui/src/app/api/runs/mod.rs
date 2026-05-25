@@ -96,6 +96,36 @@ impl<'a> App<'a> {
         Ok(())
     }
 
+    /// Fetches the list of pending approvals (runs with status Running).
+    pub async fn refresh_pending_approvals(&mut self) -> Result<()> {
+        if self.token.is_none() {
+            return Ok(());
+        }
+
+        let url = format!("{}/api/v1/runs?status=Running", self.url);
+        let res = self.api_request(reqwest::Method::GET, &url, None).await?;
+
+        if res.status().is_success() {
+            self.pending_approvals = res.json::<Vec<WorkflowRunDetail>>().await?;
+            if self.pending_approvals.is_empty() {
+                self.pending_approvals_state.select(None);
+            } else {
+                let selected_index = self
+                    .pending_approvals_state
+                    .selected()
+                    .map_or(0, |s| s.min(self.pending_approvals.len() - 1));
+                self.pending_approvals_state.select(Some(selected_index));
+            }
+            self.error = None;
+        } else {
+            self.error = Some(format!(
+                "Failed to fetch pending approvals: {}",
+                res.status()
+            ));
+        }
+        Ok(())
+    }
+
     /// Fetches the full details for a specific workflow run.
     pub async fn fetch_run_detail(&mut self, run_id: RunId) -> Result<()> {
         if self.token.is_none() {

@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod auth_profiles;
 pub mod connections;
 pub mod cron;
 pub mod lint;
