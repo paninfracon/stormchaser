@@ -70,8 +70,11 @@ jobs:
       - name: Run Database Migrations
         run: sqlx migrate run --database-url postgres://stormchaser:${STORMCHASER_DEV_PASSWORD}@localhost:5432/stormchaser
 
-      - name: Install Playwright Browsers
-        run: npx playwright install --with-deps
+      - name: Install Playwright Dependencies
+        run: |
+          cd crates/stormchaser-web/e2e
+          npm ci
+          npx playwright install --with-deps
 
       - name: Generate coverage report
         run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info

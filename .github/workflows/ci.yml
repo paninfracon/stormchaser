@@ -102,8 +102,11 @@ jobs:
         echo "STORMCHASER_CLI_SECRET=$STORMCHASER_CLI_SECRET" >> $GITHUB_ENV
     - name: Generate Certificates
       run: ./scripts/generate-certs.sh
-    - name: Install Playwright Browsers
-      run: npx playwright install --with-deps
+    - name: Install Playwright Dependencies
+      run: |
+        cd crates/stormchaser-web/e2e
+        npm ci
+        npx playwright install --with-deps
     - name: Run Unit Tests
       run: STORMCHASER_UNIT_TEST_WITH_ENV=1 ./scripts/test-unit.sh --all-features
     - name: Run Integration Tests
