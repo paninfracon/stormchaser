@@ -35,6 +35,7 @@ pub struct Config {
     pub nats_url: String,
     pub runner_id: String,
     pub encryption_key: Option<String>,
+    pub loki_url: Option<String>,
     pub rust_log: String,
 }
 
@@ -49,6 +50,7 @@ impl Config {
         let mut nats_url = "nats://localhost:4222".to_string();
         let mut runner_id = Uuid::new_v4().to_string();
         let mut encryption_key = None;
+        let mut loki_url = None;
         let mut rust_log = "stormchaser_runner_docker=info".to_string();
 
         for (k, v) in env {
@@ -56,6 +58,7 @@ impl Config {
                 "NATS_URL" => nats_url = v.as_ref().to_string(),
                 "RUNNER_ID" => runner_id = v.as_ref().to_string(),
                 "STORMCHASER_STATE_ENCRYPTION_KEY" => encryption_key = Some(v.as_ref().to_string()),
+                "LOKI_URL" => loki_url = Some(v.as_ref().to_string()),
                 "RUST_LOG" => rust_log = v.as_ref().to_string(),
                 _ => {}
             }
@@ -65,6 +68,7 @@ impl Config {
             nats_url,
             runner_id,
             encryption_key,
+            loki_url,
             rust_log,
         }
     }
@@ -301,6 +305,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
                             nats_client.clone(),
                             runner_id.clone(),
                             encryption_key.clone(),
+                            config.loki_url.clone(),
                         ));
                     }
                     Some(Err(e)) => {

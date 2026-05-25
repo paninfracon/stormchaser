@@ -10,6 +10,7 @@ pub mod connections;
 pub mod cron;
 pub mod dialogs;
 pub mod event_rules;
+pub mod pending_approvals;
 pub mod runs;
 pub mod utils;
 pub mod webhooks;
@@ -18,6 +19,7 @@ use connections::*;
 use cron::*;
 use dialogs::*;
 use event_rules::*;
+use pending_approvals::*;
 use runs::*;
 use utils::*;
 use webhooks::*;
@@ -51,6 +53,8 @@ pub fn ui(f: &mut Frame, app: &mut App) {
         || app.active_pane == crate::app::Pane::CronWorkflowDetail
     {
         render_cron_workflows_tab(f, chunks[0], app);
+    } else if app.active_pane == crate::app::Pane::PendingApprovalsList {
+        render_pending_approvals_tab(f, chunks[0], app);
     } else {
         render_runs_tab(f, chunks[0], app);
     }
@@ -59,7 +63,7 @@ pub fn ui(f: &mut Frame, app: &mut App) {
     let status_text = if let Some(err) = &app.error {
         format!("Error: {}", err)
     } else {
-        "Tabs: 1-Runs 2-Backends 3-Webhooks 4-Rules 5-Cron | Panes: Tab/h/l | Nav: j/k | Scroll: [/]/PgUp/PgDn | Actions: c(reate)/e(dit)/d(elete)/r(un local) | Filter: f | Quit: q"
+        "Tabs: 1-Runs 2-Backends 3-Webhooks 4-Rules 5-Cron P-Pending | Panes: Tab/h/l | Nav: j/k | Scroll: [/]/PgUp/PgDn | Actions: c(reate)/e(dit)/d(elete)/r(un local) | Filter: f | Quit: q"
             .to_string()
     };
     let status_bar = Paragraph::new(status_text)

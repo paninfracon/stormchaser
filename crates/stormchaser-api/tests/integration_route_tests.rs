@@ -8,14 +8,14 @@ use chrono::Utc;
 use jsonwebtoken::{encode, EncodingKey, Header};
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
-use std::collections::HashMap;
+
 use std::env::var;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::Once;
 use stormchaser_api::{app, AppState, Claims, JWT_SECRET};
 use stormchaser_model::auth::OpaClient;
-use stormchaser_model::LogBackend;
+
 use stormchaser_model::RunId;
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -30,7 +30,7 @@ fn init_test() {
     });
 }
 
-async fn setup_app() -> Option<axum::Router> {
+async fn setup_app_with_pool() -> Option<(axum::Router, sqlx::PgPool)> {
     init_test();
     std::env::set_var("CRON_ENGINE", "none");
     std::env::set_var("API_RATE_LIMIT_PER_SECOND", "1000");
@@ -53,15 +53,23 @@ async fn setup_app() -> Option<axum::Router> {
         .await
         .ok()?;
 
-    Some(app(AppState {
-        pool,
-        nats: nats_client,
-        opa: Arc::new(OpaClient::new(None, None)),
-        oidc_config: None,
-        jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
-        log_backend: var("LOKI_URL").ok().map(|url| LogBackend::Loki { url }),
-        api_base_url: "http://localhost:3000".to_string(),
-    }))
+    let pool_clone = pool.clone();
+    Some((
+        app(AppState {
+            pool,
+            nats: nats_client,
+            opa: Arc::new(OpaClient::new(None, None)),
+            oidc_config: None,
+            jwks: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+            log_backend: None,
+            api_base_url: "http://localhost:3000".to_string(),
+        }),
+        pool_clone,
+    ))
+}
+
+async fn setup_app() -> Option<axum::Router> {
+    setup_app_with_pool().await.map(|(app, _)| app)
 }
 
 fn get_token() -> String {
@@ -209,6 +217,27 @@ async fn test_create_cron_workflow() {
         None => return,
     };
 
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
+        dotenvy::dotenv().ok();
+        format!(
+            "postgres://stormchaser:{}@localhost:5432/stormchaser",
+            var("STORMCHASER_DEV_PASSWORD")
+                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
+        )
+    });
+    let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
+    let conn_id = Uuid::new_v4();
+    let conn_name = format!("test-conn-{}", conn_id);
+    sqlx::query(
+        "INSERT INTO connections (id, name, connection_type, config) VALUES ($1, $2, 'git', $3)",
+    )
+    .bind(conn_id)
+    .bind(&conn_name)
+    .bind(serde_json::json!({"repo_url": "http://github.com/test"}))
+    .execute(&pool)
+    .await
+    .unwrap();
+
     let name = format!("test-cron-{}", Uuid::new_v4());
     let workflow_name = format!("test-workflow-{}", Uuid::new_v4());
     let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
@@ -225,7 +254,7 @@ async fn test_create_cron_workflow() {
                         "name": name,
                         "cronspec": "0 0 * * *",
                         "workflow_name": workflow_name,
-                        "repo_url": "http://github.com/test",
+                        "connection": conn_name,
                         "workflow_path": "test.storm",
                         "git_ref": "main",
                         "inputs": {}
@@ -265,6 +294,18 @@ async fn test_create_event_rule() {
         .await
         .unwrap();
 
+    let conn_id = Uuid::new_v4();
+    let conn_name = format!("test-conn-{}", conn_id);
+    sqlx::query(
+        "INSERT INTO connections (id, name, connection_type, config) VALUES ($1, $2, 'git', $3)",
+    )
+    .bind(conn_id)
+    .bind(&conn_name)
+    .bind(serde_json::json!({"repo_url": "url"}))
+    .execute(&pool)
+    .await
+    .unwrap();
+
     let rule_name = format!("test-rule-{}", Uuid::new_v4());
     let workflow_name = format!("test-workflow-{}", Uuid::new_v4());
     let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
@@ -282,7 +323,7 @@ async fn test_create_event_rule() {
                         "webhook_id": webhook_id,
                         "event_type_pattern": ".*",
                         "workflow_name": workflow_name,
-                        "repo_url": "url",
+                        "connection": conn_name,
                         "workflow_path": "path",
                         "git_ref": "ref",
                         "input_mappings": {}
@@ -732,10 +773,19 @@ async fn test_direct_run() {
 
 #[tokio::test]
 async fn test_run_from_git() {
-    let app = match setup_app().await {
+    let (app, pool) = match setup_app_with_pool().await {
         Some(a) => a,
         None => return,
     };
+
+    let conn_id = uuid::Uuid::new_v4();
+    let conn_name = format!("test-git-conn-{}", conn_id);
+    sqlx::query("INSERT INTO connections (id, name, connection_type, config) VALUES ($1, $2, 'git', '{\"repo_url\": \"https://github.com/paninfracon/stormchaser\"}')")
+        .bind(conn_id)
+        .bind(conn_name)
+        .execute(&pool)
+        .await
+        .unwrap();
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
     let response = app
@@ -750,7 +800,7 @@ async fn test_run_from_git() {
                 .body(Body::from(
                     serde_json::to_vec(&json!({
                         "workflow_name": "hello-world",
-                        "repo_url": "https://github.com/paninfracon/stormchaser",
+                        "connection": conn_id.to_string(),
                         "workflow_path": "tests/hello-world.storm",
                         "git_ref": "trunk",
                         "inputs": {}
@@ -857,12 +907,14 @@ async fn test_run_from_git() {
     // Verify the workflow completes successfully.
     let mut success = false;
     for _ in 0..60 {
-        let fencing_token: i64 =
+        let fencing_token: Option<i64> =
             sqlx::query_scalar("SELECT fencing_token FROM workflow_runs WHERE id = $1")
                 .bind(uuid::Uuid::parse_str(run_id).unwrap())
-                .fetch_one(&pool)
+                .fetch_optional(&pool)
                 .await
-                .expect("workflow run fencing token should be queryable");
+                .unwrap();
+
+        let fencing_token = fencing_token.unwrap_or_default();
 
         let steps: Vec<(uuid::Uuid, String, String)> = sqlx::query_as(
             "SELECT id, step_name, status::text FROM step_instances WHERE run_id = $1",

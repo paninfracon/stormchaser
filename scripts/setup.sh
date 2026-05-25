@@ -123,6 +123,7 @@ if [ "$MODE" == "hybrid" ]; then
     export PORT_S3_CONS=9003
     export PORT_REG=32001
     export PORT_OPA=8182
+    export PORT_WEB=3004
 else
     export PORT_API=3000
     export PORT_DB=5432
@@ -134,6 +135,7 @@ else
     export PORT_S3_CONS=9001
     export PORT_REG=32000
     export PORT_OPA=8181
+    export PORT_WEB=3003
 fi
 
 # 2.25 Generate random dev passwords in .env if missing
@@ -209,6 +211,10 @@ if [[ "$MODE" == "docker" || "$MODE" == "hybrid" ]]; then
         COMPOSE_PROFILES="$MODE"
     fi
 
+    # Ensure Loki docker driver is installed
+    echo -e "${BLUE}>>> Installing Loki Docker Driver plugin...${NC}"
+    run_privileged docker plugin install grafana/loki-docker-driver:latest --alias loki --grant-all-permissions 2>/dev/null || run_privileged docker plugin enable loki 2>/dev/null || true
+
     # Build and start
     docker compose -p "stormchaser-${MODE}" --profile "$COMPOSE_PROFILES" up -d --build
     docker compose -p "stormchaser-${MODE}" build stormchaser-agent # Ensure agent is built
@@ -273,12 +279,17 @@ elif [ "$MODE" == "microk8s" ]; then
         ["stormchaser-engine"]="stormchaser-engine"
         ["stormchaser-runner-k8s"]="stormchaser-runner-k8s"
         ["stormchaser-agent"]="stormchaser-agent"
+        ["stormchaser-web"]="stormchaser-web"
     )
 
     for IMAGE_NAME in "${!COMPONENTS[@]}"; do
         BINARY_NAME=${COMPONENTS[$IMAGE_NAME]}
         echo -e "${BLUE}>>> Building $IMAGE_NAME...${NC}"
-        docker build -t "$IMAGE_NAME:latest" --build-arg BINARY="$BINARY_NAME" "$REPO_ROOT"
+        if [ "$IMAGE_NAME" == "stormchaser-web" ]; then
+            docker build -t "$IMAGE_NAME:latest" -f "$REPO_ROOT/Dockerfile.web" "$REPO_ROOT"
+        else
+            docker build -t "$IMAGE_NAME:latest" --build-arg BINARY="$BINARY_NAME" "$REPO_ROOT"
+        fi
     done
 
     echo -e "${BLUE}>>> Importing images to MicroK8s...${NC}"

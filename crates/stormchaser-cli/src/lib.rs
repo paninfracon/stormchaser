@@ -24,13 +24,8 @@ pub struct Cli {
     pub command: Commands,
 
     /// The base URL of the Stormchaser API.
-    #[arg(
-        short,
-        long,
-        env = "STORMCHASER_URL",
-        default_value = "http://localhost:3000"
-    )]
-    pub url: String,
+    #[arg(short, long, env = "STORMCHASER_URL")]
+    pub url: Option<String>,
 
     /// The authentication token for the API.
     #[arg(short, long, env = "STORMCHASER_TOKEN")]
@@ -131,7 +126,20 @@ pub async fn run_cli(cli: Cli) -> Result<()> {
         .with(RetryTransientMiddleware::new_with_policy(retry_policy))
         .build();
 
-    let token_opt = cli.token.as_deref();
+    let mut final_url = cli.url.clone();
+    let mut final_token = cli.token.clone();
+
+    if let Ok(Some(profile)) = commands::auth_profiles::get_active_profile() {
+        if final_url.is_none() {
+            final_url = Some(profile.url);
+        }
+        if final_token.is_none() {
+            final_token = profile.token;
+        }
+    }
+
+    let resolved_url = final_url.unwrap_or_else(|| "http://localhost:3000".to_string());
+    let token_opt = final_token.as_deref();
 
     match cli.command {
         Commands::Run {
@@ -140,31 +148,40 @@ pub async fn run_cli(cli: Cli) -> Result<()> {
             tail,
             watch,
         } => {
-            run::handle(&cli.url, token_opt, &http_client, file, input, tail, watch).await?;
+            run::handle(
+                &resolved_url,
+                token_opt,
+                &http_client,
+                file,
+                input,
+                tail,
+                watch,
+            )
+            .await?;
         }
 
         Commands::Runs { command } => {
-            runs::handle(&cli.url, token_opt, &http_client, command).await?;
+            runs::handle(&resolved_url, token_opt, &http_client, command).await?;
         }
 
         Commands::Webhooks { command } => {
-            webhooks::handle(&cli.url, token_opt, &http_client, command).await?;
+            webhooks::handle(&resolved_url, token_opt, &http_client, command).await?;
         }
 
         Commands::Rules { command } => {
-            rules::handle(&cli.url, token_opt, &http_client, command).await?;
+            rules::handle(&resolved_url, token_opt, &http_client, command).await?;
         }
 
         Commands::Connections { command } => {
-            connections::handle(&cli.url, token_opt, &http_client, command).await?;
+            connections::handle(&resolved_url, token_opt, &http_client, command).await?;
         }
 
         Commands::Cron { command } => {
-            cron::handle(&cli.url, token_opt, &http_client, command).await?;
+            cron::handle(&resolved_url, token_opt, &http_client, command).await?;
         }
 
         Commands::Lint(command) => {
-            lint::handle(&cli.url, &http_client, command).await?;
+            lint::handle(&resolved_url, &http_client, command).await?;
         }
 
         Commands::Schema { command } => {
@@ -172,11 +189,11 @@ pub async fn run_cli(cli: Cli) -> Result<()> {
         }
 
         Commands::Auth { command } => {
-            auth::handle(&cli.url, &http_client, command).await?;
+            auth::handle(&resolved_url, &http_client, command).await?;
         }
 
         Commands::Login { issuer, client_id } => {
-            auth::handle_login(&cli.url, &issuer, &client_id, &http_client).await?;
+            auth::handle_login(&resolved_url, &issuer, &client_id, &http_client).await?;
         }
     }
 
@@ -199,7 +216,7 @@ mod tests {
 
         let cli = Cli::try_parse_from(["stormchaser", "--url", "http://test", "webhooks", "list"])
             .unwrap();
-        assert_eq!(cli.url, "http://test");
+        assert_eq!(cli.url, Some("http://test".to_string()));
         assert!(matches!(cli.command, Commands::Webhooks { .. }));
     }
 }

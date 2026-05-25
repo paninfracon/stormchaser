@@ -218,7 +218,10 @@ pub async fn handle_webhook(
                 .unwrap_or("unknown")
                 .to_string()
         }
-        "generic" => "generic".to_string(),
+        "generic" => {
+            validate_generic_token(&headers, webhook.secret_token.as_deref())?;
+            "generic".to_string()
+        }
         _ => return Err(StatusCode::NOT_IMPLEMENTED),
     };
 
@@ -254,139 +257,11 @@ pub async fn handle_webhook(
     );
 
     for rule in rules {
-        // 3a. Check event type pattern (simple regex for now)
-        let re = regex::Regex::new(&rule.event_type_pattern).map_err(|e| {
-            tracing::error!(
-                "Invalid regex pattern '{}': {:?}",
-                rule.event_type_pattern,
-                e
-            );
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-        if !re.is_match(&event_type) {
-            continue;
+        match process_rule(&state, &webhook, &rule, &event_type, &hcl_ctx).await {
+            Ok(true) => triggered_count += 1,
+            Ok(false) => continue,
+            Err(e) => return Err(e),
         }
-
-        // 3b. Evaluate condition expression
-        if let Some(cond) = &rule.condition_expr {
-            match hcl_eval::evaluate_raw_expr(cond, &hcl_ctx) {
-                Ok(Value::Bool(true)) => {}
-                Ok(_) => continue,
-                Err(e) => {
-                    tracing::error!("Rule '{}' condition evaluation failed: {:?}", rule.name, e);
-                    continue;
-                }
-            }
-        }
-
-        // 3c. Map inputs
-        let mut inputs = serde_json::Map::new();
-        for (name, expr) in rule.get_input_mappings() {
-            match hcl_eval::evaluate_raw_expr(&expr, &hcl_ctx) {
-                Ok(val) => {
-                    inputs.insert(name, val);
-                }
-                Err(e) => {
-                    tracing::error!(
-                        "Rule '{}' input mapping for '{}' failed: {:?}",
-                        rule.name,
-                        name,
-                        e
-                    );
-                    continue;
-                }
-            }
-        }
-
-        // 4. Trigger Workflow
-        let run_id = stormchaser_model::RunId::new_v4();
-
-        tracing::info!(run_id = %run_id, "Enqueuing webhook workflow: {}", rule.workflow_name);
-        let fencing_token = Utc::now().timestamp_nanos_opt().unwrap_or(0);
-
-        let mut tx = state
-            .pool
-            .begin()
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-        db::insert_workflow_run(
-            &mut tx,
-            run_id,
-            &rule.workflow_name,
-            &format!("webhook:{}", webhook.name),
-            &rule.repo_url,
-            &rule.workflow_path,
-            &rule.git_ref,
-            RunStatus::Queued,
-            fencing_token,
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!(run_id = %run_id, "Failed to insert workflow run: {:?}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-
-        let inputs_value = serde_json::Value::Object(inputs);
-
-        db::insert_run_context(
-            &mut *tx,
-            run_id,
-            "v1",
-            serde_json::json!({}),
-            "",
-            &inputs_value,
-            serde_json::json!({}),
-            vec![],
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!(run_id = %run_id, "Failed to insert run context: {:?}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-
-        db::insert_run_quotas(&mut tx, run_id, 10, "1", "4Gi", "10Gi", "1h")
-            .await
-            .map_err(|e| {
-                tracing::error!(run_id = %run_id, "Failed to insert run quotas: {:?}", e);
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
-
-        tx.commit()
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-        let event = WorkflowQueuedEvent {
-            run_id,
-            event_type: EventType::Workflow(WorkflowEventType::Queued),
-            timestamp: chrono::Utc::now(),
-            status: stormchaser_model::workflow::RunStatus::Queued,
-            dsl: None,
-            inputs: None,
-            initiating_user: None,
-            sops_file: None,
-            sops_role_arn: None,
-        };
-
-        publish_cloudevent(
-            &jetstream::new(state.nats.clone()),
-            NatsSubject::RunQueued(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
-            EventType::Workflow(WorkflowEventType::Queued),
-            EventSource::System,
-            serde_json::to_value(event).unwrap(),
-            Some(SchemaVersion::new("1.0".to_string())),
-            None,
-        )
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-        triggered_count += 1;
-        tracing::info!(
-            "Triggered workflow '{}' (run {}) from rule '{}'",
-            rule.workflow_name,
-            run_id,
-            rule.name
-        );
     }
 
     Ok(Json(serde_json::json!({
@@ -444,4 +319,180 @@ fn validate_github_signature(
     }
 
     Ok(())
+}
+
+fn validate_generic_token(headers: &HeaderMap, secret: Option<&str>) -> Result<(), StatusCode> {
+    let secret = match secret {
+        Some(s) => s,
+        None => return Ok(()), // No secret configured
+    };
+
+    let auth_header = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .ok_or_else(|| {
+            tracing::warn!("Missing Authorization header for generic webhook");
+            StatusCode::UNAUTHORIZED
+        })?;
+
+    let expected = format!("Bearer {}", secret);
+
+    use sha2::{Digest, Sha256};
+    let mut hasher1 = Sha256::new();
+    hasher1.update(auth_header.as_bytes());
+    let hash1 = hasher1.finalize();
+
+    let mut hasher2 = Sha256::new();
+    hasher2.update(expected.as_bytes());
+    let hash2 = hasher2.finalize();
+
+    if hash1 != hash2 {
+        tracing::warn!("Invalid Authorization token for generic webhook");
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    Ok(())
+}
+
+async fn process_rule(
+    state: &AppState,
+    webhook: &WebhookConfig,
+    rule: &stormchaser_model::event_rules::EventRule,
+    event_type: &str,
+    hcl_ctx: &hcl::eval::Context<'_>,
+) -> Result<bool, StatusCode> {
+    // 3a. Check event type pattern (simple regex for now)
+    let re = regex::Regex::new(&rule.event_type_pattern).map_err(|e| {
+        tracing::error!(
+            "Invalid regex pattern '{}': {:?}",
+            rule.event_type_pattern,
+            e
+        );
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    if !re.is_match(event_type) {
+        return Ok(false);
+    }
+
+    // 3b. Evaluate condition expression
+    if let Some(cond) = &rule.condition_expr {
+        match hcl_eval::evaluate_raw_expr(cond, hcl_ctx) {
+            Ok(Value::Bool(true)) => {}
+            Ok(_) => return Ok(false),
+            Err(e) => {
+                tracing::error!("Rule '{}' condition evaluation failed: {:?}", rule.name, e);
+                return Ok(false);
+            }
+        }
+    }
+
+    // 3c. Map inputs
+    let mut inputs = serde_json::Map::new();
+    for (name, expr) in rule.get_input_mappings() {
+        match hcl_eval::evaluate_raw_expr(&expr, hcl_ctx) {
+            Ok(val) => {
+                inputs.insert(name, val);
+            }
+            Err(e) => {
+                tracing::error!(
+                    "Rule '{}' input mapping for '{}' failed: {:?}",
+                    rule.name,
+                    name,
+                    e
+                );
+                return Ok(false);
+            }
+        }
+    }
+
+    // 4. Trigger Workflow
+    let run_id = stormchaser_model::RunId::new_v4();
+
+    tracing::info!(run_id = %run_id, "Enqueuing webhook workflow: {}", rule.workflow_name);
+    let fencing_token = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+
+    let mut tx = state
+        .pool
+        .begin()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    db::insert_workflow_run(
+        &mut tx,
+        run_id,
+        &rule.workflow_name,
+        &format!("webhook:{}", webhook.name),
+        &rule.repo_url,
+        &rule.workflow_path,
+        &rule.git_ref,
+        RunStatus::Queued,
+        fencing_token,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!(run_id = %run_id, "Failed to insert workflow run: {:?}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let inputs_value = serde_json::Value::Object(inputs);
+
+    db::insert_run_context(
+        &mut *tx,
+        run_id,
+        "v1",
+        serde_json::json!({}),
+        "",
+        &inputs_value,
+        serde_json::json!({}),
+        vec![],
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!(run_id = %run_id, "Failed to insert run context: {:?}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    db::insert_run_quotas(&mut tx, run_id, 10, "1", "4Gi", "10Gi", "1h")
+        .await
+        .map_err(|e| {
+            tracing::error!(run_id = %run_id, "Failed to insert run quotas: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    tx.commit()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let event = WorkflowQueuedEvent {
+        run_id,
+        event_type: EventType::Workflow(WorkflowEventType::Queued),
+        timestamp: chrono::Utc::now(),
+        status: stormchaser_model::workflow::RunStatus::Queued,
+        dsl: None,
+        inputs: None,
+        initiating_user: None,
+        sops_file: None,
+        sops_role_arn: None,
+    };
+
+    publish_cloudevent(
+        &jetstream::new(state.nats.clone()),
+        NatsSubject::RunQueued(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
+        EventType::Workflow(WorkflowEventType::Queued),
+        EventSource::System,
+        serde_json::to_value(event).unwrap(),
+        Some(SchemaVersion::new("1.0".to_string())),
+        None,
+    )
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    tracing::info!(
+        "Triggered workflow '{}' (run {}) from rule '{}'",
+        rule.workflow_name,
+        run_id,
+        rule.name
+    );
+
+    Ok(true)
 }

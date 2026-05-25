@@ -57,13 +57,13 @@ pub async fn list_connections(pool: &PgPool) -> Result<Vec<connections::Connecti
 
 /// Retrieves a storage backend by ID.
 /// Get storage backend.
-pub async fn get_connection(
-    pool: &PgPool,
+pub async fn get_connection<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
+    executor: E,
     id: ConnectionId,
 ) -> Result<Option<connections::Connection>, sqlx::Error> {
     sqlx::query_as("SELECT * FROM connections WHERE id = $1")
         .bind(id)
-        .fetch_optional(pool)
+        .fetch_optional(executor)
         .await
 }
 
@@ -71,13 +71,13 @@ pub async fn get_connection(
 ///
 /// Unlike [`get_connection`], which looks up by [`ConnectionId`], this helper
 /// resolves a connection using the user-facing `name` field.
-pub async fn get_connection_by_name(
-    pool: &PgPool,
+pub async fn get_connection_by_name<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
+    executor: E,
     name: &str,
 ) -> Result<Option<connections::Connection>, sqlx::Error> {
     sqlx::query_as("SELECT * FROM connections WHERE name = $1")
         .bind(name)
-        .fetch_optional(pool)
+        .fetch_optional(executor)
         .await
 }
 

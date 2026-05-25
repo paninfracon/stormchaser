@@ -11,6 +11,7 @@ Recent focus has been on improving reliability, observability, and advanced data
 * **Quality Pass & Refactoring:** Refactored multiple crates to adhere to the "500-line rule". Monolithic functions and classes were decomposed into smaller, focused modules (e.g., splitting TUI `app.rs` into specialized sub-modules).
 * **Testing Remediation:** Successfully executed a full test remediation plan. Flakiness in API rate limit tests was resolved. "Fake" assertion-less tests and tests with bypassed logic (`SQL_OFFLINE`) were identified and fully remediated with meaningful assertions.
 * **TUI Enhancements:** Replaced the unmaintained `ratatui-form` with a static JSON Schema approach (`schemaui`) for simple forms, and a Native Reactive Dependency Graph for complex workflow inputs handling SSE streams.
+* **Web UI Introduction:** A new Web UI has been developed that includes an Admin interface, Reporting functionality, and Import/Export features. (Reporting logic is centralized in the API for cross-UI consumption).
 * **NATS Schema Modernization:** All NATS messaging infrastructure has been modernized. Messages conform to CloudEvents, use an OCI Schema Registry, implement subject-based versioning, and use local caching to eliminate network bottlenecks.
 * **Integrations:** Added native `JinjaRender`, `TestReportEmail`, and AWS SES backend steps.
 * **Documentation Quality:** Documentation was reviewed and confirmed to accurately reflect Cargo feature flags, security models (OPA/Fail-Closed), state machines, and DSL grammar.

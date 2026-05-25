@@ -44,7 +44,9 @@ pub mod test_report;
 /// Core workflow run and state management types.
 pub mod workflow;
 
-pub use auth::{ApiOpaContext, Claims, EngineOpaContext, OpaClient};
+#[cfg(not(target_arch = "wasm32"))]
+pub use auth::OpaClient;
+pub use auth::{ApiOpaContext, Claims, EngineOpaContext};
 pub use connections::{Connection, ConnectionType};
 pub use dsl::{ApprovalSpec, WaitEventSpec};
 pub use event::{ApprovalRegistry, EventCorrelation};

@@ -96,7 +96,9 @@ async fn setup_app(mock_server_url: String) -> Option<axum::Router> {
     std::env::set_var("API_RATE_LIMIT_BURST_SIZE", "1000");
 
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = async_nats::connect(nats_url).await.ok()?;
+    let nats_client = async_nats::connect(nats_url)
+        .await
+        .expect("Failed to connect to NATS");
 
     let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
@@ -111,7 +113,7 @@ async fn setup_app(mock_server_url: String) -> Option<axum::Router> {
         .max_connections(2)
         .connect(&db_url)
         .await
-        .ok()?;
+        .expect("Failed to connect to DB");
 
     Some(app(AppState {
         pool,
@@ -155,6 +157,32 @@ async fn test_auth_login_redirect() {
     assert!(location.starts_with(&format!("{}/auth?", mock_server.uri())));
     assert!(location.contains("client_id=test-client"));
     assert!(location.contains("redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Fcallback"));
+}
+
+#[tokio::test]
+async fn test_auth_login_redirect_with_state() {
+    let mock_server = MockServer::start().await;
+    let app = setup_app(mock_server.uri()).await.unwrap();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/auth/login?callback_url=http%3A%2F%2Flocalhost%3A3000%2Fcallback&state=test-state-123")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let location = response
+        .headers()
+        .get("location")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(location.starts_with(&format!("{}/auth?", mock_server.uri())));
+    assert!(location.contains("state=test-state-123"));
 }
 
 #[tokio::test]

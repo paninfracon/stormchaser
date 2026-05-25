@@ -81,13 +81,14 @@ jobs:
       uses: dtolnay/rust-toolchain@stable
       with:
         components: clippy
+        targets: wasm32-unknown-unknown
 
     - name: Cache dependencies
       uses: Swatinem/rust-cache@v2
-    - name: Install sqlx-cli
+    - name: Install sqlx-cli and cargo-leptos
       uses: taiki-e/install-action@v2
       with:
-        tool: sqlx-cli
+        tool: sqlx-cli,cargo-leptos
     - name: Generate Dev Passwords
       run: |
         STORMCHASER_DEV_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
@@ -101,6 +102,11 @@ jobs:
         echo "STORMCHASER_CLI_SECRET=$STORMCHASER_CLI_SECRET" >> $GITHUB_ENV
     - name: Generate Certificates
       run: ./scripts/generate-certs.sh
+    - name: Install Playwright Dependencies
+      run: |
+        cd crates/stormchaser-web/e2e
+        npm ci
+        npx playwright install --with-deps
     - name: Run Unit Tests
       run: STORMCHASER_UNIT_TEST_WITH_ENV=1 ./scripts/test-unit.sh --all-features
     - name: Run Integration Tests

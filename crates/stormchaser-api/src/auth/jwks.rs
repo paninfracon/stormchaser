@@ -18,16 +18,28 @@ pub struct OidcConfig {
 /// Type alias for JWKS cache
 pub type JwksCache = HashMap<String, jsonwebtoken::jwk::Jwk>;
 
+use std::sync::OnceLock;
+
+static HTTP_CLIENT: OnceLock<reqwest_middleware::ClientWithMiddleware> = OnceLock::new();
+
+fn get_client() -> reqwest_middleware::ClientWithMiddleware {
+    HTTP_CLIENT
+        .get_or_init(|| {
+            let retry_policy =
+                reqwest_retry::policies::ExponentialBackoff::builder().build_with_max_retries(3);
+            reqwest_middleware::ClientBuilder::new(reqwest::Client::new())
+                .with(reqwest_retry::RetryTransientMiddleware::new_with_policy(
+                    retry_policy,
+                ))
+                .build()
+        })
+        .clone()
+}
+
 /// Fetches JSON Web Key Set (JWKS) from a specified URL
 pub async fn fetch_jwks(jwks_url: &str) -> JwksCache {
     let mut jwks = HashMap::new();
-    let retry_policy =
-        reqwest_retry::policies::ExponentialBackoff::builder().build_with_max_retries(3);
-    let client = reqwest_middleware::ClientBuilder::new(reqwest::Client::new())
-        .with(reqwest_retry::RetryTransientMiddleware::new_with_policy(
-            retry_policy,
-        ))
-        .build();
+    let client = get_client();
 
     match client.get(jwks_url).send().await {
         Ok(resp) => {

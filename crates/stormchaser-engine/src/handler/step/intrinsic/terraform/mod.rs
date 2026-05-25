@@ -130,104 +130,114 @@ pub async fn mutate_if_terraform(
     resolved_spec: &mut Value,
 ) -> anyhow::Result<()> {
     if step_type == "TerraformPlan" || step_type == "TerraformApply" {
-        let is_apply = *step_type == "TerraformApply";
-
-        let actual_spec = resolved_spec.get("spec").unwrap_or(&*resolved_spec).clone();
-
-        let workspace_dir = actual_spec
-            .get("workspace_dir")
-            .and_then(|v| v.as_str())
-            .unwrap_or(".");
-        let backend_bucket = actual_spec.get("backend_bucket").and_then(|v| v.as_str());
-        let backend_key = actual_spec.get("backend_key").and_then(|v| v.as_str());
-        let region = actual_spec.get("region").and_then(|v| v.as_str());
-        let out_file = actual_spec
-            .get("out_file")
-            .and_then(|v| v.as_str())
-            .unwrap_or("tfplan");
-        let auto_approve = actual_spec
-            .get("auto_approve")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(true);
-
-        #[cfg(feature = "aws-sdk-sts")]
-        let assume_role_arn = actual_spec
-            .get("aws_assume_role_arn")
-            .and_then(|v| v.as_str());
-        #[cfg(feature = "aws-sdk-sts")]
-        let role_session_name = actual_spec
-            .get("aws_role_session_name")
-            .and_then(|v| v.as_str());
-
-        let script = build_terraform_command(
-            workspace_dir,
-            backend_bucket,
-            backend_key,
-            region,
-            is_apply,
-            auto_approve,
-            out_file,
-        );
-
-        let mut envs = Vec::new();
-        if let Some(r) = region {
-            envs.push(EnvVar {
-                name: "AWS_REGION".to_string(),
-                value: r.to_string(),
-            });
-        }
-        envs.push(EnvVar {
-            name: "TF_PLUGIN_CACHE_DIR".to_string(),
-            value: "/tmp/.terraform_plugin_cache".to_string(),
-        });
-
-        #[cfg(feature = "aws-sdk-sts")]
-        if let Some(role_arn) = assume_role_arn {
-            let mut sts_envs = assume_aws_role(run_id, region, role_arn, role_session_name).await?;
-            envs.append(&mut sts_envs);
-        }
-
-        let storage_mounts: Option<Vec<StorageMount>> = match actual_spec.get("storage_mounts") {
-            Some(v) => match serde_json::from_value(v.clone()) {
-                Ok(mounts) => Some(mounts),
-                Err(err) => {
-                    tracing::warn!(
-                        "Failed to deserialize storage_mounts for Terraform step, \
-                             mounts will not be applied: {}",
-                        err
-                    );
-                    None
-                }
-            },
-            None => None,
-        };
-        let cpu = actual_spec
-            .get("cpu")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        let memory = actual_spec
-            .get("memory")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-
-        let container_spec = CommonContainerSpec {
-            registry_connection: None,
-            connections: None,
-            image: "hashicorp/terraform:latest".to_string(),
-            command: Some(vec!["sh".to_string(), "-c".to_string(), script]),
-            args: None,
-            env: if envs.is_empty() { None } else { Some(envs) },
-            cpu,
-            memory,
-            privileged: None,
-            storage_mounts,
-        };
-
-        *step_type = "RunContainer".to_string();
-        if let Ok(val) = serde_json::to_value(container_spec) {
-            *resolved_spec = val;
-        }
+        mutate_terraform_spec(run_id, step_type, resolved_spec).await?;
     }
+    Ok(())
+}
+
+async fn mutate_terraform_spec(
+    run_id: uuid::Uuid,
+    step_type: &mut String,
+    resolved_spec: &mut Value,
+) -> anyhow::Result<()> {
+    let is_apply = *step_type == "TerraformApply";
+
+    let actual_spec = resolved_spec.get("spec").unwrap_or(&*resolved_spec).clone();
+
+    let workspace_dir = actual_spec
+        .get("workspace_dir")
+        .and_then(|v| v.as_str())
+        .unwrap_or(".");
+    let backend_bucket = actual_spec.get("backend_bucket").and_then(|v| v.as_str());
+    let backend_key = actual_spec.get("backend_key").and_then(|v| v.as_str());
+    let region = actual_spec.get("region").and_then(|v| v.as_str());
+    let out_file = actual_spec
+        .get("out_file")
+        .and_then(|v| v.as_str())
+        .unwrap_or("tfplan");
+    let auto_approve = actual_spec
+        .get("auto_approve")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+
+    #[cfg(feature = "aws-sdk-sts")]
+    let assume_role_arn = actual_spec
+        .get("aws_assume_role_arn")
+        .and_then(|v| v.as_str());
+    #[cfg(feature = "aws-sdk-sts")]
+    let role_session_name = actual_spec
+        .get("aws_role_session_name")
+        .and_then(|v| v.as_str());
+
+    let script = build_terraform_command(
+        workspace_dir,
+        backend_bucket,
+        backend_key,
+        region,
+        is_apply,
+        auto_approve,
+        out_file,
+    );
+
+    let mut envs = Vec::new();
+    if let Some(r) = region {
+        envs.push(EnvVar {
+            name: "AWS_REGION".to_string(),
+            value: r.to_string(),
+        });
+    }
+    envs.push(EnvVar {
+        name: "TF_PLUGIN_CACHE_DIR".to_string(),
+        value: "/tmp/.terraform_plugin_cache".to_string(),
+    });
+
+    #[cfg(feature = "aws-sdk-sts")]
+    if let Some(role_arn) = assume_role_arn {
+        let mut sts_envs = assume_aws_role(run_id, region, role_arn, role_session_name).await?;
+        envs.append(&mut sts_envs);
+    }
+
+    let storage_mounts: Option<Vec<StorageMount>> = match actual_spec.get("storage_mounts") {
+        Some(v) => match serde_json::from_value(v.clone()) {
+            Ok(mounts) => Some(mounts),
+            Err(err) => {
+                tracing::warn!(
+                    "Failed to deserialize storage_mounts for Terraform step, \
+                         mounts will not be applied: {}",
+                    err
+                );
+                None
+            }
+        },
+        None => None,
+    };
+    let cpu = actual_spec
+        .get("cpu")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let memory = actual_spec
+        .get("memory")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let container_spec = CommonContainerSpec {
+        registry_connection: None,
+        connections: None,
+        image: "hashicorp/terraform:latest".to_string(),
+        command: Some(vec!["sh".to_string(), "-c".to_string(), script]),
+        args: None,
+        env: if envs.is_empty() { None } else { Some(envs) },
+        cpu,
+        memory,
+        privileged: None,
+        storage_mounts,
+    };
+
+    *step_type = "RunContainer".to_string();
+    if let Ok(val) = serde_json::to_value(container_spec) {
+        *resolved_spec = val;
+    }
+
     Ok(())
 }
 

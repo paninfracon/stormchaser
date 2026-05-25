@@ -283,10 +283,11 @@ impl DockerContainerMachine<state::Running> {
 
         Ok((artifacts_out, hashes_out, reports_out))
     }
-    async fn get_artifact_meta(
+    async fn parse_log_json<T: serde::de::DeserializeOwned>(
         &self,
         container_name: &str,
-    ) -> Result<Option<HashMap<String, Value>>> {
+        prefix: &str,
+    ) -> Result<Option<T>> {
         let mut logs = self.docker.logs(
             container_name,
             Some(LogsOptions::<String> {
@@ -299,11 +300,11 @@ impl DockerContainerMachine<state::Running> {
         while let Some(log_result) = logs.next().await {
             if let Ok(output) = log_result {
                 let line = output.to_string();
-                if line.contains("Parked artifacts:") {
+                if line.contains(prefix) {
                     if let Some(json_start) = line.find('{') {
                         let json_part = &line[json_start..];
-                        if let Ok(meta) = serde_json::from_str(json_part) {
-                            return Ok(Some(meta));
+                        if let Ok(data) = serde_json::from_str(json_part) {
+                            return Ok(Some(data));
                         }
                     }
                 }
@@ -311,63 +312,27 @@ impl DockerContainerMachine<state::Running> {
         }
 
         Ok(None)
+    }
+
+    async fn get_artifact_meta(
+        &self,
+        container_name: &str,
+    ) -> Result<Option<HashMap<String, Value>>> {
+        self.parse_log_json(container_name, "Parked artifacts:")
+            .await
     }
 
     async fn get_storage_hashes(
         &self,
         container_name: &str,
     ) -> Result<Option<HashMap<String, String>>> {
-        let mut logs = self.docker.logs(
-            container_name,
-            Some(LogsOptions::<String> {
-                stdout: true,
-                stderr: true,
-                ..Default::default()
-            }),
-        );
-
-        while let Some(log_result) = logs.next().await {
-            if let Ok(output) = log_result {
-                let line = output.to_string();
-                if line.contains("Parked storage hashes:") {
-                    if let Some(json_start) = line.find('{') {
-                        let json_part = &line[json_start..];
-                        if let Ok(hashes) = serde_json::from_str(json_part) {
-                            return Ok(Some(hashes));
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(None)
+        self.parse_log_json(container_name, "Parked storage hashes:")
+            .await
     }
 
     async fn get_test_reports(&self, container_name: &str) -> Result<Option<Value>> {
-        let mut logs = self.docker.logs(
-            container_name,
-            Some(LogsOptions::<String> {
-                stdout: true,
-                stderr: true,
-                ..Default::default()
-            }),
-        );
-
-        while let Some(log_result) = logs.next().await {
-            if let Ok(output) = log_result {
-                let line = output.to_string();
-                if line.contains("Collected test reports JSON:") {
-                    if let Some(json_start) = line.find('{') {
-                        let json_part = &line[json_start..];
-                        if let Ok(reports) = serde_json::from_str(json_part) {
-                            return Ok(Some(reports));
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(None)
+        self.parse_log_json(container_name, "Collected test reports JSON:")
+            .await
     }
 
     fn build_parking_payloads(
@@ -493,6 +458,7 @@ mod tests {
             },
             received_at: Utc::now(),
             encryption_key: None,
+            loki_url: None,
             storage: Some(storage),
             test_report_urls: None,
             registry_auth: None,

@@ -8,6 +8,11 @@ use serde_json::Value;
 pub enum AuthCommands {
     /// Exchange an SSO token for a Stormchaser JWT
     Exchange { sso_token: String },
+    /// Manage multi-environment authentication profiles
+    Profiles {
+        #[command(subcommand)]
+        command: crate::commands::auth_profiles::ProfilesCommands,
+    },
 }
 
 pub async fn handle(
@@ -23,6 +28,9 @@ pub async fn handle(
                 .send()
                 .await?;
             handle_response(res).await?;
+        }
+        AuthCommands::Profiles { command } => {
+            crate::commands::auth_profiles::handle(command).await?;
         }
     }
     Ok(())

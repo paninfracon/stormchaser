@@ -59,12 +59,22 @@ pub struct AuthRefreshRequest {
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
+pub struct ParseGitRequest {
+    /// The connection (ID or name) to the repository.
+    pub connection: String,
+    /// The workflow path.
+    pub workflow_path: String,
+    /// The git ref.
+    pub git_ref: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
 /// Enqueuerequest.
 pub struct EnqueueRequest {
     /// The workflow name.
     pub workflow_name: String,
-    /// The repo url.
-    pub repo_url: String,
+    /// The connection (ID or name) to the repository.
+    pub connection: String,
     /// The workflow path.
     pub workflow_path: String,
     /// The git ref.
@@ -247,8 +257,8 @@ pub struct CreateEventRuleRequest {
     pub condition_expr: Option<String>,
     /// The workflow name.
     pub workflow_name: String,
-    /// The repo url.
-    pub repo_url: String,
+    /// The connection UUID.
+    pub connection: String,
     /// The workflow path.
     pub workflow_path: String,
     /// The git ref.
@@ -268,8 +278,8 @@ pub struct CreateCronWorkflowRequest {
     pub cronspec: String,
     /// The workflow name.
     pub workflow_name: String,
-    /// The repo url.
-    pub repo_url: String,
+    /// The connection UUID.
+    pub connection: String,
     /// The workflow path.
     pub workflow_path: String,
     /// The git ref.

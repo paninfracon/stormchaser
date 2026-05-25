@@ -1,6 +1,7 @@
 use super::{crypto, DockerContainerMachine};
 use anyhow::Result;
 use bollard::container::Config;
+use bollard::models::HostConfigLogConfig;
 use bollard::service::{HostConfig, Mount};
 use std::collections::HashMap;
 use stormchaser_model::dsl::CommonContainerSpec;
@@ -30,6 +31,8 @@ impl<S> DockerContainerMachine<S> {
         mounts: Vec<Mount>,
         network_mode: Option<String>,
         storage_names: &[String],
+        container_name: &str,
+        loki_url: Option<&str>,
     ) -> Result<Config<String>> {
         let mut env: Vec<String> = spec
             .env
@@ -109,6 +112,29 @@ impl<S> DockerContainerMachine<S> {
             );
         }
 
+        let mut log_config = None;
+        if let Some(url) = loki_url {
+            let external_labels = format!(
+                "job_name={},run_id={},step_id={}",
+                container_name, self.metadata.run_id, self.metadata.step_id
+            );
+            log_config = Some(HostConfigLogConfig {
+                typ: Some("loki".to_string()),
+                config: Some(HashMap::from([
+                    ("loki-url".to_string(), url.to_string()),
+                    ("loki-external-labels".to_string(), external_labels),
+                    ("loki-retries".to_string(), "2".to_string()),
+                    ("loki-batch-size".to_string(), "1".to_string()),
+                    ("loki-batch-wait".to_string(), "10ms".to_string()),
+                ])),
+            });
+        }
+
+        tracing::info!(
+            "Loki config is: {:?}, loki_url was: {:?}",
+            log_config,
+            loki_url
+        );
         Ok(Config {
             image: Some(final_image),
             cmd: final_args,
@@ -124,6 +150,7 @@ impl<S> DockerContainerMachine<S> {
                 privileged: spec.privileged,
                 mounts: Some(mounts),
                 network_mode,
+                log_config,
                 ..Default::default()
             }),
             ..Default::default()
@@ -190,6 +217,7 @@ mod tests {
             step_dsl,
             received_at: chrono::Utc::now(),
             encryption_key: None,
+            loki_url: None,
             storage: None,
             test_report_urls: None,
             registry_auth: None,
@@ -234,7 +262,7 @@ mod tests {
         };
 
         let config = machine
-            .build_container_config(&spec, vec![], None, &[])
+            .build_container_config(&spec, vec![], None, &[], "test-container", None)
             .unwrap();
         assert_eq!(config.image, Some("alpine:latest".into()));
     }

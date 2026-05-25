@@ -232,7 +232,8 @@ pub fn app(state: AppState) -> Router {
                 .patch(update_connection)
                 .delete(delete_connection),
         )
-        .route("/connections/test", post(test_connection));
+        .route("/connections/test", post(test_connection))
+        .route("/schema/parse-git", post(routes::schema::parse_git));
 
     #[cfg(feature = "mcp")]
     {

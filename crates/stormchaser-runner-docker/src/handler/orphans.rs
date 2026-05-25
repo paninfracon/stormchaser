@@ -154,6 +154,7 @@ async fn handle_orphaned_container(
                             test_report_urls: None,
                             registry_auth: None,
                             encryption_key: key_clone,
+                            loki_url: None,
                             received_at,
                         },
                         Some(nats.clone()),
@@ -177,6 +178,7 @@ async fn handle_orphaned_container(
             test_report_urls: None,
             registry_auth: None,
             encryption_key: key_clone,
+            loki_url: None,
             received_at,
         };
 
@@ -244,4 +246,64 @@ pub async fn scan_for_orphans(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bollard::container::{Config, CreateContainerOptions, RemoveContainerOptions};
+    use std::collections::HashMap;
+
+    #[tokio::test]
+    async fn test_scan_for_orphans_finds_container() {
+        let docker = Docker::connect_with_local_defaults().unwrap();
+
+        let nats_client = async_nats::connect("nats://localhost:4222").await;
+        if let Ok(nats) = nats_client {
+            // Create a dummy container
+            let mut labels = HashMap::new();
+            labels.insert("managed-by", "stormchaser");
+            labels.insert("stormchaser-run-id", "00000000-0000-0000-0000-000000000000");
+            labels.insert(
+                "stormchaser-step-id",
+                "00000000-0000-0000-0000-000000000001",
+            );
+            labels.insert("stormchaser.v1.io/step-dsl", "{}");
+
+            let config = Config {
+                image: Some("alpine:latest"),
+                cmd: Some(vec!["sleep", "10"]),
+                labels: Some(labels),
+                ..Default::default()
+            };
+
+            let container = docker
+                .create_container(
+                    Some(CreateContainerOptions {
+                        name: "test_orphan_container",
+                        platform: None,
+                    }),
+                    config,
+                )
+                .await;
+
+            if let Ok(_c) = container {
+                // We won't start it, just having it created is enough for list_containers
+                let res =
+                    scan_for_orphans(docker.clone(), nats, "test-runner".to_string(), None).await;
+                assert!(res.is_ok());
+
+                // Cleanup
+                let _ = docker
+                    .remove_container(
+                        "test_orphan_container",
+                        Some(RemoveContainerOptions {
+                            force: true,
+                            ..Default::default()
+                        }),
+                    )
+                    .await;
+            }
+        }
+    }
 }

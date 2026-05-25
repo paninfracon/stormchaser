@@ -1,3 +1,4 @@
+#![cfg(not(target_arch = "wasm32"))]
 use crate::id::EventId;
 use crate::RunId;
 use anyhow::Result;

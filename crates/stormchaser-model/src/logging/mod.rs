@@ -1,11 +1,17 @@
+#[cfg(not(target_arch = "wasm32"))]
 pub mod elasticsearch;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod loki;
 
 use crate::id::*;
+#[cfg(not(target_arch = "wasm32"))]
 use anyhow::Result;
+#[cfg(not(target_arch = "wasm32"))]
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
+#[cfg(not(target_arch = "wasm32"))]
 use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
 use serde::{Deserialize, Serialize};
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::sync::mpsc;
 
 /// Represents the supported logging backends for step execution logs.
@@ -25,6 +31,7 @@ pub enum LogBackend {
     },
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl LogBackend {
     pub(crate) fn create_client(&self) -> ClientWithMiddleware {
         let retry_policy = ExponentialBackoff::builder().build_with_max_retries(5);
@@ -90,7 +97,7 @@ impl LogBackend {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
 

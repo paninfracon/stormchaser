@@ -32,6 +32,7 @@ pub async fn handle_task(
     nats_client: async_nats::Client,
     runner_id: String,
     encryption_key: Option<String>,
+    loki_url: Option<String>,
 ) {
     let received_at = Utc::now();
     info!("Received task message: {:?}", msg.subject);
@@ -135,6 +136,7 @@ pub async fn handle_task(
             test_report_urls,
             registry_auth,
             encryption_key,
+            loki_url,
             received_at,
         },
         Some(nats_client.clone()),
@@ -201,6 +203,69 @@ pub async fn handle_task(
                 None,
             )
             .await;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_nats::jetstream::stream::Config as StreamConfig;
+    use futures::StreamExt;
+
+    #[tokio::test]
+    async fn test_handle_task_invalid_event() {
+        let docker = bollard::Docker::connect_with_local_defaults().unwrap();
+        let nats_client = async_nats::connect("nats://localhost:4222").await;
+        if let Ok(nats) = nats_client {
+            let js = async_nats::jetstream::new(nats.clone());
+
+            // Create a test stream
+            let stream_name = "TEST_TASK_STREAM";
+            let subject = "test.task.>";
+            let publish_subject = "test.task.foo";
+            let _ = js
+                .create_stream(StreamConfig {
+                    name: stream_name.to_string(),
+                    subjects: vec![subject.to_string()],
+                    ..Default::default()
+                })
+                .await;
+
+            // Publish a malformed message
+            js.publish(publish_subject, "not a cloud event".into())
+                .await
+                .unwrap();
+
+            // Get a consumer
+            let consumer = js
+                .create_consumer_on_stream(
+                    async_nats::jetstream::consumer::pull::Config {
+                        durable_name: Some("test_task_consumer".to_string()),
+                        ..Default::default()
+                    },
+                    stream_name,
+                )
+                .await
+                .unwrap();
+
+            let mut messages = consumer.messages().await.unwrap();
+
+            if let Some(Ok(msg)) = messages.next().await {
+                // Pass it to handle_task
+                handle_task(
+                    msg,
+                    docker.clone(),
+                    nats.clone(),
+                    "test-runner".to_string(),
+                    None,
+                    None,
+                )
+                .await;
+            }
+
+            // Clean up
+            let _ = js.delete_stream(stream_name).await;
         }
     }
 }

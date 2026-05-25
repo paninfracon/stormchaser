@@ -89,99 +89,17 @@ pub async fn schedule_step(
             Err(e) => return Err(e),
         };
 
-        if items.is_empty() {
-            crate::db::insert_step_instance(
-                executor,
-                StepInstanceId::new_v4(),
-                run_id,
-                &step_dsl.name,
-                &step_dsl.r#type,
-                StepStatus::Skipped,
-                Utc::now(),
-            )
-            .await?;
-            return Ok(());
-        }
-
-        let max_parallel = step_dsl
-            .strategy
-            .as_ref()
-            .and_then(|s| s.max_parallel)
-            .unwrap_or(u32::MAX);
-
-        let run_context = fetch_run_context(run_id, &mut *executor).await?;
-        let steps_outputs = fetch_outputs(run_id, &mut *executor).await?;
-        let quotas = fetch_quotas(run_id, &mut *executor).await?;
-        let current_running_count: i64 =
-            crate::db::count_running_steps_for_run(&mut *executor, run_id).await?;
-
-        for (idx, item) in items.into_iter().enumerate() {
-            let step_instance_id = StepInstanceId::new(Uuid::new_v4());
-            let status = match step_dsl.r#type.as_str() {
-                "Approval" | "Wait" => StepStatus::WaitingForEvent,
-                _ => {
-                    if (idx as u32) < max_parallel
-                        && current_running_count < quotas.max_concurrency as i64
-                    {
-                        StepStatus::Pending
-                    } else {
-                        StepStatus::WaitingForEvent
-                    }
-                }
-            };
-
-            let mut iteration_ctx = crate::hcl_eval::create_context(
-                run_context.inputs.clone(),
-                run_id,
-                run_context.secrets.clone(),
-                steps_outputs.clone(),
-                Some(workflow),
-                Some(step_dsl),
-            );
-            let iter_var_name = step_dsl.iterate_as.as_deref().unwrap_or("item");
-            iteration_ctx.declare_var(iter_var_name, crate::hcl_eval::json_to_hcl(item));
-
-            let mut resolved_spec_iter = resolved_spec.clone();
-            let _ =
-                crate::hcl_eval::resolve_expressions(&mut resolved_spec_iter, &iteration_ctx, true);
-
-            let mut resolved_params_iter = resolved_params.clone();
-            let _ = crate::hcl_eval::resolve_expressions(
-                &mut resolved_params_iter,
-                &iteration_ctx,
-                true,
-            );
-
-            crate::db::insert_step_instance_with_spec(
-                &mut *executor,
-                step_instance_id,
-                run_id,
-                &step_dsl.name,
-                &resolved_type,
-                status.clone(),
-                Some(idx as i32),
-                resolved_spec_iter.clone(),
-                resolved_params_iter.clone(),
-                Utc::now(),
-            )
-            .await?;
-
-            if status == StepStatus::WaitingForEvent && resolved_type == "Wait" {
-                if let Ok(wait_spec) =
-                    serde_json::from_value::<dsl::WaitEventSpec>(resolved_spec_iter.clone())
-                {
-                    let _ = crate::db::insert_event_correlation(
-                        &mut *executor,
-                        EventId::new_v4(),
-                        step_instance_id,
-                        run_id,
-                        &wait_spec.correlation_key,
-                        &wait_spec.correlation_value,
-                    )
-                    .await;
-                }
-            }
-        }
+        schedule_iterated_steps(
+            executor,
+            run_id,
+            step_dsl,
+            workflow,
+            &resolved_type,
+            &resolved_spec,
+            &resolved_params,
+            items,
+        )
+        .await?;
     } else {
         let _ = crate::hcl_eval::resolve_expressions(&mut resolved_spec, hcl_ctx, true);
         let _ = crate::hcl_eval::resolve_expressions(&mut resolved_params, hcl_ctx, true);
@@ -245,6 +163,110 @@ pub async fn schedule_step(
                         });
                     }
                 }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn schedule_iterated_steps(
+    executor: &mut sqlx::PgConnection,
+    run_id: RunId,
+    step_dsl: &ast::Step,
+    workflow: &ast::Workflow,
+    resolved_type: &str,
+    resolved_spec: &Value,
+    resolved_params: &Value,
+    items: Vec<Value>,
+) -> Result<()> {
+    if items.is_empty() {
+        crate::db::insert_step_instance(
+            executor,
+            StepInstanceId::new_v4(),
+            run_id,
+            &step_dsl.name,
+            &step_dsl.r#type,
+            StepStatus::Skipped,
+            Utc::now(),
+        )
+        .await?;
+        return Ok(());
+    }
+
+    let max_parallel = step_dsl
+        .strategy
+        .as_ref()
+        .and_then(|s| s.max_parallel)
+        .unwrap_or(u32::MAX);
+
+    let run_context = fetch_run_context(run_id, &mut *executor).await?;
+    let steps_outputs = fetch_outputs(run_id, &mut *executor).await?;
+    let quotas = fetch_quotas(run_id, &mut *executor).await?;
+    let current_running_count: i64 =
+        crate::db::count_running_steps_for_run(&mut *executor, run_id).await?;
+
+    for (idx, item) in items.into_iter().enumerate() {
+        let step_instance_id = StepInstanceId::new(Uuid::new_v4());
+        let status = match step_dsl.r#type.as_str() {
+            "Approval" | "Wait" => StepStatus::WaitingForEvent,
+            _ => {
+                if (idx as u32) < max_parallel
+                    && current_running_count < quotas.max_concurrency as i64
+                {
+                    StepStatus::Pending
+                } else {
+                    StepStatus::WaitingForEvent
+                }
+            }
+        };
+
+        let mut iteration_ctx = crate::hcl_eval::create_context(
+            run_context.inputs.clone(),
+            run_id,
+            run_context.secrets.clone(),
+            steps_outputs.clone(),
+            Some(workflow),
+            Some(step_dsl),
+        );
+        let iter_var_name = step_dsl.iterate_as.as_deref().unwrap_or("item");
+        iteration_ctx.declare_var(iter_var_name, crate::hcl_eval::json_to_hcl(item));
+
+        let mut resolved_spec_iter = resolved_spec.clone();
+        let _ = crate::hcl_eval::resolve_expressions(&mut resolved_spec_iter, &iteration_ctx, true);
+
+        let mut resolved_params_iter = resolved_params.clone();
+        let _ =
+            crate::hcl_eval::resolve_expressions(&mut resolved_params_iter, &iteration_ctx, true);
+
+        crate::db::insert_step_instance_with_spec(
+            &mut *executor,
+            step_instance_id,
+            run_id,
+            &step_dsl.name,
+            resolved_type,
+            status.clone(),
+            Some(idx as i32),
+            resolved_spec_iter.clone(),
+            resolved_params_iter.clone(),
+            Utc::now(),
+        )
+        .await?;
+
+        if status == StepStatus::WaitingForEvent && resolved_type == "Wait" {
+            if let Ok(wait_spec) =
+                serde_json::from_value::<dsl::WaitEventSpec>(resolved_spec_iter.clone())
+            {
+                let _ = crate::db::insert_event_correlation(
+                    &mut *executor,
+                    EventId::new_v4(),
+                    step_instance_id,
+                    run_id,
+                    &wait_spec.correlation_key,
+                    &wait_spec.correlation_value,
+                )
+                .await;
             }
         }
     }

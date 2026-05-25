@@ -3,6 +3,7 @@ use clap::Subcommand;
 
 pub mod approve;
 pub mod artifacts;
+pub mod delete;
 pub mod enqueue;
 pub mod get;
 pub mod list;
@@ -31,6 +32,8 @@ pub enum RunCommands {
     },
     /// Get run details
     Get { id: stormchaser_model::RunId },
+    /// Delete a run
+    Delete { id: stormchaser_model::RunId },
     /// List artifacts for a run
     Artifacts { id: stormchaser_model::RunId },
     /// List test reports for a run
@@ -53,7 +56,7 @@ pub enum RunCommands {
     Enqueue {
         workflow_name: String,
         #[arg(long)]
-        repo: String,
+        connection: String,
         #[arg(long)]
         path: String,
         #[arg(long)]
@@ -120,6 +123,7 @@ pub async fn handle(
             .await
         }
         RunCommands::Get { id } => get::get_run(url, token, http_client, id).await,
+        RunCommands::Delete { id } => delete::delete_run(url, token, http_client, id).await,
         RunCommands::Artifacts { id } => {
             artifacts::list_artifacts(url, token, http_client, id).await
         }
@@ -133,7 +137,7 @@ pub async fn handle(
         RunCommands::Watch { id } => watch::watch_run(url, token, http_client, id).await,
         RunCommands::Enqueue {
             workflow_name,
-            repo,
+            connection,
             path,
             git_ref,
             input,
@@ -146,7 +150,7 @@ pub async fn handle(
                 http_client,
                 enqueue::EnqueueRunParams {
                     workflow_name,
-                    repo,
+                    connection,
                     path,
                     git_ref,
                     input,
@@ -198,6 +202,7 @@ mod tests {
                 status: None,
             },
             RunCommands::Get { id },
+            RunCommands::Delete { id },
             RunCommands::Artifacts { id },
             RunCommands::Reports { id },
             RunCommands::Report {
@@ -211,7 +216,7 @@ mod tests {
             RunCommands::Watch { id },
             RunCommands::Enqueue {
                 workflow_name: "test".to_string(),
-                repo: "test".to_string(),
+                connection: "test".to_string(),
                 path: "test".to_string(),
                 git_ref: "test".to_string(),
                 input: vec![],

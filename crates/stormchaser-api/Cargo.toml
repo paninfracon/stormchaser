@@ -73,6 +73,7 @@ jsonschema.workspace = true
 aws-config = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-sdk-sts = { workspace = true }
+git2 = { version = "0.20", features = ["vendored-openssl"] }
 
 [dev-dependencies]
 rand = "0.8"

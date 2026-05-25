@@ -3,7 +3,11 @@ use futures::StreamExt;
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use std::env::var;
+use stormchaser_engine::handler::step::events::packing::handle_step_packing_sfs;
 use stormchaser_engine::handler::step::events::query::handle_step_query;
+use stormchaser_engine::handler::step::events::running::handle_step_running;
+use stormchaser_engine::handler::step::events::unpacking::handle_step_unpacking_sfs;
+use stormchaser_model::events::StepRunningEvent;
 use stormchaser_model::{RunId, StepInstanceId};
 
 async fn setup_db() -> sqlx::PgPool {
@@ -89,6 +93,169 @@ async fn test_handle_step_query_ephemeral_reply() {
         .await
         .unwrap();
 
+    sqlx::query("DELETE FROM workflow_runs WHERE id = $1")
+        .bind(run_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn test_handle_step_packing_sfs() {
+    let pool = setup_db().await;
+    let run_id = RunId::new_v4();
+    let step_id = StepInstanceId::new_v4();
+
+    sqlx::query(
+        "INSERT INTO workflow_runs (id, workflow_name, initiating_user, status, fencing_token, repo_url, workflow_path, git_ref) VALUES ($1, 'test', 'test', 'running', 1, 'http://example.com', 'test.storm', 'main')"
+    )
+    .bind(run_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO step_instances (id, run_id, step_name, step_type, status, spec, params) VALUES ($1, $2, 'test-step', 'RunContainer', 'running', '{}', '{}')"
+    )
+    .bind(step_id)
+    .bind(run_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let payload = json!({
+        "run_id": run_id.to_string(),
+        "step_id": step_id.to_string(),
+    });
+
+    handle_step_packing_sfs(payload, pool.clone())
+        .await
+        .unwrap();
+
+    let status: String =
+        sqlx::query_scalar("SELECT status::text FROM step_instances WHERE id = $1")
+            .bind(step_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    assert_eq!(status, "packing_sfs");
+
+    sqlx::query("DELETE FROM step_instances WHERE run_id = $1")
+        .bind(run_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM workflow_runs WHERE id = $1")
+        .bind(run_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn test_handle_step_unpacking_sfs() {
+    let pool = setup_db().await;
+    let run_id = RunId::new_v4();
+    let step_id = StepInstanceId::new_v4();
+
+    sqlx::query(
+        "INSERT INTO workflow_runs (id, workflow_name, initiating_user, status, fencing_token, repo_url, workflow_path, git_ref) VALUES ($1, 'test', 'test', 'running', 1, 'http://example.com', 'test.storm', 'main')"
+    )
+    .bind(run_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO step_instances (id, run_id, step_name, step_type, status, spec, params) VALUES ($1, $2, 'test-step', 'RunContainer', 'pending', '{}', '{}')"
+    )
+    .bind(step_id)
+    .bind(run_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let payload = json!({
+        "run_id": run_id.to_string(),
+        "step_id": step_id.to_string(),
+        "runner_id": "test-runner"
+    });
+
+    handle_step_unpacking_sfs(payload, pool.clone())
+        .await
+        .unwrap();
+
+    let status: String =
+        sqlx::query_scalar("SELECT status::text FROM step_instances WHERE id = $1")
+            .bind(step_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    assert_eq!(status, "unpacking_sfs");
+
+    sqlx::query("DELETE FROM step_instances WHERE run_id = $1")
+        .bind(run_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM workflow_runs WHERE id = $1")
+        .bind(run_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn test_handle_step_running() {
+    let pool = setup_db().await;
+    let run_id = RunId::new_v4();
+    let step_id = StepInstanceId::new_v4();
+
+    sqlx::query(
+        "INSERT INTO workflow_runs (id, workflow_name, initiating_user, status, fencing_token, repo_url, workflow_path, git_ref) VALUES ($1, 'test', 'test', 'running', 1, 'http://example.com', 'test.storm', 'main')"
+    )
+    .bind(run_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO step_instances (id, run_id, step_name, step_type, status, spec, params) VALUES ($1, $2, 'test-step', 'RunContainer', 'pending', '{}', '{}')"
+    )
+    .bind(step_id)
+    .bind(run_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let event = StepRunningEvent {
+        run_id,
+        step_id,
+        runner_id: Some("test-runner".to_string()),
+        timestamp: chrono::Utc::now(),
+        event_type: stormchaser_model::events::EventType::Step(
+            stormchaser_model::events::StepEventType::Running,
+        ),
+    };
+
+    handle_step_running(event, pool.clone()).await.unwrap();
+
+    let status: String =
+        sqlx::query_scalar("SELECT status::text FROM step_instances WHERE id = $1")
+            .bind(step_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    assert_eq!(status, "running");
+
+    sqlx::query("DELETE FROM step_instances WHERE run_id = $1")
+        .bind(run_id)
+        .execute(&pool)
+        .await
+        .unwrap();
     sqlx::query("DELETE FROM workflow_runs WHERE id = $1")
         .bind(run_id)
         .execute(&pool)

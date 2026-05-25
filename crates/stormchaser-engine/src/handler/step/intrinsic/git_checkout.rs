@@ -14,105 +14,7 @@ pub async fn mutate(
             serde_json::from_value(resolved_spec.get("spec").unwrap_or(&*resolved_spec).clone());
 
         if let Ok(git) = git_spec {
-            let depth = git.depth.unwrap_or(1);
-            let dest = git.destination.clone().unwrap_or_else(|| ".".to_string());
-            let branch = git.r#ref.clone().unwrap_or_else(|| "main".to_string());
-
-            let mut auth_command = String::new();
-            let mut env_vars = Vec::new();
-
-            if let Some(conn_name) = &git.connection {
-                let pool = pool.with_context(|| {
-                    format!(
-                        "GitCheckout step references connection '{}' but no database context is available",
-                        conn_name
-                    )
-                })?;
-                let conn = crate::db::connections::get_storage_backend_by_name::<
-                    _,
-                    stormchaser_model::Connection,
-                >(pool, conn_name)
-                .await?
-                .with_context(|| format!("GitCheckout connection '{}' was not found", conn_name))?;
-
-                if conn.connection_type != stormchaser_model::connections::ConnectionType::Git {
-                    anyhow::bail!(
-                        "GitCheckout connection '{}' has type {:?}, expected git",
-                        conn_name,
-                        conn.connection_type
-                    );
-                }
-
-                if let Some(creds) = &conn.encrypted_credentials {
-                    if let Some(username) = conn.config.get("username").and_then(|v| v.as_str()) {
-                        env_vars.push(dsl::EnvVar {
-                            name: "GIT_USERNAME".to_string(),
-                            value: username.to_string(),
-                        });
-                        env_vars.push(dsl::EnvVar {
-                            name: "GIT_PASSWORD".to_string(),
-                            value: creds.to_string(),
-                        });
-                        auth_command = "git config --global credential.helper '!f() { echo username=$GIT_USERNAME; echo password=$GIT_PASSWORD; }; f' && ".to_string();
-                    } else {
-                        env_vars.push(dsl::EnvVar {
-                            name: "GIT_BEARER_TOKEN".to_string(),
-                            value: creds.to_string(),
-                        });
-                        auth_command = "git config --global http.extraHeader \"Authorization: Bearer $GIT_BEARER_TOKEN\" && ".to_string();
-                    }
-                }
-
-                if let Some(ssh_key) = conn.config.get("ssh_key").and_then(|v| v.as_str()) {
-                    env_vars.push(dsl::EnvVar {
-                        name: "GIT_SSH_KEY".to_string(),
-                        value: ssh_key.to_string(),
-                    });
-                    auth_command = "mkdir -p ~/.ssh && echo \"$GIT_SSH_KEY\" > ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa && export GIT_SSH_COMMAND='ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no' && ".to_string();
-                }
-            }
-
-            let mut script = format!(
-                "{}mkdir -p {dest} && cd {dest} && git init && git remote add origin {repo} && git fetch --depth {depth} --filter=blob:none origin {branch} && git checkout FETCH_HEAD",
-                auth_command,
-                dest = dest,
-                repo = git.repo,
-                depth = depth,
-                branch = branch
-            );
-
-            if let Some(sparse) = git.sparse_checkout {
-                if !sparse.is_empty() {
-                    let sparse_paths = sparse.join(" ");
-                    script = format!(
-                        "{}mkdir -p {dest} && cd {dest} && git init && git remote add origin {repo} && git sparse-checkout set {sparse_paths} && git fetch --depth {depth} --filter=blob:none origin {branch} && git checkout FETCH_HEAD",
-                        auth_command,
-                        dest = dest,
-                        repo = git.repo,
-                        sparse_paths = sparse_paths,
-                        depth = depth,
-                        branch = branch
-                    );
-                }
-            }
-
-            let container_spec = dsl::CommonContainerSpec {
-                image: "alpine/git:latest".to_string(),
-                registry_connection: None,
-                connections: None,
-                command: Some(vec!["sh".to_string(), "-c".to_string(), script]),
-                args: None,
-                env: if env_vars.is_empty() {
-                    None
-                } else {
-                    Some(env_vars)
-                },
-                cpu: None,
-                memory: None,
-                privileged: None,
-                storage_mounts: git.storage_mounts,
-            };
-
+            let container_spec = build_git_container_spec(&git, pool).await?;
             *step_type = "RunContainer".to_string();
             if let Ok(val) = serde_json::to_value(container_spec) {
                 *resolved_spec = val;
@@ -121,6 +23,111 @@ pub async fn mutate(
     }
     Ok(())
 }
+
+async fn build_git_container_spec(
+    git: &dsl::GitCheckoutSpec,
+    pool: Option<&PgPool>,
+) -> anyhow::Result<dsl::CommonContainerSpec> {
+    let depth = git.depth.unwrap_or(1);
+    let dest = git.destination.clone().unwrap_or_else(|| ".".to_string());
+    let branch = git.r#ref.clone().unwrap_or_else(|| "main".to_string());
+
+    let mut auth_command = String::new();
+    let mut env_vars = Vec::new();
+
+    if let Some(conn_name) = &git.connection {
+        let pool = pool.with_context(|| {
+            format!(
+                "GitCheckout step references connection '{}' but no database context is available",
+                conn_name
+            )
+        })?;
+        let conn = crate::db::connections::get_storage_backend_by_name::<
+            _,
+            stormchaser_model::Connection,
+        >(pool, conn_name)
+        .await?
+        .with_context(|| format!("GitCheckout connection '{}' was not found", conn_name))?;
+
+        if conn.connection_type != stormchaser_model::connections::ConnectionType::Git {
+            anyhow::bail!(
+                "GitCheckout connection '{}' has type {:?}, expected git",
+                conn_name,
+                conn.connection_type
+            );
+        }
+
+        if let Some(creds) = &conn.encrypted_credentials {
+            if let Some(username) = conn.config.get("username").and_then(|v| v.as_str()) {
+                env_vars.push(dsl::EnvVar {
+                    name: "GIT_USERNAME".to_string(),
+                    value: username.to_string(),
+                });
+                env_vars.push(dsl::EnvVar {
+                    name: "GIT_PASSWORD".to_string(),
+                    value: creds.to_string(),
+                });
+                auth_command = "git config --global credential.helper '!f() { echo username=$GIT_USERNAME; echo password=$GIT_PASSWORD; }; f' && ".to_string();
+            } else {
+                env_vars.push(dsl::EnvVar {
+                    name: "GIT_BEARER_TOKEN".to_string(),
+                    value: creds.to_string(),
+                });
+                auth_command = "git config --global http.extraHeader \"Authorization: Bearer $GIT_BEARER_TOKEN\" && ".to_string();
+            }
+        }
+
+        if let Some(ssh_key) = conn.config.get("ssh_key").and_then(|v| v.as_str()) {
+            env_vars.push(dsl::EnvVar {
+                name: "GIT_SSH_KEY".to_string(),
+                value: ssh_key.to_string(),
+            });
+            auth_command = "mkdir -p ~/.ssh && echo \"$GIT_SSH_KEY\" > ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa && export GIT_SSH_COMMAND='ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no' && ".to_string();
+        }
+    }
+
+    let mut script = format!(
+        "{}mkdir -p {dest} && cd {dest} && git init && git remote add origin {repo} && git fetch --depth {depth} --filter=blob:none origin {branch} && git checkout FETCH_HEAD",
+        auth_command,
+        dest = dest,
+        repo = git.repo,
+        depth = depth,
+        branch = branch
+    );
+
+    if let Some(sparse) = &git.sparse_checkout {
+        if !sparse.is_empty() {
+            let sparse_paths = sparse.join(" ");
+            script = format!(
+                "{}mkdir -p {dest} && cd {dest} && git init && git remote add origin {repo} && git sparse-checkout set {sparse_paths} && git fetch --depth {depth} --filter=blob:none origin {branch} && git checkout FETCH_HEAD",
+                auth_command,
+                dest = dest,
+                repo = git.repo,
+                sparse_paths = sparse_paths,
+                depth = depth,
+                branch = branch
+            );
+        }
+    }
+
+    Ok(dsl::CommonContainerSpec {
+        image: "alpine/git:latest".to_string(),
+        registry_connection: None,
+        connections: None,
+        command: Some(vec!["sh".to_string(), "-c".to_string(), script]),
+        args: None,
+        env: if env_vars.is_empty() {
+            None
+        } else {
+            Some(env_vars)
+        },
+        cpu: None,
+        memory: None,
+        privileged: None,
+        storage_mounts: git.storage_mounts.clone(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

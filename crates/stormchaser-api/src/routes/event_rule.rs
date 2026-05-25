@@ -27,6 +27,35 @@ pub async fn create_event_rule(
     Json(payload): Json<CreateEventRuleRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let id = RuleId::new_v4();
+
+    let conn = if let Ok(id) = uuid::Uuid::parse_str(&payload.connection) {
+        crate::db::get_connection(&state.pool, stormchaser_model::ConnectionId::new(id))
+            .await
+            .map_err(|_| StatusCode::NOT_FOUND)?
+            .ok_or(StatusCode::NOT_FOUND)?
+    } else {
+        crate::db::get_connection_by_name(&state.pool, &payload.connection)
+            .await
+            .map_err(|_| StatusCode::NOT_FOUND)?
+            .ok_or(StatusCode::NOT_FOUND)?
+    };
+
+    let repo_url = conn
+        .config
+        .get("repo_url")
+        .and_then(|v| v.as_str())
+        .or_else(|| conn.config.get("url").and_then(|v| v.as_str()))
+        .unwrap_or("")
+        .to_string();
+
+    if repo_url.is_empty() {
+        tracing::error!(
+            "Git connection {} is missing repo_url in config",
+            payload.connection
+        );
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     db::create_event_rule(
         &state.pool,
         id,
@@ -36,7 +65,7 @@ pub async fn create_event_rule(
         &payload.event_type_pattern,
         &payload.condition_expr,
         &payload.workflow_name,
-        &payload.repo_url,
+        &repo_url,
         &payload.workflow_path,
         &payload.git_ref,
         serde_json::to_value(&payload.input_mappings).unwrap_or(serde_json::json!({})),

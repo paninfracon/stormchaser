@@ -1,3 +1,4 @@
+#![cfg(not(target_arch = "wasm32"))]
 use oci_distribution::client::{Client, ClientConfig, ClientProtocol};
 use oci_distribution::secrets::RegistryAuth;
 use oci_distribution::Reference;
