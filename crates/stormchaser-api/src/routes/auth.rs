@@ -21,6 +21,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub struct LoginQuery {
     /// The callback url.
     pub callback_url: String,
+    /// Optional OAuth state parameter.
+    pub state: Option<String>,
 }
 
 #[utoipa::path(
@@ -44,12 +46,16 @@ pub async fn login(
         .as_ref()
         .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let auth_url = format!(
+    let mut auth_url = format!(
         "{}/auth?client_id={}&redirect_uri={}&response_type=code&scope=openid+profile+email+offline_access",
         oidc_config.external_issuer,
         oidc_config.client_id,
         urlencoding::encode(&query.callback_url)
     );
+
+    if let Some(state) = &query.state {
+        auth_url.push_str(&format!("&state={}", urlencoding::encode(state)));
+    }
 
     Ok(Redirect::to(&auth_url))
 }

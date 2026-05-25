@@ -20,7 +20,7 @@ pub async fn submit_run_git(
     let cookie = require_auth().await?;
     let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
 
-    let client = reqwest::Client::new();
+    let client = super::http_client();
     let url = format!("{}/api/v1/runs", api_url);
 
     let workflow_name = workflow_path
@@ -61,7 +61,7 @@ pub async fn submit_run_direct(
     let cookie = require_auth().await?;
     let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
 
-    let client = reqwest::Client::new();
+    let client = super::http_client();
     let url = format!("{}/api/v1/runs/direct", api_url);
 
     let res = client
@@ -102,7 +102,7 @@ pub async fn fetch_dsl_from_git(
     let cookie = require_auth().await?;
     let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
 
-    let client = reqwest::Client::new();
+    let client = super::http_client();
     let url = format!("{}/api/v1/schema/parse-git", api_url);
 
     let res = client
@@ -144,6 +144,7 @@ pub struct ParseDslResult {
 pub async fn parse_dsl(dsl: String) -> Result<ParseDslResult, ServerFnError> {
     #[cfg(feature = "ssr")]
     {
+        let _cookie = require_auth().await?;
         use stormchaser_dsl::StormchaserParser;
         match StormchaserParser.parse(&dsl) {
             Ok(workflow) => {

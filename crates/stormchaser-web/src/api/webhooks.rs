@@ -15,7 +15,7 @@ pub async fn fetch_webhooks() -> Result<Vec<crate::models::WebhookConfig>, Serve
     let cookie = require_auth().await?;
     let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
 
-    let client = reqwest::Client::new();
+    let client = super::http_client();
     let url = format!("{}/api/v1/webhooks", api_url);
 
     let res = client
@@ -48,7 +48,7 @@ pub async fn create_webhook(
 ) -> Result<(), ServerFnError> {
     let cookie = require_auth().await?;
     let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
-    let client = reqwest::Client::new();
+    let client = super::http_client();
     let res = client
         .post(format!("{}/api/v1/webhooks", api_url))
         .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
@@ -73,7 +73,7 @@ pub async fn create_webhook(
 pub async fn delete_webhook(id: String) -> Result<(), ServerFnError> {
     let cookie = require_auth().await?;
     let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
-    let client = reqwest::Client::new();
+    let client = super::http_client();
     let res = client
         .delete(format!("{}/api/v1/webhooks/{}", api_url, id))
         .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))

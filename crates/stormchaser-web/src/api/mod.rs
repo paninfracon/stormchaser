@@ -55,3 +55,9 @@ pub async fn check_auth() -> Result<bool, ServerFnError> {
     let _ = require_auth().await?;
     Ok(true)
 }
+
+#[cfg(feature = "ssr")]
+pub(crate) fn http_client() -> reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(reqwest::Client::new).clone()
+}

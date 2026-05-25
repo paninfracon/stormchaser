@@ -238,3 +238,93 @@ async fn test_github_webhook_signature() {
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn test_generic_webhook_secret() {
+    std::env::set_var("API_RATE_LIMIT_PER_SECOND", "1000");
+    std::env::set_var("API_RATE_LIMIT_BURST_SIZE", "1000");
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
+        dotenvy::dotenv().ok();
+        format!(
+            "postgres://stormchaser:{}@localhost:5432/stormchaser",
+            var("STORMCHASER_DEV_PASSWORD")
+                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
+        )
+    });
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&db_url)
+        .await
+        .unwrap();
+
+    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let nats_client = async_nats::connect(nats_url).await.unwrap();
+
+    let state = AppState {
+        pool: pool.clone(),
+        nats: nats_client,
+        opa: Arc::new(OpaClient::new(None, None)),
+
+        oidc_config: None,
+        jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+        log_backend: None,
+        api_base_url: "http://localhost:3000".to_string(),
+    };
+
+    let app = app(state);
+    let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
+
+    let webhook_id = Uuid::new_v4();
+    let secret = "generic-secret";
+    sqlx::query(
+        "INSERT INTO webhooks (id, name, source_type, secret_token, is_active) VALUES ($1, $2, $3, $4, $5)"
+    )
+    .bind(webhook_id)
+    .bind(format!("generic-webhook-{}", webhook_id))
+    .bind("generic")
+    .bind(secret)
+    .bind(true)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let payload = json!({
+        "action": "trigger"
+    });
+    let body_bytes = serde_json::to_vec(&payload).unwrap();
+
+    // 1. Valid Token
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/webhooks/{}", webhook_id))
+                .header("Content-Type", stormchaser_model::APPLICATION_JSON)
+                .header("Authorization", format!("Bearer {}", secret))
+                .extension(ConnectInfo(addr))
+                .body(Body::from(body_bytes.clone()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // 2. Invalid Token
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/webhooks/{}", webhook_id))
+                .header("Content-Type", stormchaser_model::APPLICATION_JSON)
+                .header("Authorization", "Bearer invalid-secret")
+                .extension(ConnectInfo(addr))
+                .body(Body::from(body_bytes))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}

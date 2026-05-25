@@ -22,7 +22,7 @@ pub async fn create_storage_backend(
     let cookie = require_auth().await?;
     let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
 
-    let client = reqwest::Client::new();
+    let client = super::http_client();
     let res = client
         .post(format!("{}/api/v1/connections", api_url))
         .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))

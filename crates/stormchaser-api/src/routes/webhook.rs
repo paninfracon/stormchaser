@@ -218,7 +218,10 @@ pub async fn handle_webhook(
                 .unwrap_or("unknown")
                 .to_string()
         }
-        "generic" => "generic".to_string(),
+        "generic" => {
+            validate_generic_token(&headers, webhook.secret_token.as_deref())?;
+            "generic".to_string()
+        }
         _ => return Err(StatusCode::NOT_IMPLEMENTED),
     };
 
@@ -312,6 +315,39 @@ fn validate_github_signature(
 
     if let Err(e) = mac.verify_slice(&signature_bytes) {
         tracing::warn!("HMAC signature verification failed: {:?}", e);
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    Ok(())
+}
+
+fn validate_generic_token(headers: &HeaderMap, secret: Option<&str>) -> Result<(), StatusCode> {
+    let secret = match secret {
+        Some(s) => s,
+        None => return Ok(()), // No secret configured
+    };
+
+    let auth_header = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .ok_or_else(|| {
+            tracing::warn!("Missing Authorization header for generic webhook");
+            StatusCode::UNAUTHORIZED
+        })?;
+
+    let expected = format!("Bearer {}", secret);
+
+    use sha2::{Digest, Sha256};
+    let mut hasher1 = Sha256::new();
+    hasher1.update(auth_header.as_bytes());
+    let hash1 = hasher1.finalize();
+
+    let mut hasher2 = Sha256::new();
+    hasher2.update(expected.as_bytes());
+    let hash2 = hasher2.finalize();
+
+    if hash1 != hash2 {
+        tracing::warn!("Invalid Authorization token for generic webhook");
         return Err(StatusCode::UNAUTHORIZED);
     }
 

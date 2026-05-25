@@ -42,18 +42,44 @@ async fn main() {
 }
 
 #[cfg(feature = "ssr")]
+fn http_client() -> reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(reqwest::Client::new).clone()
+}
+
+#[cfg(feature = "ssr")]
 async fn auth_login_handler() -> impl axum::response::IntoResponse {
+    use axum::http::header;
     use axum::response::IntoResponse;
     let external_api_url = std::env::var("EXTERNAL_API_URL")
         .or_else(|_| std::env::var("API_URL"))
         .unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
     let web_url = std::env::var("WEB_URL").unwrap_or_else(|_| "http://127.0.0.1:3001".to_string());
     let callback = urlencoding::encode(&format!("{}/auth/callback", web_url)).into_owned();
-    axum::response::Redirect::to(&format!(
-        "{}/api/v1/auth/login?callback_url={}",
-        external_api_url, callback
-    ))
-    .into_response()
+
+    let state = uuid::Uuid::new_v4().to_string();
+    let state_cookie = format!(
+        "oauth_state={}; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=300",
+        state
+    );
+
+    let redirect_url = format!(
+        "{}/api/v1/auth/login?callback_url={}&state={}",
+        external_api_url,
+        callback,
+        urlencoding::encode(&state)
+    );
+
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert(
+        header::SET_COOKIE,
+        header::HeaderValue::from_str(&state_cookie).unwrap(),
+    );
+    headers.insert(
+        header::LOCATION,
+        header::HeaderValue::from_str(&redirect_url).unwrap(),
+    );
+    (axum::http::StatusCode::SEE_OTHER, headers).into_response()
 }
 
 #[cfg(feature = "ssr")]
@@ -72,20 +98,44 @@ async fn auth_logout_handler() -> impl axum::response::IntoResponse {
 #[derive(serde::Deserialize)]
 struct CallbackQuery {
     code: Option<String>,
+    state: Option<String>,
 }
 
 #[cfg(feature = "ssr")]
 async fn auth_callback_handler(
     axum::extract::Query(query): axum::extract::Query<CallbackQuery>,
+    headers: axum::http::HeaderMap,
 ) -> impl axum::response::IntoResponse {
+    use axum::http::header;
     use axum::response::IntoResponse;
+
+    let cookie_str = headers
+        .get(header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let mut oauth_state_cookie = None;
+    for part in cookie_str.split(';') {
+        let part = part.trim();
+        if let Some(state_val) = part.strip_prefix("oauth_state=") {
+            oauth_state_cookie = Some(state_val);
+            break;
+        }
+    }
+
+    if oauth_state_cookie.is_none()
+        || query.state.is_none()
+        || oauth_state_cookie != query.state.as_deref()
+    {
+        return axum::response::Redirect::to("/?error=auth_failed_state_mismatch").into_response();
+    }
+
     if let Some(code) = query.code {
         let api_url =
             std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
         let web_url =
             std::env::var("WEB_URL").unwrap_or_else(|_| "http://127.0.0.1:3001".to_string());
 
-        let client = reqwest::Client::new();
+        let client = http_client();
         match client
             .post(format!("{}/api/v1/auth/exchange", api_url))
             .json(&serde_json::json!({
@@ -98,17 +148,22 @@ async fn auth_callback_handler(
             Ok(res) if res.status().is_success() => {
                 if let Ok(json) = res.json::<serde_json::Value>().await {
                     if let Some(access) = json.get("access_token").and_then(|v| v.as_str()) {
-                        use axum::http::header;
-                        // Set cookie
-                        let cookie =
-                            format!("auth_token={}; Path=/; HttpOnly; SameSite=Lax", access);
-                        let mut headers = axum::http::HeaderMap::new();
-                        headers.insert(
+                        let cookie = format!(
+                            "auth_token={}; Path=/; HttpOnly; SameSite=Lax; Secure",
+                            access
+                        );
+                        let mut headers_res = axum::http::HeaderMap::new();
+                        headers_res.insert(
                             header::SET_COOKIE,
                             header::HeaderValue::from_str(&cookie).unwrap(),
                         );
-                        headers.insert(header::LOCATION, header::HeaderValue::from_static("/"));
-                        return (axum::http::StatusCode::SEE_OTHER, headers).into_response();
+                        let clear_state_cookie = "oauth_state=; Path=/; HttpOnly; SameSite=Lax; Secure; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
+                        headers_res.append(
+                            header::SET_COOKIE,
+                            header::HeaderValue::from_static(clear_state_cookie),
+                        );
+                        headers_res.insert(header::LOCATION, header::HeaderValue::from_static("/"));
+                        return (axum::http::StatusCode::SEE_OTHER, headers_res).into_response();
                     }
                 }
             }
@@ -157,7 +212,7 @@ async fn proxy_runs_stream_handler(
     };
 
     let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
-    let client = reqwest::Client::new();
+    let client = http_client();
     match client
         .get(format!("{}/api/v1/runs/stream", api_url))
         .header(header::AUTHORIZATION, format!("Bearer {}", token))
@@ -208,7 +263,7 @@ async fn proxy_run_status_stream_handler(
     };
 
     let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
-    let client = reqwest::Client::new();
+    let client = http_client();
     match client
         .get(format!("{}/api/v1/runs/{}/status/stream", api_url, id))
         .header(header::AUTHORIZATION, format!("Bearer {}", token))
@@ -259,7 +314,7 @@ async fn proxy_step_logs_stream_handler(
     };
 
     let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
-    let client = reqwest::Client::new();
+    let client = http_client();
     match client
         .get(format!(
             "{}/api/v1/runs/{}/steps/{}/logs/stream",
@@ -343,5 +398,64 @@ mod tests {
         } else {
             panic!("Expected body data");
         }
+    }
+
+    #[tokio::test]
+    async fn test_auth_login_handler_sets_state() {
+        let response = auth_login_handler().await.into_response();
+        assert_eq!(response.status(), axum::http::StatusCode::SEE_OTHER);
+
+        let headers = response.headers();
+        let cookie = headers.get(header::SET_COOKIE).unwrap().to_str().unwrap();
+        assert!(cookie.contains("oauth_state="));
+        assert!(cookie.contains("Secure"));
+
+        let location = headers.get(header::LOCATION).unwrap().to_str().unwrap();
+        assert!(location.contains("state="));
+    }
+
+    #[tokio::test]
+    async fn test_auth_callback_rejects_missing_state() {
+        let headers = axum::http::HeaderMap::new();
+        // No cookie header
+
+        let query = axum::extract::Query(CallbackQuery {
+            code: Some("some_code".to_string()),
+            state: Some("some_state".to_string()),
+        });
+
+        let response = auth_callback_handler(query, headers).await.into_response();
+        assert_eq!(response.status(), axum::http::StatusCode::SEE_OTHER);
+        let location = response
+            .headers()
+            .get(header::LOCATION)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert_eq!(location, "/?error=auth_failed_state_mismatch");
+    }
+
+    #[tokio::test]
+    async fn test_auth_callback_rejects_mismatched_state() {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            header::COOKIE,
+            header::HeaderValue::from_static("oauth_state=cookie_state"),
+        );
+
+        let query = axum::extract::Query(CallbackQuery {
+            code: Some("some_code".to_string()),
+            state: Some("query_state".to_string()),
+        });
+
+        let response = auth_callback_handler(query, headers).await.into_response();
+        assert_eq!(response.status(), axum::http::StatusCode::SEE_OTHER);
+        let location = response
+            .headers()
+            .get(header::LOCATION)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert_eq!(location, "/?error=auth_failed_state_mismatch");
     }
 }

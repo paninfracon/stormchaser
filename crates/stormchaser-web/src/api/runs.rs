@@ -23,7 +23,7 @@ pub async fn fetch_workflow_runs(
     let cookie = require_auth().await?;
     let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
 
-    let client = reqwest::Client::new();
+    let client = super::http_client();
     let url = format!("{}/api/v1/runs", api_url);
 
     let mut query = Vec::new();
@@ -97,7 +97,7 @@ pub async fn fetch_workflow_run_detail(
     let cookie = require_auth().await?;
     let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
 
-    let client = reqwest::Client::new();
+    let client = super::http_client();
     let url = format!("{}/api/v1/runs/{}", api_url, id);
 
     let res = client
@@ -130,7 +130,7 @@ pub async fn fetch_step_logs(
     let cookie = require_auth().await?;
     let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
 
-    let client = reqwest::Client::new();
+    let client = super::http_client();
     let mut url = format!("{}/api/v1/runs/{}/steps/{}/logs", api_url, run_id, step_id);
     if let Some(l) = limit {
         url.push_str(&format!("?limit={}", l));
@@ -166,7 +166,7 @@ pub async fn approve_step(
     let cookie = require_auth().await?;
     let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
 
-    let client = reqwest::Client::new();
+    let client = super::http_client();
     let url = format!(
         "{}/api/v1/runs/{}/steps/{}/approve",
         api_url, run_id, step_name
@@ -195,7 +195,7 @@ pub async fn reject_step(run_id: String, step_name: String) -> Result<(), Server
     let cookie = require_auth().await?;
     let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
 
-    let client = reqwest::Client::new();
+    let client = super::http_client();
     let url = format!(
         "{}/api/v1/runs/{}/steps/{}/reject",
         api_url, run_id, step_name
@@ -223,7 +223,7 @@ pub async fn delete_workflow_run(run_id: String) -> Result<(), ServerFnError> {
     let cookie = require_auth().await?;
     let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
 
-    let client = reqwest::Client::new();
+    let client = super::http_client();
     let url = format!("{}/api/v1/runs/{}", api_url, run_id);
 
     let res = client

@@ -158,6 +158,32 @@ async fn test_auth_login_redirect() {
 }
 
 #[tokio::test]
+async fn test_auth_login_redirect_with_state() {
+    let mock_server = MockServer::start().await;
+    let app = setup_app(mock_server.uri()).await.unwrap();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/auth/login?callback_url=http%3A%2F%2Flocalhost%3A3000%2Fcallback&state=test-state-123")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let location = response
+        .headers()
+        .get("location")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(location.starts_with(&format!("{}/auth?", mock_server.uri())));
+    assert!(location.contains("state=test-state-123"));
+}
+
+#[tokio::test]
 async fn test_auth_exchange_success() {
     let mock_server = MockServer::start().await;
 

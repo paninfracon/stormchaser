@@ -10,6 +10,14 @@ use crate::AppEvent;
 use anyhow::Result;
 use serde_json::Value;
 
+use std::sync::OnceLock;
+
+static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+fn get_client() -> reqwest::Client {
+    HTTP_CLIENT.get_or_init(reqwest::Client::new).clone()
+}
+
 impl<'a> App<'a> {
     /// Helper method to make an API request to the backend.
     pub async fn api_request(
@@ -18,7 +26,7 @@ impl<'a> App<'a> {
         path: &str,
         body: Option<Value>,
     ) -> Result<reqwest::Response> {
-        let client = reqwest::Client::new();
+        let client = get_client();
         let base_url = if path == "/api/v1/schema/hydrate" {
             &self.query_url
         } else {

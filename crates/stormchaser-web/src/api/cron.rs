@@ -15,7 +15,7 @@ pub async fn fetch_cron_workflows() -> Result<Vec<crate::models::CronWorkflow>, 
     let cookie = require_auth().await?;
     let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
 
-    let client = reqwest::Client::new();
+    let client = super::http_client();
     let url = format!("{}/api/v1/cron-workflows", api_url);
 
     let res = client
@@ -53,7 +53,7 @@ pub async fn create_cron_workflow(
 ) -> Result<(), ServerFnError> {
     let cookie = require_auth().await?;
     let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
-    let client = reqwest::Client::new();
+    let client = super::http_client();
     let res = client
         .post(format!("{}/api/v1/cron", api_url))
         .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
@@ -83,7 +83,7 @@ pub async fn create_cron_workflow(
 pub async fn delete_cron_workflow(id: String) -> Result<(), ServerFnError> {
     let cookie = require_auth().await?;
     let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
-    let client = reqwest::Client::new();
+    let client = super::http_client();
     let res = client
         .delete(format!("{}/api/v1/cron-workflows/{}", api_url, id))
         .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))

@@ -20,7 +20,7 @@ pub async fn hydrate_schema_complete(
     let query_url =
         std::env::var("QUERY_URL").unwrap_or_else(|_| "http://127.0.0.1:3001".to_string());
 
-    let client = reqwest::Client::new();
+    let client = super::http_client();
     let payload = if let Some(q) = queries {
         serde_json::json!({ "schema": schema, "inputs": inputs, "queries": q })
     } else {

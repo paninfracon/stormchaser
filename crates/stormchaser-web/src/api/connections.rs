@@ -15,7 +15,7 @@ pub async fn fetch_connections() -> Result<Vec<crate::models::Connection>, Serve
     let cookie = require_auth().await?;
     let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
 
-    let client = reqwest::Client::new();
+    let client = super::http_client();
     let url = format!("{}/api/v1/connections", api_url);
 
     let res = client
@@ -47,7 +47,7 @@ pub async fn test_connection(
     let cookie = require_auth().await?;
     let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
 
-    let client = reqwest::Client::new();
+    let client = super::http_client();
     let url = format!("{}/api/v1/connections/test", api_url);
 
     let res = client
@@ -84,7 +84,7 @@ pub async fn test_connection(
 pub async fn delete_connection(id: String) -> Result<(), ServerFnError> {
     let cookie = require_auth().await?;
     let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
-    let client = reqwest::Client::new();
+    let client = super::http_client();
     let res = client
         .delete(format!("{}/api/v1/connections/{}", api_url, id))
         .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
