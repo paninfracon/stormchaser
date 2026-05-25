@@ -223,6 +223,7 @@ mod tests {
             // Create a test stream
             let stream_name = "TEST_TASK_STREAM";
             let subject = "test.task.>";
+            let publish_subject = "test.task.foo";
             let _ = js
                 .create_stream(StreamConfig {
                     name: stream_name.to_string(),
@@ -232,7 +233,7 @@ mod tests {
                 .await;
 
             // Publish a malformed message
-            js.publish(subject, "not a cloud event".into())
+            js.publish(publish_subject, "not a cloud event".into())
                 .await
                 .unwrap();
 

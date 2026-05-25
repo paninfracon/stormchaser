@@ -1,5 +1,6 @@
 use axum::{response::IntoResponse, Json};
 use stormchaser_model::schema_gen::generate_dsl_schema;
+use crate::{AppState, AuthClaims};
 
 /// Retrieves the base JSON schema for the Stormchaser DSL.
 #[utoipa::path(
@@ -31,7 +32,8 @@ pub async fn get_schema() -> impl IntoResponse {
     tag = "stormchaser"
 )]
 pub async fn parse_git(
-    axum::extract::State(state): axum::extract::State<crate::AppState>,
+    axum::extract::State(state): axum::extract::State<AppState>,
+    AuthClaims(_claims): AuthClaims,
     Json(payload): Json<crate::routes::ParseGitRequest>,
 ) -> Result<String, axum::http::StatusCode> {
     let mut tx = state
@@ -69,6 +71,20 @@ pub async fn parse_git(
         tracing::error!(
             "Git connection {} is missing repo_url in config",
             payload.connection
+        );
+        return Err(axum::http::StatusCode::BAD_REQUEST);
+    }
+
+    // Validate workflow_path to prevent path traversal
+    let wf_path = std::path::Path::new(&payload.workflow_path);
+    if wf_path.is_absolute()
+        || wf_path
+            .components()
+            .any(|c| c == std::path::Component::ParentDir)
+    {
+        tracing::error!(
+            "Rejected unsafe workflow_path: {:?}",
+            payload.workflow_path
         );
         return Err(axum::http::StatusCode::BAD_REQUEST);
     }

@@ -134,9 +134,12 @@ async fn test_ses_handler_invoke() {
     )
     .await;
 
-    // Wiremock mocks the STS assume role request, which might fail or succeed depending on how SDK parses it.
+    // With an invalid role ARN, the STS assume-role response (mocked as
+    // {"status": "success"}) cannot be parsed as valid AWS credentials,
+    // so the handler must return an error.
     assert!(
-        res_fail.is_err() || res_fail.is_ok(),
-        "Just covering the code path"
+        res_fail.is_err(),
+        "Expected error for invalid role ARN, got: {:?}",
+        res_fail
     );
 }

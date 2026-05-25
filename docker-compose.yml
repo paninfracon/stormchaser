@@ -253,7 +253,9 @@ services:
       NATS_URL: nats://nats:4222
       RUST_LOG: stormchaser_runner_docker=debug
       STORMCHASER_STATE_ENCRYPTION_KEY: "01234567890123456789012345678901"
-      LOKI_URL: http://172.17.0.1:3100/loki/api/v1/push
+      LOKI_URL: ${LOKI_URL:-http://host.docker.internal:3100/loki/api/v1/push}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
