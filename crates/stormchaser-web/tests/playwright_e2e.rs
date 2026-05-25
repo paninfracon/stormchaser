@@ -14,6 +14,10 @@ async fn run_playwright_tests() {
         .arg("stormchaser-web")
         .env_remove("RUSTFLAGS")
         .env_remove("CARGO_ENCODED_RUSTFLAGS")
+        .env_remove("RUSTC_WRAPPER")
+        .env_remove("RUSTC_WORKSPACE_WRAPPER")
+        .env_remove("CARGO_LLVM_COV")
+        .env_remove("LLVM_PROFILE_FILE")
         .status()
         .expect("Failed to build Leptos project");
     assert!(status.success(), "cargo leptos build failed");
