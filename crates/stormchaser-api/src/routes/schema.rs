@@ -1,6 +1,6 @@
+use crate::{AppState, AuthClaims};
 use axum::{response::IntoResponse, Json};
 use stormchaser_model::schema_gen::generate_dsl_schema;
-use crate::{AppState, AuthClaims};
 
 /// Retrieves the base JSON schema for the Stormchaser DSL.
 #[utoipa::path(
@@ -82,10 +82,7 @@ pub async fn parse_git(
             .components()
             .any(|c| c == std::path::Component::ParentDir)
     {
-        tracing::error!(
-            "Rejected unsafe workflow_path: {:?}",
-            payload.workflow_path
-        );
+        tracing::error!("Rejected unsafe workflow_path: {:?}", payload.workflow_path);
         return Err(axum::http::StatusCode::BAD_REQUEST);
     }
 
