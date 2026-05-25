@@ -94,3 +94,39 @@ pub async fn parse_git(
 
     Ok(dsl)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
+    use axum::{routing::get, Router};
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn test_get_schema() {
+        let app = Router::new().route("/api/v1/schema", get(get_schema));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/schema")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert!(
+            json.get("properties").is_some(),
+            "Should contain properties"
+        );
+    }
+}
