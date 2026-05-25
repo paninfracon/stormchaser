@@ -81,13 +81,14 @@ jobs:
       uses: dtolnay/rust-toolchain@stable
       with:
         components: clippy
+        targets: wasm32-unknown-unknown
 
     - name: Cache dependencies
       uses: Swatinem/rust-cache@v2
-    - name: Install sqlx-cli
+    - name: Install sqlx-cli and cargo-leptos
       uses: taiki-e/install-action@v2
       with:
-        tool: sqlx-cli
+        tool: sqlx-cli,cargo-leptos
     - name: Generate Dev Passwords
       run: |
         STORMCHASER_DEV_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')

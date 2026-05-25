@@ -37,14 +37,15 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
+          targets: wasm32-unknown-unknown
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
-      - name: Install sqlx-cli
+      - name: Install sqlx-cli and cargo-leptos
         uses: taiki-e/install-action@v2
         with:
-          tool: sqlx-cli
+          tool: sqlx-cli,cargo-leptos
 
       - name: Generate Dev Passwords
         run: |
