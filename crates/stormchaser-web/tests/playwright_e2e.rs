@@ -108,6 +108,25 @@ async fn run_playwright_tests() {
     });
 
     println!("Running Playwright tests...");
+
+    let storage_state = r#"{
+  "cookies": [
+    {
+      "name": "auth_token",
+      "value": "mock_token",
+      "domain": "127.0.0.1",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    }
+  ],
+  "origins": []
+}"#;
+    std::fs::write("e2e/storage-state.json", storage_state)
+        .expect("Failed to write storage-state.json");
+
     let mut cmd = tokio::process::Command::new("npx");
     cmd.arg("playwright")
         .arg("test")
