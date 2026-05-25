@@ -21,7 +21,11 @@ async fn setup() -> (PgPool, async_nats::Client, Arc<TlsReloader>) {
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
-    let pool = PgPool::connect(&db_url).await.unwrap();
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&db_url)
+        .await
+        .expect("Failed to connect to DB");
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = async_nats::connect(&nats_url).await.unwrap();
     let tls_config = TlsConfig::default();
@@ -135,11 +139,20 @@ async fn test_ses_handler_invoke() {
     .await;
 
     // With an invalid role ARN, the STS assume-role response (mocked as
-    // {"status": "success"}) cannot be parsed as valid AWS credentials,
-    // so the handler must return an error.
+    // {"status": "success"}) cannot be parsed as valid AWS credentials.
+    // The handler should capture this error, mark the step as failed, and return Ok.
     assert!(
-        res_fail.is_err(),
-        "Expected error for invalid role ARN, got: {:?}",
+        res_fail.is_ok(),
+        "Expected Ok even on failure, got: {:?}",
         res_fail
+    );
+
+    let failed_step = stormchaser_engine::handler::fetch_step_instance(step_id_2, &pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        failed_step.status,
+        stormchaser_model::step::StepStatus::Failed,
+        "Expected step status to be Failed"
     );
 }
