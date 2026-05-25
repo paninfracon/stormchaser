@@ -22,7 +22,7 @@
 13. ✅ Resource management and timeout capabilities
 14. ✅ Step restart if execution engine fails
 15. ✅ CLI for viewing and scheduling runs
-16. ✅ Interactive TUI for real-time monitoring and log viewing
+16. ✅ Interactive TUI (real-time monitoring, log viewing, Admin lists, Reporting) and Web UI (Admin interface, Reporting, Import/Export features)
 17. ⏳ Pluggable secrets management: First-class SOPS support in Git, plus
     runtime fetching from Vault, AWS Secrets Manager, etc.
 18. ✅ Webhook endpoint for receiving events
@@ -75,7 +75,3 @@
 4. Distributed controller with concensus and leader election
 5. Leverage generic `tree-sitter-hcl` grammar for DSL parsing and editor
    support
-
-## Out of scope
-
-1. Web UI (for now)

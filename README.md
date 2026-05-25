@@ -96,8 +96,8 @@ workflow "example_workflow" {
 - **Shared File System (SFS)**: Seamless state and file sharing between steps,
   backed by object storage (S3/GCS) with SHA-256 verification.
 - **Dynamic Parallelism**: Map/Reduce capabilities based on runtime inputs.
-- **Rich Observability**: Built-in CLI and interactive TUI for real-time
-  monitoring. Full OpenTelemetry tracing integration.
+- **Rich Observability**: Built-in CLI, interactive TUI, and Web UI for real-time
+  monitoring and management. Full OpenTelemetry tracing integration.
 - **Policy as Code**: Integrated with Open Policy Agent (OPA) for workflow
   execution validation and authorization.
 - **First-Class Security**: First-class SOPS support for secrets, integrated
@@ -131,7 +131,7 @@ workflow "example_workflow" {
 | **Observability** | ✅ (OTel, TUI) | ⚠️ (Limited) | ⚠️ (Limited) | ✅ | ⚠️ (Plugins) | ✅ (Prometheus) | ⚠️ (Basic) | ⚠️ (Basic) | ⚠️ (Limited) |
 | **Email** | ✅ | ✅ (Packs) | ✅ | ✅ | ✅ (Plugins) | ⚠️ (Hooks) | ✅ (Nodes) | ✅ | ❌ |
 | **Slack / Teams** | ⚠️ (Planned) | ✅ (ChatOps) | ⚠️ (Plugins) | ✅ | ✅ (Plugins) | ⚠️ (Hooks) | ✅ (Nodes) | ✅ | ❌ |
-| **Pipeline UI** | ⚠️ (TUI Only) | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ (FlowForge) | ✅ | ⚠️ (Flower) |
+| **Pipeline UI** | ✅ (Web UI & TUI) | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ (FlowForge) | ✅ | ⚠️ (Flower) |
 | **Visual Builder** | ❌ (Code-First) | ⚠️ (Workflow Designer) | ❌ | ✅ | ✅ (Blue Ocean) | ⚠️ (UI/3rd Party) | ✅ (Comprehensive) | ✅ | ❌ |
 
 *For a full list of features and planned roadmap, see
@@ -188,10 +188,12 @@ pip3 install 'passlib[bcrypt]'
    ./run-cli.sh run tests/hello-world.storm
    ```
 
-4. **Monitor with the TUI:**
+4. **Monitor with the TUI or Web UI:**
 
    ```bash
    cargo run -p stormchaser-tui
+   # or
+   cargo run -p stormchaser-web
    ```
 
    *Note: If the `deploy/dex/credentials.generated` file exists, the TUI login
