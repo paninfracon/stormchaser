@@ -5,6 +5,7 @@ pub mod app;
 pub mod approvals;
 pub mod backends;
 pub mod cron;
+pub mod grafana;
 pub mod models;
 pub mod rules;
 pub mod run_modal;

@@ -56,6 +56,11 @@ pub async fn check_auth() -> Result<bool, ServerFnError> {
     Ok(true)
 }
 
+#[server(input = Json, output = Json)]
+pub async fn get_grafana_url() -> Result<Option<String>, ServerFnError> {
+    Ok(std::env::var("GRAFANA_URL").ok().filter(|s| !s.is_empty()))
+}
+
 #[cfg(feature = "ssr")]
 pub(crate) fn http_client() -> reqwest::Client {
     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();

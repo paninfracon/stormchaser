@@ -14,6 +14,8 @@ global:
     url: "nats://nats:4222"
   loki:
     url: "http://loki:3100"
+  grafana:
+    url: "http://grafana:80"
   opa:
     url: "http://127.0.0.1:8181/v1/data/stormchaser/allow"
   oidc:
@@ -85,6 +87,20 @@ query:
   # When set, the query service uses the local WASM policy instead of an HTTP OPA server.
   # Leave empty to disable OPA enforcement on this service.
   opaWasmPath: ""
+
+web:
+  image:
+    repository: stormchaser-web
+    pullPolicy: IfNotPresent
+    tag: "latest"
+  replicaCount: 1
+  rustLog: "stormchaser_web=info"
+  externalApiUrl: "http://localhost:3000"
+  webUrl: "http://localhost:3003"
+  service:
+    type: ClusterIP
+    port: 3003
+  resources: {}
 
 engine:
   image:
