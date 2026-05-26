@@ -66,3 +66,24 @@ pub(crate) fn http_client() -> reqwest::Client {
     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
     CLIENT.get_or_init(reqwest::Client::new).clone()
 }
+
+#[cfg(test)]
+#[cfg(feature = "ssr")]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_get_grafana_url() {
+        std::env::set_var("GRAFANA_URL", "http://grafana");
+        let result = get_grafana_url().await.unwrap();
+        assert_eq!(result.unwrap(), "http://grafana");
+
+        std::env::set_var("GRAFANA_URL", "");
+        let result = get_grafana_url().await.unwrap();
+        assert!(result.is_none());
+
+        std::env::remove_var("GRAFANA_URL");
+        let result = get_grafana_url().await.unwrap();
+        assert!(result.is_none());
+    }
+}
