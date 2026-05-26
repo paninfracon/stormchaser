@@ -30,8 +30,8 @@ reqwest = { workspace = true, optional = true }
 serde_json = { workspace = true }
 urlencoding = "2.1"
 futures = { workspace = true, optional = true }
-stormchaser-dsl = { path = "../stormchaser-dsl", optional = true }
-stormchaser-model = { path = "../stormchaser-model" }
+stormchaser-dsl = { version = "1.5.0", path = "../stormchaser-dsl", optional = true }
+stormchaser-model = { version = "1.5.0", path = "../stormchaser-model" }
 
 [dependencies.web-sys]
 version = "0.3.72"

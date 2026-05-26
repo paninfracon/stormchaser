@@ -66,6 +66,10 @@ If the automated GitHub Actions CI (`release.yml`) fails, follow these steps to 
 # 2. Build the standard dynamic binaries across the workspace
 SQLX_OFFLINE=true cargo build --release --workspace
 
+# 2.5 Build the Leptos Web UI (Requires cargo-leptos and wasm32-unknown-unknown target)
+# Setup: rustup target add wasm32-unknown-unknown && cargo install cargo-leptos
+SQLX_OFFLINE=true cargo leptos build --release -p stormchaser-web
+
 # 3. Build the statically linked agent (Requires musl tools)
 # Setup: rustup target add x86_64-unknown-linux-musl && sudo apt-get install -y musl-tools
 SQLX_OFFLINE=true cargo build --release -p stormchaser-agent --target x86_64-unknown-linux-musl
@@ -78,9 +82,13 @@ cp target/x86_64-unknown-linux-musl/release/stormchaser-agent target/release/sto
 
 ```bash
 mkdir -p dist
-for BIN in stormchaser-api stormchaser-engine stormchaser-query stormchaser-runner-k8s stormchaser-runner-docker stormchaser-agent stormchaser stormchaser-tui; do
+for BIN in stormchaser-api stormchaser-engine stormchaser-query stormchaser-runner-k8s stormchaser-runner-docker stormchaser-agent stormchaser stormchaser-tui stormchaser-web; do
   if [ -f "target/release/$BIN" ]; then
-    tar -czvf dist/$BIN-x86_64-unknown-linux-gnu.tar.gz -C target/release $BIN
+    if [ "$BIN" = "stormchaser-web" ]; then
+      tar -czvf dist/$BIN-x86_64-unknown-linux-gnu.tar.gz -C target/release $BIN -C ../site .
+    else
+      tar -czvf dist/$BIN-x86_64-unknown-linux-gnu.tar.gz -C target/release $BIN
+    fi
   fi
 done
 
@@ -97,7 +105,7 @@ We use `Dockerfile.prebuilt` to quickly containerize the binaries compiled local
 docker login ghcr.io -u <your-github-username>
 
 # Define the components to build
-COMPONENTS=("stormchaser-api" "stormchaser-engine" "stormchaser-query" "stormchaser-runner-k8s" "stormchaser-runner-docker" "stormchaser-agent")
+COMPONENTS=("stormchaser-api" "stormchaser-engine" "stormchaser-query" "stormchaser-runner-k8s" "stormchaser-runner-docker" "stormchaser-agent" "stormchaser-web")
 
 export VERSION="X.Y.Z" # Replace with actual version
 
@@ -152,8 +160,10 @@ sleep 15
 cargo publish -p stormchaser-agent
 sleep 15
 
-# Publish top-level CLI and TUI
+# Publish top-level CLI, TUI, and Web
 cargo publish -p stormchaser-cli
 sleep 15
 cargo publish -p stormchaser-tui
+sleep 15
+cargo publish -p stormchaser-web
 ```

@@ -185,4 +185,73 @@ test.describe('Workflow Runs', () => {
     await page.locator('button', { hasText: 'Delete Run' }).click();
     expect(deleteCalled).toBeTruthy();
   });
+  test('should sort workflow runs in the table', async ({ page }) => {
+    await page.route('**/api/*', async route => {
+      const url = route.request().url();
+      if (url.includes('fetch_workflow_runs') || url.includes('FetchWorkflowRuns')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([
+            {
+              id: "11111111-1111-1111-1111-111111111111",
+              workflow_name: "Z-workflow",
+              initiating_user: "alice",
+              repo_url: "",
+              workflow_path: "",
+              git_ref: "",
+              version: 1,
+              status: "running",
+              created_at: "2024-01-02T00:00:00Z",
+              updated_at: "2024-01-02T00:00:00Z",
+              started_resolving_at: null,
+              started_at: null,
+              finished_at: null,
+              error: null,
+              inputs: {},
+              secrets: {}
+            },
+            {
+              id: "22222222-2222-2222-2222-222222222222",
+              workflow_name: "A-workflow",
+              initiating_user: "bob",
+              repo_url: "",
+              workflow_path: "",
+              git_ref: "",
+              version: 1,
+              status: "running",
+              created_at: "2024-01-01T00:00:00Z",
+              updated_at: "2024-01-01T00:00:00Z",
+              started_resolving_at: null,
+              started_at: null,
+              finished_at: null,
+              error: null,
+              inputs: {},
+              secrets: {}
+            }
+          ])
+        });
+      } else {
+        await route.continue();
+      }
+    });
+
+    await page.goto('/approvals');
+    await page.locator('a', { hasText: 'Runs' }).click();
+
+    // Default sort is Created descending, so Z-workflow (2024-01-02) is first, A-workflow (2024-01-01) is second
+    await expect(page.locator('tbody tr').nth(0)).toContainText('Z-workflow');
+    await expect(page.locator('tbody tr').nth(1)).toContainText('A-workflow');
+
+    // Click "Name" to sort ascending
+    await page.locator('th', { hasText: 'Name' }).click();
+    await expect(page.locator('tbody tr').nth(0)).toContainText('A-workflow');
+    await expect(page.locator('tbody tr').nth(1)).toContainText('Z-workflow');
+
+    // Click "Name" again to sort descending
+    await page.locator('th', { hasText: 'Name' }).click();
+    await expect(page.locator('tbody tr').nth(0)).toContainText('Z-workflow');
+    await expect(page.locator('tbody tr').nth(1)).toContainText('A-workflow');
+  });
+
 });

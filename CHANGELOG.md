@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-05-25
+
+### Added
+
+- Added the new `stormchaser-web` crate containing the Web UI component built with Leptos.
+
 ## [1.4.2] - 2026-05-21
 
 ### Added

@@ -30,13 +30,16 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-unknown-linux-musl
+          targets: x86_64-unknown-linux-musl,wasm32-unknown-unknown
+
+      - name: Install cargo-leptos
+        run: cargo install --locked cargo-leptos
 
       - name: Build Workspace
         run: |
-
           SQLX_OFFLINE=true cargo build --release --workspace
           SQLX_OFFLINE=true cargo build --release -p stormchaser-agent --target x86_64-unknown-linux-musl
+          SQLX_OFFLINE=true cargo leptos build --release -p stormchaser-web
 
           # Replace agent with musl version for Dockerfile.prebuilt
           cp target/x86_64-unknown-linux-musl/release/stormchaser-agent target/release/stormchaser-agent
@@ -44,9 +47,13 @@ jobs:
       - name: Package Linux Binaries
         run: |
           mkdir -p dist
-          for BIN in stormchaser-api stormchaser-engine stormchaser-query stormchaser-runner-k8s stormchaser-runner-docker stormchaser-agent stormchaser stormchaser-tui; do
+          for BIN in stormchaser-api stormchaser-engine stormchaser-query stormchaser-runner-k8s stormchaser-runner-docker stormchaser-agent stormchaser stormchaser-tui stormchaser-web; do
             if [ -f "target/release/$BIN" ]; then
-              tar -czvf dist/$BIN-x86_64-unknown-linux-gnu.tar.gz -C target/release $BIN
+              if [ "$BIN" = "stormchaser-web" ]; then
+                tar -czvf dist/$BIN-x86_64-unknown-linux-gnu.tar.gz -C target/release $BIN -C ../site .
+              else
+                tar -czvf dist/$BIN-x86_64-unknown-linux-gnu.tar.gz -C target/release $BIN
+              fi
             fi
           done
 
@@ -60,7 +67,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: linux-binaries
-          path: target/release/stormchaser*
+          path: |
+            target/release/stormchaser*
+            target/site
           retention-days: 1
           if-no-files-found: error
 
@@ -77,6 +86,7 @@ jobs:
           - image: stormchaser-runner-k8s
           - image: stormchaser-runner-docker
           - image: stormchaser-agent
+          - image: stormchaser-web
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -85,7 +95,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: linux-binaries
-          path: target/release
+          path: target/
 
       - name: Make Binaries Executable
         run: chmod +x target/release/stormchaser-*
@@ -189,5 +199,9 @@ jobs:
           cargo publish -p stormchaser-agent
           sleep 15
 
-          # Publish top-level CLI
+          # Publish top-level CLI, TUI, and Web
           cargo publish -p stormchaser-cli
+          sleep 15
+          cargo publish -p stormchaser-tui
+          sleep 15
+          cargo publish -p stormchaser-web

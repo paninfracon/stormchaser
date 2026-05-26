@@ -25,6 +25,14 @@ ENV BINARY_NAME=${BINARY}
 # In the dogfood flow, this will be in target/release/
 COPY target/release/${BINARY_NAME} /usr/local/bin/${BINARY_NAME}
 
+# Copy site assets if they exist (for stormchaser-web)
+COPY target/sit[e] /app/site
+
+# Set Leptos environment variables (ignored by non-web binaries)
+ENV LEPTOS_OUTPUT_NAME="stormchaser-web"
+ENV LEPTOS_SITE_ROOT="/app/site"
+ENV LEPTOS_SITE_ADDR="0.0.0.0:3000"
+
 # Copy migrations (needed by both API and Engine)
 COPY migrations /app/migrations
 
