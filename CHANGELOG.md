@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-05-25
+
+### Fixed
+
+- Patch release to resolve a crates.io publishing issue caused by immutability of version 1.5.0 which lacked the sorting tables feature on the initial tag.
+
 ## [1.5.0] - 2026-05-25
 
 ### Added

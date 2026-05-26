@@ -8,7 +8,7 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
-stormchaser-model = { version = "1.5.0", path = "../stormchaser-model" }
+stormchaser-model = { version = "1.5.1", path = "../stormchaser-model" }
 anyhow = { workspace = true }
 opa-wasm = { workspace = true }
 wasmtime = { workspace = true }

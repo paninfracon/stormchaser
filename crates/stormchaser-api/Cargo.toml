@@ -18,8 +18,8 @@ path = "src/lib.rs"
 [dependencies]
 stormchaser-model = { workspace = true }
 stormchaser-tls = { workspace = true }
-stormchaser-opa = { version = "1.5.0", path = "../stormchaser-opa" }
-stormchaser-engine = { version = "1.5.0", path = "../stormchaser-engine" }
+stormchaser-opa = { version = "1.5.1", path = "../stormchaser-opa" }
+stormchaser-engine = { version = "1.5.1", path = "../stormchaser-engine" }
 tokio = { workspace = true }
 rustls = { version = "0.23", features = ["ring"] }
 axum = { workspace = true }
