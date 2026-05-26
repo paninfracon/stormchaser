@@ -28,7 +28,7 @@ jobs:
 
       - name: Create Swap File
         run: |
-          sudo fallocate -l 8G /swapfile-extra || sudo dd if=/dev/zero of=/swapfile-extra bs=1M count=8192
+          sudo fallocate -l 4G /swapfile-extra || sudo dd if=/dev/zero of=/swapfile-extra bs=1M count=4096
           sudo chmod 600 /swapfile-extra
           sudo mkswap /swapfile-extra
           sudo swapon /swapfile-extra
