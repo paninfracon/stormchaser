@@ -210,6 +210,7 @@ fn build_subject_schema_map() -> std::collections::HashMap<&'static str, &'stati
         ("stormchaser.v1.runner.register", "RunnerRegisterEvent"),
         ("stormchaser.v1.runner.heartbeat", "RunnerHeartbeatEvent"),
         ("stormchaser.v1.runner.offline", "RunnerOfflineEvent"),
+        ("stormchaser.v1.step.initializing", "StepInitializingEvent"),
         ("stormchaser.v1.step.running", "StepRunningEvent"),
         ("stormchaser.v1.step.completed", "StepCompletedEvent"),
         ("stormchaser.v1.step.failed", "StepFailedEvent"),

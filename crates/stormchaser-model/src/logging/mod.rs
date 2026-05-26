@@ -79,6 +79,7 @@ impl LogBackend {
         &self,
         step_name: &str,
         step_id: StepInstanceId,
+        start_time: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<mpsc::Receiver<Result<String>>> {
         let job_name = format!(
             "storm-{}-{}",
@@ -87,7 +88,7 @@ impl LogBackend {
         );
 
         match self {
-            LogBackend::Loki { url } => loki::stream_loki_logs(url, &job_name).await,
+            LogBackend::Loki { url } => loki::stream_loki_logs(url, &job_name, start_time).await,
             LogBackend::Elasticsearch { .. } => {
                 anyhow::bail!(
                     "Log streaming is not currently supported for Elasticsearch backends"
@@ -109,7 +110,7 @@ mod tests {
         };
         let step_id = StepInstanceId::new_v4();
 
-        let result = backend.stream_step_logs("test-step", step_id).await;
+        let result = backend.stream_step_logs("test-step", step_id, None).await;
         let err = result.unwrap_err();
         assert!(err.to_string().contains("not currently supported"));
     }

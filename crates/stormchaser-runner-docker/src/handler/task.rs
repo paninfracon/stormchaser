@@ -6,9 +6,7 @@ use chrono::Utc;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::time::Duration;
-use stormchaser_model::events::{
-    EventSource, EventType, SchemaVersion, StepEventType, StepRunningEvent,
-};
+use stormchaser_model::events::{EventSource, EventType, SchemaVersion, StepEventType};
 use stormchaser_model::nats::{publish_cloudevent, NatsSubject};
 use stormchaser_model::{RunId, StepInstanceId};
 use tokio::time::sleep;
@@ -105,21 +103,21 @@ pub async fn handle_task(
         }
     });
 
-    let running_event = StepRunningEvent {
+    let initializing_event = stormchaser_model::events::StepInitializingEvent {
         run_id: RunId::new(run_id),
         step_id: StepInstanceId::new(step_id),
-        event_type: EventType::Step(StepEventType::Running),
+        event_type: EventType::Step(StepEventType::Initializing),
         runner_id: Some(runner_id.clone()),
         timestamp: Utc::now(),
     };
     let _ = publish_cloudevent(
         &async_nats::jetstream::new(nats_client.clone()),
-        NatsSubject::StepRunning(Some(stormchaser_model::nats::compute_shard_id(
+        NatsSubject::StepInitializing(Some(stormchaser_model::nats::compute_shard_id(
             &stormchaser_model::RunId::new(run_id),
         ))),
-        EventType::Step(StepEventType::Running),
+        EventType::Step(StepEventType::Initializing),
         EventSource::System,
-        serde_json::to_value(running_event).unwrap(),
+        serde_json::to_value(initializing_event).unwrap(),
         Some(SchemaVersion::new("1.0".to_string())),
         None,
     )

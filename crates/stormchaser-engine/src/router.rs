@@ -167,6 +167,23 @@ async fn handle_step_events(
                 let _ = message.double_ack().await;
             });
         }
+        "stormchaser.v1.step.initializing" => {
+            let event: stormchaser_model::events::StepInitializingEvent =
+                match serde_json::from_value(payload) {
+                    Ok(e) => e,
+                    Err(err) => {
+                        tracing::error!("Failed to parse StepInitializingEvent: {}", err);
+                        let _ = message.double_ack().await;
+                        return;
+                    }
+                };
+            tokio::spawn(async move {
+                if let Err(e) = handler::handle_step_initializing(event, pool).await {
+                    tracing::error!("Failed to handle step initializing event: {:?}", e);
+                }
+                let _ = message.double_ack().await;
+            });
+        }
         "stormchaser.v1.step.running" => {
             let event: stormchaser_model::events::StepRunningEvent =
                 match serde_json::from_value(payload) {

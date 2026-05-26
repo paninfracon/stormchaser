@@ -87,7 +87,38 @@ async fn execute_job_on_cluster(
     let machine = job_machine::K8sJobMachine::new(client.clone(), metadata.clone());
 
     let result = match machine.start().await {
-        Ok(job_machine::StartResult::Running(running_machine)) => running_machine.wait().await,
+        Ok(job_machine::StartResult::Running(running_machine)) => {
+            // Notify orchestrator that we are actually running
+            let running_event = stormchaser_model::events::StepRunningEvent {
+                run_id: stormchaser_model::RunId::new(run_id),
+                step_id: stormchaser_model::StepInstanceId::new(step_id),
+                event_type: stormchaser_model::events::EventType::Step(
+                    stormchaser_model::events::StepEventType::Running,
+                ),
+                runner_id: None,
+                timestamp: Utc::now(),
+            };
+            let _ = publish_cloudevent(
+                &async_nats::jetstream::new(nats_client.clone()),
+                stormchaser_model::nats::NatsSubject::StepRunning(Some(
+                    stormchaser_model::nats::compute_shard_id(&stormchaser_model::RunId::new(
+                        run_id,
+                    )),
+                )),
+                stormchaser_model::events::EventType::Step(
+                    stormchaser_model::events::StepEventType::Running,
+                ),
+                stormchaser_model::events::EventSource::System,
+                serde_json::to_value(running_event).unwrap(),
+                Some(stormchaser_model::events::SchemaVersion::new(
+                    "1.0".to_string(),
+                )),
+                None,
+            )
+            .await;
+
+            running_machine.wait().await
+        }
         Ok(job_machine::StartResult::Failed(finished_machine)) => {
             Ok(finished_machine.into_result())
         }
@@ -356,22 +387,22 @@ pub async fn handle_task(
         }
     });
 
-    // Notify orchestrator that we are starting
-    let running_event = stormchaser_model::events::StepRunningEvent {
+    // Notify orchestrator that we are initializing
+    let initializing_event = stormchaser_model::events::StepInitializingEvent {
         run_id: RunId::new(run_id),
         step_id: StepInstanceId::new(step_id),
-        event_type: EventType::Step(StepEventType::Running),
+        event_type: EventType::Step(StepEventType::Initializing),
         runner_id: Some(runner_id.clone()),
         timestamp: Utc::now(),
     };
     let _ = publish_cloudevent(
         &async_nats::jetstream::new(nats_client.clone()),
-        NatsSubject::StepRunning(Some(stormchaser_model::nats::compute_shard_id(
+        NatsSubject::StepInitializing(Some(stormchaser_model::nats::compute_shard_id(
             &stormchaser_model::RunId::new(run_id),
         ))),
-        EventType::Step(StepEventType::Running),
+        EventType::Step(StepEventType::Initializing),
         EventSource::System,
-        serde_json::to_value(running_event).unwrap(),
+        serde_json::to_value(initializing_event).unwrap(),
         Some(SchemaVersion::new("1.0".to_string())),
         None,
     )
