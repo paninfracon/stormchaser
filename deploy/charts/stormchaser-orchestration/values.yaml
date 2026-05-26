@@ -100,6 +100,16 @@ web:
   service:
     type: ClusterIP
     port: 3003
+  ingress:
+    enabled: false
+    ingressClassName: ""
+    annotations: {}
+    hosts:
+      - host: stormchaser.local
+        paths:
+          - path: /
+            pathType: ImplementationSpecific
+    tls: []
   resources: {}
 
 engine:
