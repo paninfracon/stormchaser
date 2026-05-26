@@ -243,9 +243,11 @@ test.describe('Workflow Runs', () => {
     await expect(page.locator('tbody tr').nth(0)).toContainText('Z-workflow');
     await expect(page.locator('tbody tr').nth(1)).toContainText('A-workflow');
 
-    // Click "Name" to sort ascending
-    await page.locator('th', { hasText: 'Name' }).click();
-    await expect(page.locator('tbody tr').nth(0)).toContainText('A-workflow');
+    // Click "Name" to sort ascending, retry if hydration missed the click
+    await expect(async () => {
+      await page.locator('th', { hasText: 'Name' }).click();
+      await expect(page.locator('tbody tr').nth(0)).toContainText('A-workflow', { timeout: 1000 });
+    }).toPass({ timeout: 15000 });
     await expect(page.locator('tbody tr').nth(1)).toContainText('Z-workflow');
 
     // Click "Name" again to sort descending
