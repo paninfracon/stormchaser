@@ -8,6 +8,7 @@ use tokio::sync::mpsc;
 pub(crate) async fn stream_loki_logs(
     loki_url: &str,
     job_name: &str,
+    start_time: Option<chrono::DateTime<chrono::Utc>>,
 ) -> Result<mpsc::Receiver<Result<String>>> {
     use futures::StreamExt;
 
@@ -22,10 +23,16 @@ pub(crate) async fn stream_loki_logs(
         base_url.to_string()
     };
 
+    let start_ns = start_time
+        .unwrap_or_else(Utc::now)
+        .timestamp_nanos_opt()
+        .unwrap_or(0);
+
     let ws_url = format!(
-        "{}/loki/api/v1/tail?query={}",
+        "{}/loki/api/v1/tail?query={}&start={}",
         ws_url,
-        urlencoding::encode(&query)
+        urlencoding::encode(&query),
+        start_ns
     );
 
     tracing::debug!("Connecting to Loki WebSocket: {}", ws_url);
@@ -274,7 +281,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stream_step_logs_loki_connection_refused() {
-        let result = stream_loki_logs("http://127.0.0.1:1", "storm-test-step-12345678").await;
+        let result = stream_loki_logs("http://127.0.0.1:1", "storm-test-step-12345678", None).await;
         // The connection should fail
         result.unwrap_err();
     }

@@ -12,7 +12,6 @@ use futures::StreamExt;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 use stormchaser_model::dsl::{CommonContainerSpec, StorageMount};
-use stormchaser_model::events::StepRunningEvent;
 use stormchaser_model::events::{EventSource, EventType, SchemaVersion, StepEventType};
 use stormchaser_model::nats::publish_cloudevent;
 use stormchaser_model::nats::NatsSubject;
@@ -105,7 +104,7 @@ impl DockerContainerMachine<state::Initialized> {
             .await?;
 
         if let Some(nats) = &self.nats {
-            let running_event = StepRunningEvent {
+            let running_event = stormchaser_model::events::StepRunningEvent {
                 run_id: RunId::new(self.metadata.run_id),
                 step_id: StepInstanceId::new(self.metadata.step_id),
                 event_type: EventType::Step(StepEventType::Running),
@@ -115,7 +114,7 @@ impl DockerContainerMachine<state::Initialized> {
             let _ = publish_cloudevent(
                 &async_nats::jetstream::new(nats.clone()),
                 NatsSubject::StepRunning(Some(stormchaser_model::nats::compute_shard_id(
-                    &RunId::new(self.metadata.run_id),
+                    &stormchaser_model::RunId::new(self.metadata.run_id),
                 ))),
                 EventType::Step(StepEventType::Running),
                 EventSource::System,

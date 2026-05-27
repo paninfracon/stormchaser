@@ -95,6 +95,7 @@ pub enum NatsSubject {
     RunnerHeartbeat,
     RunnerOffline,
     StepScheduled(String, Option<u32>),
+    StepInitializing(Option<u32>),
     StepRunning(Option<u32>),
     StepCompleted(Option<u32>),
     StepFailed(Option<u32>),
@@ -150,6 +151,10 @@ impl NatsSubject {
                 "stormchaser.v1.{}.step.scheduled.{}",
                 get_shard_str(shard),
                 ty.to_lowercase()
+            )),
+            NatsSubject::StepInitializing(shard) => Cow::Owned(format!(
+                "stormchaser.v1.{}.step.initializing",
+                get_shard_str(shard)
             )),
             NatsSubject::StepRunning(shard) => Cow::Owned(format!(
                 "stormchaser.v1.{}.step.running",

@@ -36,6 +36,7 @@ impl From<RunStatus> for String {
 #[serde(rename_all = "snake_case")]
 pub enum StepStatus {
     Pending,
+    Initializing,
     UnpackingSfs,
     Running,
     PackingSfs,
@@ -52,6 +53,7 @@ impl From<StepStatus> for String {
     fn from(s: StepStatus) -> Self {
         match s {
             StepStatus::Pending => "pending".to_string(),
+            StepStatus::Initializing => "initializing".to_string(),
             StepStatus::UnpackingSfs => "unpacking_sfs".to_string(),
             StepStatus::Running => "running".to_string(),
             StepStatus::PackingSfs => "packing_sfs".to_string(),

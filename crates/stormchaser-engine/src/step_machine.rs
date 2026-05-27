@@ -9,6 +9,8 @@ use stormchaser_model::step::{StepInstance, StepStatus};
 pub mod state {
     /// State representing a step that is waiting to be executed.
     pub struct Pending;
+    /// State representing a step that has been assigned to a runner and is initializing.
+    pub struct Initializing;
     /// State representing a step that is unpacking its state from the Stormchaser File System.
     pub struct UnpackingSfs;
     /// State representing a step that is currently executing.
@@ -63,7 +65,24 @@ impl StepMachine<state::Pending> {
     }
 
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
-    /// Start.
+    /// Initializing.
+    pub async fn initializing(
+        mut self,
+        runner_id: String,
+        executor: &mut sqlx::PgConnection,
+    ) -> Result<StepMachine<state::Initializing>> {
+        self.instance.status = StepStatus::Initializing;
+        self.instance.runner_id = Some(runner_id);
+
+        persist_step_instance(&self.instance, executor).await?;
+
+        Ok(StepMachine {
+            instance: self.instance,
+            _state: PhantomData,
+        })
+    }
+    #[tracing::instrument(skip(self, executor), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
+    /// Start (shortcut for intrinsic steps that skip Initializing).
     pub async fn start(
         mut self,
         runner_id: String,
@@ -72,6 +91,66 @@ impl StepMachine<state::Pending> {
         self.instance.status = StepStatus::Running;
         self.instance.started_at = Some(Utc::now());
         self.instance.runner_id = Some(runner_id);
+
+        persist_step_instance(&self.instance, executor).await?;
+
+        Ok(StepMachine {
+            instance: self.instance,
+            _state: PhantomData,
+        })
+    }
+
+    #[tracing::instrument(skip(self, executor), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
+    /// Fail immediately from Pending (e.g., timeout or bad intrinsic setup).
+    pub async fn fail(
+        mut self,
+        reason: String,
+        exit_code: Option<i32>,
+        executor: &mut sqlx::PgConnection,
+    ) -> Result<StepMachine<state::Failed>> {
+        self.instance.status = StepStatus::Failed;
+        self.instance.error = Some(reason);
+        self.instance.exit_code = exit_code;
+        self.instance.finished_at = Some(Utc::now());
+
+        persist_step_instance(&self.instance, executor).await?;
+
+        Ok(StepMachine {
+            instance: self.instance,
+            _state: PhantomData,
+        })
+    }
+
+    #[tracing::instrument(skip(self, executor), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
+    /// Start unpacking (shortcut for when Initializing is skipped).
+    pub async fn start_unpacking(
+        mut self,
+        runner_id: String,
+        executor: &mut sqlx::PgConnection,
+    ) -> Result<StepMachine<state::UnpackingSfs>> {
+        self.instance.status = StepStatus::UnpackingSfs;
+        self.instance.started_at = Some(Utc::now());
+        self.instance.runner_id = Some(runner_id);
+
+        persist_step_instance(&self.instance, executor).await?;
+
+        Ok(StepMachine {
+            instance: self.instance,
+            _state: PhantomData,
+        })
+    }
+}
+
+#[allow(dead_code)]
+impl StepMachine<state::Initializing> {
+    #[tracing::instrument(skip(self, executor), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
+    /// Start.
+    pub async fn start(
+        mut self,
+        executor: &mut sqlx::PgConnection,
+    ) -> Result<StepMachine<state::Running>> {
+        self.instance.status = StepStatus::Running;
+        self.instance.started_at = Some(Utc::now());
 
         persist_step_instance(&self.instance, executor).await?;
 

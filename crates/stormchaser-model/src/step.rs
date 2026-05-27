@@ -16,6 +16,8 @@ use utoipa::ToSchema;
 pub enum StepStatus {
     /// The step is waiting for dependencies or an available runner.
     Pending,
+    /// The step has been assigned to a runner and is initializing.
+    Initializing,
     /// The runner is unpacking the Stormchaser File System (SFS).
     UnpackingSfs,
     /// The step is actively executing on a runner.

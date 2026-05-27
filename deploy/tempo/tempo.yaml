@@ -27,3 +27,8 @@ storage:
       path: /tmp/tempo/wal             # where to store the wal locally
     local:
       path: /tmp/tempo/blocks          # where to store the blocks locally
+
+overrides:
+  defaults:
+    metrics_generator:
+      processors: [service-graphs, span-metrics]

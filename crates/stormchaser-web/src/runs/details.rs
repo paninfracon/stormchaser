@@ -125,7 +125,9 @@ pub fn RunDetailsPanel(
                                             let status_str = step.instance.get("status").and_then(|v| v.as_str()).unwrap_or("pending");
 
                                             let status_class = match status_str {
+                                                "initializing" => "status-initializing",
                                                 "running" => "status-running",
+                                                "unpacking_sfs" | "packing_sfs" => "status-running",
                                                 "succeeded" => "status-succeeded",
                                                 "failed" => "status-failed",
                                                 _ => "status-queued",

@@ -79,7 +79,7 @@ The project is divided into specialized crates to ensure a clear separation of c
 ### 4. Coding Standards
 
 - **Low entrophy**: Make changes in small, well defined chunks, avoid changing entire files. Aggressively run the compiler to catch errors early.
-- **The 500-Line Rule**: Any file exceeding 500 lines is considered "at capacity." Before adding new logic to such a file, you MUST refactor it into logical sub-modules.
+- **The 500-Line Rule**: Any file exceeding 500 lines is considered "at capacity." Before adding new logic to such a file, you MUST refactor it into logical sub-modules. (Exception: Grafana dashboard JSON files are exempt from this rule).
 - **Wiring vs. Logic**: `main.rs` and `lib.rs` must act strictly as wiring facades (configuration, DI, route definitions). All business logic MUST reside in sub-modules.
 - **Domain Isolation**: Every new functional domain (e.g., a new integration, backend type, or API category) MUST start in its own file from inception.
 - **Structure First**: When writing new code write method stubs first then incrementally complete the methods.

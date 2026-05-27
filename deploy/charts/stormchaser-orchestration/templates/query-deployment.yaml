@@ -55,6 +55,8 @@ spec:
               value: {{ .Values.global.oidc.clientSecret | quote }}
             - name: LOKI_URL
               value: {{ .Values.global.loki.url | quote }}
+            - name: GRAFANA_URL
+              value: {{ .Values.global.grafana.url | quote }}
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: {{ .Values.global.otel.endpoint | quote }}
             - name: OTEL_SERVICE_NAME

@@ -56,6 +56,7 @@ impl WorkflowEventType {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub enum StepEventType {
     Scheduled,
+    Initializing,
     Running,
     Completed,
     Failed,
@@ -67,6 +68,7 @@ impl StepEventType {
     pub fn as_str(&self) -> &str {
         match self {
             StepEventType::Scheduled => "StepScheduledEvent",
+            StepEventType::Initializing => "StepInitializingEvent",
             StepEventType::Running => "StepRunningEvent",
             StepEventType::Completed => "StepCompletedEvent",
             StepEventType::Failed => "StepFailedEvent",
@@ -133,6 +135,7 @@ impl<'de> Deserialize<'de> for EventType {
             "WorkflowFailedEvent" => Ok(EventType::Workflow(WorkflowEventType::Failed)),
             "WorkflowAbortedEvent" => Ok(EventType::Workflow(WorkflowEventType::Aborted)),
             "StepScheduledEvent" => Ok(EventType::Step(StepEventType::Scheduled)),
+            "StepInitializingEvent" => Ok(EventType::Step(StepEventType::Initializing)),
             "StepRunningEvent" => Ok(EventType::Step(StepEventType::Running)),
             "StepCompletedEvent" => Ok(EventType::Step(StepEventType::Completed)),
             "StepFailedEvent" => Ok(EventType::Step(StepEventType::Failed)),
@@ -249,6 +252,15 @@ pub struct StepRunningEvent {
     pub step_id: StepInstanceId,
     pub event_type: EventType,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub runner_id: Option<String>,
+    pub timestamp: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct StepInitializingEvent {
+    pub run_id: RunId,
+    pub step_id: StepInstanceId,
+    pub event_type: EventType,
     pub runner_id: Option<String>,
     pub timestamp: DateTime<Utc>,
 }

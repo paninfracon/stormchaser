@@ -1,9 +1,9 @@
 use crate::dsl::*;
 use crate::events::{
     RunnerHeartbeatEvent, RunnerOfflineEvent, RunnerRegisterEvent, StepCompletedEvent,
-    StepFailedEvent, StepQueryEvent, StepQueryResponseEvent, StepRunningEvent, StepScheduledEvent,
-    WorkflowAbortedEvent, WorkflowCompletedEvent, WorkflowFailedEvent, WorkflowQueuedEvent,
-    WorkflowRunningEvent, WorkflowStartPendingEvent,
+    StepFailedEvent, StepInitializingEvent, StepQueryEvent, StepQueryResponseEvent,
+    StepRunningEvent, StepScheduledEvent, WorkflowAbortedEvent, WorkflowCompletedEvent,
+    WorkflowFailedEvent, WorkflowQueuedEvent, WorkflowRunningEvent, WorkflowStartPendingEvent,
 };
 use schemars::schema::{ObjectValidation, RootSchema, Schema, SchemaObject, SubschemaValidation};
 use schemars::{schema_for, Map};
@@ -42,6 +42,10 @@ pub fn generate_event_schemas() -> HashMap<String, RootSchema> {
     schemas.insert(
         "StepRunningEvent".to_string(),
         schema_for!(StepRunningEvent),
+    );
+    schemas.insert(
+        "StepInitializingEvent".to_string(),
+        schema_for!(StepInitializingEvent),
     );
     schemas.insert(
         "StepCompletedEvent".to_string(),

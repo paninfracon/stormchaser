@@ -21,6 +21,8 @@ stormchaser-orchestration:
       url: "nats://stormchaser-nats:4222"
     loki:
       url: "http://stormchaser-loki:3100"
+    grafana:
+      url: "http://stormchaser-grafana:80"
     opa:
       url: "http://stormchaser-stormchaser-orchestration-api:8181/v1/data/stormchaser/allow"
     oidc:

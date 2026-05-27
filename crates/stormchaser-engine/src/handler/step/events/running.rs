@@ -16,24 +16,46 @@ pub async fn handle_step_running(
     let span = tracing::Span::current();
     span.record("run_id", tracing::field::display(run_id));
     span.record("step_id", tracing::field::display(step_id));
-    let runner_id = event.runner_id.as_deref().unwrap_or("unknown");
+    // 1. Fetch current instance
+    let instance = fetch_step_instance(step_id, &pool).await?;
+
+    let runner_id = event
+        .runner_id
+        .as_deref()
+        .or(instance.runner_id.as_deref())
+        .unwrap_or("unknown");
 
     info!(
         "Step {} (Run {}) is now running on runner {}",
         step_id, run_id, runner_id
     );
 
-    // 1. Fetch current instance
-    let instance = fetch_step_instance(step_id, &pool).await?;
+    let mut conn = pool.acquire().await?;
 
     // 2. Use state machine to transition
-    let machine =
-        crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::from_instance(
-            instance.clone(),
+    if instance.status == stormchaser_model::step::StepStatus::Initializing {
+        let machine =
+            crate::step_machine::StepMachine::<crate::step_machine::state::Initializing>::from_instance(
+                instance.clone(),
+            );
+        let _ = machine.start(&mut *conn).await?;
+    } else if instance.status == stormchaser_model::step::StepStatus::Pending {
+        // Fallback in case Initializing was missed
+        let machine =
+            crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::from_instance(
+                instance.clone(),
+            );
+        let machine = machine
+            .initializing(runner_id.to_string(), &mut *conn)
+            .await?;
+        let _ = machine.start(&mut *conn).await?;
+    } else {
+        info!(
+            "Step {} is already past Initializing/Pending state, ignoring Running event.",
+            step_id
         );
-    let _ = machine
-        .start(runner_id.to_string(), &mut *pool.acquire().await?)
-        .await?;
+        return Ok(());
+    }
 
     crate::STEPS_STARTED.add(
         1,

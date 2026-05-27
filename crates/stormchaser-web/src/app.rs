@@ -136,6 +136,24 @@ pub fn Layout() -> impl IntoView {
                 <a href="/rules" class="tab-link">"Rules"</a>
                 <a href="/cron" class="tab-link">"Cron"</a>
                 <a href="/schema" class="tab-link">"Schema/Lint"</a>
+                {
+                    let grafana_res = Resource::new(|| (), |_| async move {
+                        crate::api::get_grafana_url().await.unwrap_or(None)
+                    });
+                    view! {
+                        <Suspense fallback=|| view! { <span></span> }>
+                            {move || {
+                                if let Some(Some(_url)) = grafana_res.get() {
+                                    view! {
+                                        <a href="/grafana" class="tab-link">"Grafana"</a>
+                                    }.into_any()
+                                } else {
+                                    view! { <span></span> }.into_any()
+                                }
+                            }}
+                        </Suspense>
+                    }
+                }
             </div>
 
             <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
@@ -161,6 +179,7 @@ pub fn App() -> impl IntoView {
                         <Route path=path!("rules") view=RulesList/>
                         <Route path=path!("cron") view=CronList/>
                         <Route path=path!("schema") view=SchemaLinter/>
+                        <Route path=path!("grafana") view=crate::grafana::GrafanaView/>
                     </ParentRoute>
                 </Routes>
             </main>

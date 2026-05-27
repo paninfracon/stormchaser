@@ -63,7 +63,7 @@ pub async fn stream_step_logs_api(
         .ok_or(StatusCode::NOT_FOUND)?;
 
     let rx = log_backend
-        .stream_step_logs(&instance.step_name, step_id)
+        .stream_step_logs(&instance.step_name, step_id, None)
         .await
         .map_err(|e| {
             tracing::error!("Failed to stream logs: {}", e);
@@ -205,7 +205,7 @@ pub async fn stream_run_logs_api(
                             step_name_clone
                         );
                         if let Ok(mut step_rx) = log_backend
-                            .stream_step_logs(&step_name_clone, step_id)
+                            .stream_step_logs(&step_name_clone, step_id, None)
                             .await
                         {
                             tracing::debug!(

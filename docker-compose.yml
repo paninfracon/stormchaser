@@ -70,6 +70,11 @@ services:
     environment:
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+    volumes:
+      - ./deploy/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./deploy/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./deploy/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       - loki
       - prometheus
@@ -237,6 +242,7 @@ services:
       EXTERNAL_API_URL: http://localhost:${PORT_API:-3000}
       WEB_URL: http://localhost:${PORT_WEB:-3003}
       RUST_LOG: stormchaser_web=debug
+      GRAFANA_URL: http://localhost:${PORT_GRAFANA:-3002}
     depends_on:
       - orchestration-api
     ports:
@@ -253,7 +259,7 @@ services:
       NATS_URL: nats://nats:4222
       RUST_LOG: stormchaser_runner_docker=debug
       STORMCHASER_STATE_ENCRYPTION_KEY: "01234567890123456789012345678901"
-      LOKI_URL: ${LOKI_URL:-http://host.docker.internal:3100/loki/api/v1/push}
+      LOKI_URL: ${LOKI_URL:-http://loki:3100/loki/api/v1/push}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
