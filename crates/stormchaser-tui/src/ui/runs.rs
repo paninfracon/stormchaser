@@ -154,7 +154,13 @@ pub(crate) fn render_run_detail(
     ));
     detail_text.push_str(&format!("{:-<20}-|-{:-<35}-|-{:-<20}\n", "", "", ""));
 
+    let mut selected_step_start_line = None;
+    let mut selected_step_end_line = None;
+
     for (i, step_detail) in run.steps.iter().enumerate() {
+        if i == app.selected_step_index && app.active_pane == crate::app::Pane::RunDetail {
+            selected_step_start_line = Some(detail_text.lines().count());
+        }
         let instance = &step_detail.instance;
         let name = instance
             .get("step_name")
@@ -266,6 +272,10 @@ pub(crate) fn render_run_detail(
                 }
             }
         }
+
+        if i == app.selected_step_index && app.active_pane == crate::app::Pane::RunDetail {
+            selected_step_end_line = Some(detail_text.lines().count());
+        }
     }
 
     if !run.artifacts.is_empty() {
@@ -286,20 +296,28 @@ pub(crate) fn render_run_detail(
         }
     }
 
-    let detail_paragraph =
-        Paragraph::new(detail_text.clone()).scroll((app.overview_scroll as u16, 0));
-    f.render_widget(detail_paragraph, right_chunks[0]);
-
-    // Add scrollbar to overview if content exceeds height
     let overview_content_lines = detail_text.lines().count();
     let overview_height = right_chunks[0].height as usize;
     let max_overview_scroll = overview_content_lines.saturating_sub(overview_height);
 
-    if max_overview_scroll > 0 {
-        if app.overview_scroll > max_overview_scroll {
-            app.overview_scroll = max_overview_scroll;
+    if app.active_pane == crate::app::Pane::RunDetail {
+        if let (Some(start), Some(end)) = (selected_step_start_line, selected_step_end_line) {
+            if start < app.overview_scroll {
+                app.overview_scroll = start.saturating_sub(1);
+            } else if end >= app.overview_scroll + overview_height {
+                app.overview_scroll = (end + 2).saturating_sub(overview_height);
+            }
         }
+    }
 
+    if app.overview_scroll > max_overview_scroll {
+        app.overview_scroll = max_overview_scroll;
+    }
+
+    let detail_paragraph =
+        Paragraph::new(detail_text.clone()).scroll((app.overview_scroll as u16, 0));
+    f.render_widget(detail_paragraph, right_chunks[0]);
+    if max_overview_scroll > 0 {
         let scrollbar = Scrollbar::default()
             .orientation(ScrollbarOrientation::VerticalRight)
             .begin_symbol(Some("▲"))
