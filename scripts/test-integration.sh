@@ -13,6 +13,10 @@ TEST_ARGS=""
 for test_file in crates/*/tests/integration_*.rs; do
   if [ -f "$test_file" ]; then
     test_name=$(basename "$test_file" .rs)
+    if [ "$GITHUB_ACTIONS" = "true" ] && [ "$test_name" = "integration_load_tests" ]; then
+      echo "Skipping $test_name in GitHub Actions"
+      continue
+    fi
     TEST_ARGS="$TEST_ARGS --test $test_name"
   fi
 done

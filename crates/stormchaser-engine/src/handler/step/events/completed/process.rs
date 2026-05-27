@@ -1,5 +1,4 @@
 use crate::handler::fetch_outputs;
-use crate::handler::step::dispatch::dispatch_step_instance;
 use crate::handler::step::scheduling::schedule_step;
 use crate::handler::StepInstance;
 use anyhow::Result;
@@ -63,11 +62,11 @@ pub async fn process_step_completion(
 async fn schedule_iterated_batches(
     dsl_step: &ast::Step,
     all_steps: &[StepInstance],
-    run_id: RunId,
+    _run_id: RunId,
     tx: &mut sqlx::PgConnection,
-    nats_client: async_nats::Client,
-    pool: PgPool,
-    tls_reloader: Arc<TlsReloader>,
+    _nats_client: async_nats::Client,
+    _pool: PgPool,
+    _tls_reloader: Arc<TlsReloader>,
 ) -> Result<bool> {
     let all_instances_of_this_step: Vec<&StepInstance> = all_steps
         .iter()
@@ -107,22 +106,6 @@ async fn schedule_iterated_batches(
                         crate::step_machine::state::WaitingForEvent,
                     >::from_instance((**next_instance).clone());
                     let _ = machine.reschedule(&mut *tx).await?;
-
-                    let inst_data: (Value, Value) =
-                        crate::db::get_step_spec_and_params(&mut *tx, next_instance.id).await?;
-
-                    dispatch_step_instance(
-                        run_id,
-                        next_instance.id,
-                        &dsl_step.name,
-                        &dsl_step.r#type,
-                        &inst_data.0,
-                        &inst_data.1,
-                        nats_client.clone(),
-                        pool.clone(),
-                        tls_reloader.clone(),
-                    )
-                    .await?;
                 }
             }
         }
