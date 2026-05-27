@@ -57,8 +57,8 @@ if [ "$ALL_READY" != true ]; then
     exit 1
 fi
 
-echo -e "${BLUE}>>> Generating hello-world.storm...${NC}"
-cat << 'EOF' > "$REPO_ROOT/tests/hello-world.storm"
+echo -e "${BLUE}>>> Generating load-test.storm...${NC}"
+cat << 'EOF' > "$REPO_ROOT/tests/load-test.storm"
 workflow "hello_world" {
   description = "A simple hello world workflow."
   steps {
@@ -88,7 +88,7 @@ START_TIME=$(date +%s)
 PAYLOAD_FILE=$(mktemp)
 cat <<EOF > "$PAYLOAD_FILE"
 {
-  "dsl": $(jq -Rs . < "$REPO_ROOT/tests/hello-world.storm"),
+  "dsl": $(jq -Rs . < "$REPO_ROOT/tests/load-test.storm"),
   "inputs": {}
 }
 EOF
