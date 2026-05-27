@@ -124,21 +124,13 @@ pub async fn dispatch_pending_steps(
     let quotas = fetch_quotas(run_id, &pool).await?;
     let running_count: i64 = crate::db::count_running_steps_for_run(&pool, run_id).await?;
 
-    println!(
-        "DEBUG: dispatch_pending_steps: running_count = {}, quotas.max_concurrency = {}",
-        running_count, quotas.max_concurrency
-    );
-
     if running_count >= quotas.max_concurrency as i64 {
+        debug!("Run {}: Max concurrency {} reached", run_id, running_count);
         return Ok(());
     }
 
     let available_slots = (quotas.max_concurrency as i64) - running_count;
 
-    println!(
-        "DEBUG: dispatch_pending_steps: available_slots = {}",
-        available_slots
-    );
     debug!(
         "Run {}: {} slots available for concurrent steps",
         run_id, available_slots
@@ -151,21 +143,7 @@ pub async fn dispatch_pending_steps(
     let pending_steps: Vec<StepInstance> =
         crate::db::get_pending_step_instances_for_run(&pool, run_id, available_slots).await?;
 
-    static DISPATCHED_CACHE: once_cell::sync::Lazy<
-        std::sync::Mutex<std::collections::HashSet<stormchaser_model::StepInstanceId>>,
-    > = once_cell::sync::Lazy::new(|| std::sync::Mutex::new(std::collections::HashSet::new()));
-
-    let mut to_dispatch = Vec::new();
-    {
-        let mut cache = DISPATCHED_CACHE.lock().unwrap();
-        for step in pending_steps {
-            if cache.insert(step.id) {
-                to_dispatch.push(step);
-            }
-        }
-    }
-
-    for step in to_dispatch {
+    for step in pending_steps {
         info!("Run {}: Evaluating queued step {}", run_id, step.step_name);
         // We need to fetch the resolved spec and params for this step
         let inst_data: (Value, Value) = crate::db::get_step_spec_and_params(&pool, step.id).await?;

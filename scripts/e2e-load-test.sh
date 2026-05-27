@@ -66,7 +66,7 @@ echo -e "${BLUE}>>> Generating load-test.storm...${NC}"
 # Use python to generate a list of 500 integers as a JSON string
 ITERATE_ARRAY=$(python3 -c "import json; print(json.dumps(list(range(500))))")
 
-cat << STORM_EOF > "$REPO_ROOT/tests/load-test.storm"
+cat << 'STORM_EOF' > "$REPO_ROOT/tests/load-test.storm"
 workflow "e2e_load_test" {
   description = "A full local development e2e load test to verify quotas and concurrency."
 
@@ -78,14 +78,16 @@ workflow "e2e_load_test" {
     step "process" "RunContainer" {
       image = "alpine:latest"
       command = ["/bin/sh", "-c"]
-      args = ["echo 'Running iteration \${step.iterate.value}'"]
+      args = ["echo 'Running iteration ${step.iterate.value}'"]
       strategy {
-        iterate = "${ITERATE_ARRAY}"
+        iterate = "__ITERATE_ARRAY__"
       }
     }
   }
 }
 STORM_EOF
+sed -i.bak "s|__ITERATE_ARRAY__|$ITERATE_ARRAY|" "$REPO_ROOT/tests/load-test.storm"
+rm -f "$REPO_ROOT/tests/load-test.storm.bak"
 echo -e "${GREEN}>>> Generated tests/load-test.storm${NC}"
 
 

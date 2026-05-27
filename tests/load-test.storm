@@ -1,9 +1,0 @@
-workflow "hello_world" {
-  description = "A simple hello world workflow."
-  steps {
-    step "generate" "JQ" {
-      program = ".text"
-      input   = { text = "Hello World!" }
-    }
-  }
-}

@@ -53,8 +53,15 @@ echo '}' >> "$STORM_FILE"
 
 echo ">>> Cleaning up previous workflow runs in local DB..."
 POSTGRES_CONTAINER=$(docker ps --format '{{.Names}}' | grep postgres | head -n 1)
-docker exec "$POSTGRES_CONTAINER" psql -U stormchaser -d stormchaser -c "TRUNCATE workflow_runs CASCADE" > /dev/null 2>&1
-docker exec "$POSTGRES_CONTAINER" psql -U stormchaser -d stormchaser -c "TRUNCATE archived_workflow_runs CASCADE" > /dev/null 2>&1
+if [ "${STORMCHASER_E2E_RESET_ALL_RUNS:-0}" = "1" ]; then
+  echo ">>> STORMCHASER_E2E_RESET_ALL_RUNS=1 set; truncating all workflow runs."
+  docker exec "$POSTGRES_CONTAINER" psql -U stormchaser -d stormchaser -c "TRUNCATE workflow_runs CASCADE" > /dev/null 2>&1
+  docker exec "$POSTGRES_CONTAINER" psql -U stormchaser -d stormchaser -c "TRUNCATE archived_workflow_runs CASCADE" > /dev/null 2>&1
+else
+  echo ">>> Deleting only many_parallel_steps runs. Set STORMCHASER_E2E_RESET_ALL_RUNS=1 to truncate all runs."
+  docker exec "$POSTGRES_CONTAINER" psql -U stormchaser -d stormchaser -c "DELETE FROM workflow_runs WHERE workflow_name = 'many_parallel_steps'" > /dev/null 2>&1
+  docker exec "$POSTGRES_CONTAINER" psql -U stormchaser -d stormchaser -c "DELETE FROM archived_workflow_runs WHERE workflow_name = 'many_parallel_steps'" > /dev/null 2>&1
+fi
 
 echo -e "${BLUE}>>> Launching workflow with $NUM_STEPS parallel steps via API...${NC}"
 

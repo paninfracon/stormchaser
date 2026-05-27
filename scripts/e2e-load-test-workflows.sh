@@ -72,8 +72,15 @@ EOF
 
 echo ">>> Cleaning up previous workflow runs in local DB..."
 POSTGRES_CONTAINER=$(docker ps --format '{{.Names}}' | grep postgres | head -n 1)
-docker exec "$POSTGRES_CONTAINER" psql -U stormchaser -d stormchaser -c "TRUNCATE workflow_runs CASCADE" > /dev/null 2>&1
-docker exec "$POSTGRES_CONTAINER" psql -U stormchaser -d stormchaser -c "TRUNCATE archived_workflow_runs CASCADE" > /dev/null 2>&1
+if [ "${STORMCHASER_E2E_RESET_ALL_RUNS:-0}" = "1" ]; then
+    echo ">>> STORMCHASER_E2E_RESET_ALL_RUNS=1 set; truncating all workflow runs."
+    docker exec "$POSTGRES_CONTAINER" psql -U stormchaser -d stormchaser -c "TRUNCATE workflow_runs CASCADE" > /dev/null 2>&1
+    docker exec "$POSTGRES_CONTAINER" psql -U stormchaser -d stormchaser -c "TRUNCATE archived_workflow_runs CASCADE" > /dev/null 2>&1
+else
+    echo ">>> Deleting only hello_world runs. Set STORMCHASER_E2E_RESET_ALL_RUNS=1 to truncate all runs."
+    docker exec "$POSTGRES_CONTAINER" psql -U stormchaser -d stormchaser -c "DELETE FROM workflow_runs WHERE workflow_name = 'hello_world'" > /dev/null 2>&1
+    docker exec "$POSTGRES_CONTAINER" psql -U stormchaser -d stormchaser -c "DELETE FROM archived_workflow_runs WHERE workflow_name = 'hello_world'" > /dev/null 2>&1
+fi
 
 NUM_WORKFLOWS=500
 echo -e "${BLUE}>>> Launching $NUM_WORKFLOWS workflows concurrently via API...${NC}"
@@ -173,6 +180,13 @@ rm -rf "$RESP_DIR"
 if [ "$STATUS" = "succeeded" ]; then
     echo -e "${GREEN}>>> Workflow execution successful! All $SUCCESSFUL_SUBMISSIONS workflows completed in $DURATION seconds.${NC}"
 else
+    FINAL_RUNNING=$(docker exec "$POSTGRES_CONTAINER" psql -U stormchaser -d stormchaser -t -c "SELECT count(*) FROM workflow_runs WHERE status = 'running' AND workflow_name = 'hello_world'" | xargs)
+    FINAL_QUEUED=$(docker exec "$POSTGRES_CONTAINER" psql -U stormchaser -d stormchaser -t -c "SELECT count(*) FROM workflow_runs WHERE status = 'queued' AND workflow_name = 'hello_world'" | xargs)
+    STUCK_RUN_IDS=$(docker exec "$POSTGRES_CONTAINER" psql -U stormchaser -d stormchaser -t -c "SELECT id FROM workflow_runs WHERE workflow_name = 'hello_world' AND status IN ('queued', 'running') ORDER BY created_at ASC LIMIT 10" | xargs)
     echo -e "${RED}>>> Workflow execution failed or timed out!${NC}"
+    echo "Remaining runs - Running: $FINAL_RUNNING, Queued: $FINAL_QUEUED"
+    if [ -n "$STUCK_RUN_IDS" ]; then
+        echo "Sample stuck run IDs: $STUCK_RUN_IDS"
+    fi
     exit 1
 fi
