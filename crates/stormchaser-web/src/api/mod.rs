@@ -58,7 +58,10 @@ pub async fn check_auth() -> Result<bool, ServerFnError> {
 
 #[server(input = Json, output = Json)]
 pub async fn get_grafana_url() -> Result<Option<String>, ServerFnError> {
-    Ok(std::env::var("GRAFANA_URL").ok().filter(|s| !s.is_empty()))
+    Ok(std::env::var("GRAFANA_URL")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty() && (s.starts_with("http://") || s.starts_with("https://"))))
 }
 
 #[cfg(feature = "ssr")]
@@ -71,12 +74,48 @@ pub(crate) fn http_client() -> reqwest::Client {
 #[cfg(feature = "ssr")]
 mod tests {
     use super::*;
+    use std::sync::OnceLock;
+
+    struct EnvVarGuard {
+        key: &'static str,
+        original: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn new(key: &'static str) -> Self {
+            Self {
+                key,
+                original: std::env::var(key).ok(),
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(original) = self.original.clone() {
+                std::env::set_var(self.key, original);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
 
     #[tokio::test]
     async fn test_get_grafana_url() {
+        static ENV_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+        let _lock = ENV_LOCK
+            .get_or_init(|| tokio::sync::Mutex::new(()))
+            .lock()
+            .await;
+        let _env_guard = EnvVarGuard::new("GRAFANA_URL");
+
         std::env::set_var("GRAFANA_URL", "http://grafana");
         let result = get_grafana_url().await.unwrap();
         assert_eq!(result.unwrap(), "http://grafana");
+
+        std::env::set_var("GRAFANA_URL", "ftp://grafana");
+        let result = get_grafana_url().await.unwrap();
+        assert!(result.is_none());
 
         std::env::set_var("GRAFANA_URL", "");
         let result = get_grafana_url().await.unwrap();

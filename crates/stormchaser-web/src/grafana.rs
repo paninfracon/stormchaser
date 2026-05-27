@@ -15,7 +15,7 @@ pub fn GrafanaView() -> impl IntoView {
                     view! {
                         <div class="glass-panel" style="flex: 1; display: flex; flex-direction: column; padding: 0; overflow: hidden; margin: 0;">
                             <div style="display: flex; justify-content: flex-end; padding: 0.75rem 1rem; border-bottom: 1px solid var(--surface-border); background: rgba(0,0,0,0.02);">
-                                <a href=url target="_blank" class="btn" style="background: var(--surface-light); border: 1px solid var(--surface-border); box-shadow: 0 2px 4px rgba(0,0,0,0.05); display: flex; align-items: center; gap: 0.5rem; text-decoration: none; font-size: 0.85rem; color: var(--text-primary); padding: 0.4rem 0.8rem; border-radius: 6px;">
+                                <a href=url target="_blank" rel="noopener noreferrer" class="btn" style="background: var(--surface-light); border: 1px solid var(--surface-border); box-shadow: 0 2px 4px rgba(0,0,0,0.05); display: flex; align-items: center; gap: 0.5rem; text-decoration: none; font-size: 0.85rem; color: var(--text-primary); padding: 0.4rem 0.8rem; border-radius: 6px;">
                                     "↗ Full Grafana UI"
                                 </a>
                             </div>

@@ -30,13 +30,15 @@ pub async fn handle_step_running(
         step_id, run_id, runner_id
     );
 
+    let mut conn = pool.acquire().await?;
+
     // 2. Use state machine to transition
     if instance.status == stormchaser_model::step::StepStatus::Initializing {
         let machine =
             crate::step_machine::StepMachine::<crate::step_machine::state::Initializing>::from_instance(
                 instance.clone(),
             );
-        let _ = machine.start(&mut *pool.acquire().await?).await?;
+        let _ = machine.start(&mut *conn).await?;
     } else if instance.status == stormchaser_model::step::StepStatus::Pending {
         // Fallback in case Initializing was missed
         let machine =
@@ -44,9 +46,9 @@ pub async fn handle_step_running(
                 instance.clone(),
             );
         let machine = machine
-            .initializing(runner_id.to_string(), &mut *pool.acquire().await?)
+            .initializing(runner_id.to_string(), &mut *conn)
             .await?;
-        let _ = machine.start(&mut *pool.acquire().await?).await?;
+        let _ = machine.start(&mut *conn).await?;
     } else {
         info!(
             "Step {} is already past Initializing/Pending state, ignoring Running event.",

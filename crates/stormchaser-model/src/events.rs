@@ -135,6 +135,7 @@ impl<'de> Deserialize<'de> for EventType {
             "WorkflowFailedEvent" => Ok(EventType::Workflow(WorkflowEventType::Failed)),
             "WorkflowAbortedEvent" => Ok(EventType::Workflow(WorkflowEventType::Aborted)),
             "StepScheduledEvent" => Ok(EventType::Step(StepEventType::Scheduled)),
+            "StepInitializingEvent" => Ok(EventType::Step(StepEventType::Initializing)),
             "StepRunningEvent" => Ok(EventType::Step(StepEventType::Running)),
             "StepCompletedEvent" => Ok(EventType::Step(StepEventType::Completed)),
             "StepFailedEvent" => Ok(EventType::Step(StepEventType::Failed)),

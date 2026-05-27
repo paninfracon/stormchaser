@@ -95,7 +95,7 @@ async fn execute_job_on_cluster(
                 event_type: stormchaser_model::events::EventType::Step(
                     stormchaser_model::events::StepEventType::Running,
                 ),
-                runner_id: None,
+                runner_id: Some(runner_id.clone()),
                 timestamp: Utc::now(),
             };
             let _ = publish_cloudevent(
