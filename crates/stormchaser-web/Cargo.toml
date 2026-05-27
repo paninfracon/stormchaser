@@ -28,6 +28,7 @@ serde = { workspace = true }
 chrono = { workspace = true }
 reqwest = { workspace = true, optional = true }
 serde_json = { workspace = true }
+url = { workspace = true }
 urlencoding = "2.1"
 futures = { workspace = true, optional = true }
 stormchaser-dsl = { version = "1.5.1", path = "../stormchaser-dsl", optional = true }

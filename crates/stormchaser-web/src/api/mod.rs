@@ -17,6 +17,7 @@ pub use storage::*;
 
 use leptos::prelude::*;
 use leptos::server_fn::codec::Json;
+use url::{Host, Url};
 
 #[cfg(feature = "ssr")]
 async fn get_cookie_header() -> Result<Option<String>, ServerFnError> {
@@ -61,7 +62,23 @@ pub async fn get_grafana_url() -> Result<Option<String>, ServerFnError> {
     Ok(std::env::var("GRAFANA_URL")
         .ok()
         .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty() && (s.starts_with("http://") || s.starts_with("https://"))))
+        .filter(|s| !s.is_empty() && is_valid_grafana_url(s)))
+}
+
+fn is_valid_grafana_url(url: &str) -> bool {
+    Url::parse(url).ok().is_some_and(|parsed| {
+        matches!(parsed.scheme(), "http" | "https")
+            && match parsed.host() {
+                Some(Host::Domain(domain)) => {
+                    !domain.is_empty()
+                        && domain
+                            .chars()
+                            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+                }
+                Some(Host::Ipv4(_)) | Some(Host::Ipv6(_)) => true,
+                None => false,
+            }
+    })
 }
 
 #[cfg(feature = "ssr")]
@@ -114,6 +131,14 @@ mod tests {
         assert_eq!(result.unwrap(), "http://grafana");
 
         std::env::set_var("GRAFANA_URL", "ftp://grafana");
+        let result = get_grafana_url().await.unwrap();
+        assert!(result.is_none());
+
+        std::env::set_var("GRAFANA_URL", "http://");
+        let result = get_grafana_url().await.unwrap();
+        assert!(result.is_none());
+
+        std::env::set_var("GRAFANA_URL", "https://;malicious");
         let result = get_grafana_url().await.unwrap();
         assert!(result.is_none());
 
