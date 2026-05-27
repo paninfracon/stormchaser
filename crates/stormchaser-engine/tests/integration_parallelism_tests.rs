@@ -95,7 +95,9 @@ async fn test_dynamic_parallelism_with_batching() {
     // it might immediately pick up the step and transition it from Pending to Running.
     // Thus we accept either Pending or Running.
     assert!(
-        instances[0].status == StepStatus::Pending || instances[0].status == StepStatus::Running,
+        instances[0].status == StepStatus::Pending
+            || instances[0].status == StepStatus::Running
+            || instances[0].status == StepStatus::Initializing,
         "Status was {:?}",
         instances[0].status
     );

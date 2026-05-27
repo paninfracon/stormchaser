@@ -6,7 +6,9 @@ use std::time::Duration;
 use stormchaser_model::dsl::Step;
 use stormchaser_model::events::StepCompletedEvent;
 use stormchaser_model::events::StepFailedEvent;
-use stormchaser_model::events::{EventSource, EventType, SchemaVersion, StepEventType};
+use stormchaser_model::events::{
+    EventDispatch, EventSource, EventType, SchemaVersion, StepEventType,
+};
 use stormchaser_model::nats::publish_cloudevent;
 use stormchaser_model::nats::NatsSubject;
 use stormchaser_model::RunId;
@@ -155,14 +157,14 @@ async fn publish_job_result(
                     tracing::error!("Step {} (Run {}) failed: {}", step_id, run_id, reason);
                 }
             }
-            let (subject, event_type, event) =
-                build_job_result_event(state, run_id, step_id, fencing_token, runner_id.clone());
+            let dispatch = build_job_result_event(state, run_id, step_id, fencing_token, runner_id);
+
             let _ = publish_cloudevent(
                 &async_nats::jetstream::new(nats_client.clone()),
-                subject,
-                event_type,
+                dispatch.subject,
+                dispatch.event_type,
                 EventSource::System,
-                event,
+                dispatch.payload,
                 Some(SchemaVersion::new("1.0".to_string())),
                 None,
             )
@@ -213,7 +215,7 @@ fn build_job_result_event(
     step_id: Uuid,
     fencing_token: i64,
     runner_id: String,
-) -> (NatsSubject, EventType, Value) {
+) -> EventDispatch {
     match state {
         job_machine::JobState::Succeeded(metrics) => {
             let event_type = EventType::Step(StepEventType::Completed);
@@ -235,13 +237,15 @@ fn build_job_result_event(
                 outputs: Some(outputs),
                 timestamp: Utc::now(),
             };
-            (
-                NatsSubject::StepCompleted(Some(stormchaser_model::nats::compute_shard_id(
-                    &stormchaser_model::RunId::new(run_id),
-                ))),
+            EventDispatch {
+                subject: NatsSubject::StepCompleted(Some(
+                    stormchaser_model::nats::compute_shard_id(&stormchaser_model::RunId::new(
+                        run_id,
+                    )),
+                )),
                 event_type,
-                serde_json::to_value(event).unwrap(),
-            )
+                payload: serde_json::to_value(event).unwrap(),
+            }
         }
         job_machine::JobState::Failed(reason, metrics) => {
             let event_type = EventType::Step(StepEventType::Failed);
@@ -264,13 +268,13 @@ fn build_job_result_event(
                 outputs: Some(outputs),
                 timestamp: Utc::now(),
             };
-            (
-                NatsSubject::StepFailed(Some(stormchaser_model::nats::compute_shard_id(
+            EventDispatch {
+                subject: NatsSubject::StepFailed(Some(stormchaser_model::nats::compute_shard_id(
                     &stormchaser_model::RunId::new(run_id),
                 ))),
                 event_type,
-                serde_json::to_value(event).unwrap(),
-            )
+                payload: serde_json::to_value(event).unwrap(),
+            }
         }
     }
 }

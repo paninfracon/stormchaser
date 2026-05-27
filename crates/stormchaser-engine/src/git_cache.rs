@@ -90,22 +90,6 @@ impl GitCache {
         Ok(target_dir)
     }
 
-    /// Legacy method updated to use the new implementation
-    #[allow(dead_code)]
-    pub fn get_repo(&self, repo_url: &str, rev: &str) -> Result<PathBuf> {
-        // Full checkout for the legacy get_repo
-        // We achieve this by NOT specifying paths, but by default git2 checkout_head
-        // without pathspecs checkouts everything.
-        let target_dir = self.init_repo(repo_url, rev)?;
-        let repo = Repository::open(&target_dir)?;
-
-        let mut cb = CheckoutBuilder::new();
-        cb.force();
-        repo.checkout_head(Some(&mut cb))?;
-
-        Ok(target_dir)
-    }
-
     fn hash_url(&self, url: &str) -> String {
         let mut hasher = Sha256::new();
         hasher.update(url.as_bytes());

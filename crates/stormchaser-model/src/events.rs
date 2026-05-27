@@ -1,4 +1,5 @@
 use crate::id::{RunId, StepInstanceId};
+use crate::nats::NatsSubject;
 use chrono::{DateTime, Utc};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -100,6 +101,13 @@ pub enum EventType {
     Workflow(WorkflowEventType),
     Step(StepEventType),
     Runner(RunnerEventType),
+}
+
+#[derive(Debug, Clone)]
+pub struct EventDispatch {
+    pub subject: NatsSubject,
+    pub event_type: EventType,
+    pub payload: serde_json::Value,
 }
 
 impl EventType {
