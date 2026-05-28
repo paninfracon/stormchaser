@@ -1,13 +1,69 @@
 use super::TestConnectionRequest;
 use aws_config::Region;
+use std::net::IpAddr;
 use std::time::Duration;
 
 const HTTP_TEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Validate that a URL is safe to connect to (SSRF protection).
+///
+/// Allows only `http` and `https` schemes and blocks loopback, link-local, and
+/// RFC-1918 private addresses to prevent Server-Side Request Forgery attacks.
+fn validate_url_safe(raw_url: &str) -> Result<(), String> {
+    let parsed = url::Url::parse(raw_url).map_err(|e| format!("Invalid URL: {}", e))?;
+
+    match parsed.scheme() {
+        "http" | "https" => {}
+        s => return Err(format!("Disallowed URL scheme '{}': only http and https are permitted", s)),
+    }
+
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "URL has no host".to_string())?;
+
+    // Reject bare IP addresses that fall in restricted ranges.
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if ip.is_loopback() {
+            return Err(format!("Disallowed host '{}': loopback addresses are not permitted", host));
+        }
+        match ip {
+            IpAddr::V4(v4) => {
+                if v4.is_private() {
+                    return Err(format!("Disallowed host '{}': private addresses are not permitted", host));
+                }
+                if v4.is_link_local() {
+                    return Err(format!("Disallowed host '{}': link-local addresses are not permitted", host));
+                }
+            }
+            IpAddr::V6(v6) => {
+                // Block IPv6 link-local (fe80::/10) and unique-local (fc00::/7).
+                let octets = v6.octets();
+                if octets[0] == 0xfe && (octets[1] & 0xc0) == 0x80 {
+                    return Err(format!("Disallowed host '{}': IPv6 link-local addresses are not permitted", host));
+                }
+                if octets[0] & 0xfe == 0xfc {
+                    return Err(format!("Disallowed host '{}': IPv6 unique-local addresses are not permitted", host));
+                }
+            }
+        }
+    }
+
+    // Reject well-known loopback/link-local hostnames regardless of case.
+    let host_lower = host.to_lowercase();
+    if host_lower == "localhost" || host_lower.ends_with(".localhost") {
+        return Err(format!("Disallowed host '{}': localhost is not permitted", host));
+    }
+
+    Ok(())
+}
 
 pub async fn validate_connection(payload: &TestConnectionRequest) -> (bool, String) {
     match payload.connection_type {
         stormchaser_model::connections::ConnectionType::HttpApi => {
             if let Some(base_url) = payload.config.get("base_url").and_then(|v| v.as_str()) {
+                if let Err(reason) = validate_url_safe(base_url) {
+                    return (false, reason);
+                }
                 let client = match reqwest::Client::builder()
                     .timeout(HTTP_TEST_TIMEOUT)
                     .build()
@@ -54,22 +110,28 @@ pub async fn validate_connection(payload: &TestConnectionRequest) -> (bool, Stri
                 .or_else(|| payload.config.get("repo").and_then(|v| v.as_str()))
                 .or_else(|| payload.config.get("repo_url").and_then(|v| v.as_str()))
             {
-                // We'll just test if the repo is reachable.
-                match git2::Remote::create_detached(url) {
-                    Ok(mut remote) => {
-                        let cb = git2::RemoteCallbacks::new();
-                        match remote.connect_auth(git2::Direction::Fetch, Some(cb), None) {
-                            Ok(_) => (true, "Successfully reached Git repository".to_string()),
-                            Err(e) => {
-                                (false, format!("Failed to connect to Git repository: {}", e))
+                let url = url.to_string();
+                // git2 network I/O is blocking; run it on a dedicated thread pool so it
+                // does not block the async Tokio runtime.
+                tokio::task::spawn_blocking(move || {
+                    match git2::Remote::create_detached(&*url) {
+                        Ok(mut remote) => {
+                            let cb = git2::RemoteCallbacks::new();
+                            match remote.connect_auth(git2::Direction::Fetch, Some(cb), None) {
+                                Ok(_) => (true, "Successfully reached Git repository".to_string()),
+                                Err(e) => {
+                                    (false, format!("Failed to connect to Git repository: {}", e))
+                                }
                             }
                         }
+                        Err(e) => (
+                            false,
+                            format!("Failed to create detached Git remote: {}", e),
+                        ),
                     }
-                    Err(e) => (
-                        false,
-                        format!("Failed to create detached Git remote: {}", e),
-                    ),
-                }
+                })
+                .await
+                .unwrap_or_else(|e| (false, format!("Git validation task panicked: {}", e)))
             } else {
                 (false, "Missing repo url".to_string())
             }

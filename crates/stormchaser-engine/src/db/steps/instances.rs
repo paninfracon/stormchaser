@@ -300,6 +300,48 @@ where
     .await
 }
 
+/// Atomically claim pending step instances for a run by transitioning them to `initializing`.
+///
+/// Uses `SELECT … FOR UPDATE SKIP LOCKED` inside a CTE so that concurrent engine processes
+/// never claim the same step.  Returns the rows that were successfully claimed.
+pub async fn claim_pending_step_instances_for_run<O>(
+    pool: &sqlx::PgPool,
+    run_id: RunId,
+    limit: i64,
+) -> Result<Vec<O>, sqlx::Error>
+where
+    O: Send + Unpin + for<'r> sqlx::FromRow<'r, PgRow>,
+{
+    let mut tx = pool.begin().await?;
+    let rows: Vec<O> = sqlx::query_as::<_, O>(
+        r#"
+        WITH claimed AS (
+            SELECT id
+            FROM step_instances
+            WHERE run_id = $1
+              AND status = 'pending'
+              AND step_type NOT IN ('Approval', 'Wait')
+            ORDER BY created_at ASC
+            LIMIT $2
+            FOR UPDATE SKIP LOCKED
+        )
+        UPDATE step_instances si
+        SET status = 'initializing'
+        FROM claimed
+        WHERE si.id = claimed.id
+        RETURNING si.id, si.run_id, si.step_name, si.step_type, si.status as "status",
+                  si.iteration_index, si.runner_id, si.affinity_context, si.started_at,
+                  si.finished_at, si.exit_code, si.error, si.spec, si.params, si.created_at
+        "#,
+    )
+    .bind(run_id)
+    .bind(limit)
+    .fetch_all(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(rows)
+}
+
 #[allow(clippy::too_many_arguments)]
 /// Get step instance by id.
 pub async fn get_step_instance_by_id<'a, E, O>(

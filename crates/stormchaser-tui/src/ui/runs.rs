@@ -157,9 +157,12 @@ pub(crate) fn render_run_detail(
     let mut selected_step_start_line = None;
     let mut selected_step_end_line = None;
 
+    // Track line count incrementally to avoid O(n²) rescanning of detail_text.
+    let mut line_count = detail_text.bytes().filter(|&b| b == b'\n').count();
+
     for (i, step_detail) in run.steps.iter().enumerate() {
         if i == app.selected_step_index && app.active_pane == crate::app::Pane::RunDetail {
-            selected_step_start_line = Some(detail_text.lines().count());
+            selected_step_start_line = Some(line_count);
         }
         let instance = &step_detail.instance;
         let name = instance
@@ -204,10 +207,12 @@ pub(crate) fn render_run_detail(
             "{}{:<17} | {:<35} | {}\n",
             prefix, name, status_line, started
         ));
+        line_count += 1;
 
         if status == "waiting_for_event" {
             detail_text
                 .push_str("       └─ Action Required: Press 'A' to Approve, 'R' to Reject\n");
+            line_count += 1;
         }
 
         if status == "succeeded" {
@@ -216,6 +221,7 @@ pub(crate) fn render_run_detail(
                     "       └─ Detailed Timing: Started at {}, Finished at {}\n",
                     s, f
                 ));
+                line_count += 1;
             }
         }
 
@@ -235,10 +241,12 @@ pub(crate) fn render_run_detail(
                     format_status(h_status),
                     h_time
                 ));
+                line_count += 1;
             }
 
             if !step_detail.outputs.is_empty() {
                 detail_text.push_str("       └─ Outputs:\n");
+                line_count += 1;
                 for output in &step_detail.outputs {
                     let key = output
                         .get("key")
@@ -263,25 +271,31 @@ pub(crate) fn render_run_detail(
                     let lines: Vec<&str> = val_str.lines().collect();
                     if lines.len() > 1 {
                         detail_text.push_str(&format!("          • {}:\n", key));
+                        line_count += 1;
                         for line in lines {
                             detail_text.push_str(&format!("            {}\n", line));
+                            line_count += 1;
                         }
                     } else {
                         detail_text.push_str(&format!("          • {}: {}\n", key, val_str));
+                        line_count += 1;
                     }
                 }
             }
         }
 
         if i == app.selected_step_index && app.active_pane == crate::app::Pane::RunDetail {
-            selected_step_end_line = Some(detail_text.lines().count());
+            selected_step_end_line = Some(line_count);
         }
     }
 
     if !run.artifacts.is_empty() {
         detail_text.push_str("\nPublished Artifacts:\n");
+        line_count += 2;
         detail_text.push_str(&format!("{:<40} | {}\n", "Name", "Step Name"));
+        line_count += 1;
         detail_text.push_str(&format!("{:-<40}-|-{:-<36}\n", "", ""));
+        line_count += 1;
         for artifact in &run.artifacts {
             let step_instance_str = artifact.step_instance_id.to_string();
             let step_name = run
@@ -293,10 +307,11 @@ pub(crate) fn render_run_detail(
                 .unwrap_or(&step_instance_str);
 
             detail_text.push_str(&format!("{:<40} | {}\n", artifact.artifact_name, step_name));
+            line_count += 1;
         }
     }
 
-    let overview_content_lines = detail_text.lines().count();
+    let overview_content_lines = line_count;
     let overview_height = right_chunks[0].height as usize;
     let max_overview_scroll = overview_content_lines.saturating_sub(overview_height);
 

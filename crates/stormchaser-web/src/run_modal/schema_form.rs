@@ -44,7 +44,7 @@ pub fn SchemaForm(
                     }
                 }
             } else {
-                set_hydration_status.set("Ready".to_string());
+                set_hydration_status.set("Completed".to_string());
             }
         });
     });
