@@ -171,8 +171,9 @@ pub async fn handle_step_completed(
         .await?;
     }
 
+    let mut should_archive = false;
     if let Some(step) = dsl_step {
-        if !process::process_step_completion(
+        if process::process_step_completion(
             &step,
             &all_steps,
             run_id,
@@ -186,14 +187,23 @@ pub async fn handle_step_completed(
         )
         .await?
         {
-            tx.commit().await?;
-            return Ok(());
-        }
-    }
-
-    let should_archive =
-        workflow::check_workflow_completion(&mut *tx, run_id, &workflow_ast, nats_client.clone())
+            should_archive = workflow::check_workflow_completion(
+                &mut *tx,
+                run_id,
+                &workflow_ast,
+                nats_client.clone(),
+            )
             .await?;
+        }
+    } else {
+        should_archive = workflow::check_workflow_completion(
+            &mut *tx,
+            run_id,
+            &workflow_ast,
+            nats_client.clone(),
+        )
+        .await?;
+    }
 
     tx.commit().await?;
 

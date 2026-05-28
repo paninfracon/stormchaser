@@ -48,6 +48,7 @@ scripts/.tmp/
 tests/certs/*.key
 tests/certs/*.crt
 tests/certs/*.csr
+tests/load-test.storm
 deploy/dex/config.generated.yaml
 deploy/dex/credentials.generated
 lcov.info

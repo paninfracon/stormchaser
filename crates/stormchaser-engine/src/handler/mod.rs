@@ -121,19 +121,16 @@ pub async fn dispatch_pending_steps(
     nats_client: async_nats::Client,
     tls_reloader: Arc<TlsReloader>,
 ) -> Result<()> {
-    // 1. Fetch Quotas and Current Running Count
     let quotas = fetch_quotas(run_id, &pool).await?;
     let running_count: i64 = crate::db::count_running_steps_for_run(&pool, run_id).await?;
 
     if running_count >= quotas.max_concurrency as i64 {
-        debug!(
-            "Run {}: Max concurrency ({}) reached, not dispatching more steps",
-            run_id, quotas.max_concurrency
-        );
+        debug!("Run {}: Max concurrency {} reached", run_id, running_count);
         return Ok(());
     }
 
     let available_slots = (quotas.max_concurrency as i64) - running_count;
+
     debug!(
         "Run {}: {} slots available for concurrent steps",
         run_id, available_slots

@@ -15,6 +15,7 @@
       "targets": [
         {
           "expr": "sum(rate(traces_spanmetrics_calls_total{span_name=~\"HTTP .*\"}[5m])) by (span_name)",
+          "legendFormat": "{{span_name}}",
           "refId": "A"
         }
       ]
@@ -27,6 +28,7 @@
       "targets": [
         {
           "expr": "histogram_quantile(0.95, sum(rate(traces_spanmetrics_latency_bucket{span_name=~\"HTTP .*\"}[5m])) by (le, span_name))",
+          "legendFormat": "{{span_name}}",
           "refId": "A"
         }
       ]

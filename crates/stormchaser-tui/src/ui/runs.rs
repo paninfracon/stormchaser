@@ -286,20 +286,18 @@ pub(crate) fn render_run_detail(
         }
     }
 
-    let detail_paragraph =
-        Paragraph::new(detail_text.clone()).scroll((app.overview_scroll as u16, 0));
-    f.render_widget(detail_paragraph, right_chunks[0]);
-
-    // Add scrollbar to overview if content exceeds height
     let overview_content_lines = detail_text.lines().count();
     let overview_height = right_chunks[0].height as usize;
     let max_overview_scroll = overview_content_lines.saturating_sub(overview_height);
 
-    if max_overview_scroll > 0 {
-        if app.overview_scroll > max_overview_scroll {
-            app.overview_scroll = max_overview_scroll;
-        }
+    if app.overview_scroll > max_overview_scroll {
+        app.overview_scroll = max_overview_scroll;
+    }
 
+    let detail_paragraph =
+        Paragraph::new(detail_text.clone()).scroll((app.overview_scroll as u16, 0));
+    f.render_widget(detail_paragraph, right_chunks[0]);
+    if max_overview_scroll > 0 {
         let scrollbar = Scrollbar::default()
             .orientation(ScrollbarOrientation::VerticalRight)
             .begin_symbol(Some("▲"))

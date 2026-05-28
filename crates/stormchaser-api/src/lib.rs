@@ -286,6 +286,19 @@ pub fn app(state: AppState) -> Router {
         .route("/healthz", get(|| async { "OK" }))
         .route("/api/health", get(|| async { "OK" }))
         .nest("/api/v1", api_v1)
-        .layer(TraceLayer::new_for_http())
+        .layer(
+            TraceLayer::new_for_http().make_span_with(|request: &axum::extract::Request| {
+                let method = request.method();
+                let uri = request.uri();
+                tracing::info_span!(
+                    "HTTP request",
+                    method = %method,
+                    uri = %uri,
+                    version = ?request.version(),
+                    otel.name = format!("HTTP {}", method),
+                    otel.kind = "SERVER",
+                )
+            }),
+        )
         .with_state(state)
 }
