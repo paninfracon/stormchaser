@@ -3,6 +3,7 @@ pub mod elasticsearch;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod loki;
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::id::*;
 #[cfg(not(target_arch = "wasm32"))]
 use anyhow::Result;

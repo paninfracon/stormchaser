@@ -245,7 +245,6 @@ async fn test_heavy_load_queues_and_quotas() {
     );
 }
 
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore]
 async fn test_heavy_load_multiple_workflows() {
@@ -445,4 +444,3 @@ async fn test_heavy_load_multiple_workflows() {
         "Should have completed exactly 500 distinct workflows"
     );
 }
-

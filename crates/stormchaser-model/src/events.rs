@@ -1,4 +1,5 @@
 use crate::id::{RunId, StepInstanceId};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::nats::NatsSubject;
 use chrono::{DateTime, Utc};
 use schemars::JsonSchema;
@@ -103,6 +104,7 @@ pub enum EventType {
     Runner(RunnerEventType),
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Clone)]
 pub struct EventDispatch {
     pub subject: NatsSubject,
