@@ -1,0 +1,485 @@
+Run Tests	Set up job	﻿2026-05-27T22:33:30.8667553Z Current runner version: '2.334.0'
+Run Tests	Set up job	2026-05-27T22:33:30.8693099Z ##[group]Runner Image Provisioner
+Run Tests	Set up job	2026-05-27T22:33:30.8694067Z Hosted Compute Agent
+Run Tests	Set up job	2026-05-27T22:33:30.8694663Z Version: 20260520.533
+Run Tests	Set up job	2026-05-27T22:33:30.8695363Z Commit: 189110e25284a9812c124fd27b339e2fb4f2f9db
+Run Tests	Set up job	2026-05-27T22:33:30.8696100Z Build Date: 2026-05-20T17:44:04Z
+Run Tests	Set up job	2026-05-27T22:33:30.8697080Z Worker ID: {07f3be4c-df36-41c6-9d0e-dab8bc3877f8}
+Run Tests	Set up job	2026-05-27T22:33:30.8697969Z Azure Region: westus
+Run Tests	Set up job	2026-05-27T22:33:30.8698554Z ##[endgroup]
+Run Tests	Set up job	2026-05-27T22:33:30.8700063Z ##[group]Operating System
+Run Tests	Set up job	2026-05-27T22:33:30.8700784Z Ubuntu
+Run Tests	Set up job	2026-05-27T22:33:30.8701311Z 24.04.4
+Run Tests	Set up job	2026-05-27T22:33:30.8701913Z LTS
+Run Tests	Set up job	2026-05-27T22:33:30.8702443Z ##[endgroup]
+Run Tests	Set up job	2026-05-27T22:33:30.8702988Z ##[group]Runner Image
+Run Tests	Set up job	2026-05-27T22:33:30.8703700Z Image: ubuntu-24.04
+Run Tests	Set up job	2026-05-27T22:33:30.8704271Z Version: 20260525.161.1
+Run Tests	Set up job	2026-05-27T22:33:30.8705404Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260525.161/images/ubuntu/Ubuntu2404-Readme.md
+Run Tests	Set up job	2026-05-27T22:33:30.8707461Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260525.161
+Run Tests	Set up job	2026-05-27T22:33:30.8708590Z ##[endgroup]
+Run Tests	Set up job	2026-05-27T22:33:30.8709856Z ##[group]GITHUB_TOKEN Permissions
+Run Tests	Set up job	2026-05-27T22:33:30.8711908Z Contents: read
+Run Tests	Set up job	2026-05-27T22:33:30.8712543Z Metadata: read
+Run Tests	Set up job	2026-05-27T22:33:30.8713209Z Packages: read
+Run Tests	Set up job	2026-05-27T22:33:30.8713773Z ##[endgroup]
+Run Tests	Set up job	2026-05-27T22:33:30.8715787Z Secret source: Actions
+Run Tests	Set up job	2026-05-27T22:33:30.8717059Z Prepare workflow directory
+Run Tests	Set up job	2026-05-27T22:33:30.9120544Z Prepare all required actions
+Run Tests	Set up job	2026-05-27T22:33:30.9158554Z Getting action download info
+Run Tests	Set up job	2026-05-27T22:33:31.4158364Z Download action repository 'actions/checkout@v4' (SHA:34e114876b0b11c390a56381ad16ebd13914f8d5)
+Run Tests	Set up job	2026-05-27T22:33:31.5510734Z Download action repository 'dtolnay/rust-toolchain@stable' (SHA:29eef336d9b2848a0b548edc03f92a220660cdb8)
+Run Tests	Set up job	2026-05-27T22:33:31.7563113Z Download action repository 'Swatinem/rust-cache@v2' (SHA:e18b497796c12c097a38f9edb9d0641fb99eee32)
+Run Tests	Set up job	2026-05-27T22:33:32.3536869Z Download action repository 'taiki-e/install-action@v2' (SHA:60ae4ce63c7aeb6e96d7f572c1ec7fafbb17ca80)
+Run Tests	Set up job	2026-05-27T22:33:32.9687581Z Complete job name: Run Tests
+Run Tests	Run actions/checkout@v4	﻿2026-05-27T22:33:33.0614131Z ##[group]Run actions/checkout@v4
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.0615683Z with:
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.0616810Z   repository: paninfracon/stormchaser
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.0626501Z   token: ***
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.0627575Z   ssh-strict: true
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.0628480Z   ssh-user: git
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.0629385Z   persist-credentials: true
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.0630366Z   clean: true
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.0631264Z   sparse-checkout-cone-mode: true
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.0632315Z   fetch-depth: 1
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.0633186Z   fetch-tags: false
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.0634083Z   show-progress: true
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.0635002Z   lfs: false
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.0635859Z   submodules: false
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.0636926Z   set-safe-directory: true
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.0638205Z env:
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.0639049Z   CARGO_TERM_COLOR: always
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.0640115Z   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.0641249Z   SQLX_OFFLINE: true
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.0642181Z   STORMCHASER_CERT_DIR: ./tests/certs
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.0643337Z   API_RATE_LIMIT_BURST_SIZE: 1000
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.0644398Z   API_RATE_LIMIT_PER_SECOND: 1000
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.0645424Z ##[endgroup]
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.1698200Z Syncing repository: paninfracon/stormchaser
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.1701189Z ##[group]Getting Git version info
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.1702613Z Working directory is '/home/runner/work/stormchaser/stormchaser'
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.1705497Z [command]/usr/bin/git version
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.1758651Z git version 2.54.0
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.1781691Z ##[endgroup]
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.1797480Z Temporarily overriding HOME='/home/runner/work/_temp/69a32d94-aeb9-489f-ada3-81fc90a0befb' before making global git config changes
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.1802481Z Adding repository directory to the temporary git global config as a safe directory
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.1807142Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/stormchaser/stormchaser
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.1851389Z Deleting the contents of '/home/runner/work/stormchaser/stormchaser'
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.1857341Z ##[group]Initializing the repository
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.1860931Z [command]/usr/bin/git init /home/runner/work/stormchaser/stormchaser
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.1983549Z hint: Using 'master' as the name for the initial branch. This default branch name
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.1985925Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.1988291Z hint: to use in all of your new repositories, which will suppress this warning,
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.1990583Z hint: call:
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.1992051Z hint:
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.1993854Z hint: 	git config --global init.defaultBranch <name>
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.1996158Z hint:
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.1998475Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.2001801Z hint: 'development'. The just-created branch can be renamed via this command:
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.2004535Z hint:
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.2005980Z hint: 	git branch -m <name>
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.2007897Z hint:
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.2009755Z hint: Disable this message with "git config set advice.defaultBranchName false"
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.2011837Z Initialized empty Git repository in /home/runner/work/stormchaser/stormchaser/.git/
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.2016038Z [command]/usr/bin/git remote add origin https://github.com/paninfracon/stormchaser
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.2046965Z ##[endgroup]
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.2049679Z ##[group]Disabling automatic garbage collection
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.2052063Z [command]/usr/bin/git config --local gc.auto 0
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.2080843Z ##[endgroup]
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.2083367Z ##[group]Setting up auth
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.2087764Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.2122451Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.2454597Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.2489263Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.2710048Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.2740930Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.2955273Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.2989662Z ##[endgroup]
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.2991148Z ##[group]Fetching the repository
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:33.3000378Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +a2ce6764b8df25b1d2c71d0299bda677993369e9:refs/remotes/pull/42/merge
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:34.0843165Z From https://github.com/paninfracon/stormchaser
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:34.0843953Z  * [new ref]         a2ce6764b8df25b1d2c71d0299bda677993369e9 -> pull/42/merge
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:34.0879976Z ##[endgroup]
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:34.0880795Z ##[group]Determining the checkout info
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:34.0882028Z ##[endgroup]
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:34.0887723Z [command]/usr/bin/git sparse-checkout disable
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:34.0931014Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:34.0956968Z ##[group]Checking out the ref
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:34.0960895Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/42/merge
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:34.1476519Z Note: switching to 'refs/remotes/pull/42/merge'.
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:34.1477539Z
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:34.1477986Z You are in 'detached HEAD' state. You can look around, make experimental
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:34.1479331Z changes and commit them, and you can discard any commits you make in this
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:34.1480257Z state without impacting any branches by switching back to a branch.
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:34.1480795Z
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:34.1481176Z If you want to create a new branch to retain commits you create, you may
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:34.1482079Z do so (now or later) by using -c with the switch command. Example:
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:34.1482413Z
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:34.1482555Z   git switch -c <new-branch-name>
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:34.1482776Z
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:34.1482908Z Or undo this operation with:
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:34.1483104Z
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:34.1483215Z   git switch -
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:34.1483386Z
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:34.1483637Z Turn off this advice by setting config variable advice.detachedHead to false
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:34.1483996Z
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:34.1484389Z HEAD is now at a2ce676 Merge c9eb794444c36acec8770c493eb7c1fc579ff5af into f6f5bf5866e07872942ab9e7e1ff351638db0ffa
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:34.1486459Z ##[endgroup]
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:34.1529030Z [command]/usr/bin/git log -1 --format=%H
+Run Tests	Run actions/checkout@v4	2026-05-27T22:33:34.1551347Z a2ce6764b8df25b1d2c71d0299bda677993369e9
+Run Tests	Maximize Disk Space	﻿2026-05-27T22:33:34.1752495Z ##[group]Run sudo rm -rf /usr/share/dotnet
+Run Tests	Maximize Disk Space	2026-05-27T22:33:34.1752984Z [36;1msudo rm -rf /usr/share/dotnet[0m
+Run Tests	Maximize Disk Space	2026-05-27T22:33:34.1753369Z [36;1msudo rm -rf /usr/local/lib/android[0m
+Run Tests	Maximize Disk Space	2026-05-27T22:33:34.1753731Z [36;1msudo rm -rf /opt/ghc[0m
+Run Tests	Maximize Disk Space	2026-05-27T22:33:34.1754064Z [36;1msudo rm -rf /usr/local/share/boost[0m
+Run Tests	Maximize Disk Space	2026-05-27T22:33:34.1754430Z [36;1msudo rm -rf "$AGENT_TOOLSDIRECTORY"[0m
+Run Tests	Maximize Disk Space	2026-05-27T22:33:34.1754787Z [36;1msudo docker system prune -af[0m
+Run Tests	Maximize Disk Space	2026-05-27T22:33:34.1785505Z shell: /usr/bin/bash -e {0}
+Run Tests	Maximize Disk Space	2026-05-27T22:33:34.1785852Z env:
+Run Tests	Maximize Disk Space	2026-05-27T22:33:34.1786098Z   CARGO_TERM_COLOR: always
+Run Tests	Maximize Disk Space	2026-05-27T22:33:34.1786417Z   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+Run Tests	Maximize Disk Space	2026-05-27T22:33:34.1786997Z   SQLX_OFFLINE: true
+Run Tests	Maximize Disk Space	2026-05-27T22:33:34.1787279Z   STORMCHASER_CERT_DIR: ./tests/certs
+Run Tests	Maximize Disk Space	2026-05-27T22:33:34.1787627Z   API_RATE_LIMIT_BURST_SIZE: 1000
+Run Tests	Maximize Disk Space	2026-05-27T22:33:34.1787935Z   API_RATE_LIMIT_PER_SECOND: 1000
+Run Tests	Maximize Disk Space	2026-05-27T22:33:34.1788239Z ##[endgroup]
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3285495Z Deleted Images:
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3287314Z untagged: ghcr.io/github/gh-aw-firewall/agent:latest
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3288445Z untagged: ghcr.io/github/gh-aw-firewall/agent@sha256:138c363411decc9a61a5af9b95e8d64c76648b00add0ba06fc7ba786f0e72731
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3289629Z deleted: sha256:9556608f31619fc275722e45cf3787ca84b50f31fd934d7168ccede8a2451e05
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3290833Z deleted: sha256:7b514c10a4215de4c4c5ca7b67352348d40110e6d696e9eb44beb0ae7346ee20
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3291857Z deleted: sha256:4c01247c2a0e7d3cd9f1f83a095c22354648d37a0c98fb15da75d29614543d6d
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3292597Z deleted: sha256:436ed884b363648d9e8ef0d64e1a08bd11ad99095364048689bf0da651118f61
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3293255Z deleted: sha256:240c6d817490ce0ffcd897fc3adeb2461070d3711396e0458f47ca19af781a08
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3294355Z deleted: sha256:48139be3a914eb8289355fee4627e3bee1e52428603f4cc8883748703d486a2a
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3295461Z deleted: sha256:197ebd9cf2ab02ef3d52f3486ec9522218027b509117c8934ee91148586c225a
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3314931Z deleted: sha256:8162d425d093651467614c5c9b2e71042d7f4790ca0ab923dc8c7eccc9a50c0c
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3315750Z deleted: sha256:d1fd3c3313a8e125c9d6631adc7234e078ee594fd01cf3e4def272b669125e63
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3316809Z deleted: sha256:e58ed082127322d7cfd43680532b4a7c6b3fe273bd934fbaac16e8ccb68274f3
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3317899Z deleted: sha256:a4a3b3f67a4bb1e881953670d13aaa09e1c3f1b72801563d4c584c617b584bd1
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3318946Z deleted: sha256:d594bae1d9d02e75e1c7a07447ecd6a78d0aaa1eb937c4b3a4ae7bb44b06c1c3
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3319983Z deleted: sha256:f716900c5a2ad83e4f0fc58b035eb2a2c6cb02fad3ed4863a510f4171e2b0f28
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3322797Z deleted: sha256:e44abcf4530aff6951be2b84f954c4a14f7ad24bbd6a382e348a5db0f6e967e4
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3323433Z deleted: sha256:e4d3268e09b7b61f373ab408bafbbefdf67d133780fec006f30ae682602130ed
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3324279Z deleted: sha256:0afdb205597f4bb72dcf984c09b2ba7b4f774bb4ca24e6e68767001e7b87fb2a
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3324802Z deleted: sha256:a6d25ba827a8fa2ab3313b09ade75789f39620968164152f618932598fe15758
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3325311Z deleted: sha256:f95cae1835e68d413237cbf362f6c1fd6218130fe6d5e18a3d278238e28dbf7a
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3325820Z deleted: sha256:8bba68e7621928237aa6d6e2c680cb9572c942ee23c2adabd22016bb67cb938d
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3326264Z untagged: ghcr.io/github/github-mcp-server:latest
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3327129Z untagged: ghcr.io/github/github-mcp-server@sha256:e3816a476a977cfb836e7d221510011436c654d11861db66ecfd826601aba6a4
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3327802Z deleted: sha256:aeb9334375fe31ca45751a0e5747c8acfb84976cf902276f1a30682925ffb93b
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3328340Z deleted: sha256:e451f1ad8390379ecc060b833a79c2618a6322cfe8c3d94e0153b1b4019a04a0
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3328867Z deleted: sha256:5d2d3fa4f52527c409198b5dd58d7fc77c2574ed6adde701156599711884b632
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3329509Z deleted: sha256:ef9c65e81a3140454df64000852051633a217740cadd4230d8a68b33c9eb6fd6
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3330033Z deleted: sha256:44d0cb736798a30817877c6c37ceb891f91d581279d51d962c38d0b7d3cefb1f
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3330831Z deleted: sha256:3e005f61e911be389b7090ab5e7dac5c293012172a91dceec6ec3cb008877589
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3331384Z deleted: sha256:447769e80022d633258a358a32ec185c08acf39d52ff7992a62465580862727b
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3331891Z deleted: sha256:7d2cd16d5223db171e85e78e005304348a2972c71f63003a0b491ed077558d11
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3332405Z deleted: sha256:52c4df99df6b16bf709a7d57852c4baa88cca6daddf8e1380b1cb965b246a531
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3332931Z deleted: sha256:d4bd505626ba298bdb5a4d594c55bbd659d6e7e53569dc80083d82a5775526b8
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3333450Z deleted: sha256:7c60cb27043e7c7917a896b67c0653fa29fedc90f2dce187dce8e22e9bb1d560
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3333962Z deleted: sha256:b8997b2eca37711a7ca830639978654ebc5a0e1f13f7e3af8f992b895f1550d3
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3334484Z deleted: sha256:0020b32e5a73ed88fe2de1c7889a43bdfc9541a7145fbb48ec6147dcc01da62f
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3334998Z deleted: sha256:bd59e7e428c9e76bc724f38578c163243152a507a5da6e0f63c0d61da952ba5b
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3335535Z deleted: sha256:34165fb0807042c1f8ed197fd1ea5a031ca3e27e6e3fba9fbcf49a20052d19b7
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3336056Z deleted: sha256:3bd325ec8c2d0894ea95758a6b235d7e2da1cb28f1cc2b76aeede98d5f8f425a
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3336845Z deleted: sha256:a33ba213ad26a605d904a741f67154f3904c74a43182c872c35f36b10fa005e0
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3337285Z untagged: ghcr.io/github/gh-aw-mcpg:latest
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3337812Z untagged: ghcr.io/github/gh-aw-mcpg@sha256:a6c890d7c24d7190c9ef97b9c954cc4cffaae6b01c371ced1f959f1370b1f68f
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3338457Z deleted: sha256:b9833df838956cc915142b6b547c97783873f45f82adaa77bd400f7e80226e08
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3338989Z deleted: sha256:f061d8cd565cc8052b3fd0548537353b5f1df1ff1eee6b0b2a0d13b43e590d64
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3339510Z deleted: sha256:d89ce3181c60d823e97635c84f9fe2556188a944795eab7c8a37ff78f06cc9b2
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3340026Z deleted: sha256:d4530955126625771c6f23e6b9e4c8d06e3bedef622fd928c6e0ff449d657aa8
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3340541Z deleted: sha256:a303f9e7da315a2ee616fc5821cadf54e66eba026ba502737db4fd17b22e6558
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3341200Z deleted: sha256:2e18fb3488f80f9c7ccde9399817cba3013888c0dfc2f01197fd97a78c4e511c
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3342161Z deleted: sha256:91bee3318340b775bedc8dbde7ce1468349936cf6a93ecaf3219308159e6a8f1
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3343047Z deleted: sha256:ca6561986910d00d66c2bc9ba37582b9c96dd568cd836fa45c54f66027d45cc1
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3343884Z untagged: ghcr.io/github/gh-aw-firewall/squid:latest
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3345105Z untagged: ghcr.io/github/gh-aw-firewall/squid@sha256:74084b704d8d3664a363655986664d70bd9cdb4830532d0b35cd784d867aabca
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3346839Z deleted: sha256:b98f0e1764ffea7228e12ecdf8fac171c9fa2145e72d3cf32c8d0fa988724c6e
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3347688Z deleted: sha256:276c3ae4d41546b174e87ef2a5ff62a0f9a2401b47c76d86b497282a2ea9748e
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3350662Z deleted: sha256:bc31df9492067a8da6ac03540c805795048fb97cf9e0594360a771d9c504cdff
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3352093Z deleted: sha256:47d1aa69d83063af53fdba1b9dc37c53353ced01d6abd4d5ca391dcae4e80e37
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3353579Z deleted: sha256:9cb45b4872656981f87478910290c2253405920564bf4df1b7f4bf6be938d641
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3354532Z deleted: sha256:18b8983bb021aeaf0d3dd60c74b83c5af746dd4e851b7272a3165130b2740bd3
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3355377Z deleted: sha256:0f7aceedbeef2527fd8b8cb81c5e0ebbb3032d42cbd0847080e679dfa6deb274
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3356187Z deleted: sha256:7b26b80c1cff713367db892365d8d1227498773be6690e7a39165099060acef2
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3357771Z deleted: sha256:e8bce0aabd687e9ee90e0bada33884f40b277196f72aac9934357472863a80ae
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3358575Z untagged: ghcr.io/dependabot/dependabot-updater-core:latest
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3360107Z untagged: ghcr.io/dependabot/dependabot-updater-core@sha256:6c84923efa4449b765daf050fa7c9795920745a33cd34e6bc5435381c16f4b52
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3361033Z deleted: sha256:e6640d4e4664caf667f6f25721eada1500e555e8070a0b20a54dc787a79e5a19
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3361677Z deleted: sha256:b30a87fc3eb35236aff57122143dede3c48adaa5a96e420e306f2cc85d59d452
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3362773Z deleted: sha256:7548012d1ceaa8dc0da3a7b59648d5ad309cc06129048eeb31d409fa19aee124
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3363402Z deleted: sha256:df9a7e7093fd040f7d9ce13c473bc585119e48a2d78018af9314cdf95ab35a86
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3363924Z deleted: sha256:98654cfef153a615569176b43ef3164e7914c7d23a4513a54333156003748589
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3364512Z deleted: sha256:daa8396f3bfa8eea75f0bd48ef16900679d9738aef9c3bd11385141a9bdcfafd
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3365033Z deleted: sha256:f732a0e07d61b892c9e2cb044b5a410b6f2711c732a3e01aa99542dac3bdbe8d
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3365553Z deleted: sha256:960c6f49d0f08a3c72e4919fc7e085e6869d0de322743387b2b15499406d916a
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3366072Z deleted: sha256:a460f44eb41b9438f1ae633653dfd9ed4dfaa7a5baa5428563efe2d1f2ac0bd6
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3382144Z deleted: sha256:7017a938dfe59ef0e978b65b36a0b568850e0998cc556e2d125c992a579a6de1
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3382795Z deleted: sha256:a69dd83759028ba5ee25b54df68bea25eb6f1897cb81014c9f14a789e02c22e8
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3383371Z deleted: sha256:bacc0caa785fd03a6a0362ea8b9fb35ee61294fae64cb242ab1b7c92f9aa12a9
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3383914Z deleted: sha256:538812a4b9bd45adaac2b5e5b967daa6999aa44eb110aa32ae7c69702b906475
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3384385Z untagged: ghcr.io/github/gh-aw-firewall/api-proxy:latest
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3385030Z untagged: ghcr.io/github/gh-aw-firewall/api-proxy@sha256:4142b873b678cd3279b98dcbe464857d56ea2f2348719b00379cdf35dd843ff3
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3385739Z deleted: sha256:7a3c7a567694ef950b66a3203e536f67d16cbed7ed3ab4e1b0eeb92194cd2782
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3386293Z deleted: sha256:adde65324a0af815630a357e6d4c3685e22c5359c3e9dc037a7432a0e56372e1
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3387131Z deleted: sha256:a4029e6b0859aaa777de3e1341c94de1d6bffff12304fc0a2059587abc0f51a2
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3387675Z deleted: sha256:540458ecca41f9dc4cd59e4d4fd5413993f64f75fb10c2ccc256fe933e8e0380
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3388208Z deleted: sha256:cfa46b3d1af8362b4ac2366154fa928ac0ea8563d63a13cb7ab6cde110d5946a
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3388727Z deleted: sha256:30e5237d465316cdc2ec7dc6d0f7759a476af92ac26a5b5c257a283c45b5947c
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3389245Z deleted: sha256:107880afe016d483f45f12b5f64bff3e3881f5e5e5399cd386462b10ca392272
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3389758Z deleted: sha256:e11988065c9fc278d795c61ff5b0a0d0c9e9dd1c51b8b2df940fe88c2d656d99
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3390278Z deleted: sha256:ef2e1cd535191b736bdf2a14ac57350a01e1bd1d8ce25259d0a9ac13dbfdc100
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3391942Z deleted: sha256:f1082a03b3de51207a4dfd56fc598953c9ec5b99757c1e092a33705e687af6ad
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3393093Z deleted: sha256:490398d13c84507c4126c12de10c19abc8ced78ea91247ee8d4d045bb6a3a109
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3394170Z deleted: sha256:40c9d80919e672044e1688e0e1bb2692ea1a13c4bcbdbcbf8d1be34007cae281
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3395172Z deleted: sha256:b0bc55743c296c44f231003b2a7417ea2400065fd3c76d36458e3d7d31598fa3
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3396490Z deleted: sha256:29df493baa13de438d6d2ece3a8333032e0b7b9b9d8cce4ee82194da255f61e1
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3397662Z
+Run Tests	Maximize Disk Space	2026-05-27T22:35:27.3397920Z Total reclaimed space: 1.821GB
+Run Tests	Create Swap File	﻿2026-05-27T22:35:27.3478096Z ##[group]Run sudo fallocate -l 2G /swapfile-extra || sudo dd if=/dev/zero of=/swapfile-extra bs=1M count=2048
+Run Tests	Create Swap File	2026-05-27T22:35:27.3479829Z [36;1msudo fallocate -l 2G /swapfile-extra || sudo dd if=/dev/zero of=/swapfile-extra bs=1M count=2048[0m
+Run Tests	Create Swap File	2026-05-27T22:35:27.3480839Z [36;1msudo chmod 600 /swapfile-extra[0m
+Run Tests	Create Swap File	2026-05-27T22:35:27.3481471Z [36;1msudo mkswap /swapfile-extra[0m
+Run Tests	Create Swap File	2026-05-27T22:35:27.3482217Z [36;1msudo swapon /swapfile-extra[0m
+Run Tests	Create Swap File	2026-05-27T22:35:27.3523644Z shell: /usr/bin/bash -e {0}
+Run Tests	Create Swap File	2026-05-27T22:35:27.3524001Z env:
+Run Tests	Create Swap File	2026-05-27T22:35:27.3524274Z   CARGO_TERM_COLOR: always
+Run Tests	Create Swap File	2026-05-27T22:35:27.3524623Z   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+Run Tests	Create Swap File	2026-05-27T22:35:27.3524983Z   SQLX_OFFLINE: true
+Run Tests	Create Swap File	2026-05-27T22:35:27.3525225Z   STORMCHASER_CERT_DIR: ./tests/certs
+Run Tests	Create Swap File	2026-05-27T22:35:27.3525586Z   API_RATE_LIMIT_BURST_SIZE: 1000
+Run Tests	Create Swap File	2026-05-27T22:35:27.3525974Z   API_RATE_LIMIT_PER_SECOND: 1000
+Run Tests	Create Swap File	2026-05-27T22:35:27.3526288Z ##[endgroup]
+Run Tests	Create Swap File	2026-05-27T22:35:27.3861092Z Setting up swapspace version 1, size = 2 GiB (2147479552 bytes)
+Run Tests	Create Swap File	2026-05-27T22:35:27.3862146Z no label, UUID=ee1f5fdc-feb4-423d-855b-3c8f59f889e5
+Run Tests	Setup Rust	﻿2026-05-27T22:35:27.4165712Z ##[group]Run dtolnay/rust-toolchain@stable
+Run Tests	Setup Rust	2026-05-27T22:35:27.4166040Z with:
+Run Tests	Setup Rust	2026-05-27T22:35:27.4166236Z   components: clippy
+Run Tests	Setup Rust	2026-05-27T22:35:27.4166464Z   targets: wasm32-unknown-unknown
+Run Tests	Setup Rust	2026-05-27T22:35:27.4167046Z   toolchain: stable
+Run Tests	Setup Rust	2026-05-27T22:35:27.4167265Z env:
+Run Tests	Setup Rust	2026-05-27T22:35:27.4167450Z   CARGO_TERM_COLOR: always
+Run Tests	Setup Rust	2026-05-27T22:35:27.4167700Z   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+Run Tests	Setup Rust	2026-05-27T22:35:27.4167977Z   SQLX_OFFLINE: true
+Run Tests	Setup Rust	2026-05-27T22:35:27.4168199Z   STORMCHASER_CERT_DIR: ./tests/certs
+Run Tests	Setup Rust	2026-05-27T22:35:27.4168478Z   API_RATE_LIMIT_BURST_SIZE: 1000
+Run Tests	Setup Rust	2026-05-27T22:35:27.4168747Z   API_RATE_LIMIT_PER_SECOND: 1000
+Run Tests	Setup Rust	2026-05-27T22:35:27.4168984Z ##[endgroup]
+Run Tests	Setup Rust	2026-05-27T22:35:27.4274309Z ##[group]Run : parse toolchain version
+Run Tests	Setup Rust	2026-05-27T22:35:27.4274654Z [36;1m: parse toolchain version[0m
+Run Tests	Setup Rust	2026-05-27T22:35:27.4274928Z [36;1mif [[ -z $toolchain ]]; then[0m
+Run Tests	Setup Rust	2026-05-27T22:35:27.4275443Z [36;1m  # GitHub does not enforce `required: true` inputs itself. https://github.com/actions/runner/issues/1070[0m
+Run Tests	Setup Rust	2026-05-27T22:35:27.4276056Z [36;1m  echo "'toolchain' is a required input" >&2[0m
+Run Tests	Setup Rust	2026-05-27T22:35:27.4276348Z [36;1m  exit 1[0m
+Run Tests	Setup Rust	2026-05-27T22:35:27.4277106Z [36;1melif [[ $toolchain =~ ^stable' '[0-9]+' '(year|month|week|day)s?' 'ago$ ]]; then[0m
+Run Tests	Setup Rust	2026-05-27T22:35:27.4304427Z [36;1m  if [[ Linux == macOS ]]; then[0m
+Run Tests	Setup Rust	2026-05-27T22:35:27.4305381Z [36;1m    echo "toolchain=1.$((($(date -v-$(sed 's/stable \([0-9]*\) \(.\).*/\1\2/' <<< $toolchain) +%s)/60/60/24-16569)/7/6))" >> $GITHUB_OUTPUT[0m
+Run Tests	Setup Rust	2026-05-27T22:35:27.4306249Z [36;1m  else[0m
+Run Tests	Setup Rust	2026-05-27T22:35:27.4307316Z [36;1m    echo "toolchain=1.$((($(date --date "${toolchain#stable }" +%s)/60/60/24-16569)/7/6))" >> $GITHUB_OUTPUT[0m
+Run Tests	Setup Rust	2026-05-27T22:35:27.4308219Z [36;1m  fi[0m
+Run Tests	Setup Rust	2026-05-27T22:35:27.4308765Z [36;1melif [[ $toolchain =~ ^stable' 'minus' '[0-9]+' 'releases?$ ]]; then[0m
+Run Tests	Setup Rust	2026-05-27T22:35:27.4309739Z [36;1m  echo "toolchain=1.$((($(date +%s)/60/60/24-16569)/7/6-${toolchain//[^0-9]/}))" >> $GITHUB_OUTPUT[0m
+Run Tests	Setup Rust	2026-05-27T22:35:27.4310625Z [36;1melif [[ $toolchain =~ ^1\.[0-9]+$ ]]; then[0m
+Run Tests	Setup Rust	2026-05-27T22:35:27.4311576Z [36;1m  echo "toolchain=1.$((i=${toolchain#1.}, c=($(date +%s)/60/60/24-16569)/7/6, i+9*i*(10*i<=c)+90*i*(100*i<=c)))" >> $GITHUB_OUTPUT[0m
+Run Tests	Setup Rust	2026-05-27T22:35:27.4312486Z [36;1melse[0m
+Run Tests	Setup Rust	2026-05-27T22:35:27.4312922Z [36;1m  echo "toolchain=$toolchain" >> $GITHUB_OUTPUT[0m
+Run Tests	Setup Rust	2026-05-27T22:35:27.4313443Z [36;1mfi[0m
+Run Tests	Setup Rust	2026-05-27T22:35:27.4342445Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Run Tests	Setup Rust	2026-05-27T22:35:27.4342812Z env:
+Run Tests	Setup Rust	2026-05-27T22:35:27.4343006Z   CARGO_TERM_COLOR: always
+Run Tests	Setup Rust	2026-05-27T22:35:27.4343450Z   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+Run Tests	Setup Rust	2026-05-27T22:35:27.4343716Z   SQLX_OFFLINE: true
+Run Tests	Setup Rust	2026-05-27T22:35:27.4343934Z   STORMCHASER_CERT_DIR: ./tests/certs
+Run Tests	Setup Rust	2026-05-27T22:35:27.4344197Z   API_RATE_LIMIT_BURST_SIZE: 1000
+Run Tests	Setup Rust	2026-05-27T22:35:27.4344453Z   API_RATE_LIMIT_PER_SECOND: 1000
+Run Tests	Setup Rust	2026-05-27T22:35:27.4344691Z   toolchain: stable
+Run Tests	Setup Rust	2026-05-27T22:35:27.4344895Z ##[endgroup]
+Run Tests	Setup Rust	2026-05-27T22:35:27.4459179Z ##[group]Run : construct rustup command line
+Run Tests	Setup Rust	2026-05-27T22:35:27.4459536Z [36;1m: construct rustup command line[0m
+Run Tests	Setup Rust	2026-05-27T22:35:27.4459999Z [36;1mecho "targets=$(for t in ${targets//,/ }; do echo -n ' --target' $t; done)" >> $GITHUB_OUTPUT[0m
+Run Tests	Setup Rust	2026-05-27T22:35:27.4460650Z [36;1mecho "components=$(for c in ${components//,/ }; do echo -n ' --component' $c; done)" >> $GITHUB_OUTPUT[0m
+Run Tests	Setup Rust	2026-05-27T22:35:27.4461159Z [36;1mecho "downgrade=" >> $GITHUB_OUTPUT[0m
+Run Tests	Setup Rust	2026-05-27T22:35:27.4484793Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Run Tests	Setup Rust	2026-05-27T22:35:27.4485153Z env:
+Run Tests	Setup Rust	2026-05-27T22:35:27.4485359Z   CARGO_TERM_COLOR: always
+Run Tests	Setup Rust	2026-05-27T22:35:27.4485615Z   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+Run Tests	Setup Rust	2026-05-27T22:35:27.4485886Z   SQLX_OFFLINE: true
+Run Tests	Setup Rust	2026-05-27T22:35:27.4486108Z   STORMCHASER_CERT_DIR: ./tests/certs
+Run Tests	Setup Rust	2026-05-27T22:35:27.4486380Z   API_RATE_LIMIT_BURST_SIZE: 1000
+Run Tests	Setup Rust	2026-05-27T22:35:27.4486899Z   API_RATE_LIMIT_PER_SECOND: 1000
+Run Tests	Setup Rust	2026-05-27T22:35:27.4487176Z   targets: wasm32-unknown-unknown
+Run Tests	Setup Rust	2026-05-27T22:35:27.4487645Z   components: clippy
+Run Tests	Setup Rust	2026-05-27T22:35:27.4487852Z ##[endgroup]
+Run Tests	Setup Rust	2026-05-27T22:35:27.4565081Z ##[group]Run : set $CARGO_HOME
+Run Tests	Setup Rust	2026-05-27T22:35:27.4565379Z [36;1m: set $CARGO_HOME[0m
+Run Tests	Setup Rust	2026-05-27T22:35:27.4565706Z [36;1mecho CARGO_HOME=${CARGO_HOME:-"$HOME/.cargo"} >> $GITHUB_ENV[0m
+Run Tests	Setup Rust	2026-05-27T22:35:27.4590281Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Run Tests	Setup Rust	2026-05-27T22:35:27.4590637Z env:
+Run Tests	Setup Rust	2026-05-27T22:35:27.4590829Z   CARGO_TERM_COLOR: always
+Run Tests	Setup Rust	2026-05-27T22:35:27.4591084Z   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+Run Tests	Setup Rust	2026-05-27T22:35:27.4591354Z   SQLX_OFFLINE: true
+Run Tests	Setup Rust	2026-05-27T22:35:27.4591587Z   STORMCHASER_CERT_DIR: ./tests/certs
+Run Tests	Setup Rust	2026-05-27T22:35:27.4591861Z   API_RATE_LIMIT_BURST_SIZE: 1000
+Run Tests	Setup Rust	2026-05-27T22:35:27.4592115Z   API_RATE_LIMIT_PER_SECOND: 1000
+Run Tests	Setup Rust	2026-05-27T22:35:27.4592354Z ##[endgroup]
+Run Tests	Setup Rust	2026-05-27T22:35:27.4665542Z ##[group]Run : install rustup if needed
+Run Tests	Setup Rust	2026-05-27T22:35:27.4665863Z [36;1m: install rustup if needed[0m
+Run Tests	Setup Rust	2026-05-27T22:35:27.4666160Z [36;1mif ! command -v rustup &>/dev/null; then[0m
+Run Tests	Setup Rust	2026-05-27T22:35:27.4667250Z [36;1m  curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused --location --silent --show-error --fail https://sh.rustup.rs | sh -s -- --default-toolchain none -y[0m
+Run Tests	Setup Rust	2026-05-27T22:35:27.4668031Z [36;1m  echo "$CARGO_HOME/bin" >> $GITHUB_PATH[0m
+Run Tests	Setup Rust	2026-05-27T22:35:27.4668321Z [36;1mfi[0m
+Run Tests	Setup Rust	2026-05-27T22:35:27.4692078Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Run Tests	Setup Rust	2026-05-27T22:35:27.4692417Z env:
+Run Tests	Setup Rust	2026-05-27T22:35:27.4692610Z   CARGO_TERM_COLOR: always
+Run Tests	Setup Rust	2026-05-27T22:35:27.4692865Z   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+Run Tests	Setup Rust	2026-05-27T22:35:27.4693148Z   SQLX_OFFLINE: true
+Run Tests	Setup Rust	2026-05-27T22:35:27.4693370Z   STORMCHASER_CERT_DIR: ./tests/certs
+Run Tests	Setup Rust	2026-05-27T22:35:27.4693633Z   API_RATE_LIMIT_BURST_SIZE: 1000
+Run Tests	Setup Rust	2026-05-27T22:35:27.4693911Z   API_RATE_LIMIT_PER_SECOND: 1000
+Run Tests	Setup Rust	2026-05-27T22:35:27.4694161Z   CARGO_HOME: /home/runner/.cargo
+Run Tests	Setup Rust	2026-05-27T22:35:27.4694396Z ##[endgroup]
+Run Tests	Setup Rust	2026-05-27T22:35:27.4765883Z ##[group]Run rustup toolchain install stable --target wasm32-unknown-unknown --component clippy --profile minimal --no-self-update
+Run Tests	Setup Rust	2026-05-27T22:35:27.4767117Z [36;1mrustup toolchain install stable --target wasm32-unknown-unknown --component clippy --profile minimal --no-self-update[0m
+Run Tests	Setup Rust	2026-05-27T22:35:27.4791379Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Run Tests	Setup Rust	2026-05-27T22:35:27.4791726Z env:
+Run Tests	Setup Rust	2026-05-27T22:35:27.4791926Z   CARGO_TERM_COLOR: always
+Run Tests	Setup Rust	2026-05-27T22:35:27.4792181Z   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+Run Tests	Setup Rust	2026-05-27T22:35:27.4792455Z   SQLX_OFFLINE: true
+Run Tests	Setup Rust	2026-05-27T22:35:27.4792671Z   STORMCHASER_CERT_DIR: ./tests/certs
+Run Tests	Setup Rust	2026-05-27T22:35:27.4793106Z   API_RATE_LIMIT_BURST_SIZE: 1000
+Run Tests	Setup Rust	2026-05-27T22:35:27.4793360Z   API_RATE_LIMIT_PER_SECOND: 1000
+Run Tests	Setup Rust	2026-05-27T22:35:27.4793605Z   CARGO_HOME: /home/runner/.cargo
+Run Tests	Setup Rust	2026-05-27T22:35:27.4793848Z   RUSTUP_PERMIT_COPY_RENAME: 1
+Run Tests	Setup Rust	2026-05-27T22:35:27.4794078Z ##[endgroup]
+Run Tests	Setup Rust	2026-05-27T22:35:27.6689528Z info: syncing channel updates for stable-x86_64-unknown-linux-gnu
+Run Tests	Setup Rust	2026-05-27T22:35:27.7762253Z info: latest update on 2026-04-16 for version 1.95.0 (59807616e 2026-04-14)
+Run Tests	Setup Rust	2026-05-27T22:35:27.7988660Z info: component clippy is up to date
+Run Tests	Setup Rust	2026-05-27T22:35:27.8000624Z info: downloading component rust-std
+Run Tests	Setup Rust	2026-05-27T22:35:29.3464112Z
+Run Tests	Setup Rust	2026-05-27T22:35:29.3547360Z   stable-x86_64-unknown-linux-gnu updated - rustc 1.95.0 (59807616e 2026-04-14) (from rustc 1.95.0 (59807616e 2026-04-14))
+Run Tests	Setup Rust	2026-05-27T22:35:29.3547944Z
+Run Tests	Setup Rust	2026-05-27T22:35:29.3635698Z ##[group]Run rustup default stable
+Run Tests	Setup Rust	2026-05-27T22:35:29.3636193Z [36;1mrustup default stable[0m
+Run Tests	Setup Rust	2026-05-27T22:35:29.3672378Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Run Tests	Setup Rust	2026-05-27T22:35:29.3673097Z env:
+Run Tests	Setup Rust	2026-05-27T22:35:29.3673447Z   CARGO_TERM_COLOR: always
+Run Tests	Setup Rust	2026-05-27T22:35:29.3673857Z   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+Run Tests	Setup Rust	2026-05-27T22:35:29.3674330Z   SQLX_OFFLINE: true
+Run Tests	Setup Rust	2026-05-27T22:35:29.3674715Z   STORMCHASER_CERT_DIR: ./tests/certs
+Run Tests	Setup Rust	2026-05-27T22:35:29.3675169Z   API_RATE_LIMIT_BURST_SIZE: 1000
+Run Tests	Setup Rust	2026-05-27T22:35:29.3675861Z   API_RATE_LIMIT_PER_SECOND: 1000
+Run Tests	Setup Rust	2026-05-27T22:35:29.3676335Z   CARGO_HOME: /home/runner/.cargo
+Run Tests	Setup Rust	2026-05-27T22:35:29.3677170Z ##[endgroup]
+Run Tests	Setup Rust	2026-05-27T22:35:29.3781391Z info: using existing install for stable-x86_64-unknown-linux-gnu
+Run Tests	Setup Rust	2026-05-27T22:35:29.3788161Z info: default toolchain set to stable-x86_64-unknown-linux-gnu
+Run Tests	Setup Rust	2026-05-27T22:35:29.3788905Z
+Run Tests	Setup Rust	2026-05-27T22:35:29.3868763Z   stable-x86_64-unknown-linux-gnu unchanged - rustc 1.95.0 (59807616e 2026-04-14)
+Run Tests	Setup Rust	2026-05-27T22:35:29.3880939Z
+Run Tests	Setup Rust	2026-05-27T22:35:29.3902764Z ##[group]Run : create cachekey
+Run Tests	Setup Rust	2026-05-27T22:35:29.3903059Z [36;1m: create cachekey[0m
+Run Tests	Setup Rust	2026-05-27T22:35:29.3903573Z [36;1mDATE=$(rustc +stable --version --verbose | sed -ne 's/^commit-date: \(20[0-9][0-9]\)-\([01][0-9]\)-\([0-3][0-9]\)$/\1\2\3/p')[0m
+Run Tests	Setup Rust	2026-05-27T22:35:29.3904233Z [36;1mHASH=$(rustc +stable --version --verbose | sed -ne 's/^commit-hash: //p')[0m
+Run Tests	Setup Rust	2026-05-27T22:35:29.3904736Z [36;1mecho "cachekey=$(echo $DATE$HASH | head -c12)" >> $GITHUB_OUTPUT[0m
+Run Tests	Setup Rust	2026-05-27T22:35:29.3930122Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Run Tests	Setup Rust	2026-05-27T22:35:29.3930464Z env:
+Run Tests	Setup Rust	2026-05-27T22:35:29.3930656Z   CARGO_TERM_COLOR: always
+Run Tests	Setup Rust	2026-05-27T22:35:29.3930907Z   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+Run Tests	Setup Rust	2026-05-27T22:35:29.3931174Z   SQLX_OFFLINE: true
+Run Tests	Setup Rust	2026-05-27T22:35:29.3931395Z   STORMCHASER_CERT_DIR: ./tests/certs
+Run Tests	Setup Rust	2026-05-27T22:35:29.3931657Z   API_RATE_LIMIT_BURST_SIZE: 1000
+Run Tests	Setup Rust	2026-05-27T22:35:29.3931908Z   API_RATE_LIMIT_PER_SECOND: 1000
+Run Tests	Setup Rust	2026-05-27T22:35:29.3932153Z   CARGO_HOME: /home/runner/.cargo
+Run Tests	Setup Rust	2026-05-27T22:35:29.3932384Z ##[endgroup]
+Run Tests	Setup Rust	2026-05-27T22:35:29.4310442Z ##[group]Run : disable incremental compilation
+Run Tests	Setup Rust	2026-05-27T22:35:29.4310811Z [36;1m: disable incremental compilation[0m
+Run Tests	Setup Rust	2026-05-27T22:35:29.4311125Z [36;1mif [ -z "${CARGO_INCREMENTAL+set}" ]; then[0m
+Run Tests	Setup Rust	2026-05-27T22:35:29.4311447Z [36;1m  echo CARGO_INCREMENTAL=0 >> $GITHUB_ENV[0m
+Run Tests	Setup Rust	2026-05-27T22:35:29.4311727Z [36;1mfi[0m
+Run Tests	Setup Rust	2026-05-27T22:35:29.4337131Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Run Tests	Setup Rust	2026-05-27T22:35:29.4337500Z env:
+Run Tests	Setup Rust	2026-05-27T22:35:29.4337690Z   CARGO_TERM_COLOR: always
+Run Tests	Setup Rust	2026-05-27T22:35:29.4337953Z   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+Run Tests	Setup Rust	2026-05-27T22:35:29.4338220Z   SQLX_OFFLINE: true
+Run Tests	Setup Rust	2026-05-27T22:35:29.4338436Z   STORMCHASER_CERT_DIR: ./tests/certs
+Run Tests	Setup Rust	2026-05-27T22:35:29.4338697Z   API_RATE_LIMIT_BURST_SIZE: 1000
+Run Tests	Setup Rust	2026-05-27T22:35:29.4338942Z   API_RATE_LIMIT_PER_SECOND: 1000
+Run Tests	Setup Rust	2026-05-27T22:35:29.4339183Z   CARGO_HOME: /home/runner/.cargo
+Run Tests	Setup Rust	2026-05-27T22:35:29.4339412Z ##[endgroup]
+Run Tests	Setup Rust	2026-05-27T22:35:29.4420817Z ##[group]Run : enable colors in Cargo output
+Run Tests	Setup Rust	2026-05-27T22:35:29.4421369Z [36;1m: enable colors in Cargo output[0m
+Run Tests	Setup Rust	2026-05-27T22:35:29.4421732Z [36;1mif [ -z "${CARGO_TERM_COLOR+set}" ]; then[0m
+Run Tests	Setup Rust	2026-05-27T22:35:29.4422089Z [36;1m  echo CARGO_TERM_COLOR=always >> $GITHUB_ENV[0m
+Run Tests	Setup Rust	2026-05-27T22:35:29.4422380Z [36;1mfi[0m
+Run Tests	Setup Rust	2026-05-27T22:35:29.4445268Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Run Tests	Setup Rust	2026-05-27T22:35:29.4445611Z env:
+Run Tests	Setup Rust	2026-05-27T22:35:29.4445801Z   CARGO_TERM_COLOR: always
+Run Tests	Setup Rust	2026-05-27T22:35:29.4446058Z   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+Run Tests	Setup Rust	2026-05-27T22:35:29.4446325Z   SQLX_OFFLINE: true
+Run Tests	Setup Rust	2026-05-27T22:35:29.4446803Z   STORMCHASER_CERT_DIR: ./tests/certs
+Run Tests	Setup Rust	2026-05-27T22:35:29.4447096Z   API_RATE_LIMIT_BURST_SIZE: 1000
+Run Tests	Setup Rust	2026-05-27T22:35:29.4447343Z   API_RATE_LIMIT_PER_SECOND: 1000
+Run Tests	Setup Rust	2026-05-27T22:35:29.4447590Z   CARGO_HOME: /home/runner/.cargo
+Run Tests	Setup Rust	2026-05-27T22:35:29.4447833Z   CARGO_INCREMENTAL: 0
+Run Tests	Setup Rust	2026-05-27T22:35:29.4448039Z ##[endgroup]
+Run Tests	Setup Rust	2026-05-27T22:35:29.4512023Z ##[group]Run : enable Cargo sparse registry
+Run Tests	Setup Rust	2026-05-27T22:35:29.4512353Z [36;1m: enable Cargo sparse registry[0m
+Run Tests	Setup Rust	2026-05-27T22:35:29.4512734Z [36;1m# implemented in 1.66, stabilized in 1.68, made default in 1.70[0m
+Run Tests	Setup Rust	2026-05-27T22:35:29.4513449Z [36;1mif [ -z "${CARGO_REGISTRIES_CRATES_IO_PROTOCOL+set}" -o -f "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol ]; then[0m
+Run Tests	Setup Rust	2026-05-27T22:35:29.4514184Z [36;1m  if rustc +stable --version --verbose | grep -q '^release: 1\.6[89]\.'; then[0m
+Run Tests	Setup Rust	2026-05-27T22:35:29.4514974Z [36;1m    touch "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol || true[0m
+Run Tests	Setup Rust	2026-05-27T22:35:29.4515514Z [36;1m    echo CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse >> $GITHUB_ENV[0m
+Run Tests	Setup Rust	2026-05-27T22:35:29.4516012Z [36;1m  elif rustc +stable --version --verbose | grep -q '^release: 1\.6[67]\.'; then[0m
+Run Tests	Setup Rust	2026-05-27T22:35:29.4516820Z [36;1m    touch "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol || true[0m
+Run Tests	Setup Rust	2026-05-27T22:35:29.4517408Z [36;1m    echo CARGO_REGISTRIES_CRATES_IO_PROTOCOL=git >> $GITHUB_ENV[0m
+Run Tests	Setup Rust	2026-05-27T22:35:29.4517765Z [36;1m  fi[0m
+Run Tests	Setup Rust	2026-05-27T22:35:29.4517953Z [36;1mfi[0m
+Run Tests	Setup Rust	2026-05-27T22:35:29.4540591Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Run Tests	Setup Rust	2026-05-27T22:35:29.4540935Z env:
+Run Tests	Setup Rust	2026-05-27T22:35:29.4541125Z   CARGO_TERM_COLOR: always
+Run Tests	Setup Rust	2026-05-27T22:35:29.4541375Z   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+Run Tests	Setup Rust	2026-05-27T22:35:29.4541643Z   SQLX_OFFLINE: true
+Run Tests	Setup Rust	2026-05-27T22:35:29.4541864Z   STORMCHASER_CERT_DIR: ./tests/certs
+Run Tests	Setup Rust	2026-05-27T22:35:29.4542133Z   API_RATE_LIMIT_BURST_SIZE: 1000
+Run Tests	Setup Rust	2026-05-27T22:35:29.4542387Z   API_RATE_LIMIT_PER_SECOND: 1000
+Run Tests	Setup Rust	2026-05-27T22:35:29.4542641Z   CARGO_HOME: /home/runner/.cargo
+Run Tests	Setup Rust	2026-05-27T22:35:29.4542878Z   CARGO_INCREMENTAL: 0
+Run Tests	Setup Rust	2026-05-27T22:35:29.4543086Z ##[endgroup]
+Run Tests	Setup Rust	2026-05-27T22:35:29.4883257Z ##[group]Run : work around spurious network errors in curl 8.0
+Run Tests	Setup Rust	2026-05-27T22:35:29.4883712Z [36;1m: work around spurious network errors in curl 8.0[0m
+Run Tests	Setup Rust	2026-05-27T22:35:29.4884271Z [36;1m# https://rust-lang.zulipchat.com/#narrow/stream/246057-t-cargo/topic/timeout.20investigation[0m
+Run Tests	Setup Rust	2026-05-27T22:35:29.4884926Z [36;1mif rustc +stable --version --verbose | grep -q '^release: 1\.7[01]\.'; then[0m
+Run Tests	Setup Rust	2026-05-27T22:35:29.4885394Z [36;1m  echo CARGO_HTTP_MULTIPLEXING=false >> $GITHUB_ENV[0m
+Run Tests	Setup Rust	2026-05-27T22:35:29.4885705Z [36;1mfi[0m
+Run Tests	Setup Rust	2026-05-27T22:35:29.4911522Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Run Tests	Setup Rust	2026-05-27T22:35:29.4911867Z env:
+Run Tests	Setup Rust	2026-05-27T22:35:29.4912075Z   CARGO_TERM_COLOR: always
+Run Tests	Setup Rust	2026-05-27T22:35:29.4912324Z   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+Run Tests	Setup Rust	2026-05-27T22:35:29.4912592Z   SQLX_OFFLINE: true
+Run Tests	Setup Rust	2026-05-27T22:35:29.4912811Z   STORMCHASER_CERT_DIR: ./tests/certs
+Run Tests	Setup Rust	2026-05-27T22:35:29.4913077Z   API_RATE_LIMIT_BURST_SIZE: 1000
+Run Tests	Setup Rust	2026-05-27T22:35:29.4913331Z   API_RATE_LIMIT_PER_SECOND: 1000
+Run Tests	Setup Rust	2026-05-27T22:35:29.4913573Z   CARGO_HOME: /home/runner/.cargo
+Run Tests	Setup Rust	2026-05-27T22:35:29.4913807Z   CARGO_INCREMENTAL: 0
+Run Tests	Setup Rust	2026-05-27T22:35:29.4914014Z ##[endgroup]
+Run Tests	Setup Rust	2026-05-27T22:35:29.5119520Z ##[group]Run rustc +stable --version --verbose
+Run Tests	Setup Rust	2026-05-27T22:35:29.5120047Z [36;1mrustc +stable --version --verbose[0m
+Run Tests	Setup Rust	2026-05-27T22:35:29.5144926Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Run Tests	Setup Rust	2026-05-27T22:35:29.5145265Z env:
+Run Tests	Setup Rust	2026-05-27T22:35:29.5145455Z   CARGO_TERM_COLOR: always
+Run Tests	Setup Rust	2026-05-27T22:35:29.5145714Z   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+Run Tests	Setup Rust	2026-05-27T22:35:29.5145987Z   SQLX_OFFLINE: true
+Run Tests	Setup Rust	2026-05-27T22:35:29.5146212Z   STORMCHASER_CERT_DIR: ./tests/certs
+Run Tests	Setup Rust	2026-05-27T22:35:29.5146490Z   API_RATE_LIMIT_BURST_SIZE: 1000
+Run Tests	Setup Rust	2026-05-27T22:35:29.5146928Z   API_RATE_LIMIT_PER_SECOND: 1000
+Run Tests	Setup Rust	2026-05-27T22:35:29.5147178Z   CARGO_HOME: /home/runner/.cargo
+Run Tests	Setup Rust	2026-05-27T22:35:29.5147419Z   CARGO_INCREMENTAL: 0
+Run Tests	Setup Rust	2026-05-27T22:35:29.5147624Z ##[endgroup]
+Run Tests	Setup Rust	2026-05-27T22:35:29.5312350Z rustc 1.95.0 (59807616e 2026-04-14)
+Run Tests	Setup Rust	2026-05-27T22:35:29.5312973Z binary: rustc
+Run Tests	Setup Rust	2026-05-27T22:35:29.5313417Z commit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860
+Run Tests	Setup Rust	2026-05-27T22:35:29.5313912Z commit-date: 2026-04-14
+Run Tests	Setup Rust	2026-05-27T22:35:29.5314286Z host: x86_64-unknown-linux-gnu
+Run Tests	Setup Rust	2026-05-27T22:35:29.5314725Z release: 1.95.0
+Run Tests	Setup Rust	2026-05-27T22:35:29.5315075Z LLVM version: 22.1.2

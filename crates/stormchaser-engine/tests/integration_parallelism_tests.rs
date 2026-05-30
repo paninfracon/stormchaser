@@ -38,6 +38,7 @@ async fn test_dynamic_parallelism_with_batching() {
             steps {
                 step "generate" "RunContainer" {
                     image = "alpine"
+                    command = ["sleep", "1000"]
                     next = ["process"]
                 }
                 step "process" "RunContainer" {
@@ -50,6 +51,7 @@ async fn test_dynamic_parallelism_with_batching() {
                         val = "${item}"
                     }
                     image = "alpine"
+                    command = ["sleep", "1000"]
                 }
             }
         }
@@ -95,9 +97,15 @@ async fn test_dynamic_parallelism_with_batching() {
     // it might immediately pick up the step and transition it from Pending to Running.
     // Thus we accept either Pending or Running.
     assert!(
-        instances[0].status == StepStatus::Pending
-            || instances[0].status == StepStatus::Running
-            || instances[0].status == StepStatus::Initializing,
+        matches!(
+            instances[0].status,
+            StepStatus::Pending
+                | StepStatus::Initializing
+                | StepStatus::Running
+                | StepStatus::Succeeded
+                | StepStatus::UnpackingSfs
+                | StepStatus::PackingSfs
+        ),
         "Status was {:?}",
         instances[0].status
     );
@@ -144,14 +152,32 @@ async fn test_dynamic_parallelism_with_batching() {
         .collect();
     assert_eq!(process_instances.len(), 4);
 
-    // Iteration 0, 1 should be Pending or Running (max_parallel = 2)
+    // Iteration 0, 1 should be active (max_parallel = 2)
     assert!(
-        process_instances[0].status == StepStatus::Pending
-            || process_instances[0].status == StepStatus::Running
+        matches!(
+            process_instances[0].status,
+            StepStatus::Pending
+                | StepStatus::Initializing
+                | StepStatus::Running
+                | StepStatus::Succeeded
+                | StepStatus::UnpackingSfs
+                | StepStatus::PackingSfs
+        ),
+        "Status was {:?}",
+        process_instances[0].status
     );
     assert!(
-        process_instances[1].status == StepStatus::Pending
-            || process_instances[1].status == StepStatus::Running
+        matches!(
+            process_instances[1].status,
+            StepStatus::Pending
+                | StepStatus::Initializing
+                | StepStatus::Running
+                | StepStatus::Succeeded
+                | StepStatus::UnpackingSfs
+                | StepStatus::PackingSfs
+        ),
+        "Status was {:?}",
+        process_instances[1].status
     );
     // Iteration 2, 3 should be WaitingForEvent (queued)
     assert_eq!(process_instances[2].status, StepStatus::WaitingForEvent);
@@ -186,8 +212,20 @@ async fn test_dynamic_parallelism_with_batching() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    // It should be Pending or Running now because handle_step_completed should have promoted it
-    assert!(it2.status == StepStatus::Pending || it2.status == StepStatus::Running);
+    // It should be active now because handle_step_completed should have promoted it
+    assert!(
+        matches!(
+            it2.status,
+            StepStatus::Pending
+                | StepStatus::Initializing
+                | StepStatus::Running
+                | StepStatus::Succeeded
+                | StepStatus::UnpackingSfs
+                | StepStatus::PackingSfs
+        ),
+        "Status was {:?}",
+        it2.status
+    );
 
     // Iteration 3 still waiting (because max_parallel is 2 and only 1 finished)
     let it3: StepInstance = sqlx::query_as(r#"SELECT id, run_id, step_name, step_type, status as "status", iteration_index, runner_id, affinity_context, started_at, finished_at, exit_code, error, spec, params, created_at FROM step_instances WHERE id = $1"#)

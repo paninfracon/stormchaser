@@ -90,7 +90,16 @@ async fn schedule_iterated_batches(
         if !waiting_instances.is_empty() {
             let running_or_pending = all_instances_of_this_step
                 .iter()
-                .filter(|s| s.status == StepStatus::Running || s.status == StepStatus::Pending)
+                .filter(|s| {
+                    matches!(
+                        s.status,
+                        StepStatus::Pending
+                            | StepStatus::Initializing
+                            | StepStatus::UnpackingSfs
+                            | StepStatus::Running
+                            | StepStatus::PackingSfs
+                    )
+                })
                 .count();
 
             let max_parallel = dsl_step
