@@ -78,6 +78,23 @@ mockall::mock! {
             options: Option<LogsOptions<String>>,
         ) -> BoxStream<'static, Result<LogOutput, Error>>;
 
+        async fn create_exec(
+            &self,
+            container_name: &str,
+            config: bollard::exec::CreateExecOptions<String>,
+        ) -> Result<bollard::exec::CreateExecResults, Error>;
+
+        async fn start_exec(
+            &self,
+            exec_id: &str,
+            config: Option<bollard::exec::StartExecOptions>,
+        ) -> Result<bollard::exec::StartExecResults, Error>;
+
+        async fn inspect_exec(
+            &self,
+            exec_id: &str,
+        ) -> Result<bollard::models::ExecInspectResponse, Error>;
+
         async fn inspect_container(
             &self,
             container_name: &str,
@@ -162,6 +179,23 @@ pub trait ContainerRuntime: Send + Sync + Clone + 'static {
         container_name: &str,
         options: Option<LogsOptions<String>>,
     ) -> BoxStream<'static, Result<LogOutput, Error>>;
+
+    async fn create_exec(
+        &self,
+        container_name: &str,
+        config: bollard::exec::CreateExecOptions<String>,
+    ) -> Result<bollard::exec::CreateExecResults, Error>;
+
+    async fn start_exec(
+        &self,
+        exec_id: &str,
+        config: Option<bollard::exec::StartExecOptions>,
+    ) -> Result<bollard::exec::StartExecResults, Error>;
+
+    async fn inspect_exec(
+        &self,
+        exec_id: &str,
+    ) -> Result<bollard::models::ExecInspectResponse, Error>;
 
     /// Inspects a container's details.
     async fn inspect_container(
@@ -252,6 +286,29 @@ impl ContainerRuntime for Docker {
         options: Option<LogsOptions<String>>,
     ) -> BoxStream<'static, Result<LogOutput, Error>> {
         self.logs(container_name, options).boxed()
+    }
+
+    async fn create_exec(
+        &self,
+        container_name: &str,
+        config: bollard::exec::CreateExecOptions<String>,
+    ) -> Result<bollard::exec::CreateExecResults, Error> {
+        self.create_exec(container_name, config).await
+    }
+
+    async fn start_exec(
+        &self,
+        exec_id: &str,
+        config: Option<bollard::exec::StartExecOptions>,
+    ) -> Result<bollard::exec::StartExecResults, Error> {
+        self.start_exec(exec_id, config).await
+    }
+
+    async fn inspect_exec(
+        &self,
+        exec_id: &str,
+    ) -> Result<bollard::models::ExecInspectResponse, Error> {
+        self.inspect_exec(exec_id).await
     }
 
     async fn inspect_container(

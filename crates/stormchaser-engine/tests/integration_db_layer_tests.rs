@@ -120,6 +120,7 @@ async fn test_db_layer_functions() {
         "RunContainer",
         StepStatus::Pending,
         None,
+        None,
         serde_json::json!({}),
         serde_json::json!({}),
         Utc::now(),

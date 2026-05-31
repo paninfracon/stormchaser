@@ -148,6 +148,7 @@ async fn handle_orphaned_container(
                         ContainerMetadata {
                             run_id,
                             step_id,
+                            runner_id: r_id.clone(),
                             fencing_token,
                             step_dsl,
                             storage: None,
@@ -172,6 +173,7 @@ async fn handle_orphaned_container(
         let metadata = ContainerMetadata {
             run_id,
             step_id,
+            runner_id: r_id.clone(),
             fencing_token,
             step_dsl: step_dsl.clone(),
             storage: None,

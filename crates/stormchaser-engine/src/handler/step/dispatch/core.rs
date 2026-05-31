@@ -147,15 +147,31 @@ pub async fn dispatch_step_instance(
         registry_auth,
         timestamp: Utc::now(),
         event_type: EventType::Step(StepEventType::Scheduled),
-        step_dsl: dsl_step_val,
+        step_dsl: dsl_step_val.clone(),
     };
 
     let js = async_nats::jetstream::new(nats_client);
     use stormchaser_model::nats::NatsSubject;
-    let subject = NatsSubject::StepScheduled(
+    let mut subject = NatsSubject::StepScheduled(
         step_type.clone(),
         Some(stormchaser_model::nats::compute_shard_id(&run_id)),
     );
+
+    if let Some(affinity_context) = dsl_step_val
+        .get("strategy")
+        .and_then(|s| s.get("affinity"))
+        .and_then(|a| a.as_str())
+    {
+        if affinity_context == "shared" {
+            if let Ok(Some(runner_id)) =
+                crate::db::get_affinity_runner_id(&pool, run_id, affinity_context).await
+            {
+                subject =
+                    NatsSubject::Custom(format!("stormchaser.v1.runner.docker.{}", runner_id));
+            }
+        }
+    }
+
     publish_cloudevent(
         &js,
         subject,

@@ -163,6 +163,7 @@ async fn test_rest_api_step_execution() {
         "RestApi",
         stormchaser_model::step::StepStatus::Pending,
         None,
+        None,
         spec.clone(),
         json!({}),
         Utc::now(),

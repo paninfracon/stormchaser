@@ -12,9 +12,15 @@ pub fn parse_step_from_nats_payload(payload: &Value) -> Result<dsl::Step> {
 
     if let Some(dsl_val) = payload.get("step_dsl") {
         if !dsl_val.is_null() {
-            if let Ok(mut step) = serde_json::from_value::<dsl::Step>(dsl_val.clone()) {
-                step.spec = spec;
-                return Ok(step);
+            match serde_json::from_value::<dsl::Step>(dsl_val.clone()) {
+                Ok(mut step) => {
+                    step.spec = spec;
+                    return Ok(step);
+                }
+                Err(e) => {
+                    tracing::error!("Failed to parse step_dsl from NATS payload: {:?}", e);
+                    tracing::error!("Payload was: {}", dsl_val);
+                }
             }
         }
     }

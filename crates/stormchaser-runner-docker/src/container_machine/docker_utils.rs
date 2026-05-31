@@ -213,6 +213,7 @@ mod tests {
         let metadata = ContainerMetadata {
             run_id: Uuid::new_v4(),
             step_id: Uuid::new_v4(),
+            runner_id: "test_runner".to_string(),
             fencing_token: 0,
             step_dsl,
             received_at: chrono::Utc::now(),

@@ -114,6 +114,8 @@ pub async fn schedule_step(
             "inserting step {} with type {}",
             step_dsl.name, resolved_type
         );
+        let affinity_context = step_dsl.strategy.as_ref().and_then(|s| s.affinity.clone());
+
         let insert_result = crate::db::insert_step_instance_with_spec_on_conflict_do_nothing(
             &mut *executor,
             step_instance_id,
@@ -122,6 +124,7 @@ pub async fn schedule_step(
             &resolved_type,
             initial_status.clone(),
             None::<i32>,
+            affinity_context,
             resolved_spec.clone(),
             resolved_params.clone(),
             Utc::now(),
@@ -240,6 +243,8 @@ async fn schedule_iterated_steps(
         let _ =
             crate::hcl_eval::resolve_expressions(&mut resolved_params_iter, &iteration_ctx, true);
 
+        let affinity_context = step_dsl.strategy.as_ref().and_then(|s| s.affinity.clone());
+
         crate::db::insert_step_instance_with_spec(
             &mut *executor,
             step_instance_id,
@@ -248,6 +253,7 @@ async fn schedule_iterated_steps(
             resolved_type,
             status.clone(),
             Some(idx as i32),
+            affinity_context,
             resolved_spec_iter.clone(),
             resolved_params_iter.clone(),
             Utc::now(),

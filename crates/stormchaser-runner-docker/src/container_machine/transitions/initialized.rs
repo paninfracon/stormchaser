@@ -41,6 +41,7 @@ impl DockerContainerMachine<state::Initialized> {
             metadata: self.metadata,
             state: state::Running {
                 container_name,
+                exec_id: None,
                 dispatched_at: Utc::now(),
                 volumes_to_cleanup: Vec::new(),
                 storage_names: Vec::new(),
@@ -59,56 +60,122 @@ impl DockerContainerMachine<state::Initialized> {
 
     /// Starts a new Docker container, pulling images and unparking storage as necessary.
     pub async fn start(self) -> Result<StartResult> {
-        let container_name = format!(
-            "storm-{}-{}",
-            self.metadata.step_dsl.name.to_lowercase().replace('_', "-"),
-            &self.metadata.step_id.to_string()[..8]
-        );
+        let is_shared = self
+            .metadata
+            .step_dsl
+            .strategy
+            .as_ref()
+            .and_then(|s| s.affinity.clone())
+            .as_deref()
+            == Some("shared");
+
+        let container_name = if is_shared {
+            format!("storm-shared-{}", &self.metadata.run_id.to_string()[..8])
+        } else {
+            format!(
+                "storm-{}-{}",
+                self.metadata.step_dsl.name.to_lowercase().replace('_', "-"),
+                &self.metadata.step_id.to_string()[..8]
+            )
+        };
+
+        let mut container_exists = false;
+        if is_shared {
+            if let Ok(inspect) = self.docker.inspect_container(&container_name, None).await {
+                if inspect.state.and_then(|s| s.running) == Some(true) {
+                    container_exists = true;
+                }
+            }
+        }
 
         let spec: CommonContainerSpec = serde_json::from_value(self.metadata.step_dsl.spec.clone())
             .context("Failed to parse RunContainer spec as CommonContainerSpec")?;
 
         let sfs_host_path = std::env::var("STORMCHASER_SFS_HOST_PATH").ok();
-        let (mounts, storage_names, volumes_to_cleanup) = self
-            .setup_storage_mounts(&spec, sfs_host_path.as_deref())
-            .await?;
 
-        info!("Pulling image {}", spec.image);
-        self.pull_image(&spec.image).await?;
+        let (mounts, storage_names, volumes_to_cleanup) = if container_exists {
+            // Cannot mount new volumes to existing container
+            (Vec::new(), Vec::new(), Vec::new())
+        } else {
+            self.setup_storage_mounts(&spec, sfs_host_path.as_deref())
+                .await?
+        };
 
-        let network_mode = self.get_network_mode().await;
-        let config = self.build_container_config(
-            &spec,
-            mounts.clone(),
-            network_mode,
-            &storage_names,
-            &container_name,
-            self.metadata.loki_url.as_deref(),
-        )?;
+        if !container_exists {
+            info!("Pulling image {}", spec.image);
+            self.pull_image(&spec.image).await?;
 
-        info!("Creating container {}", container_name);
-        let dispatched_at = Utc::now();
-        self.docker
-            .create_container(
-                Some(CreateContainerOptions {
-                    name: container_name.clone(),
-                    ..Default::default()
+            let network_mode = self.get_network_mode().await;
+
+            let mut config = self.build_container_config(
+                &spec,
+                mounts.clone(),
+                network_mode,
+                &storage_names,
+                &container_name,
+                self.metadata.loki_url.as_deref(),
+            )?;
+
+            if is_shared {
+                // Shared containers just sit idle, steps execute via exec
+                config.cmd = Some(vec![
+                    "tail".to_string(),
+                    "-f".to_string(),
+                    "/dev/null".to_string(),
+                ]);
+                config.entrypoint = Some(vec![]);
+            }
+
+            info!("Creating container {}", container_name);
+            self.docker
+                .create_container(
+                    Some(CreateContainerOptions {
+                        name: container_name.clone(),
+                        ..Default::default()
+                    }),
+                    config,
+                )
+                .await?;
+
+            info!("Starting container {}", container_name);
+            self.docker
+                .start_container(&container_name, None::<StartContainerOptions<String>>)
+                .await?;
+        }
+
+        let mut exec_id = None;
+        if is_shared {
+            info!("Creating exec for shared container {}", container_name);
+            let mut cmd = spec.command.unwrap_or_else(|| vec!["/bin/sh".to_string()]);
+            if let Some(args) = spec.args {
+                cmd.extend(args);
+            }
+
+            let exec_opts = bollard::exec::CreateExecOptions {
+                attach_stdout: Some(true),
+                attach_stderr: Some(true),
+                cmd: Some(cmd),
+                env: spec.env.map(|e| {
+                    e.into_iter()
+                        .map(|kv| format!("{}={}", kv.name, kv.value))
+                        .collect()
                 }),
-                config,
-            )
-            .await?;
+                ..Default::default()
+            };
 
-        info!("Starting container {}", container_name);
-        self.docker
-            .start_container(&container_name, None::<StartContainerOptions<String>>)
-            .await?;
+            let exec = self.docker.create_exec(&container_name, exec_opts).await?;
+            exec_id = Some(exec.id.clone());
+            self.docker.start_exec(&exec.id, None).await?;
+        }
+
+        let dispatched_at = Utc::now();
 
         if let Some(nats) = &self.nats {
             let running_event = stormchaser_model::events::StepRunningEvent {
                 run_id: RunId::new(self.metadata.run_id),
                 step_id: StepInstanceId::new(self.metadata.step_id),
                 event_type: EventType::Step(StepEventType::Running),
-                runner_id: None,
+                runner_id: Some(self.metadata.runner_id.clone()),
                 timestamp: Utc::now(),
             };
             let _ = publish_cloudevent(
@@ -131,6 +198,7 @@ impl DockerContainerMachine<state::Initialized> {
             metadata: self.metadata,
             state: state::Running {
                 container_name,
+                exec_id,
                 dispatched_at,
                 volumes_to_cleanup,
                 storage_names,
@@ -604,6 +672,7 @@ mod tests {
         ContainerMetadata {
             run_id: Uuid::new_v4(),
             step_id: Uuid::new_v4(),
+            runner_id: "test_runner".to_string(),
             fencing_token: 0,
             step_dsl: Step {
                 name: "test_step".to_string(),
