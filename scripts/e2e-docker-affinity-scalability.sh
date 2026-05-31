@@ -21,6 +21,10 @@ echo -e "${GREEN}>>> Core services are healthy!${NC}"
 echo -e "${BLUE}>>> Scaling Docker Runners to 2 instances...${NC}"
 # Scale up docker-runner to test scalability
 export COMPOSE_PROJECT_NAME=stormchaser-docker
+cleanup() {
+    docker compose up -d --scale docker-runner=1 docker-runner
+}
+trap cleanup EXIT
 docker compose up -d --scale docker-runner=2 docker-runner
 
 # Give runners a few seconds to register
@@ -66,13 +70,9 @@ for attempt in {1..60}; do
 
         if [ "$COMPLETED_STEPS" -eq 5 ]; then
              echo -e "${GREEN}>>> Success! Found $COMPLETED_STEPS completed steps.${NC}"
-             export COMPOSE_PROJECT_NAME=stormchaser-docker
-             docker compose up -d --scale docker-runner=1 docker-runner
              exit 0
         else
              echo -e "${RED}>>> Failed! Expected 5 completed steps, got $COMPLETED_STEPS.${NC}"
-             export COMPOSE_PROJECT_NAME=stormchaser-docker
-             docker compose up -d --scale docker-runner=1 docker-runner
              exit 1
         fi
     elif [ "$STATUS" == "failed" ]; then

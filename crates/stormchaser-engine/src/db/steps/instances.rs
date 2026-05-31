@@ -481,3 +481,33 @@ where
 
     Ok(record.and_then(|r| r.0))
 }
+
+/// Get the id of the earliest-dispatched in-flight step for a given affinity context.
+///
+/// This is used to elect an affinity leader so that concurrent dispatches do not
+/// route to different runners before any runner has been established for the group.
+pub async fn get_affinity_leader_step_id<'a, E>(
+    executor: E,
+    run_id: RunId,
+    affinity_context: &str,
+) -> Result<Option<StepInstanceId>, sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    let record: Option<(StepInstanceId,)> = sqlx::query_as(
+        r#"
+        SELECT id
+        FROM step_instances
+        WHERE run_id = $1 AND affinity_context = $2
+          AND status IN ('pending', 'initializing', 'unpacking_sfs', 'running', 'packing_sfs')
+        ORDER BY created_at ASC, id ASC
+        LIMIT 1
+        "#,
+    )
+    .bind(run_id)
+    .bind(affinity_context)
+    .fetch_optional(executor)
+    .await?;
+
+    Ok(record.map(|r| r.0))
+}

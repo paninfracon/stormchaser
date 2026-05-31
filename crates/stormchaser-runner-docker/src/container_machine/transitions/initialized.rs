@@ -165,7 +165,21 @@ impl DockerContainerMachine<state::Initialized> {
 
             let exec = self.docker.create_exec(&container_name, exec_opts).await?;
             exec_id = Some(exec.id.clone());
-            self.docker.start_exec(&exec.id, None).await?;
+            let exec_result = self.docker.start_exec(&exec.id, None).await?;
+            // Drain the exec output stream in a background task so logs are captured
+            // and the Docker exec stream does not block on buffered output.
+            // The task is intentionally fire-and-forget: exec completion is polled
+            // separately in the Running state via inspect_exec, not by awaiting here.
+            if let bollard::exec::StartExecResults::Attached { mut output, .. } = exec_result {
+                tokio::spawn(async move {
+                    while let Some(res) = output.next().await {
+                        match res {
+                            Ok(log) => info!("[exec] {}", log),
+                            Err(e) => error!("[exec] output error: {:?}", e),
+                        }
+                    }
+                });
+            }
         }
 
         let dispatched_at = Utc::now();

@@ -29,7 +29,15 @@ impl DockerContainerMachine<state::Running> {
         let mut exit_code = None;
 
         if let Some(exec_id) = &self.state.exec_id {
+            // Poll for exec completion. Use a 24-hour deadline as a safety guard against
+            // an exec that never terminates; any per-step timeout is enforced upstream.
+            let deadline =
+                tokio::time::Instant::now() + tokio::time::Duration::from_secs(24 * 3600);
             loop {
+                if tokio::time::Instant::now() > deadline {
+                    error!("Timed out waiting for exec {} to complete", exec_id);
+                    break;
+                }
                 match self.docker.inspect_exec(exec_id).await {
                     Ok(res) => {
                         if res.running != Some(true) {
@@ -107,7 +115,11 @@ impl DockerContainerMachine<state::Running> {
         // Cleanup volume and container
         // Wait a bit for log collector (Alloy) to catch the final logs before we delete the container
         sleep(Duration::from_secs(15)).await;
-        let _ = self.docker.remove_container(&container_name, None).await;
+        // Shared containers (exec_id is Some) are reused across affinity steps; only
+        // remove the container when it was created exclusively for this step.
+        if self.state.exec_id.is_none() {
+            let _ = self.docker.remove_container(&container_name, None).await;
+        }
 
         for vol in volumes_to_cleanup {
             info!("Cleaning up volume: {}", vol);
