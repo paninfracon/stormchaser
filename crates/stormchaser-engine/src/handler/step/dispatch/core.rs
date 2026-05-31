@@ -166,8 +166,13 @@ pub async fn dispatch_step_instance(
             if let Ok(Some(runner_id)) =
                 crate::db::get_affinity_runner_id(&pool, run_id, affinity_context).await
             {
+                let backend = if step_type == "k8s_job" {
+                    "k8s"
+                } else {
+                    "docker"
+                };
                 subject =
-                    NatsSubject::Custom(format!("stormchaser.v1.runner.docker.{}", runner_id));
+                    NatsSubject::Custom(format!("stormchaser.v1.runner.{}.{}", backend, runner_id));
             }
         }
     }

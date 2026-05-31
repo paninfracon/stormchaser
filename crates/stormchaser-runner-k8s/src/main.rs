@@ -214,9 +214,6 @@ pub async fn run_runner(config: Config) -> Result<()> {
 
     // 5. Subscribe to task subjects
     let js = async_nats::jetstream::new(nats_client.clone());
-    // 5a. Specific subject for this runner instance
-    let mut runner_subscriber = nats_client.subscribe(nats_subject.clone()).await?;
-
     info!("Ensuring JetStream stream 'stormchaser' exists...");
     let stream = js
         .get_or_create_stream(async_nats::jetstream::stream::Config {
@@ -226,6 +223,19 @@ pub async fn run_runner(config: Config) -> Result<()> {
         })
         .await
         .context("Failed to ensure JetStream stream")?;
+
+    let runner_consumer = stream
+        .create_consumer(async_nats::jetstream::consumer::pull::Config {
+            filter_subject: nats_subject.clone(),
+            ..Default::default()
+        })
+        .await
+        .context("Failed to create runner-specific JetStream consumer")?;
+
+    let mut runner_task_messages = runner_consumer
+        .messages()
+        .await
+        .context("Failed to get runner-specific consumer messages")?;
 
     info!("Creating durable consumer for k8s-runner...");
     let consumer = stream
@@ -277,9 +287,25 @@ pub async fn run_runner(config: Config) -> Result<()> {
                     error!("Failed to publish heartbeat: {:?}", e);
                 }
             }
-            message = runner_subscriber.next() => {
-                if let Some(msg) = message {
-                    info!("Received runner-specific message: {:?}", msg.payload);
+            message = runner_task_messages.next() => {
+                match message {
+                    Some(Ok(msg)) => {
+                        tokio::spawn(handle_task(
+                            msg,
+                            cluster_pool.clone(),
+                            nats_client.clone(),
+                            runner_id.clone(),
+                            encryption_key.clone(),
+                        ));
+                    }
+                    Some(Err(e)) => {
+                        error!("JetStream runner consumer error: {:?}", e);
+                        time::sleep(Duration::from_secs(1)).await;
+                    }
+                    None => {
+                        error!("JetStream runner consumer closed");
+                        break;
+                    }
                 }
             }
             message = task_messages.next() => {
