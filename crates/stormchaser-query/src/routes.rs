@@ -5,6 +5,10 @@ use stormchaser_api::AppState;
 use tokio_stream::StreamExt;
 
 pub async fn hydrate_schema(
+    // Require a valid token: the query service previously had NO authentication
+    // (any caller could drive user-defined SQL/API/Git queries + HCL eval).
+    // AuthClaims rejects with 401 before the body is read.
+    _claims: stormchaser_api::AuthClaims,
     State(state): State<AppState>,
     Json(payload): Json<HydrateSchemaRequest>,
 ) -> impl IntoResponse {

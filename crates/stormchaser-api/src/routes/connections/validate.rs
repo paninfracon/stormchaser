@@ -2,6 +2,7 @@ use super::TestConnectionRequest;
 use aws_config::Region;
 use std::net::IpAddr;
 use std::time::Duration;
+use tokio::net::lookup_host;
 
 const HTTP_TEST_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -9,7 +10,42 @@ const HTTP_TEST_TIMEOUT: Duration = Duration::from_secs(10);
 ///
 /// Allows only `http` and `https` schemes and blocks loopback, link-local, and
 /// RFC-1918 private addresses to prevent Server-Side Request Forgery attacks.
-fn validate_url_safe(raw_url: &str) -> Result<(), String> {
+/// True if `ip` is in a range Stormchaser must never connect to — loopback,
+/// private (RFC-1918), link-local (169.254.0.0/16, incl. the 169.254.169.254
+/// cloud-metadata address), unspecified/broadcast, and the IPv6 equivalents.
+/// IPv4-mapped IPv6 (`::ffff:a.b.c.d`) is unwrapped so it can't smuggle a
+/// restricted v4 address past the v6 checks.
+fn is_blocked_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+        }
+        IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_blocked_ip(IpAddr::V4(v4));
+            }
+            let o = v6.octets();
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || (o[0] == 0xfe && (o[1] & 0xc0) == 0x80) // link-local fe80::/10
+                || (o[0] & 0xfe == 0xfc) // unique-local fc00::/7
+        }
+    }
+}
+
+/// Validate that a URL is safe to connect to (SSRF protection).
+///
+/// Allows only `http`/`https`, then **resolves the host via DNS** and rejects
+/// the URL if ANY resolved address is restricted (see `is_blocked_ip`). This
+/// closes the bypasses in the previous parse-time-only check: a hostname (or
+/// attacker-controlled DNS) pointing at an internal/metadata address, and
+/// IPv4-mapped IPv6. NOTE: the caller must also disable HTTP redirects — a
+/// 30x response can still send the request to an internal host.
+async fn validate_url_safe(raw_url: &str) -> Result<(), String> {
     let parsed = url::Url::parse(raw_url).map_err(|e| format!("Invalid URL: {}", e))?;
 
     match parsed.scheme() {
@@ -26,55 +62,36 @@ fn validate_url_safe(raw_url: &str) -> Result<(), String> {
         .host_str()
         .ok_or_else(|| "URL has no host".to_string())?;
 
-    // Reject bare IP addresses that fall in restricted ranges.
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        if ip.is_loopback() {
-            return Err(format!(
-                "Disallowed host '{}': loopback addresses are not permitted",
-                host
-            ));
-        }
-        match ip {
-            IpAddr::V4(v4) => {
-                if v4.is_private() {
-                    return Err(format!(
-                        "Disallowed host '{}': private addresses are not permitted",
-                        host
-                    ));
-                }
-                if v4.is_link_local() {
-                    return Err(format!(
-                        "Disallowed host '{}': link-local addresses are not permitted",
-                        host
-                    ));
-                }
-            }
-            IpAddr::V6(v6) => {
-                // Block IPv6 link-local (fe80::/10) and unique-local (fc00::/7).
-                let octets = v6.octets();
-                if octets[0] == 0xfe && (octets[1] & 0xc0) == 0x80 {
-                    return Err(format!(
-                        "Disallowed host '{}': IPv6 link-local addresses are not permitted",
-                        host
-                    ));
-                }
-                if octets[0] & 0xfe == 0xfc {
-                    return Err(format!(
-                        "Disallowed host '{}': IPv6 unique-local addresses are not permitted",
-                        host
-                    ));
-                }
-            }
-        }
-    }
-
-    // Reject well-known loopback/link-local hostnames regardless of case.
+    // Reject well-known loopback hostnames up front (before resolution).
     let host_lower = host.to_lowercase();
     if host_lower == "localhost" || host_lower.ends_with(".localhost") {
         return Err(format!(
             "Disallowed host '{}': localhost is not permitted",
             host
         ));
+    }
+
+    // Resolve the host and reject if ANY resolved IP is restricted. This is the
+    // key SSRF gate: it catches hostnames that resolve to internal/metadata IPs
+    // (incl. DNS-rebinding-style inputs) and bare IPs alike.
+    let port = parsed.port_or_known_default().unwrap_or(443);
+    let addrs = lookup_host((host, port))
+        .await
+        .map_err(|e| format!("Could not resolve host '{}': {}", host, e))?;
+
+    let mut resolved_any = false;
+    for addr in addrs {
+        resolved_any = true;
+        if is_blocked_ip(addr.ip()) {
+            return Err(format!(
+                "Disallowed host '{}': resolves to a restricted address ({})",
+                host,
+                addr.ip()
+            ));
+        }
+    }
+    if !resolved_any {
+        return Err(format!("Host '{}' did not resolve to any address", host));
     }
 
     Ok(())
@@ -84,11 +101,14 @@ pub async fn validate_connection(payload: &TestConnectionRequest) -> (bool, Stri
     match payload.connection_type {
         stormchaser_model::connections::ConnectionType::HttpApi => {
             if let Some(base_url) = payload.config.get("base_url").and_then(|v| v.as_str()) {
-                if let Err(reason) = validate_url_safe(base_url) {
+                if let Err(reason) = validate_url_safe(base_url).await {
                     return (false, reason);
                 }
                 let client = match reqwest::Client::builder()
                     .timeout(HTTP_TEST_TIMEOUT)
+                    // Do not follow redirects: a 30x to an internal host would
+                    // otherwise bypass validate_url_safe (SSRF via redirect).
+                    .redirect(reqwest::redirect::Policy::none())
                     .build()
                 {
                     Ok(c) => c,
@@ -273,5 +293,41 @@ pub async fn validate_connection(payload: &TestConnectionRequest) -> (bool, Stri
             true,
             "Connection type validation not implemented".to_string(),
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_blocked_ip;
+    use std::net::IpAddr;
+
+    fn ip(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn blocks_loopback_private_linklocal_metadata_and_mapped() {
+        for s in [
+            "127.0.0.1",
+            "10.0.0.1",
+            "192.168.1.1",
+            "172.16.0.1",
+            "169.254.169.254",        // cloud metadata (link-local)
+            "0.0.0.0",
+            "::1",
+            "fe80::1",                // IPv6 link-local
+            "fc00::1",                // IPv6 unique-local
+            "::ffff:127.0.0.1",       // IPv4-mapped loopback
+            "::ffff:169.254.169.254", // IPv4-mapped metadata
+        ] {
+            assert!(is_blocked_ip(ip(s)), "expected {s} to be blocked");
+        }
+    }
+
+    #[test]
+    fn allows_public_addresses() {
+        for s in ["8.8.8.8", "1.1.1.1", "93.184.216.34", "2606:4700:4700::1111"] {
+            assert!(!is_blocked_ip(ip(s)), "expected {s} to be allowed");
+        }
     }
 }
