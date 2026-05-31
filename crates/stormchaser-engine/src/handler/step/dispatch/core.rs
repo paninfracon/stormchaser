@@ -201,10 +201,8 @@ pub async fn dispatch_step_instance(
             }
 
             if let Some(runner_id) = maybe_runner_id {
-                subject = NatsSubject::Custom(format!(
-                    "stormchaser.v1.runner.{}.{}",
-                    backend, runner_id
-                ));
+                subject =
+                    NatsSubject::Custom(format!("stormchaser.v1.runner.{}.{}", backend, runner_id));
             }
         }
     }
