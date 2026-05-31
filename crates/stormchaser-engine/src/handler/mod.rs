@@ -124,6 +124,11 @@ pub async fn dispatch_pending_steps(
     let quotas = fetch_quotas(run_id, &pool).await?;
     let running_count: i64 = crate::db::count_running_steps_for_run(&pool, run_id).await?;
 
+    debug!(
+        "dispatch_pending_steps: running_count = {}, quotas.max_concurrency = {}",
+        running_count, quotas.max_concurrency
+    );
+
     if running_count >= quotas.max_concurrency as i64 {
         debug!("Run {}: Max concurrency {} reached", run_id, running_count);
         return Ok(());
@@ -139,11 +144,13 @@ pub async fn dispatch_pending_steps(
     let max_cpu = crate::resource_utils::parse_cpu(&quotas.max_cpu).unwrap_or(0.0);
     let max_mem = crate::resource_utils::parse_memory(&quotas.max_memory).unwrap_or(0);
 
-    // 2. Fetch Pending steps (excluding Approval/Wait which are handled via events)
-    let pending_steps: Vec<StepInstance> =
-        crate::db::get_pending_step_instances_for_run(&pool, run_id, available_slots).await?;
+    // 2. Fetch and atomically claim Pending steps (sets status to Initializing,
+    //    excluding Approval/Wait which are handled via events). Using FOR UPDATE SKIP LOCKED
+    //    ensures that concurrent engine processes never double-dispatch the same step.
+    let claimed_steps: Vec<StepInstance> =
+        crate::db::claim_pending_step_instances_for_run(&pool, run_id, available_slots).await?;
 
-    for step in pending_steps {
+    for step in claimed_steps {
         info!("Run {}: Evaluating queued step {}", run_id, step.step_name);
         // We need to fetch the resolved spec and params for this step
         let inst_data: (Value, Value) = crate::db::get_step_spec_and_params(&pool, step.id).await?;
@@ -165,6 +172,13 @@ pub async fn dispatch_pending_steps(
                 "Run {}: Insufficient CPU/Memory quota to dispatch step {}",
                 run_id, step.step_name
             );
+            // Reset the step back to Pending so it can be retried in a future dispatch cycle.
+            let _ = crate::db::update_step_instance_status(
+                &pool,
+                &stormchaser_model::StepStatus::Pending,
+                step.id,
+            )
+            .await;
             continue; // Try next step, maybe it's smaller and fits
         }
 
@@ -192,6 +206,13 @@ pub async fn dispatch_pending_steps(
                 let _ =
                     crate::db::release_step_quota(&mut *conn, run_id, req.cpu, req.memory).await;
             }
+            // Reset back to Pending so the step can be retried.
+            let _ = crate::db::update_step_instance_status(
+                &pool,
+                &stormchaser_model::StepStatus::Pending,
+                step.id,
+            )
+            .await;
         }
     }
 

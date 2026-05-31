@@ -163,7 +163,7 @@ pub async fn handle_task(
                     error!("Step {} (Run {}) failed: {}", step_id, run_id, reason)
                 }
             }
-            let (subject, event_type, event) = build_container_result_event(
+            let dispatch = build_container_result_event(
                 state,
                 run_id,
                 step_id,
@@ -172,10 +172,10 @@ pub async fn handle_task(
             );
             let _ = publish_cloudevent(
                 &async_nats::jetstream::new(nats_client.clone()),
-                subject,
-                event_type,
+                dispatch.subject,
+                dispatch.event_type,
                 EventSource::System,
-                event,
+                dispatch.payload,
                 Some(SchemaVersion::new("1.0".to_string())),
                 None,
             )

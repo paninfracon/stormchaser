@@ -4,7 +4,8 @@ use cloudevents::EventBuilder;
 use serde_json::Value;
 use std::collections::HashMap;
 use stormchaser_model::events::{
-    EventSource, EventType, SchemaVersion, StepCompletedEvent, StepEventType, StepFailedEvent,
+    EventDispatch, EventSource, EventType, SchemaVersion, StepCompletedEvent, StepEventType,
+    StepFailedEvent,
 };
 use stormchaser_model::nats::{publish_cloudevent, NatsSubject};
 use stormchaser_model::{RunId, StepInstanceId, APPLICATION_JSON};
@@ -63,7 +64,7 @@ pub(crate) fn build_container_result_event(
     step_id: Uuid,
     fencing_token: i64,
     runner_id: String,
-) -> (NatsSubject, EventType, Value) {
+) -> EventDispatch {
     match state {
         ContainerState::Succeeded(metrics) => {
             let outputs = build_container_outputs(&metrics);
@@ -85,13 +86,15 @@ pub(crate) fn build_container_result_event(
                 outputs: Some(outputs),
                 timestamp: Utc::now(),
             };
-            (
-                NatsSubject::StepCompleted(Some(stormchaser_model::nats::compute_shard_id(
-                    &stormchaser_model::RunId::new(run_id),
-                ))),
+            EventDispatch {
+                subject: NatsSubject::StepCompleted(Some(
+                    stormchaser_model::nats::compute_shard_id(&stormchaser_model::RunId::new(
+                        run_id,
+                    )),
+                )),
                 event_type,
-                serde_json::to_value(event).unwrap(),
-            )
+                payload: serde_json::to_value(event).unwrap(),
+            }
         }
         ContainerState::Failed(reason, metrics) => {
             let outputs = build_container_outputs(&metrics);
@@ -114,13 +117,13 @@ pub(crate) fn build_container_result_event(
                 outputs: Some(outputs),
                 timestamp: Utc::now(),
             };
-            (
-                NatsSubject::StepFailed(Some(stormchaser_model::nats::compute_shard_id(
+            EventDispatch {
+                subject: NatsSubject::StepFailed(Some(stormchaser_model::nats::compute_shard_id(
                     &stormchaser_model::RunId::new(run_id),
                 ))),
                 event_type,
-                serde_json::to_value(event).unwrap(),
-            )
+                payload: serde_json::to_value(event).unwrap(),
+            }
         }
     }
 }
@@ -161,15 +164,15 @@ pub(crate) async fn publish_container_result(
         ContainerState::Succeeded(_) => info!("Adopted step {} completed successfully", step_id),
         ContainerState::Failed(reason, _) => warn!("Adopted step {} failed: {}", step_id, reason),
     }
-    let (subject, event_type, event_value) =
+    let event_dispatch =
         build_container_result_event(state, run_id, step_id, fencing_token, runner_id);
 
     let _ = publish_cloudevent(
         &async_nats::jetstream::new(nats),
-        subject,
-        event_type,
+        event_dispatch.subject,
+        event_dispatch.event_type,
         EventSource::System,
-        event_value,
+        event_dispatch.payload,
         Some(SchemaVersion::new("1.0".to_string())),
         None,
     )
@@ -217,7 +220,7 @@ mod tests_handler_ext {
             test_reports: Some(json!({"junit": {"url": "https://paninfracon.net/report.xml"}})),
         };
 
-        let (subject, event_type, event) = build_container_result_event(
+        let dispatch = build_container_result_event(
             ContainerState::Succeeded(metrics),
             run_id,
             step_id,
@@ -226,12 +229,16 @@ mod tests_handler_ext {
         );
 
         assert_eq!(
-            subject,
+            dispatch.subject,
             NatsSubject::StepCompleted(Some(stormchaser_model::nats::compute_shard_id(
                 &stormchaser_model::RunId::new(run_id)
             )))
         );
-        assert_eq!(event_type, EventType::Step(StepEventType::Completed));
+        assert_eq!(
+            dispatch.event_type,
+            EventType::Step(StepEventType::Completed)
+        );
+        let event = dispatch.payload;
         assert_eq!(event["run_id"], run_id.to_string());
         assert_eq!(event["step_id"], step_id.to_string());
         assert_eq!(event["runner_id"], "runner-1");
@@ -255,7 +262,7 @@ mod tests_handler_ext {
             test_reports: Some(json!("not-an-object")),
         };
 
-        let (subject, event_type, event) = build_container_result_event(
+        let dispatch = build_container_result_event(
             ContainerState::Failed("boom".to_string(), metrics),
             run_id,
             step_id,
@@ -264,12 +271,13 @@ mod tests_handler_ext {
         );
 
         assert_eq!(
-            subject,
+            dispatch.subject,
             NatsSubject::StepFailed(Some(stormchaser_model::nats::compute_shard_id(
                 &stormchaser_model::RunId::new(run_id)
             )))
         );
-        assert_eq!(event_type, EventType::Step(StepEventType::Failed));
+        assert_eq!(dispatch.event_type, EventType::Step(StepEventType::Failed));
+        let event = dispatch.payload;
         assert_eq!(event["error"], "boom");
         assert!(event["test_reports"].is_null());
         assert_eq!(event["outputs"]["run latency"], "1ms");

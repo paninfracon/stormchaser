@@ -53,7 +53,7 @@ fn test_build_job_result_event_success() {
         )])),
     };
 
-    let (subject, event_type, event) = build_job_result_event(
+    let dispatch = build_job_result_event(
         job_machine::JobState::Succeeded(metrics),
         run_id,
         step_id,
@@ -62,12 +62,16 @@ fn test_build_job_result_event_success() {
     );
 
     assert_eq!(
-        subject,
+        dispatch.subject,
         NatsSubject::StepCompleted(Some(stormchaser_model::nats::compute_shard_id(
             &stormchaser_model::RunId::new(run_id)
         )))
     );
-    assert_eq!(event_type, EventType::Step(StepEventType::Completed));
+    assert_eq!(
+        dispatch.event_type,
+        EventType::Step(StepEventType::Completed)
+    );
+    let event = dispatch.payload;
     assert_eq!(event["run_id"], run_id.to_string());
     assert_eq!(event["step_id"], step_id.to_string());
     assert_eq!(event["outputs"]["Number of attempts"], 2);
@@ -91,7 +95,7 @@ fn test_build_job_result_event_failed() {
         test_reports: None,
     };
 
-    let (subject, event_type, event) = build_job_result_event(
+    let dispatch = build_job_result_event(
         job_machine::JobState::Failed("boom".to_string(), metrics),
         run_id,
         step_id,
@@ -100,12 +104,13 @@ fn test_build_job_result_event_failed() {
     );
 
     assert_eq!(
-        subject,
+        dispatch.subject,
         NatsSubject::StepFailed(Some(stormchaser_model::nats::compute_shard_id(
             &stormchaser_model::RunId::new(run_id)
         )))
     );
-    assert_eq!(event_type, EventType::Step(StepEventType::Failed));
+    assert_eq!(dispatch.event_type, EventType::Step(StepEventType::Failed));
+    let event = dispatch.payload;
     assert_eq!(event["error"], "boom");
     assert_eq!(event["outputs"]["run latency"], "3ms");
 }

@@ -17,6 +17,7 @@ pub use storage::*;
 
 use leptos::prelude::*;
 use leptos::server_fn::codec::Json;
+#[cfg(feature = "ssr")]
 use url::{Host, Url};
 
 #[cfg(feature = "ssr")]
@@ -65,6 +66,7 @@ pub async fn get_grafana_url() -> Result<Option<String>, ServerFnError> {
         .filter(|s| !s.is_empty() && is_valid_grafana_url(s)))
 }
 
+#[cfg(feature = "ssr")]
 fn is_valid_grafana_url(url: &str) -> bool {
     Url::parse(url).ok().is_some_and(|parsed| {
         matches!(parsed.scheme(), "http" | "https")

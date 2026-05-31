@@ -5,7 +5,6 @@ use std::marker::PhantomData;
 use stormchaser_model::workflow::{RunStatus, WorkflowRun};
 
 /// State markers for the workflow typestate pattern
-#[allow(dead_code)]
 pub mod state {
     /// State representing a workflow run that is queued and waiting for resolution.
     pub struct Queued;
@@ -24,14 +23,12 @@ pub mod state {
 }
 
 /// A state machine for managing the lifecycle of a `WorkflowRun`.
-#[allow(dead_code)]
 pub struct WorkflowMachine<S> {
     /// The underlying workflow run data model.
     pub run: WorkflowRun,
     _state: PhantomData<S>,
 }
 
-#[allow(dead_code)]
 impl<S> WorkflowMachine<S> {
     /// New from run.
     pub fn new_from_run(run: WorkflowRun) -> Self {
@@ -47,7 +44,6 @@ impl<S> WorkflowMachine<S> {
     }
 }
 
-#[allow(dead_code)]
 impl WorkflowMachine<state::Queued> {
     /// New.
     pub fn new(run: WorkflowRun) -> Self {
@@ -97,7 +93,6 @@ impl WorkflowMachine<state::Queued> {
     }
 }
 
-#[allow(dead_code)]
 impl WorkflowMachine<state::Resolving> {
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.run.id))]
     /// Start pending.
@@ -155,7 +150,6 @@ impl WorkflowMachine<state::Resolving> {
     }
 }
 
-#[allow(dead_code)]
 impl WorkflowMachine<state::StartPending> {
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.run.id))]
     /// Start.
@@ -214,7 +208,6 @@ impl WorkflowMachine<state::StartPending> {
     }
 }
 
-#[allow(dead_code)]
 impl WorkflowMachine<state::Running> {
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.run.id))]
     /// Succeed.

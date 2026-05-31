@@ -8,12 +8,9 @@ use stormchaser_model::TestReportId;
 use stormchaser_model::{TestCase, TestCaseStatus, TestSummary};
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct TestCaseXml {
     #[serde(rename = "@name")]
     name: String,
-    #[serde(rename = "@classname")]
-    classname: Option<String>,
     #[serde(rename = "@time")]
     time: Option<f64>,
     failure: Option<TestFailureXml>,
@@ -22,7 +19,6 @@ struct TestCaseXml {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct TestFailureXml {
     #[serde(rename = "@message")]
     message: Option<String>,
@@ -31,7 +27,6 @@ struct TestFailureXml {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct TestSuite {
     #[serde(rename = "@name")]
     name: Option<String>,
@@ -50,18 +45,9 @@ struct TestSuite {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct TestSuites {
     #[serde(rename = "testsuite", default)]
     testsuites: Vec<TestSuite>,
-    #[serde(rename = "@tests")]
-    tests: Option<i32>,
-    #[serde(rename = "@failures")]
-    failures: Option<i32>,
-    #[serde(rename = "@errors")]
-    errors: Option<i32>,
-    #[serde(rename = "@time")]
-    time: Option<f64>,
 }
 
 /// Parses a JUnit XML report string into a `TestSummary` and a list of `TestCase` entities.

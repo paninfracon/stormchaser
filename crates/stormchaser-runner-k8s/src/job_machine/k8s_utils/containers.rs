@@ -103,9 +103,10 @@ pub(crate) fn build_k8s_containers(
         }
     }
 
-    // Wrap script
-    let (final_image, final_command, final_args) =
-        wrap_main_command(step_spec, metadata, agent_image.is_some());
+    let cmd_info = wrap_main_command(step_spec, metadata, agent_image.is_some());
+    let final_image = cmd_info.image;
+    let final_command = cmd_info.command;
+    let final_args = cmd_info.args;
 
     let mut container_volume_mounts = volume_mounts;
     if agent_image.is_some()
@@ -146,11 +147,17 @@ pub(crate) fn build_k8s_containers(
     (container, init_containers)
 }
 
+pub(crate) struct ContainerCommandInfo {
+    pub image: String,
+    pub command: Option<Vec<String>>,
+    pub args: Option<Vec<String>>,
+}
+
 pub(crate) fn wrap_main_command(
     step_spec: &StepSpec,
     metadata: &JobMetadata,
     agent_present: bool,
-) -> (String, Option<Vec<String>>, Option<Vec<String>>) {
+) -> ContainerCommandInfo {
     let mut original_cmd = Vec::new();
     if let Some(cmd) = &step_spec.command {
         original_cmd.extend(cmd.clone());
@@ -164,11 +171,11 @@ pub(crate) fn wrap_main_command(
         && (!step_spec.storage_mounts.is_empty() || !metadata.step_dsl.reports.is_empty());
 
     if original_cmd.is_empty() {
-        return (
-            step_spec.image.clone(),
-            step_spec.command.clone(),
-            step_spec.args.clone(),
-        );
+        return ContainerCommandInfo {
+            image: step_spec.image.clone(),
+            command: step_spec.command.clone(),
+            args: step_spec.args.clone(),
+        };
     }
 
     let wrapped_script = if needs_agent {
@@ -240,9 +247,9 @@ pub(crate) fn wrap_main_command(
     let mut new_args = vec!["-c".to_string(), wrapped_script, "--".to_string()];
     new_args.extend(original_cmd);
 
-    (
-        step_spec.image.clone(),
-        Some(vec!["/bin/sh".to_string()]),
-        Some(new_args),
-    )
+    ContainerCommandInfo {
+        image: step_spec.image.clone(),
+        command: Some(vec!["/bin/sh".to_string()]),
+        args: Some(new_args),
+    }
 }
