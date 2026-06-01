@@ -2,6 +2,12 @@
 
 Kubernetes-specific executor for Stormchaser, managing Kubernetes Job lifecycles for distributed workflow step execution.
 
+## State Machine
+
+The runner utilizes a strict Rust Typestate machine to govern the lifecycle of a Kubernetes Job and its integration with the K8s Job Controller API.
+
+![Kubernetes Job State Machine](./states.png)
+
 ---
 
 ## About Stormchaser
