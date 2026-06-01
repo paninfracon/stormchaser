@@ -1,15 +1,60 @@
 stateDiagram-v2
-    [*] --> Initialized: new()
+    direction TB
 
-    Initialized --> Running: adopt(container_name)
-    Initialized --> Running: start() [Success]
-    Initialized --> Finished: start() [Failed]
-    Initialized --> [*]: clean_up(container_name)
+    state "DockerContainerMachine" as SC_MACHINE {
+        [*] --> Initialized : new()
 
-    Running --> Finished: wait()
+        state Initialized {
+            direction TB
+            [*] --> CHECK_AFFINITY
+            CHECK_AFFINITY --> SETUP_VOLUMES : New Container
+            CHECK_AFFINITY --> CREATE_EXEC : Shared & Exists
 
-    Finished --> Succeeded: into_result() [ContainerState::Succeeded]
-    Finished --> Failed: into_result() [ContainerState::Failed]
+            SETUP_VOLUMES --> PULL_IMAGE
+            PULL_IMAGE --> CREATE_CONTAINER
+            CREATE_CONTAINER --> START_CONTAINER
 
-    Succeeded --> [*]
-    Failed --> [*]
+            START_CONTAINER --> CREATE_EXEC : Shared Affinity
+            START_CONTAINER --> [*] : Standard
+            CREATE_EXEC --> [*]
+        }
+
+        Initialized --> Running : start() [Success]
+        Initialized --> Finished : start() [Failed]
+        Initialized --> Running : adopt(container_name)
+        Initialized --> [*] : clean_up(container_name)
+
+        state Running {
+            direction TB
+            state "Docker Daemon (Runtime)" as DOCKER_RUNTIME {
+                [*] --> DOCKER_WAIT_CONTAINER : exec_id == None
+                [*] --> DOCKER_INSPECT_EXEC : exec_id == Some
+
+                DOCKER_WAIT_CONTAINER --> DOCKER_EXITED : wait stream ends
+                DOCKER_INSPECT_EXEC --> DOCKER_INSPECT_EXEC : poll inspect_exec
+                DOCKER_INSPECT_EXEC --> DOCKER_EXITED : running == false
+            }
+
+            state COLLECTING_METRICS {
+                [*] --> RUN_PARKING_AGENT : Storage/Reports configured
+                [*] --> PARSE_LOGS : Adopted (No agent)
+                RUN_PARKING_AGENT --> [*]
+                PARSE_LOGS --> [*]
+            }
+
+            DOCKER_EXITED --> COLLECTING_METRICS
+            COLLECTING_METRICS --> CLEANUP_VOLUMES
+        }
+
+        Running --> Finished : wait()
+
+        state Finished {
+            [*] --> HAS_RESULT
+        }
+
+        Finished --> ContainerState_Succeeded : into_result() [ContainerState::Succeeded]
+        Finished --> ContainerState_Failed : into_result() [ContainerState::Failed]
+
+        ContainerState_Succeeded --> [*]
+        ContainerState_Failed --> [*]
+    }
