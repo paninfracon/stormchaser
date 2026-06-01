@@ -1,0 +1,42 @@
+stormchaser_dsl_version = "v1"
+
+workflow "docker_affinity_scalability" {
+  description = "Tests multiple docker runners and shared affinity."
+
+  steps {
+    step "task_1" "RunContainer" {
+      image   = "alpine:latest"
+      command = ["echo", "Task 1"]
+      next    = ["task_2", "task_3"]
+    }
+
+    step "task_2" "RunContainer" {
+      image   = "alpine:latest"
+      command = ["echo", "Task 2"]
+      next    = ["aff_1"]
+    }
+
+    step "task_3" "RunContainer" {
+      image   = "alpine:latest"
+      command = ["echo", "Task 3"]
+      next    = ["aff_1"]
+    }
+
+    step "aff_1" "RunContainer" {
+      strategy {
+        affinity = "shared"
+      }
+      image   = "alpine:latest"
+      command = ["sh", "-c", "echo 'Affinity Task 1' > /shared.txt"]
+      next    = ["aff_2"]
+    }
+
+    step "aff_2" "RunContainer" {
+      strategy {
+        affinity = "shared"
+      }
+      image   = "alpine:latest"
+      command = ["sh", "-c", "cat /shared.txt"]
+    }
+  }
+}

@@ -63,6 +63,7 @@ async fn test_zombie_step_handler() {
         "shell",
         StepStatus::Running,
         None,
+        None,
         json!({}),
         json!({}),
         Utc::now(),

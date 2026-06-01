@@ -201,6 +201,7 @@ pub async fn insert_step_instance_with_spec<'a, E>(
     step_type: &str,
     status: StepStatus,
     iteration_index: Option<i32>,
+    affinity_context: Option<String>,
     spec: Value,
     params: Value,
     created_at: DateTime<Utc>,
@@ -211,8 +212,8 @@ where
     sqlx::query(
         r#"
                 WITH inserted AS (
-                    INSERT INTO step_instances (id, run_id, step_name, step_type, status, iteration_index, spec, params, created_at)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    INSERT INTO step_instances (id, run_id, step_name, step_type, status, iteration_index, affinity_context, spec, params, created_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                     RETURNING id
                 )
                 INSERT INTO step_status_history (step_instance_id, status)
@@ -225,6 +226,7 @@ where
     .bind(step_type)
     .bind(status)
     .bind(iteration_index)
+    .bind(affinity_context)
     .bind(spec)
     .bind(params)
     .bind(created_at)
@@ -242,6 +244,7 @@ pub async fn insert_step_instance_with_spec_on_conflict_do_nothing<'a, E>(
     step_type: &str,
     status: StepStatus,
     iteration_index: Option<i32>,
+    affinity_context: Option<String>,
     spec: Value,
     params: Value,
     created_at: DateTime<Utc>,
@@ -252,8 +255,8 @@ where
     sqlx::query(
         r#"
             WITH inserted AS (
-                INSERT INTO step_instances (id, run_id, step_name, step_type, status, iteration_index, spec, params, created_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                INSERT INTO step_instances (id, run_id, step_name, step_type, status, iteration_index, affinity_context, spec, params, created_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                 ON CONFLICT DO NOTHING
                 RETURNING id
             )
@@ -267,6 +270,7 @@ where
     .bind(step_type)
     .bind(status)
     .bind(iteration_index)
+    .bind(affinity_context)
     .bind(spec)
     .bind(params)
     .bind(created_at)
@@ -451,4 +455,59 @@ where
     )
     .fetch_all(executor)
     .await
+}
+
+/// Get runner id for a given affinity context in a run.
+pub async fn get_affinity_runner_id<'a, E>(
+    executor: E,
+    run_id: RunId,
+    affinity_context: &str,
+) -> Result<Option<String>, sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    let record: Option<(Option<String>,)> = sqlx::query_as(
+        r#"
+        SELECT runner_id
+        FROM step_instances
+        WHERE run_id = $1 AND affinity_context = $2 AND runner_id IS NOT NULL
+        LIMIT 1
+        "#,
+    )
+    .bind(run_id)
+    .bind(affinity_context)
+    .fetch_optional(executor)
+    .await?;
+
+    Ok(record.and_then(|r| r.0))
+}
+
+/// Get the id of the earliest-dispatched in-flight step for a given affinity context.
+///
+/// This is used to elect an affinity leader so that concurrent dispatches do not
+/// route to different runners before any runner has been established for the group.
+pub async fn get_affinity_leader_step_id<'a, E>(
+    executor: E,
+    run_id: RunId,
+    affinity_context: &str,
+) -> Result<Option<StepInstanceId>, sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    let record: Option<(StepInstanceId,)> = sqlx::query_as(
+        r#"
+        SELECT id
+        FROM step_instances
+        WHERE run_id = $1 AND affinity_context = $2
+          AND status IN ('pending', 'initializing', 'unpacking_sfs', 'running', 'packing_sfs')
+        ORDER BY created_at ASC, id ASC
+        LIMIT 1
+        "#,
+    )
+    .bind(run_id)
+    .bind(affinity_context)
+    .fetch_optional(executor)
+    .await?;
+
+    Ok(record.map(|r| r.0))
 }

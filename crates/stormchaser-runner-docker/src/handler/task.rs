@@ -128,6 +128,7 @@ pub async fn handle_task(
         ContainerMetadata {
             run_id,
             step_id,
+            runner_id: runner_id.clone(),
             fencing_token,
             step_dsl,
             storage,

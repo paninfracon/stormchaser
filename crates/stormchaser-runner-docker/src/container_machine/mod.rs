@@ -22,6 +22,8 @@ pub struct ContainerMetadata {
     pub run_id: Uuid,
     /// The unique identifier of the step being executed.
     pub step_id: Uuid,
+    /// The ID of the current runner.
+    pub runner_id: String,
     /// Monotonically increasing token for preventing duplicate execution.
     pub fencing_token: i64,
     /// The step specification from the workflow DSL.
@@ -83,6 +85,8 @@ pub mod state {
     pub struct Running {
         /// The name of the Docker container.
         pub container_name: String,
+        /// The unique execution identifier.
+        pub exec_id: Option<String>,
         /// The time the container was dispatched to run.
         pub dispatched_at: chrono::DateTime<chrono::Utc>,
         /// Docker volumes that need to be cleaned up after execution.

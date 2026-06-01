@@ -26,27 +26,55 @@ impl DockerContainerMachine<state::Running> {
         let storage_names = self.state.storage_names.clone();
         let mounts = self.state.mounts.clone();
 
-        let mut wait_stream = self.docker.wait_container(
-            &container_name,
-            Some(WaitContainerOptions {
-                condition: "not-running",
-            }),
-        );
+        let mut exit_code = None;
 
-        let exit_code = if let Some(wait_result) = wait_stream.next().await {
-            match wait_result {
-                Ok(response) => Some(response.status_code),
-                Err(bollard::errors::Error::DockerContainerWaitError { error: _, code }) => {
-                    Some(code)
+        if let Some(exec_id) = &self.state.exec_id {
+            // Poll for exec completion. Use a 24-hour deadline as a safety guard against
+            // an exec that never terminates; any per-step timeout is enforced upstream.
+            let deadline =
+                tokio::time::Instant::now() + tokio::time::Duration::from_secs(24 * 3600);
+            loop {
+                if tokio::time::Instant::now() > deadline {
+                    error!("Timed out waiting for exec {} to complete", exec_id);
+                    break;
                 }
-                Err(e) => {
-                    error!("Error waiting for container {}: {:?}", container_name, e);
-                    None
+                match self.docker.inspect_exec(exec_id).await {
+                    Ok(res) => {
+                        if res.running != Some(true) {
+                            exit_code = res.exit_code;
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        error!("Error inspecting exec {}: {:?}", exec_id, e);
+                        break;
+                    }
                 }
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
             }
         } else {
-            None
-        };
+            let mut wait_stream = self.docker.wait_container(
+                &container_name,
+                Some(WaitContainerOptions {
+                    condition: "not-running",
+                }),
+            );
+
+            exit_code = if let Some(wait_result) = wait_stream.next().await {
+                match wait_result {
+                    Ok(response) => Some(response.status_code),
+                    Err(bollard::errors::Error::DockerContainerWaitError { error: _, code }) => {
+                        Some(code)
+                    }
+                    Err(e) => {
+                        error!("Error waiting for container {}: {:?}", container_name, e);
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+        }
 
         let latency_ms = (dispatched_at - self.metadata.received_at)
             .num_milliseconds()
@@ -87,7 +115,11 @@ impl DockerContainerMachine<state::Running> {
         // Cleanup volume and container
         // Wait a bit for log collector (Alloy) to catch the final logs before we delete the container
         sleep(Duration::from_secs(15)).await;
-        let _ = self.docker.remove_container(&container_name, None).await;
+        // Shared containers (exec_id is Some) are reused across affinity steps; only
+        // remove the container when it was created exclusively for this step.
+        if self.state.exec_id.is_none() {
+            let _ = self.docker.remove_container(&container_name, None).await;
+        }
 
         for vol in volumes_to_cleanup {
             info!("Cleaning up volume: {}", vol);
@@ -432,6 +464,7 @@ mod tests {
         ContainerMetadata {
             run_id: Uuid::new_v4(),
             step_id: Uuid::new_v4(),
+            runner_id: "test_runner".to_string(),
             fencing_token: 0,
             step_dsl: Step {
                 name: "test_step".to_string(),

@@ -147,15 +147,66 @@ pub async fn dispatch_step_instance(
         registry_auth,
         timestamp: Utc::now(),
         event_type: EventType::Step(StepEventType::Scheduled),
-        step_dsl: dsl_step_val,
+        step_dsl: dsl_step_val.clone(),
     };
 
     let js = async_nats::jetstream::new(nats_client);
     use stormchaser_model::nats::NatsSubject;
-    let subject = NatsSubject::StepScheduled(
+    let mut subject = NatsSubject::StepScheduled(
         step_type.clone(),
         Some(stormchaser_model::nats::compute_shard_id(&run_id)),
     );
+
+    if let Some(affinity_context) = dsl_step_val
+        .get("strategy")
+        .and_then(|s| s.get("affinity"))
+        .and_then(|a| a.as_str())
+    {
+        if affinity_context == "shared" {
+            let backend = if step_type == "k8s_job" {
+                "k8s"
+            } else {
+                "docker"
+            };
+
+            // Check whether a runner has already been established for this affinity group.
+            let mut maybe_runner_id =
+                crate::db::get_affinity_runner_id(&pool, run_id, affinity_context)
+                    .await
+                    .ok()
+                    .flatten();
+
+            if maybe_runner_id.is_none() {
+                // No runner established yet. Elect a leader: the earliest-created
+                // in-flight step for this affinity group proceeds with load-balanced
+                // routing, while followers wait for that leader's runner_id to appear.
+                // This prevents concurrent dispatches from routing to different runners.
+                if let Ok(Some(leader_id)) =
+                    crate::db::get_affinity_leader_step_id(&pool, run_id, affinity_context).await
+                {
+                    if leader_id != step_instance_id {
+                        // We are a follower: wait up to 30 s for the leader's runner_id.
+                        for _ in 0..60u32 {
+                            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                            if let Ok(Some(rid)) =
+                                crate::db::get_affinity_runner_id(&pool, run_id, affinity_context)
+                                    .await
+                            {
+                                maybe_runner_id = Some(rid);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let Some(runner_id) = maybe_runner_id {
+                subject =
+                    NatsSubject::Custom(format!("stormchaser.v1.runner.{}.{}", backend, runner_id));
+            }
+        }
+    }
+
     publish_cloudevent(
         &js,
         subject,
