@@ -52,8 +52,8 @@ stateDiagram-v2
             [*] --> HAS_RESULT
         }
 
-        Finished --> ContainerState_Succeeded : into_result() [ContainerState::Succeeded]
-        Finished --> ContainerState_Failed : into_result() [ContainerState::Failed]
+        Finished --> ContainerState_Succeeded : into_result() [ContainerState Succeeded]
+        Finished --> ContainerState_Failed : into_result() [ContainerState Failed]
 
         ContainerState_Succeeded --> [*]
         ContainerState_Failed --> [*]

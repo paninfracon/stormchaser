@@ -42,8 +42,8 @@ stateDiagram-v2
             K8S_FAILED --> COLLECTING_METRICS : Watch Stream Terminal
         }
 
-        Running --> JobState_Succeeded : wait() [JobState::Succeeded]
-        Running --> JobState_Failed : wait() [JobState::Failed]
+        Running --> JobState_Succeeded : wait() [JobState Succeeded]
+        Running --> JobState_Failed : wait() [JobState Failed]
 
         state Finished {
             [*] --> FAILED_TO_START
