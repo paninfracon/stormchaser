@@ -54,6 +54,7 @@ async fn setup_app_with_pool() -> Option<(axum::Router, sqlx::PgPool)> {
         .ok()?;
 
     let pool_clone = pool.clone();
+    stormchaser_engine::workers::start_outbox_relay_worker(pool.clone(), nats_client.clone());
     Some((
         app(AppState {
             pool,
@@ -886,7 +887,7 @@ async fn test_run_from_git() {
     .await
     {
         if !e.to_string().contains("Optimistic concurrency") {
-            panic!("handle_workflow_queued failed: {}", e);
+            panic!("handle_workflow_queued failed: {:?}", e);
         }
     }
 

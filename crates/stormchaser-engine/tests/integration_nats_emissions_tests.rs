@@ -40,6 +40,8 @@ async fn setup() -> (
     let tls_config = TlsConfig::default();
     let tls_reloader = Arc::new(TlsReloader::new(tls_config).await.unwrap());
 
+    stormchaser_engine::workers::start_outbox_relay_worker(pool.clone(), nats_client.clone());
+
     (pool, nats_client, tls_reloader, opa_client)
 }
 
