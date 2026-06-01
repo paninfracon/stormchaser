@@ -1,14 +1,56 @@
 stateDiagram-v2
-    [*] --> Initialized: new()
+    direction TB
 
-    Initialized --> Running: adopt(job_name)
-    Initialized --> Running: start() [Success]
-    Initialized --> Finished: start() [Failed]
-    Initialized --> [*]: clean_up(job_name)
+    state "K8sJobMachine" as SC_MACHINE {
+        [*] --> Initialized : new()
 
-    Running --> Succeeded: wait() [JobState::Succeeded]
-    Running --> Failed: wait() [JobState::Failed]
+        state Initialized {
+            [*] --> PARSING_SPEC
+            PARSING_SPEC --> VERSION_CHECK : K8sJobSpec valid
+            VERSION_CHECK --> BUILDING_JOB_SPEC : Validation OK
+            BUILDING_JOB_SPEC --> CREATING_IN_K8S : Post /api/v1/jobs
+            CREATING_IN_K8S --> [*] : 201 Created
+        }
 
-    Finished --> [*]: into_result()
-    Succeeded --> [*]
-    Failed --> [*]
+        Initialized --> Running : start() [Success]
+        Initialized --> Finished : start() [Failed Validation/API Error]
+        Initialized --> Running : adopt()
+        Initialized --> [*] : clean_up()
+
+        state Running {
+            direction TB
+            state "K8s Runtime Machine (Job Controller)" as K8S_RUNTIME {
+                [*] --> K8S_PENDING : Pods unscheduled
+                K8S_PENDING --> K8S_RUNNING : Pod Scheduled / Container Start
+                K8S_RUNNING --> K8S_RUNNING : Watch Stream Update
+
+                K8S_RUNNING --> K8S_RETRY_BACKOFF : Container Exit != 0
+                K8S_RETRY_BACKOFF --> K8S_RUNNING : Re-scheduling Pod
+
+                K8S_RUNNING --> K8S_SUCCEEDED : Job.status.succeeded > 0
+                K8S_RUNNING --> K8S_FAILED : Job.status.failed > 0
+                K8S_RETRY_BACKOFF --> K8S_FAILED : backoffLimit Reached
+            }
+
+            state COLLECTING_METRICS {
+                [*] --> LISTING_PODS : job-name selector
+                LISTING_PODS --> EXTRACTING_EXIT_CODES
+                EXTRACTING_EXIT_CODES --> [*]
+            }
+
+            K8S_SUCCEEDED --> COLLECTING_METRICS : Watch Stream Terminal
+            K8S_FAILED --> COLLECTING_METRICS : Watch Stream Terminal
+        }
+
+        Running --> JobState_Succeeded : wait() [JobState::Succeeded]
+        Running --> JobState_Failed : wait() [JobState::Failed]
+
+        state Finished {
+            [*] --> FAILED_TO_START
+        }
+
+        Finished --> JobState_Failed : into_result()
+
+        JobState_Succeeded --> [*]
+        JobState_Failed --> [*]
+    }
