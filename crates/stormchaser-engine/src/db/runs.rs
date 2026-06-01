@@ -21,6 +21,7 @@ where
                 FROM workflow_runs wr
                 JOIN run_quotas rq ON wr.id = rq.run_id
                 WHERE wr.status IN ('queued', 'resolving', 'start_pending', 'running')
+                FOR UPDATE OF wr SKIP LOCKED
                 "#,
     )
     .fetch_all(executor)
@@ -46,6 +47,7 @@ where
         FROM workflow_runs
         WHERE status = 'resolving'
           AND started_resolving_at < NOW() - INTERVAL '1 minute' * $1
+        FOR UPDATE SKIP LOCKED
         "#,
     )
     .bind(timeout_minutes)

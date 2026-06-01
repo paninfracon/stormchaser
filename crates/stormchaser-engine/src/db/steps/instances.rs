@@ -451,6 +451,7 @@ where
         JOIN runners r ON s.runner_id = r.id
         WHERE s.status IN ('running', 'unpacking_sfs', 'packing_sfs')
         AND (r.status = 'offline' OR r.last_heartbeat_at < NOW() - INTERVAL '30 seconds')
+        FOR UPDATE OF s SKIP LOCKED
         "#,
     )
     .fetch_all(executor)

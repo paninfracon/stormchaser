@@ -21,6 +21,7 @@ use crate::workers::*;
 
 pub async fn setup_nats_consumers(
     nats_client: &async_nats::Client,
+    assigned_shards: &[u32],
 ) -> anyhow::Result<(
     tokio::sync::mpsc::Receiver<
         Result<
@@ -34,10 +35,6 @@ pub async fn setup_nats_consumers(
     let stream = js.get_stream("stormchaser").await?;
 
     let (tx, rx) = tokio::sync::mpsc::channel(1000);
-
-    let assigned_shards_env =
-        std::env::var("STORMCHASER_ASSIGNED_SHARDS").unwrap_or_else(|_| "0".to_string());
-    let assigned_shards = parse_assigned_shards(&assigned_shards_env)?;
 
     for shard in assigned_shards {
         let consumer_name = format!("orchestration-engine-shard-{}", shard);
@@ -65,7 +62,7 @@ pub async fn setup_nats_consumers(
             }
         });
 
-        if shard == 0 {
+        if *shard == 0 {
             let global_consumer_name = "orchestration-engine-global";
             let consumer = stream
                 .get_or_create_consumer(
@@ -121,7 +118,9 @@ pub async fn setup_nats_consumers(
 
     let (query_tx, query_rx) = tokio::sync::mpsc::channel(1000);
     for subject in ["stormchaser.v1.*.step.query", "stormchaser.v1.step.query"] {
-        let mut query_subscriber = nats_client.subscribe(subject).await?;
+        let mut query_subscriber = nats_client
+            .queue_subscribe(subject.to_string(), "engine-query-group".into())
+            .await?;
         let query_tx_clone = query_tx.clone();
         tokio::spawn(async move {
             while let Some(message) = query_subscriber.next().await {
@@ -341,11 +340,17 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
         env!("VERGEN_BUILD_TIMESTAMP")
     );
 
-    start_liveness_worker(pool.clone(), nats_client.clone());
-    start_timeout_worker(pool.clone(), nats_client.clone(), tls_reloader.clone());
-    start_resolver_crash_recovery_worker(pool.clone(), nats_client.clone());
+    let assigned_shards_env =
+        std::env::var("STORMCHASER_ASSIGNED_SHARDS").unwrap_or_else(|_| "0".to_string());
+    let assigned_shards = parse_assigned_shards(&assigned_shards_env)?;
 
-    let (messages, query_messages) = setup_nats_consumers(&nats_client).await?;
+    if assigned_shards.contains(&0) {
+        start_liveness_worker(pool.clone(), nats_client.clone());
+        start_timeout_worker(pool.clone(), nats_client.clone(), tls_reloader.clone());
+        start_resolver_crash_recovery_worker(pool.clone(), nats_client.clone());
+    }
+
+    let (messages, query_messages) = setup_nats_consumers(&nats_client, &assigned_shards).await?;
 
     info!("Engine listening for events and queries");
 
