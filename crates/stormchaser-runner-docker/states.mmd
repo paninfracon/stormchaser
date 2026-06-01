@@ -1,0 +1,15 @@
+stateDiagram-v2
+    [*] --> Initialized: new()
+
+    Initialized --> Running: adopt(container_name)
+    Initialized --> Running: start() [Success]
+    Initialized --> Finished: start() [Failed]
+    Initialized --> [*]: clean_up(container_name)
+
+    Running --> Finished: wait()
+
+    Finished --> Succeeded: into_result() [ContainerState::Succeeded]
+    Finished --> Failed: into_result() [ContainerState::Failed]
+
+    Succeeded --> [*]
+    Failed --> [*]
