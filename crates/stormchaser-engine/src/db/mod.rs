@@ -4,6 +4,8 @@ pub mod archive;
 pub mod connections;
 /// Module for events.
 pub mod events;
+/// Module for outbox.
+pub mod outbox;
 /// Module for quotas.
 pub mod quotas;
 /// Module for runners.
@@ -16,6 +18,7 @@ pub mod steps;
 pub use archive::*;
 pub use connections::*;
 pub use events::*;
+pub use outbox::*;
 pub use quotas::*;
 pub use runners::*;
 pub use runs::*;

@@ -7,7 +7,6 @@ use stormchaser_dsl::ast::Workflow;
 use stormchaser_model::events::{
     EventSource, EventType, WorkflowCompletedEvent, WorkflowEventType,
 };
-use stormchaser_model::nats::publish_cloudevent;
 use stormchaser_model::step::StepStatus;
 use stormchaser_model::RunId;
 use tracing::{error, info};
@@ -16,7 +15,7 @@ pub async fn check_workflow_completion(
     tx: &mut sqlx::PgConnection,
     run_id: RunId,
     workflow: &Workflow,
-    nats_client: async_nats::Client,
+    _nats_client: async_nats::Client,
 ) -> Result<bool> {
     let all_steps_final: Vec<StepInstance> =
         crate::db::get_step_instances_by_run_id(&mut *tx, run_id).await?;
@@ -48,10 +47,9 @@ pub async fn check_workflow_completion(
         let machine = WorkflowMachine::<state::Running>::new_from_run(run.clone());
         let _ = machine.succeed(&mut *tx).await?;
 
-        let js = async_nats::jetstream::new(nats_client.clone());
         use stormchaser_model::nats::NatsSubject;
-        if let Err(e) = publish_cloudevent(
-            &js,
+        if let Err(e) = crate::db::outbox::insert_outbox_event(
+            &mut *tx,
             NatsSubject::RunCompleted(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
             EventType::Workflow(WorkflowEventType::Completed),
             EventSource::Engine,

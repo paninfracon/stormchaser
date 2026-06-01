@@ -11,13 +11,13 @@ use stormchaser_model::workflow::{RunStatus, WorkflowRun};
 use stormchaser_model::RunId;
 use tracing::{debug, error, info};
 
-#[tracing::instrument(skip(payload, pool, opa_client, nats_client), fields(run_id = tracing::field::Empty))]
+#[tracing::instrument(skip(payload, pool, opa_client, _nats_client), fields(run_id = tracing::field::Empty))]
 /// Handle workflow direct.
 pub async fn handle_workflow_direct(
     payload: Value,
     pool: PgPool,
     opa_client: Arc<OpaClient>,
-    nats_client: async_nats::Client,
+    _nats_client: async_nats::Client,
 ) -> Result<()> {
     let run_id_str = payload["run_id"].as_str().context("Missing run_id")?;
     let run_id = uuid::Uuid::parse_str(run_id_str).map(RunId::new)?;
@@ -217,8 +217,6 @@ pub async fn handle_workflow_direct(
     )
     .await?;
 
-    tx.commit().await?;
-
     // 4. Emit event for transition to StartPending
     let event = WorkflowStartPendingEvent {
         run_id,
@@ -226,10 +224,9 @@ pub async fn handle_workflow_direct(
         timestamp: chrono::Utc::now(),
         status: stormchaser_model::workflow::RunStatus::StartPending,
     };
-    let js = async_nats::jetstream::new(nats_client);
     use stormchaser_model::nats::NatsSubject;
-    stormchaser_model::nats::publish_cloudevent(
-        &js,
+    crate::db::outbox::insert_outbox_event(
+        &mut *tx,
         NatsSubject::RunStartPending(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
         EventType::Workflow(WorkflowEventType::StartPending),
         EventSource::System,
@@ -240,10 +237,12 @@ pub async fn handle_workflow_direct(
     .await
     .with_context(|| {
         format!(
-            "Failed to publish start_pending event for direct run {}",
+            "Failed to publish start_pending event to outbox for direct run {}",
             run_id
         )
     })?;
+
+    tx.commit().await?;
 
     info!(
         "Successfully initialized direct one-off workflow run {}",
