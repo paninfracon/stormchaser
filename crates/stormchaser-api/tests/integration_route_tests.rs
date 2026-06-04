@@ -53,11 +53,9 @@ async fn setup_app_with_pool() -> Option<(axum::Router, sqlx::PgPool)> {
         .await
         .ok()?;
 
-    let pool_clone = pool.clone();
-    stormchaser_engine::workers::start_outbox_relay_worker(pool.clone(), nats_client.clone());
     Some((
         app(AppState {
-            pool,
+            pool: pool.clone(),
             nats: nats_client,
             opa: Arc::new(OpaClient::new(None, None)),
             oidc_config: None,
@@ -65,7 +63,7 @@ async fn setup_app_with_pool() -> Option<(axum::Router, sqlx::PgPool)> {
             log_backend: None,
             api_base_url: "http://localhost:3000".to_string(),
         }),
-        pool_clone,
+        pool,
     ))
 }
 

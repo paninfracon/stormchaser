@@ -66,7 +66,7 @@ pub async fn check_workflow_completion(
         .await
         {
             error!(
-                "Failed to publish workflow completed event for {}: {:?}",
+                "Failed to enqueue workflow completed event for {}: {:?}",
                 run_id, e
             );
         }

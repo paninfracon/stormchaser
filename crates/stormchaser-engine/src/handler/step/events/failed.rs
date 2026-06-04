@@ -136,7 +136,7 @@ pub async fn handle_step_failed(
     .await
     {
         error!(
-            "Failed to publish workflow failed event for {}: {:?}",
+            "Failed to enqueue workflow failed event for {}: {:?}",
             run_id, e
         );
     }

@@ -93,7 +93,7 @@ pub fn start_liveness_worker(pool: sqlx::PgPool, _nats_client: async_nats::Clien
                             .await
                             {
                                 tracing::error!(
-                                "Failed to publish zombie failure event for run {} step {}: {:?}",
+                                "Failed to enqueue zombie failure event for run {} step {}: {:?}",
                                 zombie.run_id,
                                 zombie.id,
                                 error
@@ -103,7 +103,9 @@ pub fn start_liveness_worker(pool: sqlx::PgPool, _nats_client: async_nats::Clien
                     }
                     Err(e) => tracing::error!("Failed to fetch zombie steps: {:?}", e),
                 }
-                let _ = tx.commit().await;
+                if let Err(error) = tx.commit().await {
+                    tracing::error!("Failed to commit liveness worker transaction: {:?}", error);
+                }
             }
         }
     });
@@ -111,7 +113,7 @@ pub fn start_liveness_worker(pool: sqlx::PgPool, _nats_client: async_nats::Clien
 
 pub fn start_timeout_worker(
     pool: sqlx::PgPool,
-    _nats_client: async_nats::Client,
+    nats_client: async_nats::Client,
     tls_reloader: Arc<TlsReloader>,
 ) {
     tokio::spawn(async move {
@@ -160,7 +162,7 @@ pub fn start_timeout_worker(
                             if let Err(e) = handler::handle_workflow_timeout(
                                 RunId::new(run.id),
                                 pool.clone(),
-                                _nats_client.clone(),
+                                nats_client.clone(),
                                 tls_reloader.clone(),
                             )
                             .await
@@ -219,7 +221,13 @@ pub fn start_resolver_crash_recovery_worker(pool: sqlx::PgPool, _nats_client: as
                                             Some(stormchaser_model::events::SchemaVersion::new("1.0".to_string())),
                                             None,
                                         ).await;
-                                        let _ = tx.commit().await;
+                                        if let Err(error) = tx.commit().await {
+                                            tracing::error!(
+                                                "Failed to commit resolver crash recovery transaction for run {}: {:?}",
+                                                run_id,
+                                                error
+                                            );
+                                        }
                                     }
                                 }
                             }
@@ -232,10 +240,13 @@ pub fn start_resolver_crash_recovery_worker(pool: sqlx::PgPool, _nats_client: as
     });
 }
 
-pub fn start_outbox_relay_worker(pool: sqlx::PgPool, _nats_client: async_nats::Client) {
+pub fn start_outbox_relay_worker(
+    pool: sqlx::PgPool,
+    nats_client: async_nats::Client,
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_millis(500));
-        let js = async_nats::jetstream::new(_nats_client.clone());
+        let js = async_nats::jetstream::new(nats_client.clone());
 
         loop {
             interval.tick().await;
@@ -258,8 +269,15 @@ pub fn start_outbox_relay_worker(pool: sqlx::PgPool, _nats_client: async_nats::C
                                 .await
                             {
                                 Ok(_) => {
-                                    let _ =
-                                        db::outbox::delete_outbox_event(&mut *tx, event.id).await;
+                                    if let Err(error) =
+                                        db::outbox::delete_outbox_event(&mut *tx, event.id).await
+                                    {
+                                        tracing::error!(
+                                            "Failed to delete outbox event {} after publish: {:?}",
+                                            event.id,
+                                            error
+                                        );
+                                    }
                                 }
                                 Err(e) => {
                                     tracing::error!(
@@ -267,14 +285,26 @@ pub fn start_outbox_relay_worker(pool: sqlx::PgPool, _nats_client: async_nats::C
                                         event.id,
                                         e
                                     );
+                                    if let Err(error) =
+                                        db::outbox::reschedule_outbox_event(&mut *tx, event.id)
+                                            .await
+                                    {
+                                        tracing::error!(
+                                            "Failed to reschedule outbox event {} after publish failure: {:?}",
+                                            event.id,
+                                            error
+                                        );
+                                    }
                                 }
                             }
                         }
                     }
                     Err(e) => tracing::error!("Failed to fetch outbox events: {:?}", e),
                 }
-                let _ = tx.commit().await;
+                if let Err(error) = tx.commit().await {
+                    tracing::error!("Failed to commit outbox relay transaction: {:?}", error);
+                }
             }
         }
-    });
+    })
 }

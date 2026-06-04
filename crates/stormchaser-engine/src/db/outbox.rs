@@ -94,3 +94,22 @@ where
 
     Ok(())
 }
+
+/// Move a failed outbox event to the back of oldest-first processing
+pub async fn reschedule_outbox_event<'e, E>(executor: E, id: Uuid) -> Result<(), sqlx::Error>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    sqlx::query(
+        r#"
+        UPDATE outbox_events
+        SET created_at = NOW()
+        WHERE id = $1
+        "#,
+    )
+    .bind(id)
+    .execute(executor)
+    .await?;
+
+    Ok(())
+}

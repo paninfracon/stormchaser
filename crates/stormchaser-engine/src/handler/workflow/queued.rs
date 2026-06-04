@@ -366,7 +366,7 @@ pub async fn handle_workflow_queued(
         None,
     )
     .await
-    .with_context(|| format!("Failed to publish start_pending event for {}", run_id))?;
+    .with_context(|| format!("Failed to enqueue start_pending event for {}", run_id))?;
 
     tx.commit().await?;
 

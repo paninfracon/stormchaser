@@ -91,7 +91,7 @@ pub async fn handle_workflow_timeout(
             _ => {}
         }
     }
-    // 3. Publish abort event
+    // 3. Enqueue abort event
     let event = WorkflowAbortedEvent {
         run_id,
         event_type: EventType::Workflow(WorkflowEventType::Aborted),
