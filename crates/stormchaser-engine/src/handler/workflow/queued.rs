@@ -13,7 +13,7 @@ use stormchaser_model::RunId;
 use stormchaser_tls::TlsReloader;
 use tracing::{debug, error, info};
 
-#[tracing::instrument(skip(pool, git_cache, opa_client, nats_client, _tls_reloader), fields(run_id = %run_id))]
+#[tracing::instrument(skip(pool, git_cache, opa_client, _nats_client, _tls_reloader), fields(run_id = %run_id))]
 /// Handles the event when a workflow is queued and ready for resolution.
 pub async fn handle_workflow_queued(
     run_id: RunId,
@@ -21,7 +21,7 @@ pub async fn handle_workflow_queued(
     pool: PgPool,
     git_cache: Arc<GitCache>,
     opa_client: Arc<OpaClient>,
-    nats_client: async_nats::Client,
+    _nats_client: async_nats::Client,
     _tls_reloader: Arc<TlsReloader>,
 ) -> Result<()> {
     info!("Handling queued workflow run: {}", run_id);
@@ -329,9 +329,11 @@ pub async fn handle_workflow_queued(
         (serde_json::json!({}), vec![])
     });
 
+    let mut tx = pool.begin().await?;
+
     // 7. Update RunContext with the definition and source code
     crate::db::update_run_context(
-        &pool,
+        &mut *tx,
         serde_json::to_value(&parsed_workflow)?,
         Some(&workflow_content).map(|s| s.as_str()),
         &parsed_workflow.dsl_version,
@@ -344,7 +346,7 @@ pub async fn handle_workflow_queued(
     .with_context(|| format!("Failed to update run context for {}", run_id))?;
 
     // 8. Transition to StartPending
-    let machine = machine.start_pending(&mut *pool.acquire().await?).await?;
+    let machine = machine.start_pending(&mut *tx).await?;
 
     // Emit event for transition to StartPending
     let event = WorkflowStartPendingEvent {
@@ -353,10 +355,9 @@ pub async fn handle_workflow_queued(
         timestamp: chrono::Utc::now(),
         status: stormchaser_model::workflow::RunStatus::StartPending,
     };
-    let js = async_nats::jetstream::new(nats_client);
     use stormchaser_model::nats::NatsSubject;
-    stormchaser_model::nats::publish_cloudevent(
-        &js,
+    crate::db::outbox::insert_outbox_event(
+        &mut *tx,
         NatsSubject::RunStartPending(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
         EventType::Workflow(WorkflowEventType::StartPending),
         EventSource::System,
@@ -365,7 +366,9 @@ pub async fn handle_workflow_queued(
         None,
     )
     .await
-    .with_context(|| format!("Failed to publish start_pending event for {}", run_id))?;
+    .with_context(|| format!("Failed to enqueue start_pending event for {}", run_id))?;
+
+    tx.commit().await?;
 
     // 8. Transition to Running
     let _ = machine.start(&mut *pool.acquire().await?).await?;

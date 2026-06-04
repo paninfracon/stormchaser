@@ -9,7 +9,7 @@ use stormchaser_model::RunId;
 use stormchaser_tls::TlsReloader;
 use uuid::Uuid;
 
-pub fn start_liveness_worker(pool: sqlx::PgPool, nats_client: async_nats::Client) {
+pub fn start_liveness_worker(pool: sqlx::PgPool, _nats_client: async_nats::Client) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(15));
         loop {
@@ -34,74 +34,78 @@ pub fn start_liveness_worker(pool: sqlx::PgPool, nats_client: async_nats::Client
             }
 
             // 2. Detect zombie steps and fail them out
-            match crate::db::steps::fetch_zombie_steps(&pool).await {
-                Ok(zombies) => {
-                    let js = async_nats::jetstream::new(nats_client.clone());
-                    for zombie in zombies {
-                        tracing::warn!(
-                            "Detected zombie step {} (Run {}) on dead runner {}",
-                            zombie.id,
-                            zombie.run_id,
-                            zombie.runner_id.clone().unwrap_or_default()
-                        );
+            if let Ok(mut tx) = pool.begin().await {
+                match crate::db::steps::fetch_zombie_steps(&mut *tx).await {
+                    Ok(zombies) => {
+                        for zombie in zombies {
+                            tracing::warn!(
+                                "Detected zombie step {} (Run {}) on dead runner {}",
+                                zombie.id,
+                                zombie.run_id,
+                                zombie.runner_id.clone().unwrap_or_default()
+                            );
 
-                        let fail_event = stormchaser_model::events::StepFailedEvent {
-                            run_id: zombie.run_id,
-                            step_id: zombie.id,
-                            fencing_token: zombie.fencing_token,
-                            event_type: stormchaser_model::events::EventType::Step(
-                                stormchaser_model::events::StepEventType::Failed,
-                            ),
-                            error: "lost_zombie".to_string(),
-                            runner_id: zombie.runner_id,
-                            exit_code: None,
-                            storage_hashes: None,
-                            artifacts: None,
-                            test_reports: None,
-                            outputs: None,
-                            timestamp: chrono::Utc::now(),
-                        };
+                            let fail_event = stormchaser_model::events::StepFailedEvent {
+                                run_id: zombie.run_id,
+                                step_id: zombie.id,
+                                fencing_token: zombie.fencing_token,
+                                event_type: stormchaser_model::events::EventType::Step(
+                                    stormchaser_model::events::StepEventType::Failed,
+                                ),
+                                error: "lost_zombie".to_string(),
+                                runner_id: zombie.runner_id,
+                                exit_code: None,
+                                storage_hashes: None,
+                                artifacts: None,
+                                test_reports: None,
+                                outputs: None,
+                                timestamp: chrono::Utc::now(),
+                            };
 
-                        let event_payload = match serde_json::to_value(&fail_event) {
-                            Ok(value) => value,
-                            Err(error) => {
-                                tracing::error!(
+                            let event_payload = match serde_json::to_value(&fail_event) {
+                                Ok(value) => value,
+                                Err(error) => {
+                                    tracing::error!(
                                     "Failed to serialize zombie failure event for run {} step {}: {:?}",
                                     fail_event.run_id,
                                     fail_event.step_id,
                                     error
                                 );
-                                continue;
-                            }
-                        };
+                                    continue;
+                                }
+                            };
 
-                        if let Err(error) = stormchaser_model::nats::publish_cloudevent(
-                            &js,
-                            stormchaser_model::nats::NatsSubject::StepFailed(Some(
-                                stormchaser_model::nats::compute_shard_id(&zombie.run_id),
-                            )),
-                            stormchaser_model::events::EventType::Step(
-                                stormchaser_model::events::StepEventType::Failed,
-                            ),
-                            stormchaser_model::events::EventSource::System,
-                            event_payload,
-                            Some(stormchaser_model::events::SchemaVersion::new(
-                                "1.0".to_string(),
-                            )),
-                            None,
-                        )
-                        .await
-                        {
-                            tracing::error!(
-                                "Failed to publish zombie failure event for run {} step {}: {:?}",
+                            if let Err(error) = crate::db::outbox::insert_outbox_event(
+                                &mut *tx,
+                                stormchaser_model::nats::NatsSubject::StepFailed(Some(
+                                    stormchaser_model::nats::compute_shard_id(&zombie.run_id),
+                                )),
+                                stormchaser_model::events::EventType::Step(
+                                    stormchaser_model::events::StepEventType::Failed,
+                                ),
+                                stormchaser_model::events::EventSource::System,
+                                event_payload,
+                                Some(stormchaser_model::events::SchemaVersion::new(
+                                    "1.0".to_string(),
+                                )),
+                                None,
+                            )
+                            .await
+                            {
+                                tracing::error!(
+                                "Failed to enqueue zombie failure event for run {} step {}: {:?}",
                                 zombie.run_id,
                                 zombie.id,
                                 error
                             );
+                            }
                         }
                     }
+                    Err(e) => tracing::error!("Failed to fetch zombie steps: {:?}", e),
                 }
-                Err(e) => tracing::error!("Failed to fetch zombie steps: {:?}", e),
+                if let Err(error) = tx.commit().await {
+                    tracing::error!("Failed to commit liveness worker transaction: {:?}", error);
+                }
             }
         }
     });
@@ -178,7 +182,7 @@ pub fn start_timeout_worker(
     });
 }
 
-pub fn start_resolver_crash_recovery_worker(pool: sqlx::PgPool, nats_client: async_nats::Client) {
+pub fn start_resolver_crash_recovery_worker(pool: sqlx::PgPool, _nats_client: async_nats::Client) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(60));
         loop {
@@ -200,7 +204,7 @@ pub fn start_resolver_crash_recovery_worker(pool: sqlx::PgPool, nats_client: asy
                                             &mut tx,
                                         )
                                         .await;
-                                    if result.is_ok() && tx.commit().await.is_ok() {
+                                    if result.is_ok() {
                                         // Emit failed event
                                         let event = stormchaser_model::events::WorkflowFailedEvent {
                                             run_id,
@@ -208,9 +212,8 @@ pub fn start_resolver_crash_recovery_worker(pool: sqlx::PgPool, nats_client: asy
                                             timestamp: chrono::Utc::now(),
                                             status: stormchaser_model::workflow::RunStatus::Failed,
                                         };
-                                        let js = async_nats::jetstream::new(nats_client.clone());
-                                        let _ = stormchaser_model::nats::publish_cloudevent(
-                                            &js,
+                                        let _ = crate::db::outbox::insert_outbox_event(
+                                            &mut *tx,
                                             stormchaser_model::nats::NatsSubject::RunFailed(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
                                             stormchaser_model::events::EventType::Workflow(stormchaser_model::events::WorkflowEventType::Failed),
                                             stormchaser_model::events::EventSource::System,
@@ -218,6 +221,13 @@ pub fn start_resolver_crash_recovery_worker(pool: sqlx::PgPool, nats_client: asy
                                             Some(stormchaser_model::events::SchemaVersion::new("1.0".to_string())),
                                             None,
                                         ).await;
+                                        if let Err(error) = tx.commit().await {
+                                            tracing::error!(
+                                                "Failed to commit resolver crash recovery transaction for run {}: {:?}",
+                                                run_id,
+                                                error
+                                            );
+                                        }
                                     }
                                 }
                             }
@@ -228,4 +238,73 @@ pub fn start_resolver_crash_recovery_worker(pool: sqlx::PgPool, nats_client: asy
             }
         }
     });
+}
+
+pub fn start_outbox_relay_worker(
+    pool: sqlx::PgPool,
+    nats_client: async_nats::Client,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_millis(500));
+        let js = async_nats::jetstream::new(nats_client.clone());
+
+        loop {
+            interval.tick().await;
+
+            if let Ok(mut tx) = pool.begin().await {
+                match db::outbox::fetch_outbox_events_for_processing(&mut *tx, 100).await {
+                    Ok(events) => {
+                        for event in events {
+                            let mut headers = async_nats::HeaderMap::new();
+                            if let serde_json::Value::Object(map) = event.headers {
+                                for (k, v) in map {
+                                    if let serde_json::Value::String(s) = v {
+                                        headers.insert(k.as_str(), s.as_str());
+                                    }
+                                }
+                            }
+
+                            match js
+                                .publish_with_headers(event.subject, headers, event.payload.into())
+                                .await
+                            {
+                                Ok(_) => {
+                                    if let Err(error) =
+                                        db::outbox::delete_outbox_event(&mut *tx, event.id).await
+                                    {
+                                        tracing::error!(
+                                            "Failed to delete outbox event {} after publish: {:?}",
+                                            event.id,
+                                            error
+                                        );
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        "Failed to publish outbox event {}: {:?}",
+                                        event.id,
+                                        e
+                                    );
+                                    if let Err(error) =
+                                        db::outbox::reschedule_outbox_event(&mut *tx, event.id)
+                                            .await
+                                    {
+                                        tracing::error!(
+                                            "Failed to reschedule outbox event {} after publish failure: {:?}",
+                                            event.id,
+                                            error
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => tracing::error!("Failed to fetch outbox events: {:?}", e),
+                }
+                if let Err(error) = tx.commit().await {
+                    tracing::error!("Failed to commit outbox relay transaction: {:?}", error);
+                }
+            }
+        }
+    })
 }

@@ -97,12 +97,9 @@ pub async fn handle_workflow_start_pending(
     let machine = WorkflowMachine::<state::StartPending>::new_from_run(run.clone());
     let _ = machine.start(&mut *tx).await?;
 
-    tx.commit().await?;
-
-    let js = async_nats::jetstream::new(nats_client.clone());
     use stormchaser_model::nats::NatsSubject;
-    if let Err(e) = stormchaser_model::nats::publish_cloudevent(
-        &js,
+    if let Err(e) = crate::db::outbox::insert_outbox_event(
+        &mut *tx,
         NatsSubject::RunRunning(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
         EventType::Workflow(WorkflowEventType::Running),
         EventSource::Engine,
@@ -119,10 +116,12 @@ pub async fn handle_workflow_start_pending(
     .await
     {
         error!(
-            "Failed to publish workflow running event for {}: {:?}",
+            "Failed to publish workflow running event to outbox for {}: {:?}",
             run_id, e
         );
     }
+
+    tx.commit().await?;
 
     crate::RUNS_STARTED.add(
         1,

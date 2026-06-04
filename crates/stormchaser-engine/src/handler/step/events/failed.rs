@@ -7,7 +7,6 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use stormchaser_model::events::WorkflowFailedEvent;
 use stormchaser_model::events::{EventSource, EventType, WorkflowEventType};
-use stormchaser_model::nats::publish_cloudevent;
 use stormchaser_tls::TlsReloader;
 use tracing::{error, info};
 
@@ -118,10 +117,9 @@ pub async fn handle_step_failed(
         .fail(format!("Step {} failed: {}", step_id, error_msg), &mut *tx)
         .await?;
 
-    let js = async_nats::jetstream::new(nats_client.clone());
     use stormchaser_model::nats::NatsSubject;
-    if let Err(e) = publish_cloudevent(
-        &js,
+    if let Err(e) = crate::db::outbox::insert_outbox_event(
+        &mut *tx,
         NatsSubject::RunFailed(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
         EventType::Workflow(WorkflowEventType::Failed),
         EventSource::Engine,
@@ -138,7 +136,7 @@ pub async fn handle_step_failed(
     .await
     {
         error!(
-            "Failed to publish workflow failed event for {}: {:?}",
+            "Failed to enqueue workflow failed event for {}: {:?}",
             run_id, e
         );
     }

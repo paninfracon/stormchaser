@@ -4,6 +4,7 @@ use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use std::env::var;
 use std::sync::Arc;
+use tokio::task::JoinHandle;
 
 use stormchaser_engine::handler;
 use stormchaser_engine::handler::runner::handle_runner_heartbeat;
@@ -14,11 +15,20 @@ use stormchaser_model::step::StepInstance;
 use stormchaser_model::RunId;
 use stormchaser_tls::{TlsConfig, TlsReloader};
 
+struct RelayWorkerGuard(JoinHandle<()>);
+
+impl Drop for RelayWorkerGuard {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 async fn setup() -> (
     sqlx::PgPool,
     async_nats::Client,
     Arc<TlsReloader>,
     Arc<OpaClient>,
+    RelayWorkerGuard,
 ) {
     let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
@@ -40,12 +50,21 @@ async fn setup() -> (
     let tls_config = TlsConfig::default();
     let tls_reloader = Arc::new(TlsReloader::new(tls_config).await.unwrap());
 
-    (pool, nats_client, tls_reloader, opa_client)
+    let relay_worker =
+        stormchaser_engine::workers::start_outbox_relay_worker(pool.clone(), nats_client.clone());
+
+    (
+        pool,
+        nats_client,
+        tls_reloader,
+        opa_client,
+        RelayWorkerGuard(relay_worker),
+    )
 }
 
 #[tokio::test]
 async fn test_step_lifecycle_emits_workflow_succeeded() {
-    let (pool, nats_client, tls_reloader, opa_client) = setup().await;
+    let (pool, nats_client, tls_reloader, opa_client, _relay_worker_guard) = setup().await;
     let run_id = RunId::new_v4();
 
     let mut subscriber = nats_client.subscribe("stormchaser.v1.>").await.unwrap();
@@ -150,7 +169,7 @@ async fn test_step_lifecycle_emits_workflow_succeeded() {
 
 #[tokio::test]
 async fn test_workflow_timeout_emits_workflow_failed() {
-    let (pool, nats_client, tls_reloader, opa_client) = setup().await;
+    let (pool, nats_client, tls_reloader, opa_client, _relay_worker_guard) = setup().await;
     let run_id = RunId::new_v4();
 
     let mut subscriber = nats_client.subscribe("stormchaser.v1.>").await.unwrap();
@@ -218,7 +237,7 @@ async fn test_workflow_timeout_emits_workflow_failed() {
 
 #[tokio::test]
 async fn test_runner_heartbeat_updates_db() {
-    let (pool, _nats_client, _tls_reloader, _opa_client) = setup().await;
+    let (pool, _nats_client, _tls_reloader, _opa_client, _relay_worker_guard) = setup().await;
 
     let runner_id = uuid::Uuid::new_v4().to_string();
 

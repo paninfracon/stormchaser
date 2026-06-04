@@ -11,12 +11,12 @@ use stormchaser_model::RunId;
 use stormchaser_tls::TlsReloader;
 use tracing::info;
 
-#[tracing::instrument(skip(pool, nats_client, _tls_reloader), fields(run_id = %run_id))]
+#[tracing::instrument(skip(pool, _nats_client, _tls_reloader), fields(run_id = %run_id))]
 /// Handle workflow timeout.
 pub async fn handle_workflow_timeout(
     run_id: RunId,
     pool: PgPool,
-    nats_client: async_nats::Client,
+    _nats_client: async_nats::Client,
     _tls_reloader: Arc<TlsReloader>,
 ) -> Result<()> {
     info!("Workflow {} timed out, aborting", run_id);
@@ -91,19 +91,16 @@ pub async fn handle_workflow_timeout(
             _ => {}
         }
     }
-    tx.commit().await?;
-
-    // 3. Publish abort event
+    // 3. Enqueue abort event
     let event = WorkflowAbortedEvent {
         run_id,
         event_type: EventType::Workflow(WorkflowEventType::Aborted),
         timestamp: chrono::Utc::now(),
         status: stormchaser_model::workflow::RunStatus::Aborted,
     };
-    let js = async_nats::jetstream::new(nats_client);
     use stormchaser_model::nats::NatsSubject;
-    stormchaser_model::nats::publish_cloudevent(
-        &js,
+    crate::db::outbox::insert_outbox_event(
+        &mut *tx,
         NatsSubject::RunAborted(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
         EventType::Workflow(WorkflowEventType::Aborted),
         EventSource::System,
@@ -113,6 +110,7 @@ pub async fn handle_workflow_timeout(
     )
     .await?;
 
+    tx.commit().await?;
     // 4. Archive
     archive_workflow(run_id, pool).await?;
 

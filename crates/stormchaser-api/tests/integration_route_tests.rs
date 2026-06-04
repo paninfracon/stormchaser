@@ -53,10 +53,9 @@ async fn setup_app_with_pool() -> Option<(axum::Router, sqlx::PgPool)> {
         .await
         .ok()?;
 
-    let pool_clone = pool.clone();
     Some((
         app(AppState {
-            pool,
+            pool: pool.clone(),
             nats: nats_client,
             opa: Arc::new(OpaClient::new(None, None)),
             oidc_config: None,
@@ -64,7 +63,7 @@ async fn setup_app_with_pool() -> Option<(axum::Router, sqlx::PgPool)> {
             log_backend: None,
             api_base_url: "http://localhost:3000".to_string(),
         }),
-        pool_clone,
+        pool,
     ))
 }
 
@@ -886,7 +885,7 @@ async fn test_run_from_git() {
     .await
     {
         if !e.to_string().contains("Optimistic concurrency") {
-            panic!("handle_workflow_queued failed: {}", e);
+            panic!("handle_workflow_queued failed: {:?}", e);
         }
     }
 
