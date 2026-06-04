@@ -1,9 +1,14 @@
 stateDiagram-v2
     [*] --> Pending: new()
 
+    Pending --> Initializing: initializing(runner_id)
     Pending --> Running: start(runner_id)
     Pending --> UnpackingSfs: start_unpacking(runner_id)
-    Pending --> Skipped: skip()
+    Pending --> Failed: fail(error)
+
+    Initializing --> Running: start()
+    Initializing --> UnpackingSfs: start_unpacking(runner_id)
+    Initializing --> Failed: fail(error)
 
     UnpackingSfs --> Running: start_running()
     UnpackingSfs --> Failed: fail(error)
@@ -14,12 +19,14 @@ stateDiagram-v2
     Running --> Failed: fail(error)
     Running --> WaitingForEvent: wait_for_event()
     Running --> Aborted: abort()
+    Running --> LostZombie: zombify()
 
     PackingSfs --> Succeeded: succeed()
     PackingSfs --> Failed: fail(error)
 
     WaitingForEvent --> Running: resume()
     WaitingForEvent --> Pending: reschedule()
+    WaitingForEvent --> Failed: fail(error)
 
     Failed --> FailedIgnored: ignore_failure()
 
@@ -28,3 +35,4 @@ stateDiagram-v2
     Failed --> [*]
     FailedIgnored --> [*]
     Aborted --> [*]
+    LostZombie --> [*]

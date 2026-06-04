@@ -2,6 +2,12 @@
 
 Docker-specific executor for Stormchaser, managing Docker container lifecycles for distributed workflow step execution.
 
+## State Machine
+
+The runner utilizes a strict Rust Typestate machine to govern the lifecycle of a Docker Container and its integration with the Docker Engine API.
+
+![Docker Container State Machine](./states.png)
+
 ---
 
 ## About Stormchaser
