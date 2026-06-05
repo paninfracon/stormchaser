@@ -99,10 +99,13 @@ pub async fn validate_connection(payload: &TestConnectionRequest) -> (bool, Stri
                     Err(reason) => return (false, reason),
                 };
 
-                let mut client_builder = reqwest::Client::builder().timeout(HTTP_TEST_TIMEOUT);
-                for ip in resolved_ips {
-                    client_builder = client_builder.resolve(&host, SocketAddr::new(ip, port));
-                }
+                let resolved_addrs = resolved_ips
+                    .into_iter()
+                    .map(|ip| SocketAddr::new(ip, port))
+                    .collect::<Vec<_>>();
+                let client_builder = reqwest::Client::builder()
+                    .timeout(HTTP_TEST_TIMEOUT)
+                    .resolve_to_addrs(&host, &resolved_addrs);
                 let client = match client_builder.build() {
                     Ok(c) => c,
                     Err(e) => return (false, format!("Failed to build client: {}", e)),
