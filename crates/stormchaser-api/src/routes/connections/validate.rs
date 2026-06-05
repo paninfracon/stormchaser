@@ -1,15 +1,32 @@
 use super::TestConnectionRequest;
 use aws_config::Region;
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
 const HTTP_TEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+fn is_blocked_ip(ip: IpAddr) -> bool {
+    if ip.is_loopback() || ip.is_multicast() {
+        return true;
+    }
+
+    match ip {
+        IpAddr::V4(v4) => v4.is_private() || v4.is_link_local(),
+        IpAddr::V6(v6) => {
+            // Block IPv6 link-local (fe80::/10) and unique-local (fc00::/7).
+            let octets = v6.octets();
+            let is_link_local = octets[0] == 0xfe && (octets[1] & 0xc0) == 0x80;
+            let is_unique_local = octets[0] & 0xfe == 0xfc;
+            is_link_local || is_unique_local
+        }
+    }
+}
 
 /// Validate that a URL is safe to connect to (SSRF protection).
 ///
 /// Allows only `http` and `https` schemes and blocks loopback, link-local, and
 /// RFC-1918 private addresses to prevent Server-Side Request Forgery attacks.
-fn validate_url_safe(raw_url: &str) -> Result<(), String> {
+async fn validate_url_safe(raw_url: &str) -> Result<(url::Url, String, u16, Vec<IpAddr>), String> {
     let parsed = url::Url::parse(raw_url).map_err(|e| format!("Invalid URL: {}", e))?;
 
     match parsed.scheme() {
@@ -24,48 +41,21 @@ fn validate_url_safe(raw_url: &str) -> Result<(), String> {
 
     let host = parsed
         .host_str()
-        .ok_or_else(|| "URL has no host".to_string())?;
+        .ok_or_else(|| "URL has no host".to_string())?
+        .to_string();
+    let port = parsed
+        .port_or_known_default()
+        .ok_or_else(|| "URL has no known port for scheme".to_string())?;
 
     // Reject bare IP addresses that fall in restricted ranges.
     if let Ok(ip) = host.parse::<IpAddr>() {
-        if ip.is_loopback() {
+        if is_blocked_ip(ip) {
             return Err(format!(
-                "Disallowed host '{}': loopback addresses are not permitted",
+                "Disallowed host '{}': non-public addresses are not permitted",
                 host
             ));
         }
-        match ip {
-            IpAddr::V4(v4) => {
-                if v4.is_private() {
-                    return Err(format!(
-                        "Disallowed host '{}': private addresses are not permitted",
-                        host
-                    ));
-                }
-                if v4.is_link_local() {
-                    return Err(format!(
-                        "Disallowed host '{}': link-local addresses are not permitted",
-                        host
-                    ));
-                }
-            }
-            IpAddr::V6(v6) => {
-                // Block IPv6 link-local (fe80::/10) and unique-local (fc00::/7).
-                let octets = v6.octets();
-                if octets[0] == 0xfe && (octets[1] & 0xc0) == 0x80 {
-                    return Err(format!(
-                        "Disallowed host '{}': IPv6 link-local addresses are not permitted",
-                        host
-                    ));
-                }
-                if octets[0] & 0xfe == 0xfc {
-                    return Err(format!(
-                        "Disallowed host '{}': IPv6 unique-local addresses are not permitted",
-                        host
-                    ));
-                }
-            }
-        }
+        return Ok((parsed, host, port, vec![ip]));
     }
 
     // Reject well-known loopback/link-local hostnames regardless of case.
@@ -77,24 +67,48 @@ fn validate_url_safe(raw_url: &str) -> Result<(), String> {
         ));
     }
 
-    Ok(())
+    let resolved_ips = tokio::net::lookup_host((host.as_str(), port))
+        .await
+        .map_err(|e| format!("Failed to resolve host '{}': {}", host, e))?
+        .map(|addr| addr.ip())
+        .collect::<Vec<_>>();
+
+    if resolved_ips.is_empty() {
+        return Err(format!("Host '{}' did not resolve to any addresses", host));
+    }
+
+    for ip in &resolved_ips {
+        if is_blocked_ip(*ip) {
+            return Err(format!(
+                "Disallowed host '{}': resolved to non-public address {}",
+                host, ip
+            ));
+        }
+    }
+
+    Ok((parsed, host, port, resolved_ips))
 }
 
 pub async fn validate_connection(payload: &TestConnectionRequest) -> (bool, String) {
     match payload.connection_type {
         stormchaser_model::connections::ConnectionType::HttpApi => {
             if let Some(base_url) = payload.config.get("base_url").and_then(|v| v.as_str()) {
-                if let Err(reason) = validate_url_safe(base_url) {
-                    return (false, reason);
-                }
-                let client = match reqwest::Client::builder()
-                    .timeout(HTTP_TEST_TIMEOUT)
-                    .build()
+                let (parsed_url, host, port, resolved_ips) = match validate_url_safe(base_url).await
                 {
+                    Ok(validated) => validated,
+                    Err(reason) => return (false, reason),
+                };
+
+                let mut client_builder = reqwest::Client::builder().timeout(HTTP_TEST_TIMEOUT);
+                for ip in resolved_ips {
+                    client_builder = client_builder.resolve(&host, SocketAddr::new(ip, port));
+                }
+                let client = match client_builder.build() {
                     Ok(c) => c,
                     Err(e) => return (false, format!("Failed to build client: {}", e)),
                 };
-                let mut req = client.get(base_url);
+
+                let mut req = client.get(parsed_url);
                 if let Some(headers) = payload.config.get("headers").and_then(|v| v.as_object()) {
                     for (k, v) in headers {
                         if let Some(s) = v.as_str() {
@@ -273,5 +287,28 @@ pub async fn validate_connection(payload: &TestConnectionRequest) -> (bool, Stri
             true,
             "Connection type validation not implemented".to_string(),
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_blocked_ip;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    #[test]
+    fn blocks_ipv4_multicast() {
+        assert!(is_blocked_ip(IpAddr::V4(Ipv4Addr::new(224, 0, 0, 1))));
+    }
+
+    #[test]
+    fn blocks_ipv6_multicast() {
+        assert!(is_blocked_ip(IpAddr::V6(Ipv6Addr::new(
+            0xff00, 0, 0, 0, 0, 0, 0, 1
+        ))));
+    }
+
+    #[test]
+    fn allows_public_ipv4() {
+        assert!(!is_blocked_ip(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))));
     }
 }
