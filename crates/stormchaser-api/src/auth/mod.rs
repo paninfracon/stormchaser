@@ -107,9 +107,16 @@ impl FromRequestParts<AppState> for AuthClaims {
 #[cfg(test)]
 mod tests {
     use super::{resolve_jwt_secret, JWT_SECRET};
+    use std::sync::{Mutex, OnceLock};
+
+    fn jwt_secret_env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     #[test]
     fn resolve_jwt_secret_uses_env_when_present() {
+        let _guard = jwt_secret_env_lock().lock().expect("lock poisoned");
         unsafe {
             std::env::set_var("STORMCHASER_JWT_SECRET", "test-secret");
         }
@@ -122,6 +129,7 @@ mod tests {
 
     #[test]
     fn resolve_jwt_secret_rejects_empty_env() {
+        let _guard = jwt_secret_env_lock().lock().expect("lock poisoned");
         unsafe {
             std::env::set_var("STORMCHASER_JWT_SECRET", "");
         }
@@ -134,6 +142,7 @@ mod tests {
 
     #[test]
     fn resolve_jwt_secret_debug_fallback_matches_constant() {
+        let _guard = jwt_secret_env_lock().lock().expect("lock poisoned");
         unsafe {
             std::env::remove_var("STORMCHASER_JWT_SECRET");
         }
