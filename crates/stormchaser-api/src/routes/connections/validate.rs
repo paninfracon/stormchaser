@@ -11,6 +11,9 @@ const HTTP_TEST_TIMEOUT: Duration = Duration::from_secs(10);
 /// IPv4-mapped IPv6 (`::ffff:a.b.c.d`) is unwrapped so it can't smuggle a
 /// restricted v4 address past the v6 checks.
 fn is_blocked_ip(ip: IpAddr) -> bool {
+    if ip.is_multicast() {
+        return true;
+    }
     match ip {
         IpAddr::V4(v4) => {
             v4.is_loopback()
@@ -300,5 +303,58 @@ pub async fn validate_connection(payload: &TestConnectionRequest) -> (bool, Stri
             true,
             "Connection type validation not implemented".to_string(),
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_blocked_ip;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    fn ip(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn blocks_loopback_private_linklocal_metadata_and_mapped() {
+        for s in [
+            "127.0.0.1",
+            "10.0.0.1",
+            "192.168.1.1",
+            "172.16.0.1",
+            "169.254.169.254", // cloud metadata (link-local)
+            "0.0.0.0",
+            "::1",
+            "fe80::1",                // IPv6 link-local
+            "fc00::1",                // IPv6 unique-local
+            "::ffff:127.0.0.1",       // IPv4-mapped loopback
+            "::ffff:169.254.169.254", // IPv4-mapped metadata
+        ] {
+            assert!(is_blocked_ip(ip(s)), "expected {} to be blocked", s);
+        }
+    }
+
+    #[test]
+    fn blocks_ipv4_multicast() {
+        assert!(is_blocked_ip(IpAddr::V4(Ipv4Addr::new(224, 0, 0, 1))));
+    }
+
+    #[test]
+    fn blocks_ipv6_multicast() {
+        assert!(is_blocked_ip(IpAddr::V6(Ipv6Addr::new(
+            0xff00, 0, 0, 0, 0, 0, 0, 1
+        ))));
+    }
+
+    #[test]
+    fn allows_public_addresses() {
+        for s in [
+            "8.8.8.8",
+            "1.1.1.1",
+            "93.184.216.34",
+            "2606:4700:4700::1111",
+        ] {
+            assert!(!is_blocked_ip(ip(s)), "expected {} to be allowed", s);
+        }
     }
 }
