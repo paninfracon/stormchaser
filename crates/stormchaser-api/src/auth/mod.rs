@@ -14,6 +14,16 @@ pub use stormchaser_model::auth::Claims;
 /// Fallback JWT secret for local development
 pub const JWT_SECRET: &[u8] = b"stormchaser-secret-dev-only"; // Fallback for local dev
 
+/// Resolves the JWT secret used for signing and validating local Stormchaser tokens.
+pub fn resolve_jwt_secret() -> Result<Vec<u8>, &'static str> {
+    match std::env::var("STORMCHASER_JWT_SECRET") {
+        Ok(value) if !value.is_empty() => Ok(value.into_bytes()),
+        Ok(_) => Err("STORMCHASER_JWT_SECRET must not be empty"),
+        Err(_) if cfg!(debug_assertions) => Ok(JWT_SECRET.to_vec()),
+        Err(_) => Err("STORMCHASER_JWT_SECRET must be set"),
+    }
+}
+
 /// Extractor for authenticated user claims
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthClaims(pub Claims);
@@ -78,11 +88,66 @@ impl FromRequestParts<AppState> for AuthClaims {
         // Skip audience/issuer check for local tokens as they don't have them set usually in the current model
         validation.required_spec_claims.remove("aud");
 
-        let token_data =
-            decode::<Claims>(token, &DecodingKey::from_secret(JWT_SECRET), &validation)
-                .inspect_err(|e| tracing::error!("JWT decode failed: {:?}", e))
-                .map_err(|_| StatusCode::UNAUTHORIZED)?;
+        let jwt_secret = resolve_jwt_secret()
+            .inspect_err(|e| tracing::error!("JWT secret configuration error: {}", e))
+            .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+        let token_data = decode::<Claims>(
+            token,
+            &DecodingKey::from_secret(jwt_secret.as_slice()),
+            &validation,
+        )
+        .inspect_err(|e| tracing::error!("JWT decode failed: {:?}", e))
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
 
         Ok(AuthClaims(token_data.claims))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{resolve_jwt_secret, JWT_SECRET};
+    use std::sync::{Mutex, OnceLock};
+
+    fn jwt_secret_env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    #[test]
+    fn resolve_jwt_secret_uses_env_when_present() {
+        let _guard = jwt_secret_env_lock().lock().expect("lock poisoned");
+        unsafe {
+            std::env::set_var("STORMCHASER_JWT_SECRET", "test-secret");
+        }
+        let resolved = resolve_jwt_secret().expect("secret should resolve from env");
+        assert_eq!(resolved, b"test-secret".to_vec());
+        unsafe {
+            std::env::remove_var("STORMCHASER_JWT_SECRET");
+        }
+    }
+
+    #[test]
+    fn resolve_jwt_secret_rejects_empty_env() {
+        let _guard = jwt_secret_env_lock().lock().expect("lock poisoned");
+        unsafe {
+            std::env::set_var("STORMCHASER_JWT_SECRET", "");
+        }
+        let err = resolve_jwt_secret().expect_err("empty secret should be rejected");
+        assert_eq!(err, "STORMCHASER_JWT_SECRET must not be empty");
+        unsafe {
+            std::env::remove_var("STORMCHASER_JWT_SECRET");
+        }
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    fn resolve_jwt_secret_debug_fallback_matches_constant() {
+        let _guard = jwt_secret_env_lock().lock().expect("lock poisoned");
+        unsafe {
+            std::env::remove_var("STORMCHASER_JWT_SECRET");
+        }
+        let resolved = resolve_jwt_secret().expect("debug fallback should resolve");
+        assert_eq!(resolved, JWT_SECRET.to_vec());
     }
 }

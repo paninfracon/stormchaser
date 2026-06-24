@@ -1,6 +1,6 @@
 use super::{AuthExchangeRequest, AuthExchangeResponse, AuthRefreshRequest};
 use crate::auth;
-use crate::{AppState, Claims, JWT_SECRET};
+use crate::{AppState, Claims};
 use axum::{
     extract::{Query, State},
     http::StatusCode,
@@ -196,10 +196,15 @@ pub async fn exchange_token(
         exp: expiration,
     };
 
+    let jwt_secret = auth::resolve_jwt_secret().map_err(|e| {
+        tracing::error!("JWT secret configuration error: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
     let token = encode(
         &Header::default(),
         &claims,
-        &EncodingKey::from_secret(JWT_SECRET),
+        &EncodingKey::from_secret(jwt_secret.as_slice()),
     )
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -331,10 +336,15 @@ pub async fn refresh_token(
         exp: expiration,
     };
 
+    let jwt_secret = auth::resolve_jwt_secret().map_err(|e| {
+        tracing::error!("JWT secret configuration error: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
     let token = encode(
         &Header::default(),
         &claims,
-        &EncodingKey::from_secret(JWT_SECRET),
+        &EncodingKey::from_secret(jwt_secret.as_slice()),
     )
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
