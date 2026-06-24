@@ -141,6 +141,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(debug_assertions)]
     fn resolve_jwt_secret_debug_fallback_matches_constant() {
         let _guard = jwt_secret_env_lock().lock().expect("lock poisoned");
         unsafe {

@@ -7,7 +7,8 @@ const HTTP_TEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// True if `ip` is in a range Stormchaser must never connect to — loopback,
 /// private (RFC-1918), link-local (169.254.0.0/16, incl. the 169.254.169.254
-/// cloud-metadata address), unspecified/broadcast, and the IPv6 equivalents.
+/// cloud-metadata address), unspecified/broadcast, multicast (IPv4 224.0.0.0/4,
+/// IPv6 ff00::/8), and the IPv6 equivalents.
 /// IPv4-mapped IPv6 (`::ffff:a.b.c.d`) is unwrapped so it can't smuggle a
 /// restricted v4 address past the v6 checks.
 fn is_blocked_ip(ip: IpAddr) -> bool {
