@@ -1,5 +1,6 @@
+use crate::auth::resolve_jwt_secret;
 use crate::db::insert_approval_registry;
-use crate::{AppState, JWT_SECRET};
+use crate::AppState;
 use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
@@ -52,9 +53,20 @@ pub async fn approve_step_link(
     State(state): State<AppState>,
     Path(token): Path<String>,
 ) -> impl IntoResponse {
-    // 1. Derive key from JWT_SECRET
+    // 1. Derive key from configured JWT secret
+    let jwt_secret = match resolve_jwt_secret() {
+        Ok(secret) => secret,
+        Err(error) => {
+            tracing::error!("JWT secret configuration error: {}", error);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "JWT secret configuration error",
+            )
+                .into_response();
+        }
+    };
     let mut hasher = Sha256::new();
-    hasher.update(JWT_SECRET);
+    hasher.update(jwt_secret.as_slice());
     let key_bytes = hasher.finalize();
     let key = aes_gcm::Key::<Aes256Gcm>::from_slice(&key_bytes);
     let cipher = Aes256Gcm::new(key);
