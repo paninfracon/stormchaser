@@ -187,8 +187,9 @@ pub fn app(state: AppState) -> Router {
         burst_size,
     });
 
-    #[allow(unused_mut)]
-    let mut authenticated_routes = Router::new()
+    // Every route here requires a valid bearer token, enforced by `require_auth` below
+    // whether or not the handler also extracts `AuthClaims`.
+    let authenticated_routes = Router::new()
         .route("/runs", get(list_workflow_runs).post(enqueue_workflow))
         .route("/runs/stream", get(stream_workflow_runs_api))
         .route(
@@ -238,22 +239,36 @@ pub fn app(state: AppState) -> Router {
                 .delete(delete_connection),
         )
         .route("/connections/test", post(test_connection))
-        .route("/schema/parse-git", post(routes::schema::parse_git));
+        .route("/schema/parse-git", post(routes::schema::parse_git))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            opa_middleware,
+        ))
+        // Added last so it runs first: unauthenticated requests get 401 before policy
+        // is consulted.
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth::require_auth,
+        ));
 
+    // The MCP transport is governed by policy alone (see docs/security.md): clients
+    // connect without a token and the tool calls it proxies arrive unauthenticated.
+    #[allow(unused_mut)]
+    let mut policy_only_routes = Router::new();
     #[cfg(feature = "mcp")]
     {
         if let Some(service) = mcp_service(&state.api_base_url, &state.mcp_allowed_hosts) {
-            authenticated_routes = authenticated_routes.nest_service("/mcp", service);
+            policy_only_routes = policy_only_routes.nest_service("/mcp", service);
         }
     }
-
-    let authenticated_routes = authenticated_routes.layer(middleware::from_fn_with_state(
+    let policy_only_routes = policy_only_routes.layer(middleware::from_fn_with_state(
         state.clone(),
         opa_middleware,
     ));
 
     let api_v1 = Router::new()
         .merge(authenticated_routes)
+        .merge(policy_only_routes)
         .route("/webhooks/{id}", post(handle_webhook))
         .route("/auth/login", get(login))
         .route("/auth/exchange", post(exchange_token))

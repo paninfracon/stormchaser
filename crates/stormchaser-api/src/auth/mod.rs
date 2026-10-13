@@ -28,6 +28,96 @@ pub fn resolve_jwt_secret() -> Result<Vec<u8>, &'static str> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthClaims(pub Claims);
 
+/// Validates the bearer token in `headers` and returns its claims.
+///
+/// Tokens issued by the configured OIDC provider are checked against its keys, audience
+/// and issuer; otherwise the token must be signed with the local secret.
+pub async fn authenticate(
+    headers: &axum::http::HeaderMap,
+    state: &AppState,
+) -> Result<Claims, StatusCode> {
+    let auth_header = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    if !auth_header.starts_with("Bearer ") {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let token = &auth_header["Bearer ".len()..];
+
+    // 1. Try OIDC/Dex validation if configured
+    if let Some(oidc_config) = &state.oidc_config {
+        if let Ok(header) = decode_header(token) {
+            if let Some(kid) = header.kid {
+                let mut jwk_opt = state.jwks.read().await.get(&kid).cloned();
+
+                if jwk_opt.is_none() {
+                    tracing::warn!("kid {} not found in JWKS cache, attempting refresh", kid);
+                    let new_jwks = crate::auth::jwks::fetch_jwks(&oidc_config.jwks_url).await;
+                    let mut jwks_write = state.jwks.write().await;
+                    *jwks_write = new_jwks;
+                    jwk_opt = jwks_write.get(&kid).cloned();
+                }
+
+                if let Some(jwk) = jwk_opt {
+                    let mut validation = Validation::new(header.alg);
+                    validation.set_audience(std::slice::from_ref(&oidc_config.client_id));
+                    validation.set_issuer(&[
+                        oidc_config.issuer.as_str(),
+                        oidc_config.external_issuer.as_str(),
+                    ]);
+
+                    if let Ok(decoding_key) = DecodingKey::from_jwk(&jwk) {
+                        if let Ok(token_data) = decode::<Claims>(token, &decoding_key, &validation)
+                        {
+                            return Ok(token_data.claims);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Fallback to local secret for legacy/dev tokens
+    let mut validation = Validation {
+        validate_exp: true,
+        ..Default::default()
+    };
+    // Skip audience/issuer check for local tokens as they don't have them set usually in the current model
+    validation.required_spec_claims.remove("aud");
+
+    let jwt_secret = resolve_jwt_secret()
+        .inspect_err(|e| tracing::error!("JWT secret configuration error: {}", e))
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    let token_data = decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(jwt_secret.as_slice()),
+        &validation,
+    )
+    .inspect_err(|e| tracing::error!("JWT decode failed: {:?}", e))
+    .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    Ok(token_data.claims)
+}
+
+/// Middleware that rejects any request without a valid bearer token.
+///
+/// It guards the whole protected route group, so a handler that does not ask for
+/// [`AuthClaims`] is still unreachable to unauthenticated callers. The validated claims
+/// are stored on the request for the extractor to reuse.
+pub async fn require_auth(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    mut request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Result<axum::response::Response, StatusCode> {
+    let claims = authenticate(request.headers(), &state).await?;
+    request.extensions_mut().insert(AuthClaims(claims));
+    Ok(next.run(request).await)
+}
+
 impl FromRequestParts<AppState> for AuthClaims {
     type Rejection = StatusCode;
 
@@ -35,73 +125,11 @@ impl FromRequestParts<AppState> for AuthClaims {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        let auth_header = parts
-            .headers
-            .get(axum::http::header::AUTHORIZATION)
-            .and_then(|h| h.to_str().ok())
-            .ok_or(StatusCode::UNAUTHORIZED)?;
-
-        if !auth_header.starts_with("Bearer ") {
-            return Err(StatusCode::UNAUTHORIZED);
+        // Already validated by `require_auth` when the route sits behind it.
+        if let Some(claims) = parts.extensions.get::<AuthClaims>() {
+            return Ok(claims.clone());
         }
-
-        let token = &auth_header["Bearer ".len()..];
-
-        // 1. Try OIDC/Dex validation if configured
-        if let Some(oidc_config) = &state.oidc_config {
-            if let Ok(header) = decode_header(token) {
-                if let Some(kid) = header.kid {
-                    let mut jwk_opt = state.jwks.read().await.get(&kid).cloned();
-
-                    if jwk_opt.is_none() {
-                        tracing::warn!("kid {} not found in JWKS cache, attempting refresh", kid);
-                        let new_jwks = crate::auth::jwks::fetch_jwks(&oidc_config.jwks_url).await;
-                        let mut jwks_write = state.jwks.write().await;
-                        *jwks_write = new_jwks;
-                        jwk_opt = jwks_write.get(&kid).cloned();
-                    }
-
-                    if let Some(jwk) = jwk_opt {
-                        let mut validation = Validation::new(header.alg);
-                        validation.set_audience(std::slice::from_ref(&oidc_config.client_id));
-                        validation.set_issuer(&[
-                            oidc_config.issuer.as_str(),
-                            oidc_config.external_issuer.as_str(),
-                        ]);
-
-                        if let Ok(decoding_key) = DecodingKey::from_jwk(&jwk) {
-                            if let Ok(token_data) =
-                                decode::<Claims>(token, &decoding_key, &validation)
-                            {
-                                return Ok(AuthClaims(token_data.claims));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 2. Fallback to local secret for legacy/dev tokens
-        let mut validation = Validation {
-            validate_exp: true,
-            ..Default::default()
-        };
-        // Skip audience/issuer check for local tokens as they don't have them set usually in the current model
-        validation.required_spec_claims.remove("aud");
-
-        let jwt_secret = resolve_jwt_secret()
-            .inspect_err(|e| tracing::error!("JWT secret configuration error: {}", e))
-            .map_err(|_| StatusCode::UNAUTHORIZED)?;
-
-        let token_data = decode::<Claims>(
-            token,
-            &DecodingKey::from_secret(jwt_secret.as_slice()),
-            &validation,
-        )
-        .inspect_err(|e| tracing::error!("JWT decode failed: {:?}", e))
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
-
-        Ok(AuthClaims(token_data.claims))
+        authenticate(&parts.headers, state).await.map(AuthClaims)
     }
 }
 
