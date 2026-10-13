@@ -189,8 +189,6 @@ async fn proxy_runs_stream_handler(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
-    tracing::info!("SSE Proxy Hit: Extracted cookies: {}", cookie_str);
-
     let mut auth_token = None;
     for part in cookie_str.split(';') {
         let part = part.trim();

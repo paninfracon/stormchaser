@@ -336,8 +336,15 @@ impl<'a> App<'a> {
         token: Option<String>,
         status_tx: mpsc::Sender<AppEvent>,
     ) -> Self {
+        // Development convenience, off unless asked for: the TUI otherwise reads
+        // passwords from whatever file of this name sits under the directory it was
+        // started in, and offers to log in with them.
+        let dev_login = std::env::var("STORMCHASER_TUI_DEV_LOGIN").is_ok_and(|v| v == "true");
         let mut auto_login_credentials = Vec::new();
-        if let Ok(content) = std::fs::read_to_string("deploy/dex/credentials.generated") {
+        if let Some(content) = dev_login
+            .then(|| std::fs::read_to_string("deploy/dex/credentials.generated").ok())
+            .flatten()
+        {
             for line in content.lines() {
                 if let Some((email, password)) = line.split_once(": ") {
                     if email.contains('@') {

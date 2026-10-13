@@ -89,6 +89,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `stormchaser login` stores the token in a profile instead of printing it (`--print-token` prints it). `profiles.json` is written with mode 0600 in a 0700 directory, and a profile's token is no longer sent to a different server named with `--url`.
 - The OIDC client secret has no default. The Helm value `global.oidc.clientSecret` was `stormchaser-cli-secret`; set `global.oidc.existingSecret` (key `client-secret`) or `global.oidc.clientSecret`. The query service no longer receives the secret, and `scripts/generate_dex_config.py` requires `STORMCHASER_CLI_SECRET`.
 - The CLI removes terminal control characters from log lines, stream events and error bodies before printing them to a terminal, so a step's output cannot rewrite the screen. Output that is piped or redirected is left as it is.
+- A token naming a signing key the API does not know triggers at most one key-set refresh per 30 seconds, and a refresh that fails or returns no keys leaves the cached keys in place. Previously every such token refetched the keys, and a failed fetch emptied the cache.
+- The web UI no longer writes the runs list to its log, the request's cookies (session token included) to its log, or stream events to the browser console.
+- The TUI offers the development auto-login from `deploy/dex/credentials.generated` only when `STORMCHASER_TUI_DEV_LOGIN=true`.
 - Removed `h2` 0.3 (RUSTSEC-2026-0258) by building the AWS SDK without its legacy HTTP client.
 - Removed the unmaintained `unsafe-libyaml` (RUSTSEC-2024-0449) by replacing `serde_yaml`.
 

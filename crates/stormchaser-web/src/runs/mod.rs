@@ -79,15 +79,12 @@ pub fn WorkflowRunsList() -> impl IntoView {
                         "EventSource created successfully",
                     ));
                     let es_clone = es.clone();
-                    let on_message =
-                        Closure::wrap(Box::new(move |event: MessageEvent| {
-                            if let Some(data) = event.data().as_string() {
-                                web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(
-                                    &format!("Received SSE data: {}", data),
-                                ));
-                                runs_resource.refetch();
-                            }
-                        }) as Box<dyn FnMut(MessageEvent)>);
+                    let on_message = Closure::wrap(Box::new(move |event: MessageEvent| {
+                        if event.data().as_string().is_some() {
+                            runs_resource.refetch();
+                        }
+                    })
+                        as Box<dyn FnMut(MessageEvent)>);
 
                     es.add_event_listener_with_callback(
                         "workflow_run",

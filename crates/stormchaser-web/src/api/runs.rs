@@ -76,11 +76,8 @@ pub async fn fetch_workflow_runs(
             .text()
             .await
             .map_err(|e| ServerFnError::new(e.to_string()))?;
-        println!("RAW RUNS JSON: {}", text);
-        let runs = serde_json::from_str::<Vec<WorkflowRunDetail>>(&text).map_err(|e| {
-            println!("DESERIALIZATION ERROR: {}", e);
-            ServerFnError::new(e.to_string())
-        })?;
+        let runs = serde_json::from_str::<Vec<WorkflowRunDetail>>(&text)
+            .map_err(|e| ServerFnError::new(e.to_string()))?;
         Ok(runs)
     } else {
         Err(ServerFnError::new(format!(
