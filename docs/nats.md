@@ -97,8 +97,10 @@ NATS:
 
 - **Task messages contain secrets.** The engine resolves a step before
   dispatching it, so the message a runner receives holds any secret the
-  workflow passes to a container, registry credentials, and storage access
-  URLs, as plain JSON.
+  workflow passes to a container, image pull credentials, and storage access
+  URLs, as plain JSON. The credentials of an OCI artifact registry are not in
+  it: a runner asks for a short-lived token when it needs to push, and the
+  answer goes to its reply inbox, which the stream does not store.
 - **A task message is an instruction to run a container.** Whoever can publish
   one on the right subject can make a runner execute it.
 - **Stormchaser does not encrypt or sign these messages itself.** It relies on

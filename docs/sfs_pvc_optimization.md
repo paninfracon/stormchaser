@@ -42,4 +42,4 @@ When the Kubernetes runner builds the Pod specification for a workflow step, it 
 
 If a workflow step requests `provision` URLs (to download external seed data into the volume before the step starts), the Kubernetes runner still fully supports this. It will dynamically inject Alpine-based init containers into the Pod to download and extract the provisioned data into the PVC sub-path before the main step container starts.
 
-S3 "unparking" (restoring previous step state) is automatically bypassed when the PVC is enabled, as the state is already present on the disk.
+S3 "unparking" (restoring previous step state) and "parking" (saving step state) are automatically bypassed when the PVC is enabled, as the state is already present on the disk. Artifacts declared on the volume are still published, by the agent sidecar, after the step's command has succeeded.

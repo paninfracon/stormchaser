@@ -13,7 +13,7 @@ The `spec` block for `RunK8sJob` maps to the `K8sJobSpec` and supports the follo
 * `resources` (object, optional): Kubernetes resource requests and limits.
 * `secret_mounts` (list of objects, optional): Kubernetes secrets to mount. Each name must be listed by the operator in `STORMCHASER_ALLOWED_SECRET_MOUNTS` on the runner.
 * `config_map_mounts` (list of objects, optional): Kubernetes config maps to mount. Each name must be listed by the operator in `STORMCHASER_ALLOWED_CONFIG_MAP_MOUNTS` on the runner.
-* `storage_mounts` (list of objects, optional): Volumes to mount.
+* `storage_mounts` (list of objects, optional): Volumes to mount. `mount_path` must be absolute and must not be a system location; see [Mounting Storage in Steps](../workflow_dsl.md).
 * `active_deadline_seconds` (integer, optional): Job active deadline.
 * `backoff_limit` (integer, optional): Number of retries before marking as failed.
 * `completions` (integer, optional): Number of successfully finished pods required.

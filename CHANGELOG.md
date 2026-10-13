@@ -16,9 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Templates are rendered with MiniJinja 3, which aligns more closely with Jinja2 (for example `tojson` separator spacing, round-half-even rounding, and an error on division by zero).
 - Generated JSON Schemas remain Draft 7; documented enum variants are now expressed with `const` instead of a single-value `enum`.
 - A `JQ` step whose program calls `halt` now fails the step.
+- Storage `mount_path` values that are system locations (for example `/`, `/usr`, `/etc`, `/bin`, `/stormchaser`) are refused on both runners.
+- Kubernetes runner: an artifact's `path` is now relative to its storage volume, as on the Docker runner (it was relative to the container's working directory). Volumes on a shared PVC are no longer also parked to object storage.
+- Kubernetes runner: the runner Role needs `patch` on pods in the step namespace, and the runner's NATS user needs to publish on `stormchaser.v1.step.artifact_auth`. Drain running steps before upgrading: jobs started by an older runner lose their storage hashes and artifacts.
+- The engine waits for NATS to acknowledge each task message, and needs a new database migration (`dispatched_task_messages`).
 
 ### Fixed
 
+- OCI artifacts are now pushed from the Docker runner. `oras` refuses absolute paths, so these pushes always failed.
 - The MCP server can now be reached through a non-loopback hostname. It accepts the host of `API_BASE_URL` and any hosts listed in the new `MCP_ALLOWED_HOSTS` setting (Helm: `api.mcpAllowedHosts`), in addition to loopback names.
 - The default OPA policy now permits the MCP transport's `POST` and `DELETE` requests on `/api/v1/mcp`. Previously only `POST /api/v1/mcp/messages` was permitted, so clients using the real endpoint were denied.
 
@@ -29,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- A step can no longer make the engine read arbitrary objects from storage: test reports are accepted only if the step declares them, their location is worked out by the engine, and report archives are size-limited (32 MiB compressed, 64 MiB unpacked, 1,000 files).
+- Storage is parked and artifacts are published by a helper the step's code does not share (an agent sidecar on Kubernetes, the parking container on Docker), and runners read storage hashes and artifact metadata from that helper only. The step's container no longer receives upload URLs.
+- The username and password of an OCI artifact registry no longer leave the engine. Runners get a token scoped to the run's repositories, minted when the step is ready to push. Registries that cannot issue such tokens need `STORMCHASER_OCI_ALLOW_STATIC_CREDENTIALS=true` on the engine.
+- Task messages, which carry a step's resolved secrets, are erased from the NATS stream once the step is finished, and the stream has a maximum message age (`STORMCHASER_NATS_STREAM_MAX_AGE_HOURS`, default 168).
 - Removed `h2` 0.3 (RUSTSEC-2026-0258) by building the AWS SDK without its legacy HTTP client.
 - Removed the unmaintained `unsafe-libyaml` (RUSTSEC-2024-0449) by replacing `serde_yaml`.
 
