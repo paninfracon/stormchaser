@@ -54,10 +54,11 @@ async fn test_webhook_trigger() {
 
     // 1. Create a Webhook
     let webhook_id = Uuid::new_v4();
-    sqlx::query("INSERT INTO webhooks (id, name, source_type, is_active) VALUES ($1, $2, $3, $4)")
+    sqlx::query("INSERT INTO webhooks (id, name, source_type, secret_token, is_active) VALUES ($1, $2, $3, $4, $5)")
         .bind(webhook_id)
         .bind(format!("test-webhook-{}", webhook_id))
         .bind("generic")
+        .bind("delivery-secret")
         .bind(true)
         .execute(&pool)
         .await
@@ -98,6 +99,7 @@ async fn test_webhook_trigger() {
                 .method("POST")
                 .uri(format!("/api/v1/webhooks/{}", webhook_id))
                 .header("Content-Type", stormchaser_model::APPLICATION_JSON)
+                .header("Authorization", "Bearer delivery-secret")
                 .extension(ConnectInfo(addr))
                 .body(Body::from(serde_json::to_vec(&payload).unwrap()))
                 .unwrap(),
@@ -330,4 +332,71 @@ async fn test_generic_webhook_secret() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn a_webhook_without_a_secret_accepts_no_deliveries() {
+    std::env::set_var("API_RATE_LIMIT_PER_SECOND", "1000");
+    std::env::set_var("API_RATE_LIMIT_BURST_SIZE", "1000");
+    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let Ok(nats_client) = stormchaser_model::nats::connect(nats_url).await else {
+        return;
+    };
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
+        dotenvy::dotenv().ok();
+        format!(
+            "postgres://stormchaser:{}@localhost:5432/stormchaser",
+            var("STORMCHASER_DEV_PASSWORD")
+                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
+        )
+    });
+    let Ok(pool) = PgPoolOptions::new().connect(&db_url).await else {
+        return;
+    };
+    let app = app(AppState {
+        pool: pool.clone(),
+        nats: nats_client,
+        opa: Arc::new(OpaClient::new(None, None)),
+        oidc_config: None,
+        jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+        log_backend: None,
+        api_base_url: "http://localhost:3000".to_string(),
+        mcp_allowed_hosts: Vec::new(),
+    });
+    let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
+
+    // Rows like this exist from before a secret was required
+    for source_type in ["generic", "github"] {
+        let webhook_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO webhooks (id, name, source_type, is_active) VALUES ($1, $2, $3, true)",
+        )
+        .bind(webhook_id)
+        .bind(format!("no-secret-{}", webhook_id))
+        .bind(source_type)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/webhooks/{}", webhook_id))
+                    .header("Content-Type", stormchaser_model::APPLICATION_JSON)
+                    .extension(ConnectInfo(addr))
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{source_type}");
+
+        sqlx::query("DELETE FROM webhooks WHERE id = $1")
+            .bind(webhook_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
 }

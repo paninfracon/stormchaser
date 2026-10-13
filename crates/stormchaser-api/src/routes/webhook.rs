@@ -39,6 +39,22 @@ pub async fn create_webhook(
     State(state): State<AppState>,
     Json(payload): Json<CreateWebhookRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
+    // A webhook URL is public; the secret is the only thing that says who is calling
+    if !payload
+        .secret_token
+        .as_deref()
+        .is_some_and(|secret| !secret.is_empty())
+    {
+        tracing::warn!(
+            "Refusing to create webhook '{}' without a secret",
+            payload.name
+        );
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    if !matches!(payload.source_type.as_str(), "github" | "generic") {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     let id = stormchaser_model::WebhookId::new_v4();
     db::insert_webhook(
         &state.pool,
@@ -140,7 +156,8 @@ pub async fn update_webhook(
     let secret_token = match payload.secret_token {
         // The mask from a previous response means "keep the stored secret".
         Some(s) if s == crate::redact::MASK => None,
-        Some(s) if s.is_empty() => Some(None),
+        // A secret can be replaced but not removed
+        Some(s) if s.is_empty() => return Err(StatusCode::BAD_REQUEST),
         Some(s) => Some(Some(s)),
         None => None,
     };
@@ -254,15 +271,7 @@ pub async fn handle_webhook(
     hcl_ctx.declare_var("event", hcl_eval::json_to_hcl(payload.clone()));
     hcl_ctx.declare_var(
         "headers",
-        hcl_eval::json_to_hcl(
-            serde_json::to_value(
-                headers
-                    .iter()
-                    .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or_default().to_string()))
-                    .collect::<HashMap<_, _>>(),
-            )
-            .unwrap(),
-        ),
+        hcl_eval::json_to_hcl(serde_json::to_value(headers_for_rules(&headers)).unwrap()),
     );
 
     for rule in rules {
@@ -282,20 +291,45 @@ pub async fn handle_webhook(
 
 use stormchaser_model::hcl_eval;
 
+/// A webhook without a secret accepts nothing: its URL is not a credential, and a
+/// delivery starts workflows.
+fn required_secret(secret: Option<&str>) -> Result<&str, StatusCode> {
+    match secret {
+        Some(secret) if !secret.is_empty() => Ok(secret),
+        _ => {
+            tracing::warn!("Refusing delivery to a webhook that has no secret configured");
+            Err(StatusCode::FORBIDDEN)
+        }
+    }
+}
+
+/// Headers a rule may read. The ones that authenticate the delivery are left out, so a
+/// rule cannot copy the webhook's secret or signature into a run's inputs.
+fn headers_for_rules(headers: &HeaderMap) -> HashMap<String, String> {
+    headers
+        .iter()
+        .filter(|(name, _)| {
+            !matches!(
+                name.as_str(),
+                "authorization" | "cookie" | "x-hub-signature" | "x-hub-signature-256"
+            )
+        })
+        .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or_default().to_string()))
+        .collect()
+}
+
+/// Whether an event type matches a rule's pattern. The pattern must match the whole
+/// event type: unanchored, `push` would also match `repository_push_ruleset`.
+fn event_type_matches(pattern: &str, event_type: &str) -> Result<bool, regex::Error> {
+    Ok(regex::Regex::new(&format!("^(?:{})$", pattern))?.is_match(event_type))
+}
+
 fn validate_github_signature(
     headers: &HeaderMap,
     body: &[u8],
     secret: Option<&str>,
 ) -> Result<(), StatusCode> {
-    let secret = match secret {
-        Some(s) => s,
-        None => {
-            tracing::debug!(
-                "No secret token configured for webhook, skipping signature validation"
-            );
-            return Ok(());
-        }
-    };
+    let secret = required_secret(secret)?;
 
     let signature = headers
         .get("X-Hub-Signature-256")
@@ -331,10 +365,7 @@ fn validate_github_signature(
 }
 
 fn validate_generic_token(headers: &HeaderMap, secret: Option<&str>) -> Result<(), StatusCode> {
-    let secret = match secret {
-        Some(s) => s,
-        None => return Ok(()), // No secret configured
-    };
+    let secret = required_secret(secret)?;
 
     let auth_header = headers
         .get(axum::http::header::AUTHORIZATION)
@@ -371,7 +402,7 @@ async fn process_rule(
     hcl_ctx: &hcl::eval::Context<'_>,
 ) -> Result<bool, StatusCode> {
     // 3a. Check event type pattern (simple regex for now)
-    let re = regex::Regex::new(&rule.event_type_pattern).map_err(|e| {
+    let matches = event_type_matches(&rule.event_type_pattern, event_type).map_err(|e| {
         tracing::error!(
             "Invalid regex pattern '{}': {:?}",
             rule.event_type_pattern,
@@ -379,7 +410,7 @@ async fn process_rule(
         );
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
-    if !re.is_match(event_type) {
+    if !matches {
         return Ok(false);
     }
 
@@ -510,4 +541,46 @@ async fn process_rule(
     );
 
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_rule_pattern_must_match_the_whole_event_type() {
+        assert!(event_type_matches("push", "push").unwrap());
+        assert!(!event_type_matches("push", "repository_push_ruleset").unwrap());
+        assert!(event_type_matches("pull_request.*", "pull_request_review").unwrap());
+        assert!(event_type_matches("push|release", "release").unwrap());
+        assert!(!event_type_matches("push|release", "prerelease").unwrap());
+        assert!(event_type_matches(".*", "anything").unwrap());
+        assert!(event_type_matches("(", "push").is_err());
+    }
+
+    #[test]
+    fn rules_do_not_see_the_headers_that_authenticate_a_delivery() {
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", "Bearer the-secret".parse().unwrap());
+        headers.insert("x-hub-signature-256", "sha256=abc".parse().unwrap());
+        headers.insert("x-github-event", "push".parse().unwrap());
+        let visible = headers_for_rules(&headers);
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible["x-github-event"], "push");
+    }
+
+    #[test]
+    fn a_missing_or_empty_secret_refuses_the_delivery() {
+        assert_eq!(required_secret(None), Err(StatusCode::FORBIDDEN));
+        assert_eq!(required_secret(Some("")), Err(StatusCode::FORBIDDEN));
+        assert_eq!(required_secret(Some("s3cret")), Ok("s3cret"));
+        assert_eq!(
+            validate_generic_token(&HeaderMap::new(), None),
+            Err(StatusCode::FORBIDDEN)
+        );
+        assert_eq!(
+            validate_github_signature(&HeaderMap::new(), b"{}", None),
+            Err(StatusCode::FORBIDDEN)
+        );
+    }
 }

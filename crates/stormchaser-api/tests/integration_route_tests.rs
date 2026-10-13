@@ -198,7 +198,8 @@ async fn test_create_webhook() {
                 .body(Body::from(
                     serde_json::to_vec(&json!({
                         "name": name,
-                        "source_type": "generic"
+                        "source_type": "generic",
+                        "secret_token": "a-delivery-secret"
                     }))
                     .unwrap(),
                 ))
@@ -208,6 +209,36 @@ async fn test_create_webhook() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::CREATED);
+}
+
+#[tokio::test]
+async fn test_create_webhook_without_a_secret_is_refused() {
+    let app = match setup_app().await {
+        Some(a) => a,
+        None => return,
+    };
+
+    let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
+    for body in [
+        json!({ "name": format!("no-secret-{}", Uuid::new_v4()), "source_type": "generic" }),
+        json!({ "name": format!("no-secret-{}", Uuid::new_v4()), "source_type": "github", "secret_token": "" }),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/webhooks")
+                    .header("Content-Type", stormchaser_model::APPLICATION_JSON)
+                    .header(AUTHORIZATION, format!("Bearer {}", get_token()))
+                    .extension(ConnectInfo(addr))
+                    .body(Body::from(serde_json::to_vec(&body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
 }
 
 #[tokio::test]
