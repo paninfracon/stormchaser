@@ -76,6 +76,7 @@ pub async fn list_webhooks(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
+    let webhooks: Vec<_> = webhooks.into_iter().map(crate::redact::webhook).collect();
     Ok(Json(webhooks))
 }
 
@@ -102,7 +103,7 @@ pub async fn get_webhook(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    Ok(Json(webhook))
+    Ok(Json(crate::redact::webhook(webhook)))
 }
 
 /// Updates a webhook.
@@ -131,6 +132,8 @@ pub async fn update_webhook(
         None => None,
     };
     let secret_token = match payload.secret_token {
+        // The mask from a previous response means "keep the stored secret".
+        Some(s) if s == crate::redact::MASK => None,
         Some(s) if s.is_empty() => Some(None),
         Some(s) => Some(Some(s)),
         None => None,

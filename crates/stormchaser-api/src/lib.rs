@@ -47,6 +47,8 @@ use stormchaser_model::LogBackend;
 use tokio::sync;
 /// Rate limiting middleware and configuration
 pub mod rate_limit;
+/// Masking of stored secrets in API responses.
+pub mod redact;
 
 use tower_http::trace::TraceLayer;
 use utoipa::OpenApi;

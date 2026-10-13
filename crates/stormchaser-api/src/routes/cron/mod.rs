@@ -113,6 +113,10 @@ pub async fn list_cron_workflows(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
+    let workflows = workflows
+        .into_iter()
+        .map(crate::redact::cron_workflow)
+        .collect();
     Ok(Json(workflows))
 }
 

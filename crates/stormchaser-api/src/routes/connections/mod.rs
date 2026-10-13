@@ -95,6 +95,10 @@ pub async fn list_connections(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
+    let backends: Vec<_> = backends
+        .into_iter()
+        .map(crate::redact::connection)
+        .collect();
     Ok(Json(backends))
 }
 
@@ -121,7 +125,7 @@ pub async fn get_connection(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    Ok(Json(backend))
+    Ok(Json(crate::redact::connection(backend)))
 }
 
 /// Update storage backend.
@@ -141,8 +145,21 @@ pub async fn update_connection(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
     Path(id): Path<ConnectionId>,
-    Json(payload): Json<UpdateStorageBackendRequest>,
+    Json(mut payload): Json<UpdateStorageBackendRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
+    // Responses mask stored secrets. A client that loads a connection, edits it and saves
+    // it sends those masks back; they mean "unchanged", not a new value.
+    if payload.encrypted_credentials.as_deref() == Some(crate::redact::MASK) {
+        payload.encrypted_credentials = None;
+    }
+    if let Some(config) = payload.config.as_mut() {
+        let stored = db::get_connection(&state.pool, id)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .ok_or(StatusCode::NOT_FOUND)?;
+        crate::redact::restore_masked(config, &stored.config);
+    }
+
     let mut tx = state
         .pool
         .begin()
