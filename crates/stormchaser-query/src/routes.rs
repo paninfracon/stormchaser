@@ -8,7 +8,7 @@ pub async fn hydrate_schema(
     // Require a valid token: the query service previously had NO authentication
     // (any caller could drive user-defined SQL/API/Git queries + HCL eval).
     // AuthClaims rejects with 401 before the body is read.
-    _claims: stormchaser_api::AuthClaims,
+    stormchaser_api::AuthClaims(claims): stormchaser_api::AuthClaims,
     State(state): State<AppState>,
     Json(payload): Json<HydrateSchemaRequest>,
 ) -> impl IntoResponse {
@@ -17,6 +17,10 @@ pub async fn hydrate_schema(
         .into_iter()
         .filter_map(|v| serde_json::from_value(v).ok())
         .collect();
+
+    // Connection use is authorized against the caller, named the same way a run records
+    // its initiating user.
+    let user = claims.email.clone().unwrap_or(claims.sub.clone());
 
     let (tx, rx) = tokio::sync::mpsc::channel(100);
 
@@ -27,6 +31,7 @@ pub async fn hydrate_schema(
             payload.inputs,
             queries,
             Some(state_clone),
+            user,
             tx,
         )
         .await;

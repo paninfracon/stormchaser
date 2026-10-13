@@ -194,6 +194,8 @@ query "db_envs" {
 }
 ```
 
+The query must be a single statement that only reads. It runs in a read-only transaction that is rolled back, is stopped after 30 seconds, and may return at most 10,000 rows; the first column of each row becomes an option. Give the connection a database role that can read only what a form needs: a read-only transaction does not stop a function with side effects.
+
 ##### REST API
 
 Fetch options from an HTTP endpoint. You can optionally use `jq_filter` to extract a list of strings if the API returns a complex object.

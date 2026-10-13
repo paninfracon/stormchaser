@@ -208,6 +208,46 @@ async fn test_execute_query_connection_resolution() {
     assert_eq!(res.len(), 1);
     assert_eq!(res[0], serde_json::json!("test_conn_val"));
 
+    // A query cannot change data: it runs in a read-only transaction.
+    for write in [
+        "CREATE TABLE query_write_probe (id int)",
+        "UPDATE connections SET description = 'changed' WHERE name = 'test-db-conn' RETURNING name",
+    ] {
+        params.insert("query".to_string(), write.to_string());
+        let err = stormchaser_engine::query::execute_query("sql", &params, Some(&pool), None)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("read-only transaction"),
+            "{write}: {err}"
+        );
+    }
+
+    // Nor can it lift the restriction for a later statement: only one statement runs, and
+    // the transaction is rolled back.
+    params.insert(
+        "query".to_string(),
+        "SET TRANSACTION READ WRITE".to_string(),
+    );
+    let _ = stormchaser_engine::query::execute_query("sql", &params, Some(&pool), None).await;
+    let description: Option<String> =
+        sqlx::query_scalar("SELECT description FROM connections WHERE id = $1")
+            .bind(conn_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(description, None);
+
+    // More rows than the cap is an error, not an unbounded read.
+    params.insert(
+        "query".to_string(),
+        "SELECT g::text FROM generate_series(1, 10001) g".to_string(),
+    );
+    let err = stormchaser_engine::query::execute_query("sql", &params, Some(&pool), None)
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("more than 10000 rows"), "{err}");
+
     sqlx::query("DELETE FROM connections WHERE id = $1")
         .bind(conn_id)
         .execute(&pool)

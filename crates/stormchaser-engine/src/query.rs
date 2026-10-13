@@ -2,6 +2,12 @@ use serde_json::Value;
 use sqlx::PgPool;
 use std::collections::HashMap;
 
+/// Longest a `sql` query may run.
+const SQL_QUERY_TIMEOUT_MS: u64 = 30_000;
+
+/// Most rows a `sql` query may return.
+const MAX_SQL_QUERY_ROWS: usize = 10_000;
+
 pub async fn execute_query(
     query_type: &str,
     params: &HashMap<String, String>,
@@ -64,13 +70,37 @@ async fn execute_sql_query(
         anyhow::anyhow!("SQL queries require a 'connection' param naming a connection with a 'url'")
     })?;
 
-    use sqlx::{AssertSqlSafe, Row};
+    use futures::TryStreamExt;
+    use sqlx::{AssertSqlSafe, Connection, Row};
     let mut results = Vec::new();
 
-    let tmp_pool = sqlx::PgPool::connect(&url).await?;
-    let rows = sqlx::query(AssertSqlSafe(sql_query.as_str()))
-        .fetch_all(&tmp_pool)
+    // A query fills in a form; it has no business changing data. It runs as one statement in
+    // a read-only transaction that is always rolled back, with a time limit and a row cap.
+    let mut conn = sqlx::PgConnection::connect(&url).await?;
+    let mut tx = conn.begin().await?;
+    sqlx::query("SET TRANSACTION READ ONLY")
+        .execute(&mut *tx)
         .await?;
+    sqlx::query(AssertSqlSafe(format!(
+        "SET LOCAL statement_timeout = {}",
+        SQL_QUERY_TIMEOUT_MS
+    )))
+    .execute(&mut *tx)
+    .await?;
+
+    let mut rows = Vec::new();
+    {
+        let mut stream = sqlx::query(AssertSqlSafe(sql_query.as_str())).fetch(&mut *tx);
+        while let Some(row) = stream.try_next().await? {
+            if rows.len() >= MAX_SQL_QUERY_ROWS {
+                anyhow::bail!("SQL query returned more than {} rows", MAX_SQL_QUERY_ROWS);
+            }
+            rows.push(row);
+        }
+    }
+    tx.rollback().await?;
+    conn.close().await.ok();
+
     for row in rows {
         if row.is_empty() {
             continue;

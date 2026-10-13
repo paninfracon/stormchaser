@@ -196,6 +196,7 @@ pub async fn execute_query(
     query_type: &str,
     params: &std::collections::HashMap<String, String>,
     state: Option<&AppState>,
+    initiating_user: &str,
 ) -> Result<Vec<Value>, anyhow::Error> {
     let mut db_url = None;
 
@@ -211,8 +212,7 @@ pub async fn execute_query(
             if app_state.opa.is_configured() {
                 let opa_ctx = stormchaser_model::auth::ConnectionOpaContext {
                     connection_name: conn_name,
-                    // In a real scenario we extract the username from JWT claims.
-                    initiating_user: "schema_hydration_service",
+                    initiating_user,
                 };
                 if !app_state.opa.check_connection(opa_ctx).await? {
                     return Err(anyhow::anyhow!(
@@ -237,6 +237,7 @@ pub async fn run_hydration_loop(
     inputs: Value,
     queries: Vec<stormchaser_model::dsl::Query>,
     state: Option<AppState>,
+    initiating_user: String,
     tx: tokio::sync::mpsc::Sender<HydrationEvent>,
 ) {
     let mut tasks = Vec::new();
@@ -309,9 +310,11 @@ pub async fn run_hydration_loop(
         let state_for_query = state.clone();
         let query_type = task.query_type.clone();
         let params_clone = resolved_params.clone();
+        let user = initiating_user.clone();
 
         join_set.spawn(async move {
-            let res = execute_query(&query_type, &params_clone, state_for_query.as_ref()).await;
+            let res =
+                execute_query(&query_type, &params_clone, state_for_query.as_ref(), &user).await;
             (idx, res)
         });
     }
@@ -386,7 +389,9 @@ mod tests {
     async fn test_execute_query_mock() {
         let mut params = std::collections::HashMap::new();
         params.insert("items".to_string(), "a,b,c".to_string());
-        let res = execute_query("mock", &params, None).await.unwrap();
+        let res = execute_query("mock", &params, None, "tester")
+            .await
+            .unwrap();
         assert_eq!(res, vec![json!("a"), json!("b"), json!("c")]);
     }
 
@@ -421,7 +426,15 @@ mod tests {
         // 1. Missing dependency
         let (tx, mut rx) = tokio::sync::mpsc::channel(100);
         let inputs_missing = json!({});
-        run_hydration_loop(schema.clone(), inputs_missing, queries.clone(), None, tx).await;
+        run_hydration_loop(
+            schema.clone(),
+            inputs_missing,
+            queries.clone(),
+            None,
+            "tester".to_string(),
+            tx,
+        )
+        .await;
 
         let event1 = rx.recv().await.unwrap();
         assert_eq!(event1.status, HydrationStatus::SchemaValidationFailed);
@@ -433,7 +446,15 @@ mod tests {
         // 2. Dependency provided
         let (tx2, mut rx2) = tokio::sync::mpsc::channel(100);
         let inputs_provided = json!({"dep": "val"});
-        run_hydration_loop(schema.clone(), inputs_provided, queries.clone(), None, tx2).await;
+        run_hydration_loop(
+            schema.clone(),
+            inputs_provided,
+            queries.clone(),
+            None,
+            "tester".to_string(),
+            tx2,
+        )
+        .await;
 
         let event_start = rx2.recv().await.unwrap();
         assert_eq!(event_start.status, HydrationStatus::UpdatePending);
