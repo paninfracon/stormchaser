@@ -13,7 +13,9 @@ local machine, complete with automated log management and monitoring
 
 ### Quick Start Prerequisites
 
-- **MicroK8s**: Install via `snap install microk8s --classic`.
+- **MicroK8s**: Install via `snap install microk8s --classic`. The Kubernetes
+  runner is built against the Kubernetes 1.32 API, so use a cluster running
+  1.32 or newer.
 - **Enable Addons**:
 
   ```bash

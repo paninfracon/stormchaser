@@ -182,6 +182,10 @@ modules directly.
 > managed RBAC solutions or in environments where policies may change
 > frequently, as it allows policies to be updated without restarting the
 > Stormchaser services.
+>
+> **Unsupported builtins:** The embedded WASM runtime does not provide the
+> YAML builtins (`yaml.marshal`, `yaml.unmarshal`, `yaml.is_valid`). Policies
+> that call them must be evaluated over HTTP via `OPA_URL` instead.
 
 ### Compile the Rego Policy
 

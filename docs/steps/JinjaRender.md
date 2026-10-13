@@ -20,6 +20,8 @@ The following objects are automatically available in the template context:
 
 Any values provided in the `context` field of the spec will be merged directly into the root of the template context.
 
+Templates are rendered with MiniJinja 3, which follows Jinja2 semantics closely: for example `tojson` emits `{"a": 1}` with a space after separators, `round` uses round-half-even, and division by zero is an error.
+
 ## Example
 
 ```hcl

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Upgraded all dependencies to their latest releases, including Axum 0.8, Leptos 0.8, SQLx 0.9, reqwest 0.13, kube 4, schemars 1, MiniJinja 3 and jaq 3.
+- The minimum supported Rust version is now 1.96, declared as `rust-version` in the workspace manifest. The Docker builder images use `rust:1.96`.
+- The Kubernetes runner is now built against the Kubernetes 1.32 API (previously 1.31).
+- Services now validate outbound TLS against the system certificate store instead of a bundled root list. The agent bundles the Mozilla roots and merges them with the system store, so it keeps working in task images without CA certificates.
+- Templates are rendered with MiniJinja 3, which aligns more closely with Jinja2 (for example `tojson` separator spacing, round-half-even rounding, and an error on division by zero).
+- Generated JSON Schemas remain Draft 7; documented enum variants are now expressed with `const` instead of a single-value `enum`.
+- A `JQ` step whose program calls `halt` now fails the step.
+
+### Removed
+
+- The embedded OPA WASM runtime no longer provides the YAML builtins (`yaml.marshal`, `yaml.unmarshal`, `yaml.is_valid`).
+- Removed the unused `sqlx` feature from `stormchaser-tls`.
+
+### Security
+
+- Removed `h2` 0.3 (RUSTSEC-2026-0258) by building the AWS SDK without its legacy HTTP client.
+- Removed the unmaintained `unsafe-libyaml` (RUSTSEC-2024-0449) by replacing `serde_yaml`.
+
 ## [1.5.1] - 2026-05-25
 
 ### Fixed

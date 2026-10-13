@@ -13,6 +13,8 @@ The `spec` block for `JQ` supports the following fields:
 
 *Note: You must provide either `input` or `input_file`.*
 
+Programs are evaluated with [jaq](https://github.com/01mf02/jaq) 3. A program that raises an error or calls `halt`/`halt_error` fails the step.
+
 ## Example (Inline Variables)
 
 ```hcl

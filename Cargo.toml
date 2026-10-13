@@ -21,6 +21,7 @@ description = "A robust, distributed workflow engine for event-driven and human-
 repository = "https://github.com/paninfracon/stormchaser"
 license = "MIT OR Apache-2.0 OR CDLA-Permissive-2.0"
 edition = "2021"
+rust-version = "1.96"
 
 [workspace.dependencies]
 stormchaser-model = { version = "1.5.1", path = "crates/stormchaser-model" }

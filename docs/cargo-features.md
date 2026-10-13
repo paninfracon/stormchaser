@@ -8,7 +8,7 @@ By default, most functional features are enabled to provide a complete "batterie
 
 | Feature | Default | Description |
 | :--- | :---: | :--- |
-| `mcp` | ✅ | Enables the integrated [Model Context Protocol (MCP) server](mcp-server.md), exposing the OpenAPI spec as AI-callable tools via SSE. Pulls in `rmcp` and `rmcp-openapi`. |
+| `mcp` | ✅ | Enables the integrated [Model Context Protocol (MCP) server](mcp-server.md), exposing the OpenAPI spec as AI-callable tools over Streamable HTTP. Pulls in `rmcp` and `rmcp-openapi`. |
 
 ## `stormchaser-engine`
 
@@ -21,12 +21,17 @@ By default, most functional features are enabled to provide a complete "batterie
 | `vault` | ✅ | Enables fetching dynamic secrets from HashiCorp Vault during workflow execution. |
 | `aws-sdk-sts` | ✅ | Base STS support for AWS authentication. |
 | `rustls-native-certs` | ✅ | Enables loading native root certificates for TLS connections, particularly useful outside of containerized environments. |
+| `aws-cloudcontrol` | ✅ | Enables dynamic workflow input queries backed by the AWS Cloud Control API. |
+| `aws-sops` | ✅ | Enables assuming an AWS role (via STS) when decrypting SOPS secrets. |
+| `chatops-slack` | ✅ | Enables the Slack message integration. |
+| `chatops-teams` | ✅ | Enables the Microsoft Teams message integration. |
 
-## `stormchaser-tls`
+## `stormchaser-web`
 
 | Feature | Default | Description |
 | :--- | :---: | :--- |
-| `sqlx` | ✅ | Provides helper functions for building `rustls::ClientConfig` dynamically from certificates stored in a PostgreSQL database via `sqlx`. |
+| `ssr` | ❌ | Builds the server-side rendering binary (Axum server). Selected automatically by `cargo leptos`. |
+| `hydrate` | ❌ | Builds the WASM frontend that hydrates the server-rendered page. Selected automatically by `cargo leptos`. |
 
 ## Disabling Default Features
 
