@@ -81,6 +81,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A `lost_zombie` step failure is acted on only when the step's runner really is offline or stale, so a runner cannot fail another runner's step as lost.
 - Logs no longer contain evaluated template results, raw event payloads, a step's definition on a parse failure, the values that failed event schema validation, or a step command's arguments. The engine and API log at `info` unless `RUST_LOG` says otherwise (they defaulted to `debug`), as do the services in the compose file.
 - `secret()` reads only the Vault paths listed in `STORMCHASER_VAULT_ALLOWED_PATHS` (empty by default), and the engine no longer falls back to the Vault token `root` when `VAULT_TOKEN` is unset: lookups are disabled instead.
+- Step names are limited to letters, digits, `_` and `-`, and a step name can no longer alter the log query used to fetch its logs.
 - Removed `h2` 0.3 (RUSTSEC-2026-0258) by building the AWS SDK without its legacy HTTP client.
 - Removed the unmaintained `unsafe-libyaml` (RUSTSEC-2024-0449) by replacing `serde_yaml`.
 

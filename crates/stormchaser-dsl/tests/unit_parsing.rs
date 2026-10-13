@@ -304,3 +304,29 @@ fn test_parse_include_library_strategy_quotas_handler() {
     assert_eq!(handler.condition.as_deref(), Some("true"));
     assert_eq!(handler.action, "notify");
 }
+
+#[test]
+fn step_names_are_limited_to_safe_characters() {
+    let workflow = |name: &str| {
+        format!(
+            r#"
+        stormchaser_dsl_version = "0.1"
+        workflow "names" {{
+            steps {{
+                step "{name}" "RunContainer" {{
+                    image = "alpine"
+                }}
+            }}
+        }}
+    "#
+        )
+    };
+    let parser = StormchaserParser::new();
+    assert!(parser.parse(&workflow("build_image-2")).is_ok());
+    for name in ["build image", "a.b", "x} or {job_name=~.+", ""] {
+        assert!(
+            parser.parse(&workflow(name)).is_err(),
+            "'{name}' was accepted"
+        );
+    }
+}
