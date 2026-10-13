@@ -93,6 +93,26 @@ rbac:
   # Create that namespace as part of this release. Set to false if it already exists.
   createTargetNamespace: true
 
+# Network isolation for the step namespace. Requires a CNI that enforces NetworkPolicy.
+networkPolicy:
+  enabled: true
+  # Ranges step pods may not connect to: the private ranges that cluster-internal
+  # services live in, carrier-grade NAT, and link-local (cloud metadata). Narrow these
+  # to your pod and service CIDRs if steps must reach other private networks.
+  blockedCidrs:
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+    - 100.64.0.0/10
+    - 169.254.0.0/16
+  # Pods in the release namespace that steps may still reach, for example an
+  # in-cluster object store that serves presigned URLs:
+  #   - podLabels: {app.kubernetes.io/name: minio}
+  #     port: 9000
+  allowReleaseNamespace: []
+  # Additional raw NetworkPolicy egress rules.
+  extraEgress: []
+
 global:
   agent:
     image:

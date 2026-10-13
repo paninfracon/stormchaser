@@ -107,6 +107,23 @@ There are two main areas to consider for encryption at rest:
 
 ## 6. Runner Security Considerations
 
+Workflow steps run images chosen by workflow authors, so both runners keep them
+away from the control plane:
+
+* **Kubernetes Runner:** steps run in a dedicated namespace, never the
+  runner's own. The chart applies a NetworkPolicy there that blocks cluster-internal
+  addresses and the cloud metadata endpoint, step pods get no API token, and
+  ServiceAccounts, Secrets and ConfigMaps are only attachable when the operator
+  allow-lists them.
+* **Docker Runner:** steps join the network named by `STORMCHASER_STEP_NETWORK`
+  instead of the runner's own. The runner still needs the Docker socket and is
+  therefore root on its host; use dedicated hosts.
+* **Privileged steps** are refused unless the runner is started with
+  `STORMCHASER_ALLOW_PRIVILEGED=true`.
+
+`scripts/setup.sh` relaxes the network isolation and the privileged setting for
+local development; see [NATS: Quickstart and Production](nats.md).
+
 When using the **Docker Runner** with the `STORMCHASER_SFS_HOST_PATH` optimization enabled, the runner creates direct bind mounts from the host file system into step containers.
 
 * **Host Access:** This bypasses Docker's native volume isolation. The directory specified must be securely owned by the user running the Docker daemon.

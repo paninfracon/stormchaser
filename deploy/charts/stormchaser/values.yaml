@@ -72,6 +72,12 @@ stormchaser-runner-k8s:
     natsUrl: "nats://stormchaser-nats:4222"
     # Secret with `user` and `password` keys for the restricted runner user.
     natsAuthSecret: "stormchaser-nats-runner"
+  networkPolicy:
+    # Steps upload and download through presigned URLs served by the bundled MinIO.
+    allowReleaseNamespace:
+      - podLabels:
+          app.kubernetes.io/name: minio
+        port: 9000
   rbac:
     create: true
 

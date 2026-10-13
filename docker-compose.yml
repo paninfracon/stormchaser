@@ -6,7 +6,9 @@ services:
       POSTGRES_PASSWORD: ${STORMCHASER_DEV_PASSWORD:-stormchaser_dev_password}
       POSTGRES_DB: stormchaser
     ports:
-      - "${PORT_DB:-5432}:5432"
+      # Control-plane ports are published on loopback only unless overridden, so that
+      # step containers cannot reach them through the host.
+      - "${STORMCHASER_CONTROL_PLANE_BIND:-127.0.0.1}:${PORT_DB:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -18,8 +20,8 @@ services:
   nats:
     image: nats:2.10
     ports:
-      - "${PORT_NATS:-4222}:4222"
-      - "${PORT_NATS_MGT:-8222}:8222"
+      - "${STORMCHASER_CONTROL_PLANE_BIND:-127.0.0.1}:${PORT_NATS:-4222}:4222"
+      - "${STORMCHASER_CONTROL_PLANE_BIND:-127.0.0.1}:${PORT_NATS_MGT:-8222}:8222"
     environment:
       NATS_CONTROL_PASSWORD: '${STORMCHASER_NATS_PASSWORD?Error: STORMCHASER_NATS_PASSWORD is not set}'
       NATS_RUNNER_PASSWORD: '${STORMCHASER_NATS_RUNNER_PASSWORD?Error: STORMCHASER_NATS_RUNNER_PASSWORD is not set}'
@@ -110,6 +112,11 @@ services:
       MINIO_ROOT_USER: stormchaser
       MINIO_ROOT_PASSWORD: ${STORMCHASER_MINIO_PASSWORD:-stormchaser_dev_password}
     command: server /data --console-address ":9001"
+    # Object storage is the one service workflow steps need, so it is also attached to
+    # the network step containers run on.
+    networks:
+      - default
+      - steps
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 10s
@@ -126,7 +133,7 @@ services:
   opa:
     image: openpolicyagent/opa:latest
     ports:
-      - "${PORT_OPA:-8181}:8181"
+      - "${STORMCHASER_CONTROL_PLANE_BIND:-127.0.0.1}:${PORT_OPA:-8181}:8181"
     volumes:
       - ./deploy/opa:/etc/opa
     command: run --server --addr 0.0.0.0:8181 --log-level debug /etc/opa/policy.rego
@@ -274,6 +281,8 @@ services:
       RUST_LOG: stormchaser_runner_docker=debug
       # Privileged steps are root on this host; tests/dogfood.storm needs this set to true.
       STORMCHASER_ALLOW_PRIVILEGED: ${STORMCHASER_ALLOW_PRIVILEGED:-false}
+      # Steps run on their own network, away from NATS and Postgres.
+      STORMCHASER_STEP_NETWORK: ${COMPOSE_PROJECT_NAME:-stormchaser}_steps
       STORMCHASER_STATE_ENCRYPTION_KEY: "01234567890123456789012345678901"
       LOKI_URL: ${LOKI_URL:-http://loki:3100/loki/api/v1/push}
     extra_hosts:
@@ -300,6 +309,10 @@ services:
         BINARY: stormchaser-agent
     image: stormchaser-agent:v1
     profiles: [build-only]
+
+networks:
+  # Workflow step containers join this network. Only object storage is reachable on it.
+  steps:
 
 volumes:
   git-cache:

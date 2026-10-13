@@ -7,9 +7,26 @@ use std::collections::HashMap;
 use stormchaser_model::dsl::{self, CommonContainerSpec};
 use tracing::info;
 
+/// Environment variable naming the Docker network step containers are attached to.
+pub const STEP_NETWORK_ENV: &str = "STORMCHASER_STEP_NETWORK";
+
 impl<S> DockerContainerMachine<S> {
-    /// Attempts to detect the Docker network mode the runner is operating in.
+    /// Returns the Docker network step containers should join.
+    ///
+    /// `STORMCHASER_STEP_NETWORK` names a network set aside for steps, so that they cannot
+    /// reach the control plane (NATS, Postgres) that shares the runner's own network.
+    /// Without it, steps fall back to the runner's network.
     pub async fn get_network_mode(&self) -> Option<String> {
+        if let Some(network) = std::env::var(STEP_NETWORK_ENV)
+            .ok()
+            .filter(|n| !n.trim().is_empty())
+        {
+            return Some(network);
+        }
+        tracing::warn!(
+            "{} is not set; step containers will share the runner's network and can reach whatever it can",
+            STEP_NETWORK_ENV
+        );
         if let Ok(hostname) = std::env::var("HOSTNAME") {
             if let Ok(inspect) = self.docker.inspect_container(&hostname, None).await {
                 if let Some(networks) = inspect.network_settings.and_then(|ns| ns.networks) {
@@ -290,5 +307,16 @@ mod tests {
             .build_container_config(&spec, vec![], None, &[], "test-container", None)
             .unwrap_err();
         assert!(err.to_string().contains(dsl::ALLOW_PRIVILEGED_ENV));
+    }
+
+    #[tokio::test]
+    async fn test_step_network_override() {
+        let machine = get_dummy_machine();
+        std::env::set_var(STEP_NETWORK_ENV, "stormchaser_steps");
+        assert_eq!(
+            machine.get_network_mode().await,
+            Some("stormchaser_steps".to_string())
+        );
+        std::env::remove_var(STEP_NETWORK_ENV);
     }
 }

@@ -20,7 +20,7 @@ service) and configure it as described [below](#production-requirements).
 | TLS | None; traffic is plaintext | TLS on every link, verified |
 | Nodes | 1 | 3 or more, clustered |
 | Stream replicas | 1 | 3 |
-| Network isolation | None | Step containers cannot reach NATS |
+| Network isolation | Steps on a separate Docker network or behind a NetworkPolicy; **off** when started by `scripts/setup.sh` | Step containers cannot reach NATS |
 | Monitoring port (8222) | Open; published on the host by compose | Restricted |
 | Storage | 10Gi PVC (Helm); container filesystem (compose) | Sized, persistent, encrypted |
 
@@ -176,15 +176,29 @@ Workflow authors choose the images that steps run. A step that can open a
 connection to NATS can attack it directly, so the NATS client port must not be
 reachable from step containers:
 
-- **Kubernetes**: steps run in their own namespace (see
-  [environments](environments.md)). Apply a NetworkPolicy to that namespace
-  that denies egress to NATS, PostgreSQL, the object-store admin API and the
-  cloud metadata address (`169.254.169.254`). Stormchaser does not ship this
-  policy yet.
-- **Docker runner**: step containers currently join the runner's own Docker
-  network. Run the Docker runner on hosts whose network cannot reach NATS
-  except from the runner process, or prefer the Kubernetes runner for
-  untrusted workflows.
+- **Kubernetes**: steps run in their own namespace, and the runner chart
+  applies a NetworkPolicy there (`networkPolicy.enabled`, on by default). It
+  denies all ingress and allows egress only to cluster DNS and to addresses
+  outside the private, carrier-grade NAT and link-local ranges, so NATS,
+  PostgreSQL, the Kubernetes API and the cloud metadata address
+  (`169.254.169.254`) are out of reach. Check three things in your cluster:
+  that the CNI enforces NetworkPolicy; that `networkPolicy.blockedCidrs`
+  covers your pod and service ranges; and that cluster DNS is not served from
+  a link-local address (NodeLocal DNSCache), which the default ranges block.
+  If steps must reach an in-cluster object store, allow just that with
+  `networkPolicy.allowReleaseNamespace`, as the umbrella chart does for MinIO.
+- **Docker runner**: set `STORMCHASER_STEP_NETWORK` on the runner to a Docker
+  network that has no route to NATS or PostgreSQL; step containers join it
+  instead of the runner's own network. A network on the same host can still
+  reach any port the control plane publishes on the host, so do not publish
+  NATS or PostgreSQL beyond loopback on runner hosts. The bundled compose
+  file does both: steps join a `steps` network that only object storage is
+  attached to, and the PostgreSQL, NATS and OPA ports are published on
+  `127.0.0.1` (`STORMCHASER_CONTROL_PLANE_BIND`).
+
+`scripts/setup.sh` turns this isolation **off** for local development, because
+the dogfood workflows run the test suite and deploy charts from inside steps.
+Set `STORMCHASER_ISOLATE_STEPS=true` before running it to keep isolation on.
 
 Also restrict the monitoring port (8222): it serves connection, user and
 subject details in plaintext. On Kubernetes keep it bound for probes and limit

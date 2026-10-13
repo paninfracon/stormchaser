@@ -216,6 +216,18 @@ fi
 # default; set STORMCHASER_ALLOW_PRIVILEGED=false (shell or .env) to keep it off.
 export STORMCHASER_ALLOW_PRIVILEGED="${STORMCHASER_ALLOW_PRIVILEGED:-true}"
 
+# The dogfood workflows also run the test suite and deploy charts from inside steps, so
+# their steps must reach Postgres, NATS and the Kubernetes API. Everywhere else steps
+# are cut off from the control plane; here that isolation is off unless you set
+# STORMCHASER_ISOLATE_STEPS=true. The Kubernetes runner in hybrid mode also needs the
+# control-plane ports published beyond loopback.
+export STORMCHASER_ISOLATE_STEPS="${STORMCHASER_ISOLATE_STEPS:-false}"
+if [ "$STORMCHASER_ISOLATE_STEPS" = "true" ] && [ "$MODE" != "hybrid" ]; then
+    export STORMCHASER_CONTROL_PLANE_BIND="${STORMCHASER_CONTROL_PLANE_BIND:-127.0.0.1}"
+else
+    export STORMCHASER_CONTROL_PLANE_BIND="${STORMCHASER_CONTROL_PLANE_BIND:-0.0.0.0}"
+fi
+
 # 3. Start Docker Services
 if [[ "$MODE" == "docker" || "$MODE" == "hybrid" ]]; then
     echo -e "${BLUE}>>> Starting Stormchaser backend in Docker ($MODE mode)...${NC}"
@@ -288,6 +300,8 @@ if [ "$MODE" == "hybrid" ]; then
     helm upgrade --install stormchaser-runner "$REPO_ROOT/deploy/charts/stormchaser-runner-k8s" \
       --namespace default \
       --set config.natsAuthSecret=stormchaser-nats-runner \
+      --set networkPolicy.enabled="$STORMCHASER_ISOLATE_STEPS" \
+      --set-json "networkPolicy.extraEgress=[{\"to\":[{\"ipBlock\":{\"cidr\":\"$HOST_IP/32\"}}],\"ports\":[{\"protocol\":\"TCP\",\"port\":${PORT_S3:-9000}}]}]" \
       --set config.natsUrl="nats://$HOST_IP:${PORT_NATS}" \
       --set config.rustLog="stormchaser_runner_k8s=debug" \
       --set config.allowPrivileged="$STORMCHASER_ALLOW_PRIVILEGED" \
@@ -330,7 +344,7 @@ elif [ "$MODE" == "microk8s" ]; then
         rm -f charts/stormchaser-*.tgz
         helm dependency update
 
-        helm upgrade --install stormchaser .           --namespace "$NAMESPACE"           --create-namespace           --set "stormchaser-orchestration.api.image.repository=stormchaser-api"           --set "stormchaser-orchestration.api.image.tag=latest"           --set "stormchaser-orchestration.api.image.pullPolicy=Never"           --set "stormchaser-orchestration.query.image.repository=stormchaser-query"           --set "stormchaser-orchestration.query.image.tag=v2"           --set "stormchaser-orchestration.query.image.pullPolicy=Never"           --set "stormchaser-orchestration.engine.image.repository=stormchaser-engine"           --set "stormchaser-orchestration.engine.image.tag=latest"           --set "stormchaser-orchestration.engine.image.pullPolicy=Never"           --set "stormchaser-runner-k8s.image.repository=stormchaser-runner-k8s"           --set "stormchaser-runner-k8s.image.tag=latest"           --set "stormchaser-runner-k8s.image.pullPolicy=Never"           --set "stormchaser-runner-k8s.config.allowPrivileged=$STORMCHASER_ALLOW_PRIVILEGED"           --set "global.agent.image.repository=stormchaser-agent"           --set "global.agent.image.tag=latest"           --set "global.agent.image.pullPolicy=Never"
+        helm upgrade --install stormchaser .           --namespace "$NAMESPACE"           --create-namespace           --set "stormchaser-orchestration.api.image.repository=stormchaser-api"           --set "stormchaser-orchestration.api.image.tag=latest"           --set "stormchaser-orchestration.api.image.pullPolicy=Never"           --set "stormchaser-orchestration.query.image.repository=stormchaser-query"           --set "stormchaser-orchestration.query.image.tag=v2"           --set "stormchaser-orchestration.query.image.pullPolicy=Never"           --set "stormchaser-orchestration.engine.image.repository=stormchaser-engine"           --set "stormchaser-orchestration.engine.image.tag=latest"           --set "stormchaser-orchestration.engine.image.pullPolicy=Never"           --set "stormchaser-runner-k8s.image.repository=stormchaser-runner-k8s"           --set "stormchaser-runner-k8s.image.tag=latest"           --set "stormchaser-runner-k8s.image.pullPolicy=Never"           --set "stormchaser-runner-k8s.config.allowPrivileged=$STORMCHASER_ALLOW_PRIVILEGED"           --set "stormchaser-runner-k8s.networkPolicy.enabled=$STORMCHASER_ISOLATE_STEPS"           --set "global.agent.image.repository=stormchaser-agent"           --set "global.agent.image.tag=latest"           --set "global.agent.image.pullPolicy=Never"
     )
 
     echo -e "${BLUE}>>> Deploying Dex Identity Provider...${NC}"
