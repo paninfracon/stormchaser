@@ -106,6 +106,31 @@ pub async fn dispatch_step_instance(
             );
         }
 
+        // The runtime sends pull credentials to whichever registry the image names, so they
+        // only leave the engine with an image on the connection's own registry.
+        let registry_url = conn
+            .config
+            .get("url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let image = resolved_spec
+            .get("image")
+            .and_then(|v| v.as_str())
+            .with_context(|| {
+                format!(
+                    "Registry connection '{}' is set on a step with no image",
+                    reg_conn_name
+                )
+            })?;
+        if !stormchaser_model::registry::image_is_on_registry(image, registry_url) {
+            anyhow::bail!(
+                "Image '{}' is not on the registry of connection '{}' ({}); its credentials are only used for that registry",
+                image,
+                reg_conn_name,
+                stormchaser_model::registry::registry_url_host(registry_url)
+            );
+        }
+
         let username = conn
             .config
             .get("username")
@@ -130,7 +155,7 @@ pub async fn dispatch_step_instance(
         registry_auth = Some(serde_json::json!({
             "username": username,
             "password": password,
-            "url": conn.config.get("url").and_then(|v| v.as_str()).unwrap_or(""),
+            "url": registry_url,
         }));
     }
 

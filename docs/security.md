@@ -220,6 +220,11 @@ someone else. The engine only sends those to the server they were issued for:
   the engine's own `SMTP_SERVER` and `SMTP_PORT`. An email step that names
   another server must supply its own credentials.
 
+* **Registry connections.** A step's `registry_connection` is used only when
+  the step's `image` is on that connection's registry (the host and port of its
+  `url`; an empty `url` means Docker Hub). Any other image fails the step, and
+  the Docker runner checks again before it pulls. On Kubernetes the per-step
+  pull secret is owned by the step's Job and is deleted with it.
 * **The engine's AWS identity.** The engine assumes a role named by a workflow
   step, a query, a SOPS setting or an S3 connection only if the role is listed
   in `STORMCHASER_AWS_ALLOWED_ROLE_ARNS` (Helm: `global.aws.allowedRoleArns`).

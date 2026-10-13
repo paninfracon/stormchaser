@@ -33,6 +33,8 @@ pub mod nats;
 pub mod net_guard;
 /// Outbox pattern models for reliable message publishing.
 pub mod outbox;
+/// Matching container images to registry credentials.
+pub mod registry;
 /// Execution runner definitions and status models.
 pub mod runner;
 /// Schema cache for OCI schemas.

@@ -96,104 +96,128 @@ impl K8sJobMachine<state::Initialized> {
         let job =
             k8s_utils::do_build_job_spec(&job_name, &self.metadata, agent_image, sfs_pvc_name)?;
 
-        if let Some(auth) = &self.metadata.registry_auth {
-            use base64::{engine::general_purpose, Engine as _};
-            use std::collections::BTreeMap;
+        let jobs: Api<Job> = Api::namespaced(self.client.clone(), &self.metadata.namespace);
 
-            let secret_name = format!("{}-auth", job_name);
-            let username = auth.get("username").and_then(|v| v.as_str()).unwrap_or("");
-            let password = auth.get("password").and_then(|v| v.as_str()).unwrap_or("");
-            let url = auth
-                .get("url")
-                .and_then(|v| v.as_str())
-                .unwrap_or("https://index.docker.io/v1/");
-            let url = if url.is_empty() {
-                "https://index.docker.io/v1/"
-            } else {
-                url
-            };
-
-            let auth_string = format!("{}:{}", username, password);
-            let auth_base64 = general_purpose::STANDARD.encode(auth_string);
-
-            let dockerconfigjson = serde_json::json!({
-                "auths": {
-                    url: {
-                        "username": username,
-                        "password": password,
-                        "auth": auth_base64
+        let created = match jobs.create(&PostParams::default(), &job).await {
+            Ok(created) => created,
+            Err(kube::Error::Api(ref err)) if err.code == 409 => {
+                tracing::warn!("Job {} already exists, re-attaching", job_name);
+                match jobs.get(&job_name).await {
+                    Ok(existing) => existing,
+                    Err(e) => {
+                        return Ok(self.failed(format!(
+                            "Failed to read existing K8s job {}: {}",
+                            job_name, e
+                        )))
                     }
                 }
-            });
+            }
+            Err(e) => {
+                error!("Failed to create K8s job {}: {:?}", job_name, e);
+                return Ok(self.failed(format!("K8s API error: {:?}", e)));
+            }
+        };
 
-            let mut secret = Secret::default();
-            secret.metadata.name = Some(secret_name.clone());
-            secret.type_ = Some("kubernetes.io/dockerconfigjson".to_string());
-            let mut data = BTreeMap::new();
-            data.insert(
-                ".dockerconfigjson".to_string(),
-                k8s_openapi::ByteString(serde_json::to_vec(&dockerconfigjson).unwrap()),
-            );
-            secret.data = Some(data);
-
+        // The pull secret is created after the Job so that it can be owned by it: deleting
+        // the Job, by the reaper or its TTL, then removes the registry credentials too.
+        if let Some(auth) = &self.metadata.registry_auth {
+            let secret = build_pull_secret(&job_name, auth, &created);
             let secrets: Api<Secret> =
                 Api::namespaced(self.client.clone(), &self.metadata.namespace);
             if let Err(e) = secrets.create(&PostParams::default(), &secret).await {
                 if !matches!(e, kube::Error::Api(ref err) if err.code == 409) {
-                    return Ok(StartResult::Failed(K8sJobMachine {
-                        client: self.client,
-                        metadata: self.metadata,
-                        state: state::Finished {
-                            result: JobState::Failed(
-                                format!(
-                                    "Failed to create image pull secret {}: {}",
-                                    secret_name, e
-                                ),
-                                JobMetrics::default(),
-                            ),
-                        },
-                    }));
+                    // Without its pull secret the Job would only sit in ImagePullBackOff.
+                    let dp = DeleteParams {
+                        propagation_policy: Some(PropagationPolicy::Background),
+                        ..Default::default()
+                    };
+                    if let Err(delete_err) = jobs.delete(&job_name, &dp).await {
+                        error!(
+                            "Failed to delete K8s job {} after its pull secret could not be created: {:?}",
+                            job_name, delete_err
+                        );
+                    }
+                    return Ok(self.failed(format!(
+                        "Failed to create image pull secret {}-auth: {}",
+                        job_name, e
+                    )));
                 }
             }
         }
 
-        let jobs: Api<Job> = Api::namespaced(self.client.clone(), &self.metadata.namespace);
+        Ok(StartResult::Running(K8sJobMachine {
+            client: self.client,
+            metadata: self.metadata,
+            state: state::Running {
+                job_name,
+                dispatched_at: Utc::now(),
+            },
+        }))
+    }
 
-        match jobs.create(&PostParams::default(), &job).await {
-            Ok(_) => Ok(StartResult::Running(K8sJobMachine {
-                client: self.client,
-                metadata: self.metadata,
-                state: state::Running {
-                    job_name,
-                    dispatched_at: Utc::now(),
-                },
-            })),
-            Err(kube::Error::Api(ref err)) if err.code == 409 => {
-                tracing::warn!("Job {} already exists, re-attaching", job_name);
-                Ok(StartResult::Running(K8sJobMachine {
-                    client: self.client,
-                    metadata: self.metadata,
-                    state: state::Running {
-                        job_name,
-                        dispatched_at: Utc::now(),
-                    },
-                }))
-            }
-            Err(e) => {
-                error!("Failed to create K8s job {}: {:?}", job_name, e);
-                Ok(StartResult::Failed(K8sJobMachine {
-                    client: self.client,
-                    metadata: self.metadata,
-                    state: state::Finished {
-                        result: JobState::Failed(
-                            format!("K8s API error: {:?}", e),
-                            JobMetrics::default(),
-                        ),
-                    },
-                }))
+    fn failed(self, reason: String) -> StartResult {
+        StartResult::Failed(K8sJobMachine {
+            client: self.client,
+            metadata: self.metadata,
+            state: state::Finished {
+                result: JobState::Failed(reason, JobMetrics::default()),
+            },
+        })
+    }
+}
+
+/// Builds the per-step image pull secret, owned by the step's Job so that Kubernetes
+/// deletes it with the Job.
+pub(crate) fn build_pull_secret(job_name: &str, auth: &serde_json::Value, owner: &Job) -> Secret {
+    use base64::{engine::general_purpose, Engine as _};
+    use std::collections::BTreeMap;
+
+    let username = auth.get("username").and_then(|v| v.as_str()).unwrap_or("");
+    let password = auth.get("password").and_then(|v| v.as_str()).unwrap_or("");
+    let url = auth
+        .get("url")
+        .and_then(|v| v.as_str())
+        .filter(|url| !url.is_empty())
+        .unwrap_or("https://index.docker.io/v1/");
+
+    let auth_base64 = general_purpose::STANDARD.encode(format!("{}:{}", username, password));
+
+    let dockerconfigjson = serde_json::json!({
+        "auths": {
+            url: {
+                "username": username,
+                "password": password,
+                "auth": auth_base64
             }
         }
+    });
+
+    let mut secret = Secret::default();
+    secret.metadata.name = Some(format!("{}-auth", job_name));
+    secret.metadata.labels = Some(BTreeMap::from([(
+        "managed-by".to_string(),
+        "stormchaser".to_string(),
+    )]));
+    if let Some(uid) = &owner.metadata.uid {
+        secret.metadata.owner_references = Some(vec![
+            k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference {
+                api_version: "batch/v1".to_string(),
+                kind: "Job".to_string(),
+                name: job_name.to_string(),
+                uid: uid.clone(),
+                controller: Some(false),
+                block_owner_deletion: Some(false),
+            },
+        ]);
     }
+    secret.type_ = Some("kubernetes.io/dockerconfigjson".to_string());
+    secret.data = Some(BTreeMap::from([(
+        ".dockerconfigjson".to_string(),
+        k8s_openapi::ByteString(
+            serde_json::to_vec(&dockerconfigjson).expect("a JSON value always serializes"),
+        ),
+    )]));
+    secret
 }
 
 impl K8sJobMachine<state::Running> {

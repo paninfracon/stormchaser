@@ -617,25 +617,39 @@ impl DockerContainerMachine<state::Initialized> {
             }
         };
 
-        let credentials =
-            self.metadata
-                .registry_auth
-                .as_ref()
-                .map(|auth| bollard::auth::DockerCredentials {
-                    username: auth
-                        .get("username")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    password: auth
-                        .get("password")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    serveraddress: auth
-                        .get("url")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    ..Default::default()
-                });
+        // Docker sends these to whichever registry the image names, so they are only
+        // attached when that is the registry they were issued for.
+        let credentials = self
+            .metadata
+            .registry_auth
+            .as_ref()
+            .filter(|auth| {
+                let url = auth.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                let matches = stormchaser_model::registry::image_is_on_registry(image, url);
+                if !matches {
+                    tracing::warn!(
+                        "Not sending registry credentials for {} with image {}: different registry",
+                        stormchaser_model::registry::registry_url_host(url),
+                        image
+                    );
+                }
+                matches
+            })
+            .map(|auth| bollard::auth::DockerCredentials {
+                username: auth
+                    .get("username")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                password: auth
+                    .get("password")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                serveraddress: auth
+                    .get("url")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                ..Default::default()
+            });
 
         let mut pull_stream = self.docker.create_image(
             Some(CreateImageOptions {
