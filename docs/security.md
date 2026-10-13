@@ -220,6 +220,9 @@ someone else. The engine only sends those to the server they were issued for:
   the engine's own `SMTP_SERVER` and `SMTP_PORT`. An email step that names
   another server must supply its own credentials.
 
+WASM modules run with no host imports, a time limit and a memory cap; see
+[the Wasm step](steps/Wasm.md#limits).
+
 ### Git repositories
 
 Workflow files are read from repositories named by Git connections, which any
