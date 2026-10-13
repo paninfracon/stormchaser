@@ -264,6 +264,44 @@ pub fn build_cloudevent_and_headers(
     Ok((payload, headers))
 }
 
+/// Name of the JetStream stream every Stormchaser component shares.
+pub const STREAM_NAME: &str = "stormchaser";
+
+/// How long the stream keeps a message when nothing erases it sooner.
+///
+/// Set in hours by `STORMCHASER_NATS_STREAM_MAX_AGE_HOURS` (default 168, one week);
+/// `0` means no limit. Task messages hold step secrets, so the stream should never be
+/// left to grow without bound.
+pub fn stream_max_age() -> std::time::Duration {
+    let hours = std::env::var("STORMCHASER_NATS_STREAM_MAX_AGE_HOURS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(168);
+    std::time::Duration::from_secs(hours.saturating_mul(3600))
+}
+
+/// Publishes like [`publish_cloudevent`] and returns the message's sequence in the stream.
+///
+/// `None` means the message was sent but the stream did not confirm storing it.
+pub async fn publish_cloudevent_with_sequence(
+    js: &jetstream::Context,
+    subject: NatsSubject,
+    event_type: EventType,
+    source: EventSource,
+    data: Value,
+    schema_version: Option<SchemaVersion>,
+    schema_id: Option<SchemaId>,
+) -> Result<Option<u64>> {
+    let (payload, headers) =
+        build_cloudevent_and_headers(event_type, source, data, schema_version, schema_id)?;
+
+    let ack = js
+        .publish_with_headers(subject.as_str().into_owned(), headers, payload.into())
+        .await?;
+
+    Ok(ack.await.ok().map(|ack| ack.sequence))
+}
+
 /// Helper function to wrap a JSON payload in a CloudEvent and publish it to NATS with schema headers.
 pub async fn publish_cloudevent(
     js: &jetstream::Context,

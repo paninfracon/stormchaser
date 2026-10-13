@@ -309,3 +309,114 @@ pub fn start_outbox_relay_worker(
         }
     })
 }
+
+/// True when a stream message is the task message dispatched for `step_id`.
+///
+/// Checked before erasing, so that a stale record can never remove some other message
+/// that later came to occupy the same sequence (a stream deleted and created again).
+fn is_task_message_for(subject: &str, payload: &[u8], step_id: Uuid) -> bool {
+    if !subject.contains(".step.scheduled.") && !subject.starts_with("stormchaser.v1.runner.") {
+        return false;
+    }
+    serde_json::from_slice::<serde_json::Value>(payload)
+        .ok()
+        .and_then(|event| {
+            event
+                .get("data")?
+                .get("step_id")?
+                .as_str()
+                .map(str::to_owned)
+        })
+        .is_some_and(|id| id == step_id.to_string())
+}
+
+/// Erases from the stream the task messages of steps that are finished or archived.
+///
+/// A task message carries the step's resolved spec, with secrets, registry credentials
+/// and storage URLs. Nothing needs it once the step is over, so it is removed here rather
+/// than left for the stream's age limit. Returns how many records were cleared.
+pub async fn purge_finished_task_messages(
+    pool: &sqlx::PgPool,
+    js: &async_nats::jetstream::Context,
+) -> anyhow::Result<usize> {
+    use async_nats::jetstream::stream::RawMessageErrorKind;
+
+    let stream = js.get_stream(stormchaser_model::nats::STREAM_NAME).await?;
+    let mut tx = pool.begin().await?;
+    let finished = db::task_messages::fetch_finished_task_messages(&mut *tx, 200).await?;
+    let mut cleared = 0;
+
+    for (seq, step_id) in finished {
+        let erase = match stream.get_raw_message(seq as u64).await {
+            Ok(message) => is_task_message_for(&message.subject, &message.payload, step_id),
+            // Already aged out or erased
+            Err(e) if e.kind() == RawMessageErrorKind::NoMessageFound => false,
+            Err(e) => {
+                tracing::warn!("Could not read task message {} to erase it: {:?}", seq, e);
+                break;
+            }
+        };
+        if erase {
+            // The server overwrites the message's bytes on disk, not just its index entry
+            if let Err(e) = stream.delete_message(seq as u64).await {
+                tracing::warn!(
+                    "Could not erase task message {} of step {}: {:?}",
+                    seq,
+                    step_id,
+                    e
+                );
+                break;
+            }
+        }
+        db::task_messages::delete_task_message_record(&mut *tx, seq).await?;
+        cleared += 1;
+    }
+
+    tx.commit().await?;
+    Ok(cleared)
+}
+
+pub fn start_task_message_purge_worker(pool: sqlx::PgPool, nats_client: async_nats::Client) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(30));
+        let js = async_nats::jetstream::new(nats_client);
+        loop {
+            interval.tick().await;
+            if let Err(e) = purge_finished_task_messages(&pool, &js).await {
+                tracing::warn!("Task message purge failed: {:?}", e);
+            }
+        }
+    });
+}
+
+#[cfg(test)]
+mod task_message_tests {
+    use super::is_task_message_for;
+    use uuid::Uuid;
+
+    #[test]
+    fn only_the_steps_own_task_message_matches() {
+        let step_id = Uuid::new_v4();
+        let payload = serde_json::json!({"type": "x", "data": {"step_id": step_id}}).to_string();
+        let task = "stormchaser.v1.3.step.scheduled.runcontainer";
+
+        assert!(is_task_message_for(task, payload.as_bytes(), step_id));
+        assert!(is_task_message_for(
+            "stormchaser.v1.runner.docker.abc",
+            payload.as_bytes(),
+            step_id
+        ));
+        // Another step's message, another kind of event, or junk
+        assert!(!is_task_message_for(
+            task,
+            payload.as_bytes(),
+            Uuid::new_v4()
+        ));
+        assert!(!is_task_message_for(
+            "stormchaser.v1.3.run.queued",
+            payload.as_bytes(),
+            step_id
+        ));
+        assert!(!is_task_message_for(task, b"not json", step_id));
+    }
+}

@@ -104,10 +104,11 @@ NATS:
 - **Stormchaser does not encrypt or sign these messages itself.** It relies on
   NATS for confidentiality (TLS, authentication, permissions) and on the
   filesystem for encryption at rest.
-- **Messages are retained.** The `stormchaser` stream currently has no age
-  limit and is not purged when a run finishes, so secrets from past runs stay
-  readable through the NATS API until you set a limit (see
-  [Availability and storage](#4-availability-and-storage)).
+- **Task messages are erased when their step is over.** The engine erases a
+  step's task message from the stream within about a minute of the step
+  finishing, and the stream has a maximum age as a backstop (see
+  [Availability and storage](#4-availability-and-storage)). Until then the
+  message is readable through the NATS API by anyone with access to the stream.
 
 So the question to answer is: *who, other than Stormchaser, can read or
 publish on this NATS server, and do you trust them with every secret your
@@ -268,11 +269,18 @@ it with a NetworkPolicy; elsewhere bind it to localhost.
   replicas. Stormchaser does not set a replica count, so a stream it creates
   gets the server default of one; create the stream yourself, or update it,
   to raise that.
-- Set a maximum age on the `stormchaser` stream (for example
-  `nats stream edit stormchaser --max-age 72h`). Stormchaser creates it with
-  no limit and does not yet purge a run's messages when the run finishes, so
-  without one every task message, secrets included, is kept indefinitely.
-  Choose an age longer than your longest-running workflow.
+- The `stormchaser` stream has a maximum message age of one week by default.
+  Change it with `STORMCHASER_NATS_STREAM_MAX_AGE_HOURS` on the engine and
+  runners (`0` for no limit). The engine applies it at start-up to a stream that
+  has no limit; an age you set yourself (for example
+  `nats stream edit stormchaser --max-age 72h`) is left alone. Choose an age
+  longer than your longest-running step and longer than a task may wait for a
+  runner: a task message that ages out before a runner takes it is lost.
+- The engine erases each task message once its step has finished or its run has
+  been archived. With restricted NATS permissions the engine's user needs
+  `$JS.API.STREAM.MSG.GET.stormchaser`, `$JS.API.STREAM.MSG.DELETE.stormchaser`
+  and, to set the age, `$JS.API.STREAM.UPDATE.stormchaser`. If it lacks them the
+  engine logs a warning and messages stay until they age out.
 - Use persistent, adequately sized file storage. Set a container memory limit
   above the JetStream memory-store size, and `GOMEMLIMIT` a little below the
   limit.

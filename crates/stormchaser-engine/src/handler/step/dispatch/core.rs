@@ -7,7 +7,7 @@ use stormchaser_model::dsl::Step;
 use stormchaser_model::events::{
     EventSource, EventType, SchemaVersion, StepEventType, StepScheduledEvent,
 };
-use stormchaser_model::nats::publish_cloudevent;
+use stormchaser_model::nats::publish_cloudevent_with_sequence;
 use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
 use stormchaser_tls::TlsReloader;
@@ -235,7 +235,7 @@ pub async fn dispatch_step_instance(
     // From here the runner owns the step and reports its result without a token.
     crate::db::clear_step_completion_token(&pool, step_instance_id).await?;
 
-    publish_cloudevent(
+    let stream_seq = publish_cloudevent_with_sequence(
         &js,
         subject,
         EventType::Step(StepEventType::Scheduled),
@@ -245,6 +245,30 @@ pub async fn dispatch_step_instance(
         None,
     )
     .await?;
+
+    // The message holds the step's secrets; remember where it is so it can be erased
+    // from the stream when the step is done.
+    match stream_seq {
+        Some(seq) => {
+            if let Err(e) = crate::db::task_messages::record_task_message(
+                &pool,
+                seq,
+                step_instance_id.into_inner(),
+            )
+            .await
+            {
+                tracing::warn!(
+                    "Could not record the task message of step {}; it stays in the stream until it ages out: {:?}",
+                    step_instance_id,
+                    e
+                );
+            }
+        }
+        None => tracing::warn!(
+            "The stream did not confirm the task message of step {}; it cannot be erased early",
+            step_instance_id
+        ),
+    }
 
     Ok(())
 }

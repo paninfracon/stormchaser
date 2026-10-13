@@ -350,6 +350,7 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
         start_timeout_worker(pool.clone(), nats_client.clone(), tls_reloader.clone());
         start_resolver_crash_recovery_worker(pool.clone(), nats_client.clone());
         let _outbox_relay_worker = start_outbox_relay_worker(pool.clone(), nats_client.clone());
+        start_task_message_purge_worker(pool.clone(), nats_client.clone());
     }
 
     let (messages, query_messages) = setup_nats_consumers(&nats_client, &assigned_shards).await?;

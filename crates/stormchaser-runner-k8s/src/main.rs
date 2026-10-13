@@ -227,6 +227,8 @@ pub async fn run_runner(config: Config) -> Result<()> {
         .get_or_create_stream(async_nats::jetstream::stream::Config {
             name: "stormchaser".to_string(),
             subjects: vec!["stormchaser.>".to_string()],
+            // Only applies if this runner creates the stream; the engine sets it otherwise
+            max_age: stormchaser_model::nats::stream_max_age(),
             ..Default::default()
         })
         .await
