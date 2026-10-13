@@ -105,38 +105,7 @@ async fn handle_rest_api_invoke(
         .await?
         {
             if conn.connection_type == stormchaser_model::connections::ConnectionType::HttpApi {
-                if let Some(base_url) = conn.config.get("base_url").and_then(|v| v.as_str()) {
-                    let mut url = spec.url.clone();
-                    if !url.starts_with("http://") && !url.starts_with("https://") {
-                        let base = base_url.trim_end_matches('/');
-                        let path = url.trim_start_matches('/');
-                        url = format!("{}/{}", base, path);
-                    }
-                    spec.url = url;
-                }
-
-                if let Some(headers) = conn.config.get("headers").and_then(|v| v.as_object()) {
-                    let mut current_headers = spec.headers.unwrap_or_default();
-                    for (k, v) in headers {
-                        if let Some(s) = v.as_str() {
-                            current_headers.insert(k.clone(), s.to_string());
-                        }
-                    }
-                    spec.headers = Some(current_headers);
-                }
-
-                if let Some(auth_token) = conn.encrypted_credentials {
-                    let mut current_headers = spec.headers.unwrap_or_default();
-                    if !current_headers.contains_key("Authorization")
-                        && !current_headers.contains_key("authorization")
-                    {
-                        current_headers.insert(
-                            "Authorization".to_string(),
-                            format!("Bearer {}", auth_token),
-                        );
-                    }
-                    spec.headers = Some(current_headers);
-                }
+                apply_http_connection(&mut spec, &conn)?;
             } else {
                 warn!("Connection {} is not of type HttpApi", conn_name);
             }
@@ -177,6 +146,87 @@ async fn handle_rest_api_invoke(
         nats_client,
     )
     .await
+}
+
+/// Resolves the step's URL against an HttpApi connection and attaches the connection's
+/// headers and token.
+///
+/// The URL is the workflow author's; the headers and token are the connection owner's. They
+/// are only attached when the request goes to the connection's own origin, so a step cannot
+/// name a connection and have its credentials sent to a server of the author's choosing.
+fn apply_http_connection(
+    spec: &mut RestApiSpec,
+    conn: &stormchaser_model::Connection,
+) -> Result<()> {
+    let base_url = conn
+        .config
+        .get("base_url")
+        .and_then(|v| v.as_str())
+        // Keep legacy `url` support for existing HttpApi connections.
+        .or_else(|| conn.config.get("url").and_then(|v| v.as_str()));
+    let headers = conn.config.get("headers").and_then(|v| v.as_object());
+    let carries_credentials =
+        conn.encrypted_credentials.is_some() || headers.is_some_and(|h| !h.is_empty());
+
+    let lowered = spec.url.to_ascii_lowercase();
+    let is_absolute = lowered.starts_with("http://") || lowered.starts_with("https://");
+
+    match base_url {
+        Some(base_url) => {
+            let base = reqwest::Url::parse(base_url)
+                .with_context(|| format!("Connection {} has an invalid base_url", conn.name))?;
+            let target = if is_absolute {
+                spec.url.clone()
+            } else {
+                format!(
+                    "{}/{}",
+                    base_url.trim_end_matches('/'),
+                    spec.url.trim_start_matches('/')
+                )
+            };
+            let parsed = reqwest::Url::parse(&target)
+                .with_context(|| format!("RestApi URL {} is not valid", target))?;
+            if carries_credentials && parsed.origin() != base.origin() {
+                anyhow::bail!(
+                    "RestApi URL {} is outside connection {}: its credentials are only sent to {}",
+                    spec.url,
+                    conn.name,
+                    base.origin().ascii_serialization()
+                );
+            }
+            spec.url = target;
+        }
+        None if carries_credentials => {
+            anyhow::bail!(
+                "Connection {} has credentials but no base_url, so they cannot be tied to a server; set base_url on the connection",
+                conn.name
+            );
+        }
+        None => {}
+    }
+
+    let mut current_headers = spec.headers.take().unwrap_or_default();
+    if let Some(headers) = headers {
+        for (k, v) in headers {
+            if let Some(s) = v.as_str() {
+                current_headers.insert(k.clone(), s.to_string());
+            }
+        }
+    }
+    if let Some(auth_token) = &conn.encrypted_credentials {
+        if !current_headers.contains_key("Authorization")
+            && !current_headers.contains_key("authorization")
+        {
+            current_headers.insert(
+                "Authorization".to_string(),
+                format!("Bearer {}", auth_token),
+            );
+        }
+    }
+    if !current_headers.is_empty() || headers.is_some() || conn.encrypted_credentials.is_some() {
+        spec.headers = Some(current_headers);
+    }
+    Ok(())
 }
 
 fn render_request_body(spec: &RestApiSpec, template_ctx: &Value) -> Result<Option<String>> {
@@ -398,6 +448,107 @@ mod tests {
     use super::*;
     use serde_json::json;
     use uuid::Uuid;
+
+    fn http_connection(config: Value, token: Option<&str>) -> stormchaser_model::Connection {
+        serde_json::from_value(json!({
+            "id": Uuid::new_v4(),
+            "name": "billing",
+            "description": null,
+            "connection_type": "http_api",
+            "config": config,
+            "encrypted_credentials": token,
+            "aws_assume_role_arn": null,
+            "is_default_sfs": false,
+            "ca_cert": null,
+            "client_cert": null,
+            "client_key": null,
+            "created_at": chrono::Utc::now(),
+            "updated_at": chrono::Utc::now(),
+        }))
+        .unwrap()
+    }
+
+    fn spec_for(url: &str) -> RestApiSpec {
+        RestApiSpec {
+            connection: Some("billing".to_string()),
+            url: url.to_string(),
+            method: None,
+            headers: None,
+            body: None,
+            timeout: None,
+            extractors: None,
+        }
+    }
+
+    #[test]
+    fn connection_joins_relative_url_and_attaches_token() {
+        let conn = http_connection(
+            json!({"base_url": "https://api.example.com/v1/"}),
+            Some("t0k"),
+        );
+        let mut spec = spec_for("/invoices");
+        apply_http_connection(&mut spec, &conn).unwrap();
+        assert_eq!(spec.url, "https://api.example.com/v1/invoices");
+        assert_eq!(spec.headers.unwrap()["Authorization"], "Bearer t0k");
+    }
+
+    #[test]
+    fn connection_allows_absolute_url_on_its_own_origin() {
+        let conn = http_connection(
+            json!({"base_url": "https://api.example.com/v1"}),
+            Some("t0k"),
+        );
+        let mut spec = spec_for("https://api.example.com:443/v2/invoices");
+        apply_http_connection(&mut spec, &conn).unwrap();
+        assert!(spec.headers.unwrap().contains_key("Authorization"));
+    }
+
+    #[test]
+    fn connection_credentials_are_not_sent_to_another_origin() {
+        let conn = http_connection(json!({"base_url": "https://api.example.com"}), Some("t0k"));
+        for url in [
+            "https://attacker.example.net/collect",
+            "http://api.example.com/invoices",
+            "https://api.example.com:8443/invoices",
+            "https://api.example.com@attacker.example.net/",
+            "HTTPS://attacker.example.net/",
+        ] {
+            let mut spec = spec_for(url);
+            let err = apply_http_connection(&mut spec, &conn).unwrap_err();
+            assert!(
+                err.to_string().contains("outside connection"),
+                "{url}: {err}"
+            );
+            assert!(spec.headers.is_none(), "{url}");
+        }
+    }
+
+    #[test]
+    fn connection_headers_alone_are_bound_to_the_origin() {
+        let conn = http_connection(
+            json!({"base_url": "https://api.example.com", "headers": {"X-Api-Key": "k"}}),
+            None,
+        );
+        let mut spec = spec_for("https://attacker.example.net/");
+        assert!(apply_http_connection(&mut spec, &conn).is_err());
+    }
+
+    #[test]
+    fn connection_with_credentials_needs_a_base_url() {
+        let conn = http_connection(json!({}), Some("t0k"));
+        let mut spec = spec_for("https://api.example.com/invoices");
+        let err = apply_http_connection(&mut spec, &conn).unwrap_err();
+        assert!(err.to_string().contains("no base_url"));
+    }
+
+    #[test]
+    fn connection_without_credentials_does_not_restrict_the_url() {
+        let conn = http_connection(json!({"base_url": "https://api.example.com"}), None);
+        let mut spec = spec_for("https://other.example.net/status");
+        apply_http_connection(&mut spec, &conn).unwrap();
+        assert_eq!(spec.url, "https://other.example.net/status");
+        assert!(spec.headers.is_none());
+    }
 
     #[test]
     fn test_render_request_body() {

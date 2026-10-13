@@ -208,6 +208,15 @@ comma-separated list of hostnames, IP literals or `*.suffix` patterns, for
 example `vault.internal,*.svc.cluster.local`. The list is empty by default.
 Response bodies are limited to 10 MiB (64 MiB for WASM modules).
 
+### Credentials the engine attaches
+
+A workflow author chooses where a step connects, but some credentials belong to
+someone else. The engine only sends those to the server they were issued for:
+
+* **`http_api` connections.** A `RestApi` step that names a connection gets the
+  connection's headers and token only when the request goes to the scheme, host
+  and port of the connection's `base_url`. Any other URL fails the step.
+
 ### Git repositories
 
 Workflow files are read from repositories named by Git connections, which any
