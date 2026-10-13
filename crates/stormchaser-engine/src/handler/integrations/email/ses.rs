@@ -14,6 +14,7 @@ pub async fn build_ses_client(
     let config = config_loader.load().await;
 
     if let Some(role) = role_arn {
+        crate::aws_guard::ensure_role_allowed(&role)?;
         let sts_client = aws_sdk_sts::Client::new(&config);
         let session_name = format!("stormchaser-ses-{}", run_id);
 

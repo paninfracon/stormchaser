@@ -51,6 +51,10 @@ spec:
             {{- end }}
             - name: STORMCHASER_SSRF_ALLOWED_HOSTS
               value: {{ join "," .Values.global.ssrfAllowedHosts | quote }}
+            - name: STORMCHASER_AWS_ALLOWED_ROLE_ARNS
+              value: {{ join "," .Values.global.aws.allowedRoleArns | quote }}
+            - name: STORMCHASER_AWS_ALLOWED_LAMBDA_FUNCTIONS
+              value: {{ join "," .Values.global.aws.allowedLambdaFunctions | quote }}
             - name: RUST_LOG
               value: {{ .Values.engine.rustLog | quote }}
             - name: GIT_CACHE_DIR

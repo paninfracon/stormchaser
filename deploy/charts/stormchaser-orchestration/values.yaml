@@ -20,6 +20,13 @@ global:
   # link-local and metadata addresses are refused unless the host is listed here.
   # Entries are hostnames, IP literals, or "*.suffix".
   ssrfAllowedHosts: []
+  aws:
+    # Role ARNs the engine and query service may assume when a workflow, query or
+    # S3 connection names one. A trailing "*" matches a prefix. Empty refuses all.
+    allowedRoleArns: []
+    # Lambda function names or ARNs the engine may invoke with its own credentials
+    # (a LambdaInvoke step with no assume_role_arn). A trailing "*" matches a prefix.
+    allowedLambdaFunctions: []
   loki:
     url: "http://loki:3100"
   grafana:

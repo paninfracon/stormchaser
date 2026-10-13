@@ -21,7 +21,7 @@ The `spec` block for `EmailSend` supports the following fields:
 * `smtp_use_tls` (boolean, optional): Whether to use TLS for SMTP. Defaults to `SMTP_USE_TLS` env var.
 * `smtp_use_mtls` (boolean, optional): Whether to use mutual TLS (mTLS) for SMTP. Defaults to `SMTP_USE_MTLS` env var.
 * `ses_region` (string, optional): AWS region for SES.
-* `ses_role_arn` (string, optional): IAM Role ARN to assume for sending via SES.
+* `ses_role_arn` (string, optional): IAM Role ARN to assume for sending via SES. The operator must list the role in `STORMCHASER_AWS_ALLOWED_ROLE_ARNS`.
 * `ses_configuration_set_name` (string, optional): SES configuration set name.
 
 ## Example

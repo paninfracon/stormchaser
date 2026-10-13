@@ -5,6 +5,8 @@
 
 /// Artifact management and backend integrations.
 pub mod artifact;
+/// Operator allow-lists for AWS roles and Lambda functions.
+pub mod aws_guard;
 /// Database interaction layer.
 pub mod db;
 /// Git caching and cloning utilities.

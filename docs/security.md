@@ -220,6 +220,17 @@ someone else. The engine only sends those to the server they were issued for:
   the engine's own `SMTP_SERVER` and `SMTP_PORT`. An email step that names
   another server must supply its own credentials.
 
+* **The engine's AWS identity.** The engine assumes a role named by a workflow
+  step, a query, a SOPS setting or an S3 connection only if the role is listed
+  in `STORMCHASER_AWS_ALLOWED_ROLE_ARNS` (Helm: `global.aws.allowedRoleArns`).
+  A `LambdaInvoke` step with no role runs as the engine itself, and its
+  function must be listed in `STORMCHASER_AWS_ALLOWED_LAMBDA_FUNCTIONS` (Helm:
+  `global.aws.allowedLambdaFunctions`). Both are comma-separated, a trailing
+  `*` matches a prefix, and both are empty by default, which refuses every
+  role and every function. Scope the engine's own IAM policy as well: these
+  lists do not limit SES sending or `aws_cloudcontrol` queries made without a
+  role.
+
 WASM modules run with no host imports, a time limit and a memory cap; see
 [the Wasm step](steps/Wasm.md#limits).
 

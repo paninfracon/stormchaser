@@ -12,7 +12,7 @@ This document outlines proposed enhancements to the native `TerraformPlan`, `Ter
 
 **Goal:** Eliminate long-lived static credentials for cloud providers.
 **Rationale:** The current approach requires passing `AWS_ACCESS_KEY_ID` or `GOOGLE_CREDENTIALS` via environment variables. Since Stormchaser runs on modern orchestrators, it should natively generate short-lived OIDC tokens.
-**Implementation:** You can now provide `aws_assume_role_arn` and `aws_role_session_name` in the spec of `TerraformPlan` and `TerraformApply`. If the Stormchaser Engine is compiled with the `aws-sdk-sts` feature, it will natively invoke `sts:AssumeRole` before dispatching the container and inject short-lived AWS credentials securely into the container environment.
+**Implementation:** You can now provide `aws_assume_role_arn` and `aws_role_session_name` in the spec of `TerraformPlan` and `TerraformApply`. If the Stormchaser Engine is compiled with the `aws-sdk-sts` feature, it will natively invoke `sts:AssumeRole` before dispatching the container and inject short-lived AWS credentials securely into the container environment. The role must be listed in the engine's `STORMCHASER_AWS_ALLOWED_ROLE_ARNS` (Helm: `global.aws.allowedRoleArns`); the list is empty by default and a trailing `*` matches a prefix.
 
 ## 3. Automatic Plan Artifact Generation (Implemented)
 

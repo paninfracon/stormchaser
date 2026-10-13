@@ -188,6 +188,7 @@ async fn execute_aws_cloudcontrol_query(
         let config = config_loader.load().await;
 
         let client = if let Some(role_arn) = params.get("assume_role_arn") {
+            crate::aws_guard::ensure_role_allowed(role_arn)?;
             let sts_client = aws_sdk_sts::Client::new(&config);
             let session_name = params
                 .get("role_session_name")

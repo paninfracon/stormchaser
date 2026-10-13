@@ -76,6 +76,31 @@ async fn test_lambda_handler_invoke() {
         .await
         .unwrap();
 
+    // The engine only invokes functions the operator has allow-listed for its own identity.
+    let refused_step_id = StepInstanceId::new_v4();
+    sqlx::query("INSERT INTO step_instances (id, run_id, step_name, step_type, status, spec, params) VALUES ($1, $2, 'refused-step', 'LambdaInvoke', 'pending', '{}', '{}')")
+        .bind(refused_step_id)
+        .bind(run_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let refused = handle_lambda_invoke(
+        run_id,
+        refused_step_id,
+        spec.clone(),
+        pool.clone(),
+        nats_client.clone(),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        refused
+            .to_string()
+            .contains("STORMCHASER_AWS_ALLOWED_LAMBDA_FUNCTIONS"),
+        "{refused}"
+    );
+
+    std::env::set_var("STORMCHASER_AWS_ALLOWED_LAMBDA_FUNCTIONS", "test-*");
     let res = handle_lambda_invoke(run_id, step_id, spec, pool.clone(), nats_client).await;
 
     assert!(res.is_ok(), "Lambda invoke failed: {:?}", res.err());

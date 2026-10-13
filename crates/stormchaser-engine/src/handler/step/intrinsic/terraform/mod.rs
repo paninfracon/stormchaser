@@ -193,6 +193,7 @@ async fn mutate_terraform_spec(
 
     #[cfg(feature = "aws-sdk-sts")]
     if let Some(role_arn) = assume_role_arn {
+        crate::aws_guard::ensure_role_allowed(role_arn)?;
         let mut sts_envs = assume_aws_role(run_id, region, role_arn, role_session_name).await?;
         envs.append(&mut sts_envs);
     }

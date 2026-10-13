@@ -82,6 +82,7 @@ pub async fn decrypt_sops_secrets(
     #[cfg(feature = "aws-sops")]
     {
         if let Some(arn) = role_arn {
+            crate::aws_guard::ensure_role_allowed(arn)?;
             debug!("Assuming AWS STS role {} for SOPS decryption", arn);
             let config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
             let sts = aws_sdk_sts::Client::new(&config);

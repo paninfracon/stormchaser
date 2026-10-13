@@ -45,6 +45,7 @@ pub async fn get_s3_client(backend: &Connection) -> Result<Client> {
 
     #[cfg(feature = "aws-s3-sts")]
     let sdk_config = if let Some(role_arn) = &backend.aws_assume_role_arn {
+        crate::aws_guard::ensure_role_allowed(role_arn)?;
         let sts_client = aws_sdk_sts::Client::new(&sdk_config);
         let assume_role_res = sts_client
             .assume_role()
