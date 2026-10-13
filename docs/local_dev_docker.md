@@ -10,7 +10,8 @@ core engine logic or testing features locally.
 The Docker-only setup includes:
 
 * **Stormchaser API & Engine**: Core orchestration services.
-* **PostgreSQL**: Database for state and configuration.
+* **PostgreSQL**: Database for state and configuration. It is not encrypted
+  at rest; do not store real credentials in this environment.
 * **NATS JetStream**: Message broker and persistent event store for service
   communication and task queuing. It requires passwords, which `setup.sh`
   generates into `.env` (`STORMCHASER_NATS_PASSWORD` for the control plane,

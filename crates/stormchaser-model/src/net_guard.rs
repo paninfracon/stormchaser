@@ -5,7 +5,7 @@
 //! addresses that were checked.
 //!
 //! This lives in the model crate only because the engine and API both depend on it; it
-//! is due to move to a shared utility crate (see docs/security-remediation-plan.md).
+//! is due to move to a shared utility crate.
 
 use anyhow::{anyhow, bail, Result};
 use reqwest::Url;

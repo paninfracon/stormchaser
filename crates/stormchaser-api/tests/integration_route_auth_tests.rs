@@ -150,3 +150,74 @@ async fn public_routes_stay_reachable_without_a_token() {
         StatusCode::UNAUTHORIZED
     );
 }
+
+/// Records what the API hands to policy, and allows everything.
+#[derive(Default)]
+struct RecordingAuthorizer {
+    seen: std::sync::Mutex<Vec<(String, String)>>,
+}
+
+#[async_trait::async_trait]
+impl stormchaser_model::auth::OpaAuthorizer for RecordingAuthorizer {
+    async fn check(
+        &self,
+        context: stormchaser_model::auth::ApiOpaContext<'_>,
+    ) -> anyhow::Result<bool> {
+        self.seen
+            .lock()
+            .unwrap()
+            .push((context.method.to_string(), context.path.to_string()));
+        Ok(true)
+    }
+    async fn check_approval(
+        &self,
+        _context: stormchaser_model::auth::ApprovalOpaContext<'_>,
+    ) -> anyhow::Result<bool> {
+        Ok(true)
+    }
+    async fn check_connection(
+        &self,
+        _context: stormchaser_model::auth::ConnectionOpaContext<'_>,
+    ) -> anyhow::Result<bool> {
+        Ok(true)
+    }
+    fn is_configured(&self) -> bool {
+        true
+    }
+}
+
+/// Documents what request-level policy can and cannot see today: the method, the path
+/// with the `/api/v1` prefix stripped, and the raw token. It is not told who owns the
+/// object in the path, so it cannot make per-object decisions.
+#[tokio::test]
+async fn policy_sees_the_path_without_its_api_prefix() {
+    let claims = stormchaser_model::auth::Claims {
+        sub: "test-user".to_string(),
+        email: Some("test-user@paninfracon.net".to_string()),
+        exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
+    };
+    let token = jsonwebtoken::encode(
+        &jsonwebtoken::Header::default(),
+        &claims,
+        &jsonwebtoken::EncodingKey::from_secret(stormchaser_api::JWT_SECRET),
+    )
+    .unwrap();
+
+    let authorizer = Arc::new(RecordingAuthorizer::default());
+    let mut state = mock_state().await;
+    state.opa = authorizer.clone();
+    let router = app(state);
+
+    let run_id = Uuid::new_v4();
+    let path = format!("/api/v1/runs/{run_id}");
+    status_of(
+        &router,
+        &Method::GET,
+        &path,
+        Some(&format!("Bearer {token}")),
+    )
+    .await;
+
+    let seen = authorizer.seen.lock().unwrap().clone();
+    assert_eq!(seen, vec![("GET".to_string(), format!("/runs/{run_id}"))]);
+}

@@ -25,8 +25,10 @@ local machine, complete with automated log management and monitoring
 - **Helm**: Ensure `helm` is installed locally.
 
 > **This is an evaluation environment.** It deploys single-node PostgreSQL,
-> NATS and MinIO alongside Stormchaser. NATS requires generated passwords but
-> has no TLS and no clustering. Before relying on it, read
+> NATS and MinIO alongside Stormchaser. PostgreSQL is not encrypted at rest,
+> so do not store real credentials in it. NATS requires generated passwords
+> but has no TLS and no clustering. Before relying on it, read
+> [Encryption at rest](security.md#5-encryption-at-rest) and
 > [NATS: Quickstart and Production](nats.md).
 
 ### Step 1: Run the Deployment Script
@@ -161,7 +163,11 @@ and the Runners in isolated worker clusters).
 - `helm` and `kubectl` installed and configured to communicate with your
   cluster.
 - External dependencies provisioned (PostgreSQL Database, NATS JetStream
-  cluster). NATS must require authentication, give runners a separate
+  cluster). PostgreSQL must be encrypted at rest and reached over TLS:
+  Stormchaser stores workflow secrets and connection credentials in it and
+  does not encrypt them itself; see
+  [Encryption at rest](security.md#5-encryption-at-rest) for what your
+  database administrator needs to provide. NATS must require authentication, give runners a separate
   restricted user, use TLS, and be unreachable from workflow step pods; see
   [NATS: Quickstart and Production](nats.md) for the exact requirements.
 

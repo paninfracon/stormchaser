@@ -210,10 +210,12 @@ configuration and require TLS, because the client still sends the password
 itself.
 
 **What these permissions do not stop.** A runner credential can report
-`completed` or `failed` for any step, including approval steps, because the
-engine cannot yet tell which runner a report came from. It can also read tasks
-scheduled for other runners of any type. Treat every runner host as trusted to
-that extent, and see the remediation plan for the planned fix.
+`completed` or `failed` for any step that was handed to a runner, including
+steps another runner is executing, because the engine cannot yet tell which
+runner a report came from. It can also read tasks scheduled for other runners
+of any type. It cannot finish steps the engine handles itself, such as
+approvals: those need a token that never leaves the database. Treat every
+runner host as trusted to that extent.
 
 ### 2. TLS on every link
 

@@ -100,10 +100,67 @@ Stormchaser follows a strict **Fail-Closed** security philosophy regarding OPA:
 
 ## 5. Encryption at rest
 
-There are two main areas to consider for encryption at rest:
+Stormchaser does not encrypt data itself before storing it. Protecting data at
+rest is the responsibility of whoever operates the data stores: this section
+states what must be protected and what Stormchaser expects; the database
+administrator implements it.
 
-1. Postgres DB - standard techniques are well documented for this
-2. NATS Jetstream - NATS documentation notes that whilst NATS supports at rest encryption, host native file system encryption is preferred
+### PostgreSQL
+
+**Encryption at rest is required for any deployment that handles real
+credentials.** Stormchaser writes secrets to PostgreSQL in the clear and
+relies on the database being encrypted underneath it.
+
+What the database administrator must provide:
+
+* **Encryption of everything PostgreSQL writes to disk**: the data directory,
+  write-ahead log, temporary files, replicas, and every backup and snapshot.
+  Core PostgreSQL has no transparent data encryption, so this is done at the
+  storage layer (LUKS/dm-crypt, an encrypted volume or storage class, or the
+  encryption built into a managed PostgreSQL service) or with a PostgreSQL
+  distribution that offers it.
+* **TLS for connections from Stormchaser.** Set `STORMCHASER_DB_SSL=true` and
+  `TLS_CA_CERT_PATH` on the API, engine and query service so they verify the
+  server certificate; without the CA path the connection is not verified.
+* **A dedicated, least-privileged database role** for Stormchaser, and control
+  over who else can query the database or restore its backups. Storage
+  encryption does not protect against anyone who can connect and read tables.
+* **No statement parameters in server logs.** Secrets are sent as query
+  parameters; leave parameter logging off (`log_parameter_max_length = 0`) and
+  avoid `log_statement = 'all'` on this database.
+* **Key management and rotation** for whichever encryption is used.
+
+Stormchaser does not use `pgcrypto` or any other column-level encryption, and
+none should be layered on from the application side: the database is the
+single place this is handled.
+
+So the administrator can judge what is at stake, these are the places secrets
+are stored:
+
+| Table | Columns | Contents |
+| :--- | :--- | :--- |
+| `run_contexts`, `archived_run_contexts` | `secrets`, `sensitive_values`, `inputs` | Decrypted SOPS secrets for a run, the list of secret values used for redaction, and workflow inputs, including those declared secret |
+| `step_instances`, `archived_step_instances` | `spec`, `params` | Resolved step definitions, with secrets already substituted in |
+| `step_instances` | `completion_token` | A per-step secret that authorises finishing an approval or other engine-handled step |
+| `step_outputs` and archived copy | `value` | Step outputs, which may contain secrets a step emitted |
+| `outbox_events` | `payload` | Task messages waiting to be published, with the same content as a resolved step |
+| `connections` | `config`, `encrypted_credentials`, `client_key` | Credentials for storage, registries, databases, Git and HTTP APIs. Despite its name, `encrypted_credentials` is stored exactly as supplied |
+| `webhooks` | `secret_token`, `client_key` | Webhook signing secrets and mTLS client keys |
+| `cron_workflows` | `secret_token` | Trigger tokens for scheduled workflows |
+
+The API masks these values in its responses (see the relevant endpoints), but
+that is independent of how they are stored.
+
+The PostgreSQL bundled with docker-compose and the umbrella Helm chart is for
+evaluation: it has no encryption at rest and, in the chart, connects with
+`sslmode=disable`. Do not store real credentials in it.
+
+### NATS JetStream
+
+Task messages held in JetStream contain the same secrets as a resolved step.
+NATS supports encryption at rest, but its documentation recommends
+file-system encryption of the store directory instead; that is what
+Stormchaser assumes. See [NATS: Quickstart and Production](nats.md).
 
 ## 6. Runner Security Considerations
 
