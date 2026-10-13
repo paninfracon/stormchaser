@@ -4,7 +4,7 @@ use bollard::models::ContainerCreateBody;
 use bollard::models::HostConfigLogConfig;
 use bollard::models::{HostConfig, Mount};
 use std::collections::HashMap;
-use stormchaser_model::dsl::CommonContainerSpec;
+use stormchaser_model::dsl::{self, CommonContainerSpec};
 use tracing::info;
 
 impl<S> DockerContainerMachine<S> {
@@ -34,6 +34,8 @@ impl<S> DockerContainerMachine<S> {
         container_name: &str,
         loki_url: Option<&str>,
     ) -> Result<ContainerCreateBody> {
+        dsl::ensure_privileged_permitted(spec.privileged, dsl::privileged_steps_allowed())?;
+
         let mut env: Vec<String> = spec
             .env
             .clone()
@@ -266,5 +268,27 @@ mod tests {
             .build_container_config(&spec, vec![], None, &[], "test-container", None)
             .unwrap();
         assert_eq!(config.image, Some("alpine:latest".into()));
+    }
+
+    #[test]
+    fn test_build_container_config_rejects_privileged_by_default() {
+        let machine = get_dummy_machine();
+        let spec = CommonContainerSpec {
+            image: "alpine:latest".into(),
+            registry_connection: None,
+            connections: None,
+            command: None,
+            args: None,
+            env: None,
+            cpu: None,
+            memory: None,
+            privileged: Some(true),
+            storage_mounts: None,
+        };
+
+        let err = machine
+            .build_container_config(&spec, vec![], None, &[], "test-container", None)
+            .unwrap_err();
+        assert!(err.to_string().contains(dsl::ALLOW_PRIVILEGED_ENV));
     }
 }

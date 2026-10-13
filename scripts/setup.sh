@@ -202,6 +202,11 @@ if [ "$REGENERATE_DEX_CONFIG" = true ]; then
     python3 "$REPO_ROOT/scripts/generate_dex_config.py"
 fi
 
+# The dogfood workflows build images with privileged Buildah steps, which runners
+# reject unless the operator opts in. This is a local dev environment, so opt in by
+# default; set STORMCHASER_ALLOW_PRIVILEGED=false (shell or .env) to keep it off.
+export STORMCHASER_ALLOW_PRIVILEGED="${STORMCHASER_ALLOW_PRIVILEGED:-true}"
+
 # 3. Start Docker Services
 if [[ "$MODE" == "docker" || "$MODE" == "hybrid" ]]; then
     echo -e "${BLUE}>>> Starting Stormchaser backend in Docker ($MODE mode)...${NC}"
@@ -268,6 +273,7 @@ if [ "$MODE" == "hybrid" ]; then
       --namespace default \
       --set config.natsUrl="nats://$HOST_IP:${PORT_NATS}" \
       --set config.rustLog="stormchaser_runner_k8s=debug" \
+      --set config.allowPrivileged="$STORMCHASER_ALLOW_PRIVILEGED" \
       --wait
 elif [ "$MODE" == "microk8s" ]; then
     NAMESPACE="stormchaser"
@@ -307,7 +313,7 @@ elif [ "$MODE" == "microk8s" ]; then
         rm -f charts/stormchaser-*.tgz
         helm dependency update
 
-        helm upgrade --install stormchaser .           --namespace "$NAMESPACE"           --create-namespace           --set "stormchaser-orchestration.api.image.repository=stormchaser-api"           --set "stormchaser-orchestration.api.image.tag=latest"           --set "stormchaser-orchestration.api.image.pullPolicy=Never"           --set "stormchaser-orchestration.query.image.repository=stormchaser-query"           --set "stormchaser-orchestration.query.image.tag=v2"           --set "stormchaser-orchestration.query.image.pullPolicy=Never"           --set "stormchaser-orchestration.engine.image.repository=stormchaser-engine"           --set "stormchaser-orchestration.engine.image.tag=latest"           --set "stormchaser-orchestration.engine.image.pullPolicy=Never"           --set "stormchaser-runner-k8s.image.repository=stormchaser-runner-k8s"           --set "stormchaser-runner-k8s.image.tag=latest"           --set "stormchaser-runner-k8s.image.pullPolicy=Never"           --set "global.agent.image.repository=stormchaser-agent"           --set "global.agent.image.tag=latest"           --set "global.agent.image.pullPolicy=Never"
+        helm upgrade --install stormchaser .           --namespace "$NAMESPACE"           --create-namespace           --set "stormchaser-orchestration.api.image.repository=stormchaser-api"           --set "stormchaser-orchestration.api.image.tag=latest"           --set "stormchaser-orchestration.api.image.pullPolicy=Never"           --set "stormchaser-orchestration.query.image.repository=stormchaser-query"           --set "stormchaser-orchestration.query.image.tag=v2"           --set "stormchaser-orchestration.query.image.pullPolicy=Never"           --set "stormchaser-orchestration.engine.image.repository=stormchaser-engine"           --set "stormchaser-orchestration.engine.image.tag=latest"           --set "stormchaser-orchestration.engine.image.pullPolicy=Never"           --set "stormchaser-runner-k8s.image.repository=stormchaser-runner-k8s"           --set "stormchaser-runner-k8s.image.tag=latest"           --set "stormchaser-runner-k8s.image.pullPolicy=Never"           --set "stormchaser-runner-k8s.config.allowPrivileged=$STORMCHASER_ALLOW_PRIVILEGED"           --set "global.agent.image.repository=stormchaser-agent"           --set "global.agent.image.tag=latest"           --set "global.agent.image.pullPolicy=Never"
     )
 
     echo -e "${BLUE}>>> Deploying Dex Identity Provider...${NC}"

@@ -93,16 +93,16 @@ async fn test_headless_validation_dynamic_query_failure() {
 }
 
 #[tokio::test]
-async fn test_execute_query_sql_success() {
+async fn test_execute_query_sql_without_connection_is_rejected() {
     let pool = setup_db().await;
     let mut params = std::collections::HashMap::new();
     params.insert("query".to_string(), "SELECT 'test_val'".to_string());
 
-    let res = stormchaser_engine::query::execute_query("sql", &params, Some(&pool), None)
+    // A query that names no connection must never run on the system pool.
+    let err = stormchaser_engine::query::execute_query("sql", &params, Some(&pool), None)
         .await
-        .unwrap();
-    assert_eq!(res.len(), 1);
-    assert_eq!(res[0], serde_json::json!("test_val"));
+        .unwrap_err();
+    assert!(err.to_string().contains("require a 'connection'"));
 }
 
 #[tokio::test]

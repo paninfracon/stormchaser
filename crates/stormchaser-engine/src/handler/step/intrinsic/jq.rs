@@ -138,11 +138,7 @@ async fn dispatch_jq_internal(
             match modules {
                 Ok(mods) => {
                     let filter = jaq_core::Compiler::default()
-                        .with_funs(
-                            jaq_core::funs()
-                                .chain(jaq_std::funs())
-                                .chain(jaq_json::funs()),
-                        )
+                        .with_funs(crate::query::jq_funs())
                         .compile(mods);
 
                     match filter {

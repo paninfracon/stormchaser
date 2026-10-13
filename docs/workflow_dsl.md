@@ -794,7 +794,7 @@ Stormchaser provides a set of built-in functions extending HCL to handle common 
 
 **Workflow Context:**
 
-* `env(string)`: **(Planned)** Accesses an environment variable (Equivalent to `${env.NAME}`).
+* `env(string)`: Reads an environment variable of the engine process. Only names the operator has listed in `STORMCHASER_ENV_ALLOWLIST` (comma-separated) are readable; any other name is an evaluation error. The list is empty by default.
 * `secret(string)`: Performs a dynamic secret lookup from the configured backend (e.g., Vault). Format is `secret("path#key")`.
 * `is_retry()`: **(Planned)** Returns `true` if the current step execution is a retry.
 * `retry_count()`: **(Planned)** Returns the number of times the current step has been retried.

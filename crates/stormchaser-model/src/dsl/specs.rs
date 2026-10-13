@@ -5,6 +5,33 @@ use std::collections::HashMap;
 
 use super::StorageMount;
 
+/// Environment variable an operator sets to `true` on a runner to permit privileged steps.
+pub const ALLOW_PRIVILEGED_ENV: &str = "STORMCHASER_ALLOW_PRIVILEGED";
+
+/// Whether the operator has enabled privileged steps on this runner.
+pub fn privileged_steps_allowed() -> bool {
+    std::env::var(ALLOW_PRIVILEGED_ENV)
+        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+        .unwrap_or(false)
+}
+
+/// Rejects a step that asks for privileged mode unless the operator enabled it.
+///
+/// Privileged containers are root on the runner host, so this is enforced by the runner
+/// itself rather than left to policy upstream of it.
+pub fn ensure_privileged_permitted(
+    privileged: Option<bool>,
+    operator_allows: bool,
+) -> anyhow::Result<()> {
+    if privileged == Some(true) && !operator_allows {
+        anyhow::bail!(
+            "Step requests privileged mode, which this runner does not permit (set {}=true on the runner to allow it)",
+            ALLOW_PRIVILEGED_ENV
+        );
+    }
+    Ok(())
+}
+
 /// Minimal common set of arguments for running containers (portable across runners)
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct CommonContainerSpec {
@@ -386,4 +413,19 @@ pub struct JqSpec {
     pub output_file: Option<String>,
     /// Storage mounts.
     pub storage_mounts: Option<Vec<StorageMount>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ensure_privileged_permitted() {
+        assert!(ensure_privileged_permitted(None, false).is_ok());
+        assert!(ensure_privileged_permitted(Some(false), false).is_ok());
+        assert!(ensure_privileged_permitted(Some(true), true).is_ok());
+
+        let err = ensure_privileged_permitted(Some(true), false).unwrap_err();
+        assert!(err.to_string().contains(ALLOW_PRIVILEGED_ENV));
+    }
 }

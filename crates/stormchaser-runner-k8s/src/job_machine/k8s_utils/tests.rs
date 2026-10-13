@@ -255,3 +255,56 @@ fn test_build_k8s_resources() {
     assert_eq!(limits["cpu"].0, "500m");
     assert_eq!(limits["memory"].0, "1Gi");
 }
+
+#[test]
+fn test_do_build_job_spec_rejects_privileged_by_default() {
+    for step_type in ["RunContainer", "RunK8sJob"] {
+        let step_dsl = Step {
+            name: "test-step".into(),
+            r#type: step_type.into(),
+            params: HashMap::new(),
+            spec: serde_json::json!({
+                "image": "alpine:latest",
+                "privileged": true
+            }),
+            aggregation: vec![],
+            next: vec![],
+            outputs: vec![],
+            reports: vec![],
+            condition: None,
+            strategy: None,
+            iterate: None,
+            iterate_as: None,
+            steps: None,
+            on_failure: None,
+            aliases: std::collections::HashMap::new(),
+            retry: None,
+            timeout: None,
+            allow_failure: None,
+            start_marker: None,
+            end_marker: None,
+            artifacts: None,
+        };
+
+        let metadata = JobMetadata {
+            run_id: Uuid::new_v4(),
+            step_id: Uuid::new_v4(),
+            fencing_token: 0,
+            step_dsl,
+            namespace: "default".into(),
+            received_at: Utc::now(),
+            cluster_version: "v1.28.0".into(),
+            encryption_key: None,
+            storage: None,
+            test_report_urls: None,
+            registry_auth: None,
+        };
+
+        let err = do_build_job_spec("test-job", &metadata, None, None).unwrap_err();
+        assert!(
+            format!("{:#}", err).contains(dsl::ALLOW_PRIVILEGED_ENV),
+            "{} should be rejected",
+            step_type
+        );
+    }
+}

@@ -28,7 +28,7 @@ pub async fn execute_query(
     }
 
     if query_type == "sql" {
-        execute_sql_query(params, db_url, pool).await
+        execute_sql_query(params, db_url).await
     } else if query_type == "api" {
         execute_api_query(params).await
     } else if query_type == "mock" {
@@ -53,53 +53,35 @@ pub async fn execute_query(
 async fn execute_sql_query(
     params: &HashMap<String, String>,
     db_url: Option<String>,
-    pool: Option<&PgPool>,
 ) -> Result<Vec<Value>, anyhow::Error> {
     let sql_query = params
         .get("query")
         .ok_or_else(|| anyhow::anyhow!("Missing 'query' param"))?;
 
-    // The query text is the workflow author's own query source, executed as written.
+    // The query text is the workflow author's own source, executed as written, so it only
+    // ever runs against a database named by a connection — never Stormchaser's own.
+    let url = db_url.ok_or_else(|| {
+        anyhow::anyhow!("SQL queries require a 'connection' param naming a connection with a 'url'")
+    })?;
+
     use sqlx::{AssertSqlSafe, Row};
     let mut results = Vec::new();
 
-    if let Some(url) = db_url {
-        let tmp_pool = sqlx::PgPool::connect(&url).await?;
-        let rows = sqlx::query(AssertSqlSafe(sql_query.as_str()))
-            .fetch_all(&tmp_pool)
-            .await?;
-        for row in rows {
-            if row.is_empty() {
-                continue;
-            }
-            if let Ok(val) = row.try_get::<String, _>(0) {
-                results.push(Value::String(val));
-            } else if let Ok(val) = row.try_get::<i64, _>(0) {
-                results.push(serde_json::json!(val));
-            } else if let Ok(val) = row.try_get::<bool, _>(0) {
-                results.push(Value::Bool(val));
-            }
+    let tmp_pool = sqlx::PgPool::connect(&url).await?;
+    let rows = sqlx::query(AssertSqlSafe(sql_query.as_str()))
+        .fetch_all(&tmp_pool)
+        .await?;
+    for row in rows {
+        if row.is_empty() {
+            continue;
         }
-    } else if let Some(p) = pool {
-        let rows = sqlx::query(AssertSqlSafe(sql_query.as_str()))
-            .fetch_all(p)
-            .await?;
-        for row in rows {
-            if row.is_empty() {
-                continue;
-            }
-            if let Ok(val) = row.try_get::<String, _>(0) {
-                results.push(Value::String(val));
-            } else if let Ok(val) = row.try_get::<i64, _>(0) {
-                results.push(serde_json::json!(val));
-            } else if let Ok(val) = row.try_get::<bool, _>(0) {
-                results.push(Value::Bool(val));
-            }
+        if let Ok(val) = row.try_get::<String, _>(0) {
+            results.push(Value::String(val));
+        } else if let Ok(val) = row.try_get::<i64, _>(0) {
+            results.push(serde_json::json!(val));
+        } else if let Ok(val) = row.try_get::<bool, _>(0) {
+            results.push(Value::Bool(val));
         }
-    } else {
-        return Err(anyhow::anyhow!(
-            "No connection and no system pool available"
-        ));
     }
     Ok(results)
 }
@@ -280,6 +262,17 @@ pub(crate) fn jq_output_to_json(
     }
 }
 
+/// Native jq functions available to workflow-supplied programs.
+///
+/// `env` is left out: it would return the engine's whole process environment.
+pub(crate) fn jq_funs(
+) -> impl Iterator<Item = jaq_core::native::Fun<jaq_core::data::JustLut<jaq_json::Val>>> {
+    jaq_core::funs()
+        .chain(jaq_std::funs())
+        .chain(jaq_json::funs())
+        .filter(|(name, _, _)| *name != "env")
+}
+
 fn apply_jq_filter(jq_filter_str: &str, input_val: Value) -> Result<Vec<Value>, anyhow::Error> {
     use jaq_core::load::{Arena, File, Loader};
     use jaq_core::{data, Ctx, Vars};
@@ -301,11 +294,7 @@ fn apply_jq_filter(jq_filter_str: &str, input_val: Value) -> Result<Vec<Value>, 
         .map_err(|e| anyhow::anyhow!("Failed to parse jq filter: {:?}", e))?;
 
     let filter = jaq_core::Compiler::default()
-        .with_funs(
-            jaq_core::funs()
-                .chain(jaq_std::funs())
-                .chain(jaq_json::funs()),
-        )
+        .with_funs(jq_funs())
         .compile(modules)
         .map_err(|e| anyhow::anyhow!("Failed to compile jq filter: {:?}", e))?;
 
@@ -418,5 +407,28 @@ mod tests {
         let res = execute_query("unknown", &HashMap::new(), None, None).await;
         let err = res.unwrap_err();
         assert!(err.to_string().contains("Unsupported query protocol"));
+    }
+
+    #[tokio::test]
+    async fn test_execute_query_sql_requires_connection() {
+        let mut params = HashMap::new();
+        params.insert("query".to_string(), "SELECT 1".to_string());
+
+        let err = execute_query("sql", &params, None, None).await.unwrap_err();
+        assert!(err.to_string().contains("require a 'connection'"));
+    }
+
+    #[test]
+    fn test_jq_filter_cannot_read_process_env() {
+        let err = apply_jq_filter("env", serde_json::json!(null)).unwrap_err();
+        assert!(err.to_string().contains("Failed to compile jq filter"));
+
+        // The rest of the standard library is still available.
+        let res = apply_jq_filter(
+            "[.[] | ascii_upcase] | length",
+            serde_json::json!(["a", "b"]),
+        )
+        .unwrap();
+        assert_eq!(res, vec![serde_json::json!(2)]);
     }
 }

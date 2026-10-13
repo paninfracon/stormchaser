@@ -24,6 +24,8 @@ spec:
               value: {{ .Values.config.natsUrl | quote }}
             - name: RUST_LOG
               value: {{ .Values.config.rustLog | quote }}
+            - name: STORMCHASER_ALLOW_PRIVILEGED
+              value: {{ .Values.config.allowPrivileged | quote }}
             - name: DOCKER_HOST
               value: "unix:///var/run/docker.sock"
           volumeMounts:

@@ -187,6 +187,31 @@ pub async fn handle_workflow_queued(
     // 5. Schema Validation and Default Value Hydration
     let mut inputs = fetch_inputs(run_id, &pool).await?;
 
+    // OPA Policy Check — runs before any query execution so denied requests cannot
+    // trigger SQL/API/AWS side-effects from DSL-supplied query parameters.
+    let opa_context = EngineOpaContext {
+        run_id,
+        initiating_user: machine.run.initiating_user.clone(),
+        workflow_ast: serde_json::to_value(&parsed_workflow)?,
+        inputs: inputs.clone(),
+    };
+
+    match opa_client.check_context(opa_context).await {
+        Ok(true) => debug!("OPA allowed execution for run {}", run_id),
+        Ok(false) => {
+            let err_msg = "Execution denied by OPA policy".to_string();
+            info!("Run {}: {}", run_id, err_msg);
+            let _ = machine.fail(err_msg, &mut *pool.acquire().await?).await?;
+            return Ok(()); // Handled failure
+        }
+        Err(e) => {
+            let err_msg = format!("OPA check failed: {}", e);
+            error!("Run {}: {}", run_id, err_msg);
+            let _ = machine.fail(err_msg, &mut *pool.acquire().await?).await?;
+            return Err(e);
+        }
+    }
+
     // Evaluate dynamic queries
     let mut query_results = serde_json::Map::new();
     for query in &parsed_workflow.queries {
@@ -286,31 +311,6 @@ pub async fn handle_workflow_queued(
                 .fail(full_err.clone(), &mut *pool.acquire().await?)
                 .await?;
             return Err(anyhow::anyhow!(full_err));
-        }
-    }
-
-    // 6. OPA Policy Check after Parsing
-    // We send the full context: AST, user, and inputs
-    let opa_context = EngineOpaContext {
-        run_id,
-        initiating_user: machine.run.initiating_user.clone(),
-        workflow_ast: serde_json::to_value(&parsed_workflow)?,
-        inputs: inputs.clone(),
-    };
-
-    match opa_client.check_context(opa_context).await {
-        Ok(true) => debug!("OPA allowed execution for run {}", run_id),
-        Ok(false) => {
-            let err_msg = "Execution denied by OPA policy".to_string();
-            info!("Run {}: {}", run_id, err_msg);
-            let _ = machine.fail(err_msg, &mut *pool.acquire().await?).await?;
-            return Ok(()); // Handled failure
-        }
-        Err(e) => {
-            let err_msg = format!("OPA check failed: {}", e);
-            error!("Run {}: {}", run_id, err_msg);
-            let _ = machine.fail(err_msg, &mut *pool.acquire().await?).await?;
-            return Err(e);
         }
     }
 

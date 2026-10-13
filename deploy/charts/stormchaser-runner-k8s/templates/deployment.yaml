@@ -47,6 +47,8 @@ spec:
             {{- end }}
             - name: RUST_LOG
               value: {{ .Values.config.rustLog | quote }}
+            - name: STORMCHASER_ALLOW_PRIVILEGED
+              value: {{ .Values.config.allowPrivileged | quote }}
             - name: STORMCHASER_AGENT_IMAGE
               value: "{{ .Values.global.agent.image.repository }}:{{ .Values.global.agent.image.tag }}"
           ports:

@@ -100,6 +100,8 @@ pub(crate) fn parse_step_spec(metadata: &JobMetadata) -> Result<StepSpec> {
                 serde_json::from_value(metadata.step_dsl.spec.clone())
                     .context("Failed to parse RunContainer spec as CommonContainerSpec")?;
 
+            dsl::ensure_privileged_permitted(spec.privileged, dsl::privileged_steps_allowed())?;
+
             let env = map_dsl_env_to_k8s(spec.env.unwrap_or_default());
 
             let resources = build_k8s_resources(spec.cpu, spec.memory);
@@ -129,6 +131,8 @@ pub(crate) fn parse_step_spec(metadata: &JobMetadata) -> Result<StepSpec> {
         "RunK8sJob" => {
             let spec: K8sJobSpec = serde_json::from_value(metadata.step_dsl.spec.clone())
                 .context("Failed to parse RunK8sJob spec as K8sJobSpec")?;
+
+            dsl::ensure_privileged_permitted(spec.privileged, dsl::privileged_steps_allowed())?;
 
             let env = map_dsl_env_to_k8s(spec.env.unwrap_or_default());
 
