@@ -45,7 +45,6 @@ allow = [
     "Apache-2.0",
     "Unicode-3.0", # Compatibility verified - JAC
     "ISC", # Compatibility verified - JAC
-    "OpenSSL", # Compatibility verified - JAC
     "BSD-3-Clause", # Compatibility verified - JAC
     "CC0-1.0", # Sus. Clarifcation needed - JAC
     "BSL-1.0", # Compatibility verified - JAC

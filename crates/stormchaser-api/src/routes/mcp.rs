@@ -35,6 +35,7 @@ pub fn mcp_service(
                 None,
                 false,
                 false,
+                false,
             );
             server.load_openapi_spec().map_err(|error| {
                 error!(?error, "Failed to load MCP OpenAPI spec");

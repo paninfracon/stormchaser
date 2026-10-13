@@ -49,7 +49,7 @@ thiserror = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
 futures = "0.3"
-git2 = { version = "0.20", features = ["vendored-openssl"] }
+git2 = { version = "0.21", features = ["vendored-openssl", "https", "ssh"] }
 humantime = "2.1"
 once_cell = { workspace = true }
 opentelemetry = { workspace = true }
@@ -59,11 +59,11 @@ tracing-opentelemetry = { workspace = true }
 opentelemetry-semantic-conventions = { workspace = true }
 parking_lot = { workspace = true }
 hex = "0.4"
-sha2 = "0.10"
+sha2 = { workspace = true }
 hcl-rs.workspace = true
 wasmtime = { workspace = true }
 regex = "1.12.3"
-base64 = "0.22.1"
+base64 = { workspace = true }
 aes-gcm = { workspace = true }
 aead = { workspace = true }
 aws-config = { workspace = true }
@@ -84,8 +84,8 @@ flate2 = { workspace = true }
 rustls-native-certs = { version = "0.8.3", optional = true }
 cloudevents-sdk = "0.9.0"
 jsonschema.workspace = true
-aws-sdk-cloudcontrol = { version = "1.65.0", optional = true }
-serde_yaml = "0.9"
+aws-sdk-cloudcontrol = { version = "1.65.0", default-features = false, features = ["default-https-client", "rt-tokio"], optional = true }
+serde-saphyr = "1.3"
 
 [dev-dependencies]
 dotenvy = "0.15"
@@ -94,4 +94,4 @@ wat = "1.211"
 wiremock = "0.6"
 
 [build-dependencies]
-vergen = { workspace = true }
+vergen-gitcl = { workspace = true }

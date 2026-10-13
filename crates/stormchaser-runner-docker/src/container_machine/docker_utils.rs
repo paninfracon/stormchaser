@@ -1,8 +1,8 @@
 use super::{crypto, DockerContainerMachine};
 use anyhow::Result;
-use bollard::container::Config;
+use bollard::models::ContainerCreateBody;
 use bollard::models::HostConfigLogConfig;
-use bollard::service::{HostConfig, Mount};
+use bollard::models::{HostConfig, Mount};
 use std::collections::HashMap;
 use stormchaser_model::dsl::CommonContainerSpec;
 use tracing::info;
@@ -33,7 +33,7 @@ impl<S> DockerContainerMachine<S> {
         storage_names: &[String],
         container_name: &str,
         loki_url: Option<&str>,
-    ) -> Result<Config<String>> {
+    ) -> Result<ContainerCreateBody> {
         let mut env: Vec<String> = spec
             .env
             .clone()
@@ -135,7 +135,7 @@ impl<S> DockerContainerMachine<S> {
             log_config,
             loki_url
         );
-        Ok(Config {
+        Ok(ContainerCreateBody {
             image: Some(final_image),
             cmd: final_args,
             entrypoint: final_command,

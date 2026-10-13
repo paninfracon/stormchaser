@@ -67,14 +67,13 @@ fn encrypt_token(payload: &ApprovalLinkPayload) -> String {
     let mut hasher = Sha256::new();
     hasher.update(JWT_SECRET);
     let key_bytes = hasher.finalize();
-    let key = aes_gcm::Key::<Aes256Gcm>::from_slice(&key_bytes);
-    let cipher = Aes256Gcm::new(key);
+    let cipher = Aes256Gcm::new(&key_bytes);
 
     let nonce_bytes = [0u8; 12]; // Fixed nonce for tests is fine
-    let nonce = Nonce::from_slice(&nonce_bytes);
+    let nonce = Nonce::from(nonce_bytes);
 
     let plaintext = serde_json::to_vec(payload).unwrap();
-    let ciphertext = cipher.encrypt(nonce, plaintext.as_ref()).unwrap();
+    let ciphertext = cipher.encrypt(&nonce, plaintext.as_ref()).unwrap();
 
     let mut combined = nonce_bytes.to_vec();
     combined.extend_from_slice(&ciphertext);

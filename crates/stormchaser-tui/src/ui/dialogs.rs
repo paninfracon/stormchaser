@@ -20,19 +20,16 @@ pub(crate) fn render_filter_dialog(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(2)
-        .constraints(
-            [
-                Constraint::Length(3), // Workflow Name
-                Constraint::Length(3), // Initiating User
-                Constraint::Length(3), // Repo URL
-                Constraint::Length(3), // Workflow Path
-                Constraint::Length(3), // Created After
-                Constraint::Length(3), // Created Before
-                Constraint::Length(3), // Status
-                Constraint::Min(0),
-            ]
-            .as_ref(),
-        )
+        .constraints([
+            Constraint::Length(3), // Workflow Name
+            Constraint::Length(3), // Initiating User
+            Constraint::Length(3), // Repo URL
+            Constraint::Length(3), // Workflow Path
+            Constraint::Length(3), // Created After
+            Constraint::Length(3), // Created Before
+            Constraint::Length(3), // Status
+            Constraint::Min(0),
+        ])
         .split(area);
 
     let labels = [
@@ -84,7 +81,7 @@ pub(crate) fn render_file_browser(f: &mut Frame, app: &mut App) {
 
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)].as_ref())
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(area);
 
     // Explorer Pane
@@ -126,15 +123,12 @@ pub(crate) fn render_schedule_git_dialog(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(2)
-        .constraints(
-            [
-                Constraint::Length(3), // Repo URL
-                Constraint::Length(3), // Workflow Path
-                Constraint::Length(3), // Git Ref
-                Constraint::Min(0),    // Help text
-            ]
-            .as_ref(),
-        )
+        .constraints([
+            Constraint::Length(3), // Repo URL
+            Constraint::Length(3), // Workflow Path
+            Constraint::Length(3), // Git Ref
+            Constraint::Min(0),    // Help text
+        ])
         .split(area);
 
     let labels = [
@@ -178,13 +172,10 @@ pub(crate) fn render_approval_dialog(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(2)
-        .constraints(
-            [
-                Constraint::Min(5),    // JSON Inputs
-                Constraint::Length(3), // Help text
-            ]
-            .as_ref(),
-        )
+        .constraints([
+            Constraint::Min(5),    // JSON Inputs
+            Constraint::Length(3), // Help text
+        ])
         .split(area);
 
     let mut text_area = app.approval_inputs.clone();
@@ -216,13 +207,10 @@ pub(crate) fn render_delete_run_dialog(f: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(2)
-        .constraints(
-            [
-                Constraint::Min(3),    // Message
-                Constraint::Length(3), // Help text
-            ]
-            .as_ref(),
-        )
+        .constraints([
+            Constraint::Min(3),    // Message
+            Constraint::Length(3), // Help text
+        ])
         .split(area);
 
     let run_id = app

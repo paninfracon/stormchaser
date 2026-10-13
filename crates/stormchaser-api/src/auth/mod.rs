@@ -28,7 +28,6 @@ pub fn resolve_jwt_secret() -> Result<Vec<u8>, &'static str> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthClaims(pub Claims);
 
-#[axum::async_trait]
 impl FromRequestParts<AppState> for AuthClaims {
     type Rejection = StatusCode;
 
@@ -83,8 +82,10 @@ impl FromRequestParts<AppState> for AuthClaims {
         }
 
         // 2. Fallback to local secret for legacy/dev tokens
-        let mut validation = Validation::default();
-        validation.validate_exp = true;
+        let mut validation = Validation {
+            validate_exp: true,
+            ..Default::default()
+        };
         // Skip audience/issuer check for local tokens as they don't have them set usually in the current model
         validation.required_spec_claims.remove("aud");
 

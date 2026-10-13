@@ -5,11 +5,25 @@ use crate::events::{
     StepRunningEvent, StepScheduledEvent, WorkflowAbortedEvent, WorkflowCompletedEvent,
     WorkflowFailedEvent, WorkflowQueuedEvent, WorkflowRunningEvent, WorkflowStartPendingEvent,
 };
-use schemars::schema::{ObjectValidation, RootSchema, Schema, SchemaObject, SubschemaValidation};
-use schemars::{schema_for, Map};
+use schemars::generate::SchemaSettings;
+use schemars::transform::{transform_subschemas, Transform};
+use schemars::{JsonSchema, Schema};
+
+/// Generates a standalone JSON Schema Draft-07 document for `T`.
+pub fn draft07_schema_for<T: JsonSchema + ?Sized>() -> Schema {
+    SchemaSettings::draft07()
+        .into_generator()
+        .into_root_schema_for::<T>()
+}
+
+macro_rules! schema_for {
+    ($t:ty) => {
+        draft07_schema_for::<$t>()
+    };
+}
 
 /// Generates a map of all event schemas.
-pub fn generate_event_schemas() -> HashMap<String, RootSchema> {
+pub fn generate_event_schemas() -> HashMap<String, Schema> {
     let mut schemas = HashMap::new();
     schemas.insert(
         "WorkflowQueuedEvent".to_string(),
@@ -81,68 +95,68 @@ use std::collections::HashMap;
 /// to structurally match the required subschema mapping (e.g. `K8sJobSpec`) depending on
 /// the literal string value of the `type` field (e.g. `"RunK8sJob"`). It also sets
 /// `additionalProperties` to `true` on steps to allow for external plugins.
-pub fn apply_step_extensibility(
-    root_schema: &mut RootSchema,
-    spec_schemas: &HashMap<String, Schema>,
-) {
-    if let Some(Schema::Object(step_obj)) = root_schema.definitions.get_mut("Step") {
-        let mut all_of = Vec::new();
+pub fn apply_step_extensibility(root_schema: &mut Schema, spec_schemas: &HashMap<String, Schema>) {
+    let Some(step_obj) = root_schema
+        .get_mut("definitions")
+        .and_then(Value::as_object_mut)
+        .and_then(|definitions| definitions.get_mut("Step"))
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
 
-        // Preserve any existing allOf logic
-        if let Some(subschemas) = &mut step_obj.subschemas {
-            if let Some(existing_all_of) = &subschemas.all_of {
-                all_of.extend(existing_all_of.clone());
+    // Preserve any existing allOf logic
+    let mut all_of = step_obj
+        .get("allOf")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    for (type_name, spec_schema) in spec_schemas {
+        all_of.push(serde_json::json!({
+            "if": {
+                "required": ["type"],
+                "properties": { "type": { "const": type_name } }
+            },
+            "then": {
+                "required": ["spec"],
+                "properties": { "spec": spec_schema }
+            }
+        }));
+    }
+
+    step_obj.insert("allOf".to_string(), Value::Array(all_of));
+
+    if step_obj.contains_key("properties") || step_obj.contains_key("required") {
+        step_obj.insert("additionalProperties".to_string(), Value::Bool(true));
+    }
+}
+
+/// Marks schemas that accept `null` with the OpenAPI-style `nullable: true` annotation,
+/// keeping the explicit `null` type so plain JSON Schema validators behave the same.
+#[derive(Clone)]
+struct MarkNullable;
+
+impl Transform for MarkNullable {
+    fn transform(&mut self, schema: &mut Schema) {
+        if let Some(obj) = schema.as_object_mut() {
+            let has_null_type = obj
+                .get("type")
+                .and_then(Value::as_array)
+                .is_some_and(|types| types.iter().any(|t| t == "null"));
+            let has_null_branch =
+                obj.get("anyOf")
+                    .and_then(Value::as_array)
+                    .is_some_and(|branches| {
+                        branches
+                            .iter()
+                            .any(|branch| branch.get("type").is_some_and(|t| t == "null"))
+                    });
+            if has_null_type || has_null_branch {
+                obj.insert("nullable".to_string(), Value::Bool(true));
             }
         }
-
-        for (type_name, spec_schema) in spec_schemas {
-            let mut if_schema = SchemaObject::default();
-            let mut properties = Map::new();
-
-            let type_schema = SchemaObject {
-                const_value: Some(Value::String(type_name.clone())),
-                ..Default::default()
-            };
-
-            properties.insert("type".to_string(), Schema::Object(type_schema));
-            if_schema.object = Some(Box::new(ObjectValidation {
-                properties,
-                required: std::collections::BTreeSet::from(["type".to_string()]),
-                ..Default::default()
-            }));
-
-            let mut then_schema = SchemaObject::default();
-            let mut then_props = Map::new();
-            then_props.insert("spec".to_string(), spec_schema.clone());
-            then_schema.object = Some(Box::new(ObjectValidation {
-                properties: then_props,
-                required: std::collections::BTreeSet::from(["spec".to_string()]),
-                ..Default::default()
-            }));
-
-            let condition = SchemaObject {
-                subschemas: Some(Box::new(SubschemaValidation {
-                    if_schema: Some(Box::new(Schema::Object(if_schema))),
-                    then_schema: Some(Box::new(Schema::Object(then_schema))),
-                    ..Default::default()
-                })),
-                ..Default::default()
-            };
-            all_of.push(Schema::Object(condition));
-        }
-
-        if let Some(subschemas) = &mut step_obj.subschemas {
-            subschemas.all_of = Some(all_of);
-        } else {
-            step_obj.subschemas = Some(Box::new(SubschemaValidation {
-                all_of: Some(all_of),
-                ..Default::default()
-            }));
-        }
-
-        if let Some(obj) = step_obj.object.as_mut() {
-            obj.additional_properties = Some(Box::new(Schema::Bool(true)));
-        }
+        transform_subschemas(self, schema);
     }
 }
 
@@ -151,9 +165,9 @@ pub fn apply_step_extensibility(
 /// This compiles the `Workflow` AST struct into an OpenAPI/JSON Schema compatible
 /// tree, embeds all standard `spec` mappings for known intrinsic step types, and
 /// strips out incompatible OpenAPI meta-schemas to ensure local JSON Schema validation runs cleanly.
-pub fn generate_dsl_schema() -> RootSchema {
-    let mut generator = schemars::gen::SchemaSettings::draft07()
-        .with(|s| s.option_nullable = true)
+pub fn generate_dsl_schema() -> Schema {
+    let mut generator = SchemaSettings::draft07()
+        .with_transform(MarkNullable)
         .into_generator();
 
     let mut spec_schemas = HashMap::new();
@@ -221,7 +235,7 @@ pub fn generate_dsl_schema() -> RootSchema {
     apply_step_extensibility(&mut root_schema, &spec_schemas);
 
     // Remove the OpenAPI meta-schema to avoid jsonschema validation errors on unrecognized drafts
-    root_schema.meta_schema = None;
+    root_schema.remove("$schema");
     root_schema
 }
 
@@ -361,8 +375,7 @@ mod tests {
     fn test_generate_dsl_schema_registers_rest_api_spec() {
         let schema = generate_dsl_schema();
         let rest_api_schema = schema
-            .definitions
-            .get("RestApiSpec")
+            .pointer("/definitions/RestApiSpec")
             .expect("generated DSL schema should include the RestApiSpec definition");
         let rest_api_schema_json = serde_json::to_value(rest_api_schema)
             .expect("RestApiSpec schema should serialize to JSON value");
@@ -385,8 +398,7 @@ mod tests {
     fn test_generate_dsl_schema_registers_sql_execute_spec() {
         let schema = generate_dsl_schema();
         let sql_execute_schema = schema
-            .definitions
-            .get("SqlExecuteSpec")
+            .pointer("/definitions/SqlExecuteSpec")
             .expect("generated DSL schema should include the SqlExecuteSpec definition");
         let sql_execute_schema_json = serde_json::to_value(sql_execute_schema)
             .expect("SqlExecuteSpec schema should serialize to JSON value");

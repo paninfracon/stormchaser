@@ -117,12 +117,16 @@ async fn dispatch_jq_internal(
     let result = match jq_spec {
         Ok(jq) => {
             use jaq_core::load::{Arena, File, Loader};
-            use jaq_core::{Ctx, RcIter};
+            use jaq_core::{data, Ctx, Vars};
             use jaq_json::Val;
 
             let input_value = jq.input.unwrap_or(Value::Null);
 
-            let loader = Loader::new(jaq_std::defs().chain(jaq_json::defs()));
+            let loader = Loader::new(
+                jaq_core::defs()
+                    .chain(jaq_std::defs())
+                    .chain(jaq_json::defs()),
+            );
             let arena = Arena::default();
             let program = File {
                 code: jq.program.as_str(),
@@ -134,29 +138,32 @@ async fn dispatch_jq_internal(
             match modules {
                 Ok(mods) => {
                     let filter = jaq_core::Compiler::default()
-                        .with_funs(jaq_std::funs().chain(jaq_json::funs()))
+                        .with_funs(
+                            jaq_core::funs()
+                                .chain(jaq_std::funs())
+                                .chain(jaq_json::funs()),
+                        )
                         .compile(mods);
 
                     match filter {
                         Ok(f) => {
-                            let input = Val::from(input_value);
-                            let inputs = RcIter::new(core::iter::empty());
-                            let out = f.run((Ctx::new([], &inputs), input));
-
                             let mut results = Vec::new();
                             let mut execution_err = None;
 
-                            for res in out {
-                                match res {
-                                    Ok(v) => {
-                                        results.push(Value::from(v));
-                                    }
-                                    Err(e) => {
-                                        execution_err =
-                                            Some(anyhow::anyhow!("JQ execution error: {:?}", e));
-                                        break;
+                            match crate::query::json_to_jq_val(input_value) {
+                                Ok(input) => {
+                                    let ctx = Ctx::<data::JustLut<Val>>::new(&f.lut, Vars::new([]));
+                                    for res in f.id.run((ctx, input)) {
+                                        match crate::query::jq_output_to_json(res) {
+                                            Ok(v) => results.push(v),
+                                            Err(e) => {
+                                                execution_err = Some(e);
+                                                break;
+                                            }
+                                        }
                                     }
                                 }
+                                Err(e) => execution_err = Some(e),
                             }
 
                             if let Some(e) = execution_err {

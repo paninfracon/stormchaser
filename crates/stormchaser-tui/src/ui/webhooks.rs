@@ -10,7 +10,7 @@ use ratatui::{
 pub(crate) fn render_webhooks_tab(f: &mut Frame, area: Rect, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(30), Constraint::Percentage(70)].as_ref())
+        .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
         .split(area);
 
     let list_border_color = if app.active_pane == crate::app::Pane::WebhooksList {
@@ -108,17 +108,14 @@ pub(crate) fn render_webhook_dialog(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(2)
-        .constraints(
-            [
-                Constraint::Length(3), // Name
-                Constraint::Length(3), // Description
-                Constraint::Length(3), // Secret Token
-                Constraint::Length(3), // Source Type
-                Constraint::Length(3), // Is Active
-                Constraint::Length(2), // Help text
-            ]
-            .as_ref(),
-        )
+        .constraints([
+            Constraint::Length(3), // Name
+            Constraint::Length(3), // Description
+            Constraint::Length(3), // Secret Token
+            Constraint::Length(3), // Source Type
+            Constraint::Length(3), // Is Active
+            Constraint::Length(2), // Help text
+        ])
         .split(area);
 
     let labels = ["Name:", "Description:", "Secret Token:"];

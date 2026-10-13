@@ -167,7 +167,8 @@ pub async fn run_runner(config: Config) -> Result<()> {
     let nats_subject = format!("stormchaser.v1.runner.docker.{}", runner_id);
 
     // Generate JSON Schema for our supported step type
-    let common_schema = schemars::schema_for!(dsl::CommonContainerSpec);
+    let common_schema =
+        stormchaser_model::schema_gen::draft07_schema_for::<dsl::CommonContainerSpec>();
     let common_schema_json = serde_json::to_value(common_schema)?;
 
     let registration_payload = RunnerRegisterEvent {

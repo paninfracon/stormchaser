@@ -120,7 +120,7 @@ async fn upload_to_oci(
 
 /// Uploads artifacts to configured backends and returns metadata maps.
 pub async fn park_artifacts(artifacts: Value) -> Result<HashMap<String, Value>> {
-    let client = Client::new();
+    let client = crate::http_client()?;
     let mut metadata_map = HashMap::new();
 
     if let Some(artifact_map) = artifacts.as_object() {

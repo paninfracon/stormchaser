@@ -129,12 +129,16 @@ pub fn extract_queries(queries: &[stormchaser_model::dsl::Query], tasks: &mut Ve
     }
 }
 
+/// The hydration event stream's receiver has gone away.
+#[derive(Debug)]
+pub struct ReceiverClosed;
+
 pub async fn emit_event(
     schema: &Value,
     inputs: &Value,
     tasks: &[QueryTask],
     tx: &tokio::sync::mpsc::Sender<HydrationEvent>,
-) -> Result<(), ()> {
+) -> Result<(), ReceiverClosed> {
     let mut query_status = std::collections::HashMap::new();
     let mut any_running = false;
     for task in tasks {
@@ -185,7 +189,7 @@ pub async fn emit_event(
         validation_errors,
     };
 
-    tx.send(event).await.map_err(|_| ())
+    tx.send(event).await.map_err(|_| ReceiverClosed)
 }
 
 pub async fn execute_query(

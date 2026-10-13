@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use schemars::schema::Schema;
+use schemars::Schema;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -117,7 +117,7 @@ async fn resolve_base_schema(
     command: &LintCommand,
     url: &str,
     http_client: &reqwest_middleware::ClientWithMiddleware,
-) -> Result<schemars::schema::RootSchema> {
+) -> Result<Schema> {
     if command.remote || command.prepare {
         let req_url = format!("{}/api/v1/schema", url);
         let resp = http_client

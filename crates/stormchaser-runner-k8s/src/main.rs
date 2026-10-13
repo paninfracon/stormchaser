@@ -137,9 +137,10 @@ pub async fn run_runner(config: Config) -> Result<()> {
     let nats_subject = format!("stormchaser.v1.runner.k8s.{}", runner_id);
 
     // Generate JSON Schemas for our supported step types
-    let common_schema = schemars::schema_for!(dsl::CommonContainerSpec);
+    let common_schema =
+        stormchaser_model::schema_gen::draft07_schema_for::<dsl::CommonContainerSpec>();
     let common_schema_json = serde_json::to_value(common_schema)?;
-    let k8s_job_schema = schemars::schema_for!(dsl::K8sJobSpec);
+    let k8s_job_schema = stormchaser_model::schema_gen::draft07_schema_for::<dsl::K8sJobSpec>();
     let k8s_job_schema_json = serde_json::to_value(k8s_job_schema)?;
 
     let registration_payload = RunnerRegisterEvent {

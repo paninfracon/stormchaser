@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
-use reqwest::{Body, Client};
+use reqwest::Body;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -28,7 +28,7 @@ pub async fn unpark_storage(
     mode: Option<&str>,
 ) -> Result<()> {
     info!("Unparking storage from {} to {}...", url, destination);
-    let client = Client::new();
+    let client = crate::http_client()?;
     let mut response = client.get(url).send().await?;
 
     if !response.status().is_success() {
@@ -96,7 +96,7 @@ pub async fn unpark_storage(
 
 /// Park storage.
 pub async fn park_storage(urls: Value, paths: Value) -> Result<HashMap<String, String>> {
-    let client = Client::new();
+    let client = crate::http_client()?;
     let mut hashes = HashMap::new();
 
     if let Some(url_map) = urls.as_object() {

@@ -12,13 +12,12 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 axum = { workspace = true, optional = true }
-leptos = { version = "0.7" }
-leptos_meta = { version = "0.7" }
-leptos_router = { version = "0.7" }
-leptos_axum = { version = "0.7", optional = true }
+leptos = { version = "0.8" }
+leptos_meta = { version = "0.8" }
+leptos_router = { version = "0.8" }
+leptos_axum = { version = "0.8", optional = true }
 tokio = { workspace = true, optional = true }
 tower = { workspace = true, optional = true }
-tower-http = { workspace = true, optional = true }
 wasm-bindgen = "0.2"
 console_error_panic_hook = "0.1"
 tracing.workspace = true
@@ -56,7 +55,6 @@ ssr = [
     "dep:axum",
     "dep:tokio",
     "dep:tower",
-    "dep:tower-http",
     "dep:leptos_axum",
     "dep:reqwest",
     "dep:futures",
@@ -79,6 +77,9 @@ bin-default-features = false
 lib-features = ["hydrate"]
 lib-default-features = false
 wasm-opt = false
+# The e2e harness serves the SSR binary via plain `cargo run`, which does not set
+# `--cfg erase_components`; keep the WASM build consistent to avoid hydration mismatches.
+disable-erase-components = true
 
 [dev-dependencies]
 wiremock = "0.6"

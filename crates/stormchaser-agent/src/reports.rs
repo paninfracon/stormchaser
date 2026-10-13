@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs::{self, File};
-use std::io::{copy, Read};
+use std::io::Read;
 use std::path::PathBuf;
 use tar::Builder;
 use tokio::fs::File as AsyncFile;
@@ -56,7 +56,14 @@ async fn upload_report(
     if res.status().is_success() {
         let mut hasher = Sha256::new();
         let mut f = File::open(&tar_path)?;
-        copy(&mut f, &mut hasher)?;
+        let mut buf = [0u8; 8192];
+        loop {
+            let n = f.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buf[..n]);
+        }
         let hash = hex::encode(hasher.finalize());
 
         collected.insert(
@@ -123,7 +130,7 @@ pub async fn collect_test_reports(
     urls: Option<Value>,
 ) -> Result<HashMap<String, Value>> {
     let mut collected = HashMap::new();
-    let client = Client::new();
+    let client = crate::http_client()?;
 
     if let Some(report_list) = reports.as_array() {
         for report in report_list {

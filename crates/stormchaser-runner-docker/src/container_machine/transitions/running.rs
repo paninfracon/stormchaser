@@ -1,9 +1,10 @@
 use crate::container_machine::{state, ContainerMetrics, ContainerState, DockerContainerMachine};
 use anyhow::Result;
-use bollard::container::{
-    Config, CreateContainerOptions, LogsOptions, StartContainerOptions, WaitContainerOptions,
+use bollard::models::ContainerCreateBody;
+use bollard::models::HostConfig;
+use bollard::query_parameters::{
+    CreateContainerOptions, LogsOptions, StartContainerOptions, WaitContainerOptions,
 };
-use bollard::service::HostConfig;
 use chrono::Utc;
 use cloudevents::EventBuilder;
 use futures::StreamExt;
@@ -56,7 +57,7 @@ impl DockerContainerMachine<state::Running> {
             let mut wait_stream = self.docker.wait_container(
                 &container_name,
                 Some(WaitContainerOptions {
-                    condition: "not-running",
+                    condition: "not-running".to_string(),
                 }),
             );
 
@@ -123,7 +124,10 @@ impl DockerContainerMachine<state::Running> {
 
         for vol in volumes_to_cleanup {
             info!("Cleaning up volume: {}", vol);
-            let _ = self.docker.remove_volume(&vol, None).await;
+            let _ = self
+                .docker
+                .remove_volume(&vol, None::<bollard::query_parameters::RemoveVolumeOptions>)
+                .await;
         }
 
         let result = if exit_code == Some(0) {
@@ -147,7 +151,7 @@ impl DockerContainerMachine<state::Running> {
         &self,
         container_name: &str,
         storage_names: &[String],
-        mounts: Vec<bollard::service::Mount>,
+        mounts: Vec<bollard::models::Mount>,
         spec: Option<&CommonContainerSpec>,
         exit_code: Option<i64>,
     ) -> Result<(
@@ -185,7 +189,7 @@ impl DockerContainerMachine<state::Running> {
     async fn run_parking_agent(
         &self,
         storage_names: &[String],
-        mounts: Vec<bollard::service::Mount>,
+        mounts: Vec<bollard::models::Mount>,
         spec: Option<&CommonContainerSpec>,
         exit_code: Option<i64>,
     ) -> Result<(
@@ -237,7 +241,7 @@ impl DockerContainerMachine<state::Running> {
         agent_args.push("--".to_string());
         agent_args.push("/bin/true".to_string());
 
-        let agent_config = Config {
+        let agent_config = ContainerCreateBody {
             image: Some(agent_image.to_string()),
             cmd: Some(agent_args),
             entrypoint: Some(vec!["/usr/local/bin/stormchaser-agent".to_string()]),
@@ -276,7 +280,7 @@ impl DockerContainerMachine<state::Running> {
         self.docker
             .create_container(
                 Some(CreateContainerOptions {
-                    name: park_container_name.clone(),
+                    name: Some(park_container_name.clone()),
                     ..Default::default()
                 }),
                 agent_config,
@@ -284,13 +288,13 @@ impl DockerContainerMachine<state::Running> {
             .await?;
 
         self.docker
-            .start_container(&park_container_name, None::<StartContainerOptions<String>>)
+            .start_container(&park_container_name, None::<StartContainerOptions>)
             .await?;
 
         let mut agent_wait_stream = self.docker.wait_container(
             &park_container_name,
             Some(WaitContainerOptions {
-                condition: "not-running",
+                condition: "not-running".to_string(),
             }),
         );
 
@@ -322,7 +326,7 @@ impl DockerContainerMachine<state::Running> {
     ) -> Result<Option<T>> {
         let mut logs = self.docker.logs(
             container_name,
-            Some(LogsOptions::<String> {
+            Some(LogsOptions {
                 stdout: true,
                 stderr: true,
                 ..Default::default()

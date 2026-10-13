@@ -19,8 +19,7 @@ pub fn generate_approval_token(
     let mut hasher = Sha256::new();
     hasher.update(secret);
     let key_bytes = hasher.finalize();
-    let key = aes_gcm::Key::<Aes256Gcm>::from_slice(&key_bytes);
-    let cipher = Aes256Gcm::new(key);
+    let cipher = Aes256Gcm::new(&key_bytes);
 
     // 2. Prepare payload
     let payload = json!({
@@ -39,10 +38,10 @@ pub fn generate_approval_token(
     // Given the constraints, let's just use the first 12 bytes of a new Uuid.
     let nonce_uuid = Uuid::new_v4();
     nonce_bytes.copy_from_slice(&nonce_uuid.as_bytes()[..12]);
-    let nonce = Nonce::from_slice(&nonce_bytes);
+    let nonce = Nonce::from(nonce_bytes);
 
     let ciphertext = cipher
-        .encrypt(nonce, plaintext.as_ref())
+        .encrypt(&nonce, plaintext.as_ref())
         .map_err(|e| anyhow::anyhow!("Encryption failed: {:?}", e))?;
 
     // 4. Combine nonce + ciphertext
@@ -72,13 +71,12 @@ mod tests {
         let mut hasher = Sha256::new();
         hasher.update(secret);
         let key_bytes = hasher.finalize();
-        let key = aes_gcm::Key::<Aes256Gcm>::from_slice(&key_bytes);
-        let cipher = Aes256Gcm::new(key);
+        let cipher = Aes256Gcm::new(&key_bytes);
 
         let decoded = URL_SAFE_NO_PAD.decode(token).unwrap();
         let (nonce_bytes, ciphertext) = decoded.split_at(12);
-        let nonce = Nonce::from_slice(nonce_bytes);
-        let plaintext = cipher.decrypt(nonce, ciphertext).unwrap();
+        let nonce = Nonce::try_from(nonce_bytes).unwrap();
+        let plaintext = cipher.decrypt(&nonce, ciphertext).unwrap();
 
         let payload: Value = serde_json::from_slice(&plaintext).unwrap();
         assert_eq!(payload["run_id"], run_id.to_string());

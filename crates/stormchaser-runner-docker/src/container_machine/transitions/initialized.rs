@@ -1,11 +1,12 @@
 use crate::container_machine::{state, DockerContainerMachine, StartResult};
 use anyhow::{Context, Result};
-use bollard::container::{
-    Config, CreateContainerOptions, StartContainerOptions, WaitContainerOptions,
+use bollard::models::ContainerCreateBody;
+use bollard::models::VolumeCreateRequest;
+use bollard::models::{HostConfig, Mount, MountType};
+use bollard::query_parameters::CreateImageOptions;
+use bollard::query_parameters::{
+    CreateContainerOptions, StartContainerOptions, WaitContainerOptions,
 };
-use bollard::image::CreateImageOptions;
-use bollard::service::{HostConfig, Mount, MountTypeEnum};
-use bollard::volume::CreateVolumeOptions;
 use chrono::Utc;
 use cloudevents::EventBuilder;
 use futures::StreamExt;
@@ -130,7 +131,7 @@ impl DockerContainerMachine<state::Initialized> {
             self.docker
                 .create_container(
                     Some(CreateContainerOptions {
-                        name: container_name.clone(),
+                        name: Some(container_name.clone()),
                         ..Default::default()
                     }),
                     config,
@@ -139,7 +140,7 @@ impl DockerContainerMachine<state::Initialized> {
 
             info!("Starting container {}", container_name);
             self.docker
-                .start_container(&container_name, None::<StartContainerOptions<String>>)
+                .start_container(&container_name, None::<StartContainerOptions>)
                 .await?;
         }
 
@@ -242,7 +243,7 @@ impl DockerContainerMachine<state::Initialized> {
             cmd.push(m.to_string());
         }
 
-        let config = Config {
+        let config = ContainerCreateBody {
             image: Some(agent_image.to_string()),
             cmd: Some(cmd),
             host_config: Some(HostConfig {
@@ -250,9 +251,9 @@ impl DockerContainerMachine<state::Initialized> {
                     target: Some(params.volume_mount_path.to_string()),
                     source: Some(params.source_name.to_string()),
                     typ: Some(if params.is_bind_mount {
-                        MountTypeEnum::BIND
+                        MountType::BIND
                     } else {
-                        MountTypeEnum::VOLUME
+                        MountType::VOLUME
                     }),
                     ..Default::default()
                 }]),
@@ -265,7 +266,7 @@ impl DockerContainerMachine<state::Initialized> {
         self.docker
             .create_container(
                 Some(CreateContainerOptions {
-                    name: unpark_container_name.clone(),
+                    name: Some(unpark_container_name.clone()),
                     ..Default::default()
                 }),
                 config,
@@ -273,16 +274,13 @@ impl DockerContainerMachine<state::Initialized> {
             .await?;
 
         self.docker
-            .start_container(
-                &unpark_container_name,
-                None::<StartContainerOptions<String>>,
-            )
+            .start_container(&unpark_container_name, None::<StartContainerOptions>)
             .await?;
 
         let mut wait_stream = self.docker.wait_container(
             &unpark_container_name,
             Some(WaitContainerOptions {
-                condition: "not-running",
+                condition: "not-running".to_string(),
             }),
         );
 
@@ -491,8 +489,8 @@ impl DockerContainerMachine<state::Initialized> {
 
             info!("Ensuring Docker volume exists: {}", volume_name);
             self.docker
-                .create_volume(CreateVolumeOptions {
-                    name: volume_name.clone(),
+                .create_volume(VolumeCreateRequest {
+                    name: Some(volume_name.clone()),
                     ..Default::default()
                 })
                 .await?;
@@ -505,9 +503,9 @@ impl DockerContainerMachine<state::Initialized> {
             target: Some(mount.mount_path.clone()),
             source: Some(source_name.clone()),
             typ: Some(if is_bind_mount {
-                MountTypeEnum::BIND
+                MountType::BIND
             } else {
-                MountTypeEnum::VOLUME
+                MountType::VOLUME
             }),
             read_only: mount.read_only,
             ..Default::default()
@@ -641,8 +639,8 @@ impl DockerContainerMachine<state::Initialized> {
 
         let mut pull_stream = self.docker.create_image(
             Some(CreateImageOptions {
-                from_image: from_image.to_string(),
-                tag: tag.to_string(),
+                from_image: Some(from_image.to_string()),
+                tag: Some(tag.to_string()),
                 ..Default::default()
             }),
             None,
@@ -741,7 +739,7 @@ mod tests {
 
         let mount = &mounts[0];
         assert_eq!(mount.target.as_deref(), Some("/workspace"));
-        assert_eq!(mount.typ, Some(MountTypeEnum::VOLUME));
+        assert_eq!(mount.typ, Some(MountType::VOLUME));
 
         let source = mount.source.as_ref().unwrap();
         assert!(source.starts_with("sfs-workspace-"));
@@ -749,7 +747,9 @@ mod tests {
 
         // Cleanup
         for vol in volumes_to_cleanup {
-            let _ = docker.remove_volume(&vol, None).await;
+            let _ = docker
+                .remove_volume(&vol, None::<bollard::query_parameters::RemoveVolumeOptions>)
+                .await;
         }
     }
 
@@ -778,7 +778,7 @@ mod tests {
 
         let mount = &mounts[0];
         assert_eq!(mount.target.as_deref(), Some("/workspace"));
-        assert_eq!(mount.typ, Some(MountTypeEnum::BIND));
+        assert_eq!(mount.typ, Some(MountType::BIND));
 
         let expected_source = host_path.path().join(run_id.to_string()).join("workspace");
         assert!(expected_source.is_dir());

@@ -139,7 +139,7 @@ async fn test_webhook_trigger() {
 
 #[tokio::test]
 async fn test_github_webhook_signature() {
-    use hmac::{Hmac, Mac};
+    use hmac::{Hmac, KeyInit, Mac};
     use sha2::Sha256;
 
     std::env::set_var("API_RATE_LIMIT_PER_SECOND", "1000");

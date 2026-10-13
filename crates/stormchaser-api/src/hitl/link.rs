@@ -68,8 +68,7 @@ pub async fn approve_step_link(
     let mut hasher = Sha256::new();
     hasher.update(jwt_secret.as_slice());
     let key_bytes = hasher.finalize();
-    let key = aes_gcm::Key::<Aes256Gcm>::from_slice(&key_bytes);
-    let cipher = Aes256Gcm::new(key);
+    let cipher = Aes256Gcm::new(&key_bytes);
 
     // 2. Decode base64
     let decoded = match URL_SAFE_NO_PAD.decode(token) {
@@ -83,8 +82,10 @@ pub async fn approve_step_link(
 
     // 3. Decrypt
     let (nonce_bytes, ciphertext) = decoded.split_at(12);
-    let nonce = Nonce::from_slice(nonce_bytes);
-    let plaintext = match cipher.decrypt(nonce, ciphertext) {
+    let Ok(nonce) = Nonce::try_from(nonce_bytes) else {
+        return (StatusCode::BAD_REQUEST, "Token too short").into_response();
+    };
+    let plaintext = match cipher.decrypt(&nonce, ciphertext) {
         Ok(p) => p,
         Err(_) => {
             return (
@@ -104,7 +105,7 @@ pub async fn approve_step_link(
     // 5. Verify step exists and is WaitingForEvent
     let _step = match verify_step_for_approval(&state.pool, payload.run_id, payload.step_id).await {
         Ok(s) => s,
-        Err(r) => return r,
+        Err(r) => return *r,
     };
 
     let is_approve = payload.action.to_lowercase() == "approve";
@@ -123,7 +124,7 @@ pub async fn approve_step_link(
 
     let fencing_token = match resolve_fencing_token_or_response(&state, payload.run_id).await {
         Ok(token) => token,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
 
     let publish_result = if is_approve {

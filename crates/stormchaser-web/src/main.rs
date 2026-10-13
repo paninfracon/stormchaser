@@ -16,14 +16,14 @@ async fn main() {
     let app = Router::new()
         .route("/api/v1/runs/stream", get(proxy_runs_stream_handler))
         .route(
-            "/api/v1/runs/:id/status/stream",
+            "/api/v1/runs/{id}/status/stream",
             get(proxy_run_status_stream_handler),
         )
         .route(
-            "/api/v1/runs/:run_id/steps/:step_id/logs/stream",
+            "/api/v1/runs/{run_id}/steps/{step_id}/logs/stream",
             get(proxy_step_logs_stream_handler),
         )
-        .route("/api/*fn_name", post(leptos_axum::handle_server_fns))
+        .route("/api/{*fn_name}", post(leptos_axum::handle_server_fns))
         .route("/auth/login", get(auth_login_handler))
         .route("/auth/logout", get(auth_logout_handler))
         .route("/auth/callback", get(auth_callback_handler))
@@ -35,7 +35,7 @@ async fn main() {
         .with_state(leptos_options);
 
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
-    println!("listening on http://{}", &addr);
+    println!("listening on http://{}", addr);
     axum::serve(listener, app.into_make_service())
         .await
         .unwrap();

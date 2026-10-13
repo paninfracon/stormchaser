@@ -126,10 +126,7 @@ pub async fn decrypt_sops_secrets(
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // Parse as JSON or YAML
-    let secrets_val: Value = serde_yaml::from_str(&stdout)
-        .or_else(|_| serde_json::from_str(&stdout))
-        .context("Failed to parse decrypted SOPS output as JSON or YAML")?;
+    let secrets_val = parse_decrypted_output(&stdout)?;
 
     let mut sensitive_set = HashSet::new();
     extract_sensitive_values(&secrets_val, &mut sensitive_set);
@@ -138,9 +135,45 @@ pub async fn decrypt_sops_secrets(
     Ok((secrets_val, sensitive_values))
 }
 
+/// Parses decrypted SOPS output, which may be YAML or JSON.
+fn parse_decrypted_output(output: &str) -> Result<Value> {
+    serde_saphyr::from_str(output)
+        .or_else(|_| serde_json::from_str(output))
+        .context("Failed to parse decrypted SOPS output as JSON or YAML")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_parse_decrypted_output_yaml() {
+        let yaml = "db:\n  password: s3cret\n  port: 5432\n  tls: true\ntokens:\n  - abc\n  - \"123\"\nempty: null\n";
+        let parsed = parse_decrypted_output(yaml).unwrap();
+        assert_eq!(
+            parsed,
+            serde_json::json!({
+                "db": { "password": "s3cret", "port": 5432, "tls": true },
+                "tokens": ["abc", "123"],
+                "empty": null
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_decrypted_output_json() {
+        let json = r#"{"api_key": "abc", "nested": {"n": 1.5, "list": [1, 2]}}"#;
+        let parsed = parse_decrypted_output(json).unwrap();
+        assert_eq!(
+            parsed,
+            serde_json::json!({"api_key": "abc", "nested": {"n": 1.5, "list": [1, 2]}})
+        );
+    }
+
+    #[test]
+    fn test_parse_decrypted_output_rejects_garbage() {
+        parse_decrypted_output("key: [unterminated").unwrap_err();
+    }
 
     #[test]
     fn test_extract_sensitive_values() {

@@ -79,7 +79,7 @@ fn prepare_template_context(
 fn render_template(template: &str, context: &Value) -> Result<String> {
     use minijinja::Environment;
     let env = Environment::new();
-    env.render_str(template, context)
+    env.render_str(template, minijinja::value::Serde(context))
         .map_err(|e| anyhow::anyhow!("Failed to render Jinja template: {:?}", e))
 }
 

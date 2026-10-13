@@ -134,12 +134,16 @@ async fn resolve_fencing_token(state: &AppState, run_id: RunId) -> Result<i64, S
 pub(crate) async fn resolve_fencing_token_or_response(
     state: &AppState,
     run_id: RunId,
-) -> Result<i64, axum::response::Response> {
+) -> Result<i64, Box<axum::response::Response>> {
     resolve_fencing_token(state, run_id)
         .await
         .map_err(|status| match status {
-            StatusCode::NOT_FOUND => (StatusCode::NOT_FOUND, "Run not found").into_response(),
-            _ => (StatusCode::INTERNAL_SERVER_ERROR, "Failed to load run").into_response(),
+            StatusCode::NOT_FOUND => {
+                Box::new((StatusCode::NOT_FOUND, "Run not found").into_response())
+            }
+            _ => {
+                Box::new((StatusCode::INTERNAL_SERVER_ERROR, "Failed to load run").into_response())
+            }
         })
 }
 
@@ -152,7 +156,7 @@ pub async fn approve_step(
     Json(inputs): Json<Value>,
 ) -> impl IntoResponse {
     if let Err(r) = validate_approval_state(&state, run_id, step_id, &headers).await {
-        return r;
+        return *r;
     }
 
     // 2. Insert into approval_registry
@@ -168,7 +172,7 @@ pub async fn approve_step(
 
     let fencing_token = match resolve_fencing_token_or_response(&state, run_id).await {
         Ok(token) => token,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
 
     // 3. Publish to NATS simulating step completion
@@ -210,7 +214,7 @@ pub async fn reject_step(
     Path((run_id, step_id)): Path<(RunId, StepInstanceId)>,
 ) -> impl IntoResponse {
     if let Err(r) = validate_approval_state(&state, run_id, step_id, &headers).await {
-        return r;
+        return *r;
     }
 
     let _ = insert_approval_registry(
@@ -225,7 +229,7 @@ pub async fn reject_step(
 
     let fencing_token = match resolve_fencing_token_or_response(&state, run_id).await {
         Ok(token) => token,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
 
     let event = StepFailedEvent {
@@ -280,7 +284,7 @@ pub async fn correlate_event(
 
     let fencing_token = match resolve_fencing_token_or_response(&state, corr.run_id).await {
         Ok(token) => token,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
 
     // 2. Publish to stormchaser.step.completed
@@ -324,14 +328,20 @@ pub(crate) async fn verify_step_for_approval(
     pool: &sqlx::PgPool,
     run_id: RunId,
     step_id: StepInstanceId,
-) -> Result<stormchaser_model::step::StepInstance, axum::response::Response> {
+) -> Result<stormchaser_model::step::StepInstance, Box<axum::response::Response>> {
     let step = match get_step_instance_for_approval(pool, step_id, run_id).await {
         Ok(Some(s)) => s,
-        _ => return Err((StatusCode::NOT_FOUND, "Step not found").into_response()),
+        _ => {
+            return Err(Box::new(
+                (StatusCode::NOT_FOUND, "Step not found").into_response(),
+            ))
+        }
     };
 
     if step.status != StepStatus::WaitingForEvent {
-        return Err((StatusCode::BAD_REQUEST, "Step is not waiting for approval").into_response());
+        return Err(Box::new(
+            (StatusCode::BAD_REQUEST, "Step is not waiting for approval").into_response(),
+        ));
     }
 
     Ok(step)
@@ -342,7 +352,7 @@ async fn validate_approval_state(
     run_id: RunId,
     step_id: StepInstanceId,
     headers: &HeaderMap,
-) -> Result<(), axum::response::Response> {
+) -> Result<(), Box<axum::response::Response>> {
     let step = verify_step_for_approval(&state.pool, run_id, step_id).await?;
     let token = headers
         .get(AUTHORIZATION)
@@ -350,7 +360,7 @@ async fn validate_approval_state(
         .and_then(|s| s.strip_prefix("Bearer "));
 
     if let Err((status, msg)) = check_approval_opa(state, run_id, &step.step_name, token).await {
-        return Err((status, msg).into_response());
+        return Err(Box::new((status, msg).into_response()));
     }
 
     Ok(())

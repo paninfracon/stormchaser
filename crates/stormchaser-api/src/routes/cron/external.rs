@@ -16,7 +16,8 @@ async fn register_ofelia_cron(
     cronspec: &str,
     secret_token: &str,
 ) -> Result<Option<String>, StatusCode> {
-    use bollard::container::{Config, CreateContainerOptions};
+    use bollard::models::ContainerCreateBody;
+    use bollard::query_parameters::CreateContainerOptions;
     use bollard::Docker;
 
     let docker = Docker::connect_with_local_defaults().map_err(|e| {
@@ -46,7 +47,7 @@ async fn register_ofelia_cron(
         ),
     );
 
-    let config = Config {
+    let config = ContainerCreateBody {
         image: Some("curlimages/curl:latest".to_string()),
         labels: Some(labels),
         entrypoint: Some(vec!["/bin/true".to_string()]),
@@ -56,7 +57,7 @@ async fn register_ofelia_cron(
     docker
         .create_container(
             Some(CreateContainerOptions {
-                name: container_name.clone(),
+                name: Some(container_name.clone()),
                 ..Default::default()
             }),
             config,
@@ -71,7 +72,7 @@ async fn register_ofelia_cron(
 }
 
 async fn unregister_ofelia_cron(container_name: &str) -> Result<(), StatusCode> {
-    use bollard::container::RemoveContainerOptions;
+    use bollard::query_parameters::RemoveContainerOptions;
     use bollard::Docker;
 
     let docker =

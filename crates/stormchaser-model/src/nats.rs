@@ -5,7 +5,7 @@ use anyhow::Result;
 use async_nats::jetstream;
 use async_nats::HeaderMap;
 use cloudevents::{AttributesReader, EventBuilder, EventBuilderV10};
-use schemars::schema::RootSchema;
+use schemars::Schema;
 use serde_json::Value;
 use std::borrow::Cow;
 use tracing::error;
@@ -30,7 +30,7 @@ pub fn compute_shard_id(run_id: &RunId) -> u32 {
 /// Returns `Ok(())` if the value is valid. If the schema is `None`, validation is
 /// skipped (permissive). If the schema is provided and validation fails, the
 /// mismatch is logged and an error is returned.
-pub fn validate_against_schema(data: &Value, schema: Option<&RootSchema>) -> Result<()> {
+pub fn validate_against_schema(data: &Value, schema: Option<&Schema>) -> Result<()> {
     let schema = match schema {
         Some(s) => s,
         None => return Ok(()),
@@ -59,10 +59,7 @@ pub fn validate_against_schema(data: &Value, schema: Option<&RootSchema>) -> Res
 /// Returns `Ok(value)` when the payload is valid (or no schema is provided).
 /// Returns `Err` when the CloudEvent contains no JSON data, or when a schema
 /// is available but the payload does not conform to it.
-pub fn extract_and_validate(
-    event: &cloudevents::Event,
-    schema: Option<&RootSchema>,
-) -> Result<Value> {
+pub fn extract_and_validate(event: &cloudevents::Event, schema: Option<&Schema>) -> Result<Value> {
     let data = match event.data() {
         Some(cloudevents::Data::Json(v)) => v.clone(),
         Some(_) => anyhow::bail!("CloudEvent data is not JSON"),
@@ -243,7 +240,6 @@ pub async fn publish_cloudevent(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use schemars::schema_for;
     use serde::{Deserialize, Serialize};
 
     #[derive(Serialize, Deserialize, schemars::JsonSchema)]
@@ -254,14 +250,14 @@ mod tests {
 
     #[test]
     fn test_validate_against_schema_valid() {
-        let schema = schema_for!(TestEvent);
+        let schema = crate::schema_gen::draft07_schema_for::<TestEvent>();
         let data = serde_json::json!({"id": 1, "name": "test"});
         validate_against_schema(&data, Some(&schema)).unwrap();
     }
 
     #[test]
     fn test_validate_against_schema_invalid() {
-        let schema = schema_for!(TestEvent);
+        let schema = crate::schema_gen::draft07_schema_for::<TestEvent>();
         // `id` must be a number, not a string
         let data = serde_json::json!({"id": "not-a-number", "name": "test"});
         validate_against_schema(&data, Some(&schema)).unwrap_err();

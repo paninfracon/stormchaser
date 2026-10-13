@@ -1,5 +1,5 @@
 # Multi-stage Dockerfile for stormchaser-web (Leptos)
-FROM rust:1.91-slim-bookworm AS builder
+FROM rust:1.96-slim-bookworm AS builder
 
 # Install build dependencies required for rust and cargo-leptos
 RUN apt-get update && apt-get install -y \

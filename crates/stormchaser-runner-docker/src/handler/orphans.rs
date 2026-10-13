@@ -2,7 +2,7 @@ use super::events::{build_cloudevent_payload, publish_container_result};
 use crate::container_machine::{ContainerMetadata, DockerContainerMachine};
 use crate::parsing::parse_step_from_docker_labels;
 use anyhow::Result;
-use bollard::container::ListContainersOptions;
+use bollard::query_parameters::ListContainersOptions;
 use bollard::Docker;
 use chrono::Utc;
 use serde_json::Value;
@@ -215,12 +215,15 @@ pub async fn scan_for_orphans(
     info!("Scanning for orphaned Docker containers...");
 
     let mut filters = HashMap::new();
-    filters.insert("label", vec!["managed-by=stormchaser"]);
+    filters.insert(
+        "label".to_string(),
+        vec!["managed-by=stormchaser".to_string()],
+    );
 
     let containers = docker
         .list_containers(Some(ListContainersOptions {
             all: true,
-            filters,
+            filters: Some(filters),
             ..Default::default()
         }))
         .await?;
@@ -253,7 +256,8 @@ pub async fn scan_for_orphans(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bollard::container::{Config, CreateContainerOptions, RemoveContainerOptions};
+    use bollard::models::ContainerCreateBody;
+    use bollard::query_parameters::{CreateContainerOptions, RemoveContainerOptions};
     use std::collections::HashMap;
 
     #[tokio::test]
@@ -264,17 +268,20 @@ mod tests {
         if let Ok(nats) = nats_client {
             // Create a dummy container
             let mut labels = HashMap::new();
-            labels.insert("managed-by", "stormchaser");
-            labels.insert("stormchaser-run-id", "00000000-0000-0000-0000-000000000000");
+            labels.insert("managed-by".to_string(), "stormchaser".to_string());
             labels.insert(
-                "stormchaser-step-id",
-                "00000000-0000-0000-0000-000000000001",
+                "stormchaser-run-id".to_string(),
+                "00000000-0000-0000-0000-000000000000".to_string(),
             );
-            labels.insert("stormchaser.v1.io/step-dsl", "{}");
+            labels.insert(
+                "stormchaser-step-id".to_string(),
+                "00000000-0000-0000-0000-000000000001".to_string(),
+            );
+            labels.insert("stormchaser.v1.io/step-dsl".to_string(), "{}".to_string());
 
-            let config = Config {
-                image: Some("alpine:latest"),
-                cmd: Some(vec!["sleep", "10"]),
+            let config = ContainerCreateBody {
+                image: Some("alpine:latest".to_string()),
+                cmd: Some(vec!["sleep".to_string(), "10".to_string()]),
                 labels: Some(labels),
                 ..Default::default()
             };
@@ -282,8 +289,8 @@ mod tests {
             let container = docker
                 .create_container(
                     Some(CreateContainerOptions {
-                        name: "test_orphan_container",
-                        platform: None,
+                        name: Some("test_orphan_container".to_string()),
+                        ..Default::default()
                     }),
                     config,
                 )

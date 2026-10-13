@@ -34,7 +34,7 @@ pub fn ui(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(2)
-        .constraints([Constraint::Min(0), Constraint::Length(3)].as_ref())
+        .constraints([Constraint::Min(0), Constraint::Length(3)])
         .split(f.area());
 
     if app.active_pane == crate::app::Pane::ConnectionsList
@@ -110,14 +110,11 @@ pub(crate) fn render_login_screen(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(2)
-        .constraints(
-            [
-                Constraint::Length(2),
-                Constraint::Min(3),
-                Constraint::Length(3),
-            ]
-            .as_ref(),
-        )
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Min(3),
+            Constraint::Length(3),
+        ])
         .split(area);
 
     f.render_widget(block, area);

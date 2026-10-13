@@ -94,7 +94,7 @@ pub mod state {
         /// Names of the storage endpoints.
         pub storage_names: Vec<String>,
         /// The mounts configured for this container.
-        pub mounts: Vec<bollard::service::Mount>,
+        pub mounts: Vec<bollard::models::Mount>,
     }
     /// The state when the container has finished executing.
     pub struct Finished {

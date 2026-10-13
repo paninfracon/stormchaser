@@ -10,7 +10,7 @@ use ratatui::{
 pub(crate) fn render_cron_workflows_tab(f: &mut Frame, area: Rect, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(30), Constraint::Percentage(70)].as_ref())
+        .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
         .split(area);
 
     let list_border_color = if app.active_pane == crate::app::Pane::CronWorkflowsList {
@@ -114,21 +114,18 @@ pub(crate) fn render_cron_dialog(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(2)
-        .constraints(
-            [
-                Constraint::Length(3), // Name
-                Constraint::Length(3), // Description
-                Constraint::Length(3), // Cron Spec
-                Constraint::Length(3), // Workflow Name
-                Constraint::Length(3), // Repo URL
-                Constraint::Length(3), // Workflow Path
-                Constraint::Length(3), // Git Ref
-                Constraint::Length(6), // Inputs
-                Constraint::Length(3), // Is Active
-                Constraint::Length(2), // Help text
-            ]
-            .as_ref(),
-        )
+        .constraints([
+            Constraint::Length(3), // Name
+            Constraint::Length(3), // Description
+            Constraint::Length(3), // Cron Spec
+            Constraint::Length(3), // Workflow Name
+            Constraint::Length(3), // Repo URL
+            Constraint::Length(3), // Workflow Path
+            Constraint::Length(3), // Git Ref
+            Constraint::Length(6), // Inputs
+            Constraint::Length(3), // Is Active
+            Constraint::Length(2), // Help text
+        ])
         .split(area);
 
     let labels = [

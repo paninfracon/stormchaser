@@ -16,6 +16,20 @@ pub use artifacts::*;
 mod reports;
 pub use reports::*;
 
+/// Builds the HTTP client used to talk to storage and the engine.
+///
+/// The agent runs inside arbitrary task images, many of which ship without a
+/// system CA bundle, so the Mozilla roots are compiled in and merged with
+/// whatever the platform provides.
+pub fn http_client() -> Result<reqwest::Client> {
+    let bundled_roots = webpki_root_certs::TLS_SERVER_ROOT_CERTS
+        .iter()
+        .filter_map(|cert| reqwest::Certificate::from_der(cert).ok());
+    Ok(reqwest::Client::builder()
+        .tls_certs_merge(bundled_roots)
+        .build()?)
+}
+
 #[derive(Parser)]
 #[command(author, about, long_about = None)]
 #[command(version = concat!(env!("CARGO_PKG_VERSION"), " (rev: ", env!("VERGEN_GIT_SHA"), ", branch: ", env!("VERGEN_GIT_BRANCH"), ", built: ", env!("VERGEN_BUILD_TIMESTAMP"), ")"))]
@@ -173,6 +187,28 @@ pub async fn run_agent(cli: Cli) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_http_client_builds_with_bundled_roots() {
+        http_client().expect("client with bundled roots should build");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires network access"]
+    async fn test_http_client_verifies_public_tls_without_system_roots() {
+        // SAFETY: only this ignored, manually run test touches the variable
+        unsafe {
+            std::env::set_var("SSL_CERT_FILE", "/dev/null");
+            std::env::set_var("SSL_CERT_DIR", "/nonexistent");
+        }
+        let response = http_client()
+            .unwrap()
+            .get("https://example.com")
+            .send()
+            .await
+            .expect("bundled roots should validate a public certificate");
+        assert!(response.status().is_success());
+    }
 
     #[test]
     fn test_cli_parsing_unpark() {

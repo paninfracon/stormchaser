@@ -9,11 +9,28 @@ use std::collections::HashMap;
 
 use nutype::nutype;
 
-#[nutype(derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema))]
+#[nutype(derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize))]
 pub struct SchemaVersion(String);
 
-#[nutype(derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema))]
+#[nutype(derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize))]
 pub struct SchemaId(String);
+
+macro_rules! impl_string_json_schema {
+    ($t:ident) => {
+        impl JsonSchema for $t {
+            fn schema_name() -> std::borrow::Cow<'static, str> {
+                stringify!($t).into()
+            }
+
+            fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+                String::json_schema(generator)
+            }
+        }
+    };
+}
+
+impl_string_json_schema!(SchemaVersion);
+impl_string_json_schema!(SchemaId);
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub enum EventSource {
@@ -163,12 +180,12 @@ impl<'de> Deserialize<'de> for EventType {
 }
 
 impl schemars::JsonSchema for EventType {
-    fn schema_name() -> String {
-        "EventType".to_string()
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "EventType".into()
     }
 
-    fn json_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-        String::json_schema(gen)
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        String::json_schema(generator)
     }
 }
 

@@ -1,13 +1,13 @@
 use std::error::Error;
-use vergen::EmitBuilder;
+use vergen_gitcl::{Build, Cargo, Emitter, Gitcl, Rustc, Sysinfo};
 
 fn main() -> Result<(), Box<dyn Error>> {
-    EmitBuilder::builder()
-        .all_build()
-        .all_cargo()
-        .all_git()
-        .all_rustc()
-        .all_sysinfo()
+    Emitter::default()
+        .add_instructions(&Build::all_build())?
+        .add_instructions(&Cargo::all_cargo())?
+        .add_instructions(&Gitcl::all_git())?
+        .add_instructions(&Rustc::all_rustc())?
+        .add_instructions(&Sysinfo::all_sysinfo())?
         .emit()?;
     Ok(())
 }

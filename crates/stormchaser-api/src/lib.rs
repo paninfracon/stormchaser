@@ -190,27 +190,30 @@ pub fn app(state: AppState) -> Router {
         .route("/runs", get(list_workflow_runs).post(enqueue_workflow))
         .route("/runs/stream", get(stream_workflow_runs_api))
         .route(
-            "/runs/:id",
+            "/runs/{id}",
             get(get_workflow_run).delete(delete_workflow_run_api),
         )
-        .route("/runs/:id/steps/:step_id/approve", post(hitl::approve_step))
-        .route("/runs/:id/steps/:step_id/reject", post(hitl::reject_step))
-        .route("/events/correlate", post(hitl::correlate_event))
-        .route("/runs/:id/artifacts", get(list_run_artifacts))
-        .route("/runs/:id/reports", get(list_run_test_reports))
-        .route("/runs/:id/summaries", get(list_run_test_summaries))
-        .route("/runs/:id/reports/:report_id", get(get_test_report))
         .route(
-            "/runs/:id/steps/:step_id/logs/stream",
+            "/runs/{id}/steps/{step_id}/approve",
+            post(hitl::approve_step),
+        )
+        .route("/runs/{id}/steps/{step_id}/reject", post(hitl::reject_step))
+        .route("/events/correlate", post(hitl::correlate_event))
+        .route("/runs/{id}/artifacts", get(list_run_artifacts))
+        .route("/runs/{id}/reports", get(list_run_test_reports))
+        .route("/runs/{id}/summaries", get(list_run_test_summaries))
+        .route("/runs/{id}/reports/{report_id}", get(get_test_report))
+        .route(
+            "/runs/{id}/steps/{step_id}/logs/stream",
             get(stream_step_logs_api),
         )
-        .route("/runs/:id/steps/:step_id/logs", get(get_step_logs_api))
-        .route("/runs/:id/logs/stream", get(stream_run_logs_api))
-        .route("/runs/:id/status/stream", get(stream_run_status_api))
+        .route("/runs/{id}/steps/{step_id}/logs", get(get_step_logs_api))
+        .route("/runs/{id}/logs/stream", get(stream_run_logs_api))
+        .route("/runs/{id}/status/stream", get(stream_run_status_api))
         .route("/runs/direct", post(direct_run))
         .route("/webhooks", get(list_webhooks).post(create_webhook))
         .route(
-            "/webhooks/:id",
+            "/webhooks/{id}",
             get(get_webhook)
                 .patch(update_webhook)
                 .delete(delete_webhook),
@@ -219,15 +222,15 @@ pub fn app(state: AppState) -> Router {
             "/cron-workflows",
             get(list_cron_workflows).post(create_cron_workflow),
         )
-        .route("/cron-workflows/:id", delete(delete_cron_workflow))
+        .route("/cron-workflows/{id}", delete(delete_cron_workflow))
         .route("/rules", get(list_event_rules).post(create_event_rule))
-        .route("/rules/:id", delete(delete_event_rule))
+        .route("/rules/{id}", delete(delete_event_rule))
         .route(
             "/connections",
             get(list_connections).post(create_connection),
         )
         .route(
-            "/connections/:id",
+            "/connections/{id}",
             get(get_connection)
                 .patch(update_connection)
                 .delete(delete_connection),
@@ -249,13 +252,13 @@ pub fn app(state: AppState) -> Router {
 
     let api_v1 = Router::new()
         .merge(authenticated_routes)
-        .route("/webhooks/:id", post(handle_webhook))
+        .route("/webhooks/{id}", post(handle_webhook))
         .route("/auth/login", get(login))
         .route("/auth/exchange", post(exchange_token))
         .route("/auth/refresh", post(refresh_token))
-        .route("/approve-link/:token", get(hitl::approve_step_link))
+        .route("/approve-link/{token}", get(hitl::approve_step_link))
         .route(
-            "/cron-trigger/:id",
+            "/cron-trigger/{id}",
             post(routes::cron::trigger_cron_workflow),
         )
         .route("/schema", get(routes::schema::get_schema))

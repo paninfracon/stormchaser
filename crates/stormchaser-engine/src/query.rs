@@ -59,12 +59,15 @@ async fn execute_sql_query(
         .get("query")
         .ok_or_else(|| anyhow::anyhow!("Missing 'query' param"))?;
 
-    use sqlx::Row;
+    // The query text is the workflow author's own query source, executed as written.
+    use sqlx::{AssertSqlSafe, Row};
     let mut results = Vec::new();
 
     if let Some(url) = db_url {
         let tmp_pool = sqlx::PgPool::connect(&url).await?;
-        let rows = sqlx::query(sql_query).fetch_all(&tmp_pool).await?;
+        let rows = sqlx::query(AssertSqlSafe(sql_query.as_str()))
+            .fetch_all(&tmp_pool)
+            .await?;
         for row in rows {
             if row.is_empty() {
                 continue;
@@ -78,7 +81,9 @@ async fn execute_sql_query(
             }
         }
     } else if let Some(p) = pool {
-        let rows = sqlx::query(sql_query).fetch_all(p).await?;
+        let rows = sqlx::query(AssertSqlSafe(sql_query.as_str()))
+            .fetch_all(p)
+            .await?;
         for row in rows {
             if row.is_empty() {
                 continue;
@@ -252,12 +257,39 @@ async fn execute_aws_cloudcontrol_query(
     }
 }
 
+/// Converts a JSON value into a jq value.
+pub(crate) fn json_to_jq_val(value: Value) -> Result<jaq_json::Val, anyhow::Error> {
+    serde_json::from_value(value)
+        .map_err(|e| anyhow::anyhow!("Failed to convert JQ input from JSON: {}", e))
+}
+
+/// Converts a single jq output (or exception) back into a JSON value.
+///
+/// A `halt` raised by the program is reported as an error rather than being
+/// allowed to terminate the process.
+pub(crate) fn jq_output_to_json(
+    output: jaq_core::ValX<jaq_json::Val>,
+) -> Result<Value, anyhow::Error> {
+    match output {
+        Ok(v) => serde_json::from_str(&v.to_string())
+            .map_err(|e| anyhow::anyhow!("JQ output is not valid JSON: {}", e)),
+        Err(exn) => match exn.get_err() {
+            Ok(e) => Err(anyhow::anyhow!("JQ execution error: {:?}", e)),
+            Err(_) => Err(anyhow::anyhow!("JQ execution error: program halted")),
+        },
+    }
+}
+
 fn apply_jq_filter(jq_filter_str: &str, input_val: Value) -> Result<Vec<Value>, anyhow::Error> {
     use jaq_core::load::{Arena, File, Loader};
-    use jaq_core::{Ctx, RcIter};
+    use jaq_core::{data, Ctx, Vars};
     use jaq_json::Val;
 
-    let loader = Loader::new(jaq_std::defs().chain(jaq_json::defs()));
+    let loader = Loader::new(
+        jaq_core::defs()
+            .chain(jaq_std::defs())
+            .chain(jaq_json::defs()),
+    );
     let arena = Arena::default();
     let program = File {
         code: jq_filter_str,
@@ -269,22 +301,17 @@ fn apply_jq_filter(jq_filter_str: &str, input_val: Value) -> Result<Vec<Value>, 
         .map_err(|e| anyhow::anyhow!("Failed to parse jq filter: {:?}", e))?;
 
     let filter = jaq_core::Compiler::default()
-        .with_funs(jaq_std::funs().chain(jaq_json::funs()))
+        .with_funs(
+            jaq_core::funs()
+                .chain(jaq_std::funs())
+                .chain(jaq_json::funs()),
+        )
         .compile(modules)
         .map_err(|e| anyhow::anyhow!("Failed to compile jq filter: {:?}", e))?;
 
-    let input = Val::from(input_val);
-    let inputs = RcIter::new(core::iter::empty());
-    let out = filter.run((Ctx::new([], &inputs), input));
-
-    let mut results = Vec::new();
-    for res in out {
-        match res {
-            Ok(v) => results.push(Value::from(v)),
-            Err(e) => return Err(anyhow::anyhow!("JQ execution error: {:?}", e)),
-        }
-    }
-    Ok(results)
+    let input = json_to_jq_val(input_val)?;
+    let ctx = Ctx::<data::JustLut<Val>>::new(&filter.lut, Vars::new([]));
+    filter.id.run((ctx, input)).map(jq_output_to_json).collect()
 }
 
 #[cfg(test)]

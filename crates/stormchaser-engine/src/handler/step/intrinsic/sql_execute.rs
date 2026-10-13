@@ -120,7 +120,7 @@ async fn handle_sql_execute(
     let query = {
         use minijinja::Environment;
         let env = Environment::new();
-        env.render_str(&spec.query, &template_ctx)
+        env.render_str(&spec.query, minijinja::value::Serde(&template_ctx))
             .map_err(|e| anyhow::anyhow!("Failed to render SQL query template: {:?}", e))?
     };
 
@@ -206,7 +206,10 @@ async fn execute_sql_query(
                 }
             };
 
-            let result = sqlx::query(query).execute(&mut conn).await?;
+            // The statement is the workflow author's own SqlExecute query, executed as written.
+            let result = sqlx::query(sqlx::AssertSqlSafe(query))
+                .execute(&mut conn)
+                .await?;
             let affected = result.rows_affected();
             Ok(affected)
         }

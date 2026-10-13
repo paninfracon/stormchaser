@@ -45,8 +45,7 @@ async fn test_rate_limiting() {
         api_base_url: "http://localhost:3000".to_string(),
     });
 
-    let mut rng = rand::thread_rng();
-    let ip_last_octet = rand::Rng::gen_range(&mut rng, 10..250);
+    let ip_last_octet = rand::RngExt::random_range(&mut rand::rng(), 10..250);
     let addr = SocketAddr::from(([127, 0, 0, ip_last_octet], 12345));
 
     // We configured: per_second(1), burst_size(2)

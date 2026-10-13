@@ -40,7 +40,7 @@ static TEST_KEYS: OnceLock<(String, serde_json::Value)> = OnceLock::new();
 
 fn get_test_keys() -> &'static (String, serde_json::Value) {
     TEST_KEYS.get_or_init(|| {
-        let mut rng = rand::thread_rng();
+        let mut rng = rsa::rand_core::OsRng;
         let priv_key = RsaPrivateKey::new(&mut rng, 2048).expect("failed to generate a key");
         let pem = priv_key
             .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)

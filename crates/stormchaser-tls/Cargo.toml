@@ -16,22 +16,11 @@ tokio = { workspace = true }
 rustls = { version = "0.23", features = ["ring"] }
 rustls-pemfile = "2.1"
 rustls-native-certs = "0.8"
-tokio-rustls = "0.26"
-notify = "6.1"
+notify = "8.2"
 arc-swap = "1.7"
 tracing = { workspace = true }
 anyhow = { workspace = true }
-thiserror = { workspace = true }
-futures = "0.3"
-sqlx = { workspace = true, optional = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
-parking_lot = { workspace = true }
-path-clean = "1.0"
 
 [dev-dependencies]
 tempfile = "3.10"
-
-[features]
-default = ["sqlx"]
-sqlx = ["dep:sqlx"]
