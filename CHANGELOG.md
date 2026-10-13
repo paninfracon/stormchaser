@@ -76,6 +76,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Storage is parked and artifacts are published by a helper the step's code does not share (an agent sidecar on Kubernetes, the parking container on Docker), and runners read storage hashes and artifact metadata from that helper only. The step's container no longer receives upload URLs.
 - The username and password of an OCI artifact registry no longer leave the engine. Runners get a token scoped to the run's repositories, minted when the step is ready to push. Registries that cannot issue such tokens need `STORMCHASER_OCI_ALLOW_STATIC_CREDENTIALS=true` on the engine.
 - Task messages, which carry a step's resolved secrets, are erased from the NATS stream once the step is finished, and the stream has a maximum message age (`STORMCHASER_NATS_STREAM_MAX_AGE_HOURS`, default 168).
+- The connection test applies the internal-address rules to Git, Postgres and S3 targets as well as HTTP ones, refuses local Git paths and Postgres Unix sockets, and never runs an S3 test as the API itself: it needs `access_key` and `secret_key`, or a role listed in `STORMCHASER_AWS_ALLOWED_ROLE_ARNS` (now also passed to the API by the Helm chart).
+- A `lost_zombie` step failure is acted on only when the step's runner really is offline or stale, so a runner cannot fail another runner's step as lost.
 - Removed `h2` 0.3 (RUSTSEC-2026-0258) by building the AWS SDK without its legacy HTTP client.
 - Removed the unmaintained `unsafe-libyaml` (RUSTSEC-2024-0449) by replacing `serde_yaml`.
 

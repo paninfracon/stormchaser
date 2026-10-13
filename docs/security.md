@@ -304,6 +304,14 @@ comma-separated list of hostnames, IP literals or `*.suffix` patterns, for
 example `vault.internal,*.svc.cluster.local`. The list is empty by default.
 Response bodies are limited to 10 MiB (64 MiB for WASM modules).
 
+The connection test (`POST /api/v1/connections/test`) applies the same address
+rules to every connection type it probes. A Git URL must use a scheme the
+engine would clone over and a host that is not internal; a Postgres URL must
+name a network host (no Unix sockets) that is not internal; an S3 `endpoint` is
+checked like any other URL. An S3 test never runs as the API itself: it needs
+`access_key` and `secret_key`, or a role listed in
+`STORMCHASER_AWS_ALLOWED_ROLE_ARNS`.
+
 ### Credentials the engine attaches
 
 A workflow author chooses where a step connects, but some credentials belong to

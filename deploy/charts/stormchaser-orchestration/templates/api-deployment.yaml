@@ -62,6 +62,8 @@ spec:
             {{- end }}
             - name: STORMCHASER_SSRF_ALLOWED_HOSTS
               value: {{ join "," .Values.global.ssrfAllowedHosts | quote }}
+            - name: STORMCHASER_AWS_ALLOWED_ROLE_ARNS
+              value: {{ join "," .Values.global.aws.allowedRoleArns | quote }}
             - name: RUST_LOG
               value: {{ .Values.api.rustLog | quote }}
             - name: OIDC_ISSUER

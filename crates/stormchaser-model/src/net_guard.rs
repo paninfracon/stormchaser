@@ -149,6 +149,24 @@ pub async fn validate_url_with(
         None => return Err("URL has no host".to_string()),
     };
 
+    check_resolved(&display_host, &resolved, allowed_hosts)?;
+
+    Ok(ValidatedUrl {
+        url,
+        domain,
+        addrs: resolved
+            .into_iter()
+            .map(|ip| SocketAddr::new(ip, port))
+            .collect(),
+    })
+}
+
+/// Refuses a host whose addresses include a restricted one, unless it is allow-listed.
+fn check_resolved(
+    display_host: &str,
+    resolved: &[IpAddr],
+    allowed_hosts: &[String],
+) -> Result<(), String> {
     if resolved.is_empty() {
         return Err(format!(
             "Host '{}' did not resolve to any address",
@@ -156,7 +174,7 @@ pub async fn validate_url_with(
         ));
     }
 
-    if !host_is_allowed(allowed_hosts, &display_host) {
+    if !host_is_allowed(allowed_hosts, display_host) {
         if display_host == "localhost" || display_host.ends_with(".localhost") {
             return Err(format!(
                 "Disallowed host '{}': localhost is not permitted",
@@ -172,15 +190,47 @@ pub async fn validate_url_with(
             ));
         }
     }
+    Ok(())
+}
 
-    Ok(ValidatedUrl {
-        url,
-        domain,
-        addrs: resolved
-            .into_iter()
-            .map(|ip| SocketAddr::new(ip, port))
+/// Validates a host and port for a protocol other than HTTP (a database, Git over SSH),
+/// against the operator's allow-list in [`ALLOWED_HOSTS_ENV`].
+///
+/// Returns the addresses that were checked. A caller that cannot pin its connection to
+/// them is still exposed to a name that resolves differently a moment later.
+pub async fn validate_host_safe(host: &str, port: u16) -> Result<Vec<SocketAddr>, String> {
+    let allowed = parse_allowed_hosts(std::env::var(ALLOWED_HOSTS_ENV).ok());
+    validate_host_with(host, port, &allowed).await
+}
+
+/// [`validate_host_safe`] with an explicit allow-list.
+pub async fn validate_host_with(
+    host: &str,
+    port: u16,
+    allowed_hosts: &[String],
+) -> Result<Vec<SocketAddr>, String> {
+    let bare = host
+        .strip_prefix('[')
+        .and_then(|h| h.strip_suffix(']'))
+        .unwrap_or(host)
+        .trim_end_matches('.')
+        .to_lowercase();
+    if bare.is_empty() {
+        return Err("No host given".to_string());
+    }
+    let resolved: Vec<IpAddr> = match bare.parse::<IpAddr>() {
+        Ok(ip) => vec![ip],
+        Err(_) => tokio::net::lookup_host((bare.as_str(), port))
+            .await
+            .map_err(|e| format!("Could not resolve host '{}': {}", bare, e))?
+            .map(|addr| addr.ip())
             .collect(),
-    })
+    };
+    check_resolved(&bare, &resolved, allowed_hosts)?;
+    Ok(resolved
+        .into_iter()
+        .map(|ip| SocketAddr::new(ip, port))
+        .collect())
 }
 
 /// Builds an HTTP client for one request to `raw_url`, or fails if the URL is unsafe.
