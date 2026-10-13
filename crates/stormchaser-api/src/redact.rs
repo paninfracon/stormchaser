@@ -14,7 +14,7 @@ use stormchaser_model::step::{StepInstance, StepOutput};
 /// Shown in place of a stored secret.
 pub const MASK: &str = "********";
 
-/// True for configuration keys whose values are credentials.
+/// True for configuration keys whose names say their values are credentials.
 fn is_secret_key(key: &str) -> bool {
     let key = key.to_ascii_lowercase();
     [
@@ -27,44 +27,230 @@ fn is_secret_key(key: &str) -> bool {
         "credential",
         "api_key",
         "apikey",
+        "api-key",
         "authorization",
         "cookie",
+        "signature",
     ]
     .iter()
     .any(|needle| key.contains(needle))
 }
 
-/// Replaces the password in a URL such as `postgres://user:pass@host/db`, if it has one.
-fn mask_url_password(value: &str) -> Option<String> {
+/// Configuration keys whose values are shown as they are.
+///
+/// A connection's configuration is free-form, so there is no telling what a key nobody
+/// thought of holds. Everything is therefore masked except the keys listed here, which
+/// name where a connection points and who it connects as, never what it proves that with.
+const PUBLIC_CONFIG_KEYS: &[&str] = &[
+    "url",
+    "base_url",
+    "endpoint",
+    "endpoint_url",
+    "host",
+    "hostname",
+    "port",
+    "bucket",
+    "region",
+    "registry",
+    "repo",
+    "repo_url",
+    "repository",
+    "branch",
+    "ref",
+    "path",
+    "prefix",
+    "container",
+    "namespace",
+    "project",
+    "project_id",
+    "account",
+    "account_name",
+    "database",
+    "dbname",
+    "db",
+    "schema",
+    "sslmode",
+    "username",
+    "user",
+    "email",
+    "access_key",
+    "access_key_id",
+    "name",
+    "type",
+    "description",
+    "force_path_style",
+    "plain_http",
+    "insecure",
+    "timeout",
+];
+
+/// Request headers that describe a request without authorising it.
+const PUBLIC_HEADERS: &[&str] = &[
+    "accept",
+    "accept-encoding",
+    "accept-language",
+    "content-type",
+    "user-agent",
+];
+
+/// URL query parameters that are settings, not credentials.
+const PUBLIC_QUERY_KEYS: &[&str] = &[
+    "sslmode",
+    "ssl",
+    "region",
+    "timeout",
+    "connect_timeout",
+    "application_name",
+    "schema",
+    "search_path",
+    "charset",
+    "api-version",
+    "version",
+];
+
+fn is_public(key: &str, list: &[&str]) -> bool {
+    let key = key.to_ascii_lowercase();
+    list.contains(&key.as_str()) && !is_secret_key(&key)
+}
+
+/// Masks the credentials a URL can carry: its password, and every query parameter that
+/// is not a known setting (access tokens, signatures and SAS tokens travel there).
+/// Returns `None` if `value` is not a URL or holds nothing to mask.
+fn mask_url(value: &str) -> Option<String> {
     let mut url = url::Url::parse(value).ok()?;
-    url.password()?;
-    url.set_password(Some(MASK)).ok()?;
-    Some(url.to_string())
+    let mut changed = false;
+
+    if url.password().is_some() {
+        url.set_password(Some(MASK)).ok()?;
+        changed = true;
+    }
+
+    if url.query().is_some() {
+        let pairs: Vec<(String, String)> = url
+            .query_pairs()
+            .map(|(k, v)| (k.into_owned(), v.into_owned()))
+            .collect();
+        if pairs
+            .iter()
+            .any(|(k, v)| !v.is_empty() && !is_public(k, PUBLIC_QUERY_KEYS))
+        {
+            url.query_pairs_mut()
+                .clear()
+                .extend_pairs(pairs.iter().map(|(k, v)| {
+                    let shown = if v.is_empty() || is_public(k, PUBLIC_QUERY_KEYS) {
+                        v.as_str()
+                    } else {
+                        MASK
+                    };
+                    (k.as_str(), shown)
+                }));
+            changed = true;
+        }
+    }
+
+    changed.then(|| url.to_string())
+}
+
+/// What to show for a string stored under a public key.
+fn mask_public_string(value: &str) -> Option<String> {
+    if let Some(masked) = mask_url(value) {
+        return Some(masked);
+    }
+    if url::Url::parse(value).is_ok() {
+        return None;
+    }
+    // Not a URL: a keyword-style connection string such as `host=db password=x`
+    let lower = value.to_ascii_lowercase();
+    ["password=", "passwd=", "secret=", "token=", "pwd="]
+        .iter()
+        .any(|needle| lower.contains(needle))
+        .then(|| MASK.to_string())
 }
 
 /// Masks every credential in a connection's free-form configuration.
+///
+/// Anything not known to be harmless is masked: see [`PUBLIC_CONFIG_KEYS`].
 pub fn mask_config(config: &mut Value) {
-    match config {
+    mask_value(config, None, PUBLIC_CONFIG_KEYS);
+}
+
+/// Masks `value`, which is stored under `key` (`None` at the top level). `public` is
+/// the list of keys that may be shown at this level.
+fn mask_value(value: &mut Value, key: Option<&str>, public: &'static [&'static str]) {
+    match value {
         Value::Object(map) => {
-            for (key, value) in map.iter_mut() {
-                match value {
-                    Value::String(s) if is_secret_key(key) => {
-                        if !s.is_empty() {
-                            *s = MASK.to_string();
-                        }
-                    }
-                    Value::String(s) => {
-                        if let Some(masked) = mask_url_password(s) {
-                            *s = masked;
-                        }
-                    }
-                    other => mask_config(other),
-                }
+            // Inside `headers` the keys are header names, with their own short list
+            let public = if key.is_some_and(|k| k.eq_ignore_ascii_case("headers")) {
+                PUBLIC_HEADERS
+            } else {
+                public
+            };
+            for (child_key, child) in map.iter_mut() {
+                mask_value(child, Some(child_key), public);
             }
         }
-        Value::Array(items) => items.iter_mut().for_each(mask_config),
-        _ => {}
+        Value::Array(items) => items
+            .iter_mut()
+            .for_each(|item| mask_value(item, key, public)),
+        Value::String(s) => {
+            // An unset value stays visibly unset
+            if s.is_empty() {
+                return;
+            }
+            if key.is_some_and(|k| is_public(k, public)) {
+                if let Some(masked) = mask_public_string(s) {
+                    *s = masked;
+                }
+            } else {
+                *s = MASK.to_string();
+            }
+        }
+        Value::Number(_) => {
+            if !key.is_some_and(|k| is_public(k, public)) {
+                *value = Value::String(MASK.to_string());
+            }
+        }
+        Value::Bool(_) | Value::Null => {}
     }
+}
+
+/// Puts a URL's stored credentials back where an update carries the mask.
+fn restore_url(new: &str, old: &str) -> Option<String> {
+    let mut new_url = url::Url::parse(new).ok()?;
+    let old_url = url::Url::parse(old).ok()?;
+    let mut changed = false;
+
+    if new_url.password() == Some(MASK) {
+        new_url.set_password(old_url.password()).ok()?;
+        changed = true;
+    }
+
+    let pairs: Vec<(String, String)> = new_url
+        .query_pairs()
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect();
+    if pairs.iter().any(|(_, v)| v == MASK) {
+        let old_pairs: Vec<(String, String)> = old_url
+            .query_pairs()
+            .map(|(k, v)| (k.into_owned(), v.into_owned()))
+            .collect();
+        new_url
+            .query_pairs_mut()
+            .clear()
+            .extend_pairs(pairs.iter().map(|(k, v)| {
+                let stored = old_pairs
+                    .iter()
+                    .find(|(old_key, _)| old_key == k)
+                    .map(|(_, old_value)| old_value.as_str());
+                match stored {
+                    Some(stored) if v == MASK => (k.as_str(), stored),
+                    _ => (k.as_str(), v.as_str()),
+                }
+            }));
+        changed = true;
+    }
+
+    changed.then(|| new_url.to_string())
 }
 
 /// Puts stored secrets back wherever an update carries the mask instead of a new value.
@@ -82,17 +268,15 @@ pub fn restore_masked(incoming: &mut Value, stored: &Value) {
                 restore_masked(value, old_value);
             }
         }
+        // The mask stands for whatever was stored, a string or (masked) a number
+        (incoming @ Value::String(_), old) if incoming.as_str() == Some(MASK) => {
+            if matches!(old, Value::String(_) | Value::Number(_)) {
+                *incoming = old.clone();
+            }
+        }
         (Value::String(new), Value::String(old)) => {
-            if new == MASK {
-                *new = old.clone();
-            } else if let (Ok(mut new_url), Ok(old_url)) =
-                (url::Url::parse(new), url::Url::parse(old))
-            {
-                if new_url.password() == Some(MASK)
-                    && new_url.set_password(old_url.password()).is_ok()
-                {
-                    *new = new_url.to_string();
-                }
+            if let Some(restored) = restore_url(new, old) {
+                *new = restored;
             }
         }
         _ => {}
@@ -295,6 +479,105 @@ mod tests {
         );
         // An unset secret stays visibly unset.
         assert_eq!(config["password"], "");
+    }
+
+    #[test]
+    fn a_credential_under_a_key_nobody_listed_is_still_masked() {
+        let mut config = json!({
+            "bucket": "artifacts",
+            "port": 5432,
+            "force_path_style": true,
+            // None of these names says "secret"
+            "sas": "sv=2022&sig=abc123",
+            "pat": "ghp_exampleexample",
+            "key": "AccountKeyValue==",
+            "pin": 482913,
+            "connection_string": "Server=db;Pwd=hunter2",
+            "headers": { "X-Api-Key": "k-123", "X-Auth": "a-456", "Content-Type": "application/json" },
+            "auths": { "ghcr.io": { "auth": "dXNlcjpwYXNz", "username": "ci" } },
+            "extra": { "nested": ["one-secret", "two-secret"] },
+        });
+        mask_config(&mut config);
+
+        let text = config.to_string();
+        for leaked in [
+            "abc123",
+            "ghp_",
+            "AccountKey",
+            "482913",
+            "hunter2",
+            "k-123",
+            "a-456",
+            "dXNlcjpwYXNz",
+            "one-secret",
+            "two-secret",
+        ] {
+            assert!(!text.contains(leaked), "{leaked} leaked: {text}");
+        }
+        // What says where the connection points is still readable
+        assert_eq!(config["bucket"], "artifacts");
+        assert_eq!(config["port"], 5432);
+        assert_eq!(config["force_path_style"], true);
+        assert_eq!(config["headers"]["Content-Type"], "application/json");
+        assert_eq!(config["auths"]["ghcr.io"]["username"], "ci");
+    }
+
+    #[test]
+    fn credentials_inside_a_url_or_connection_string_are_masked() {
+        let mut config = json!({
+            "url": "https://store.example.com/c?sv=2022&sig=abc123&sslmode=require",
+            "base_url": "https://api.example.com/v1?access_token=tok-1",
+            "endpoint": "host=db.internal user=app password=hunter2",
+            "repo_url": "https://ci:ghp_tok@github.com/org/repo.git",
+        });
+        mask_config(&mut config);
+
+        let text = config.to_string();
+        for leaked in ["abc123", "tok-1", "hunter2", "ghp_tok"] {
+            assert!(!text.contains(leaked), "{leaked} leaked: {text}");
+        }
+        let url = config["url"].as_str().unwrap();
+        assert!(url.starts_with("https://store.example.com/c?"), "{url}");
+        assert!(url.contains("sslmode=require"), "{url}");
+        assert_eq!(
+            config["repo_url"],
+            "https://ci:********@github.com/org/repo.git"
+        );
+    }
+
+    #[test]
+    fn saving_a_masked_config_keeps_everything_that_was_masked() {
+        let stored = json!({
+            "bucket": "artifacts",
+            "pat": "ghp_exampleexample",
+            "pin": 482913,
+            "url": "https://store.example.com/c?sv=2022&sig=abc123&sslmode=require",
+            "headers": { "X-Api-Key": "k-123" },
+            "extra": { "nested": ["one-secret", "two-secret"] },
+        });
+        let mut edited = stored.clone();
+        mask_config(&mut edited);
+        assert_ne!(edited, stored);
+        edited["bucket"] = json!("artifacts-v2");
+
+        restore_masked(&mut edited, &stored);
+
+        let mut expected = stored.clone();
+        expected["bucket"] = json!("artifacts-v2");
+        // Query order and encoding are the URL library's; compare the parameters
+        let params = |v: &Value| {
+            let mut pairs: Vec<(String, String)> = url::Url::parse(v["url"].as_str().unwrap())
+                .unwrap()
+                .query_pairs()
+                .map(|(k, v)| (k.into_owned(), v.into_owned()))
+                .collect();
+            pairs.sort();
+            pairs
+        };
+        assert_eq!(params(&edited), params(&expected));
+        edited["url"] = json!(null);
+        expected["url"] = json!(null);
+        assert_eq!(edited, expected);
     }
 
     #[test]

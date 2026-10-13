@@ -201,6 +201,17 @@ are stored:
 The API masks these values in its responses (see the relevant endpoints), but
 that is independent of how they are stored.
 
+A connection's `config` is free-form, so the API cannot know which of its keys
+hold credentials. It therefore shows only the values of keys known to say where
+a connection points or who it connects as (for example `url`, `endpoint`,
+`bucket`, `region`, `registry`, `username`, `access_key`, `port`) and returns
+`********` for everything else, whatever the key is called. Within `headers`
+only descriptive headers such as `Accept` and `Content-Type` are shown. In a
+URL, the password and every query parameter that is not a known setting (such
+as `sslmode`) are masked. Sending `********` back in an update keeps the stored
+value, so a connection can be loaded, edited and saved without re-entering its
+secrets.
+
 Run details get the same treatment. A run's decrypted secrets and its
 `secret = true` inputs are replaced with `********` wherever they appear in the
 step specs, parameters, outputs, errors and log lines the API returns, and an
