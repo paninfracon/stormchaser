@@ -17,6 +17,40 @@ pub fn parse_key_val_list(list: Vec<String>) -> serde_json::Map<String, Value> {
     map
 }
 
+/// Removes terminal control characters from text that came from the server.
+///
+/// Log lines, error bodies and step names are written by whoever ran the workflow. Left
+/// alone, escape sequences in them can move the cursor, rewrite earlier output, set the
+/// window title or, on some terminals, inject input. Newlines and tabs are kept.
+pub fn strip_control(text: &str) -> std::borrow::Cow<'_, str> {
+    let is_unsafe = |c: char| c.is_control() && c != '\n' && c != '\t';
+    if text.contains(is_unsafe) {
+        std::borrow::Cow::Owned(text.chars().filter(|c| !is_unsafe(*c)).collect())
+    } else {
+        std::borrow::Cow::Borrowed(text)
+    }
+}
+
+/// Server text made safe for the stream it is going to: stripped when a person is
+/// reading it in a terminal, untouched when it is piped or redirected.
+fn for_stdout(text: &str) -> std::borrow::Cow<'_, str> {
+    use std::io::IsTerminal;
+    if std::io::stdout().is_terminal() {
+        strip_control(text)
+    } else {
+        std::borrow::Cow::Borrowed(text)
+    }
+}
+
+fn for_stderr(text: &str) -> std::borrow::Cow<'_, str> {
+    use std::io::IsTerminal;
+    if std::io::stderr().is_terminal() {
+        strip_control(text)
+    } else {
+        std::borrow::Cow::Borrowed(text)
+    }
+}
+
 pub async fn handle_response(res: reqwest::Response) -> Result<()> {
     let status = res.status();
     if status.is_success() {
@@ -25,14 +59,14 @@ pub async fn handle_response(res: reqwest::Response) -> Result<()> {
             if let Ok(val) = serde_json::from_str::<Value>(&body) {
                 println!("{}", serde_json::to_string_pretty(&val)?);
             } else {
-                println!("{}", body);
+                println!("{}", for_stdout(&body));
             }
         } else {
             println!("Success ({})", status);
         }
     } else {
         let error_text = res.text().await.unwrap_or_default();
-        eprintln!("Error ({}): {}", status, error_text);
+        eprintln!("Error ({}): {}", status, for_stderr(&error_text));
         std::process::exit(1);
     }
     Ok(())
@@ -60,10 +94,10 @@ pub async fn stream_run_logs(
         match event {
             Ok(event) => {
                 if event.event == "error" {
-                    eprintln!("Error from stream: {}", event.data);
+                    eprintln!("Error from stream: {}", for_stderr(&event.data));
                     break;
                 }
-                println!("{}", event.data);
+                println!("{}", for_stdout(&event.data));
             }
             Err(e) => {
                 eprintln!("Stream error: {}", e);
@@ -96,10 +130,10 @@ pub async fn stream_run_status(
         match event {
             Ok(event) => {
                 if event.event == "error" {
-                    eprintln!("Error from stream: {}", event.data);
+                    eprintln!("Error from stream: {}", for_stderr(&event.data));
                     break;
                 }
-                println!("{}: {}", event.event, event.data);
+                println!("{}: {}", for_stdout(&event.event), for_stdout(&event.data));
             }
             Err(e) => {
                 eprintln!("Stream error: {}", e);
@@ -143,10 +177,10 @@ pub async fn handle_run_response(
                 }
             }
         } else {
-            println!("{}", body);
+            println!("{}", for_stdout(&body));
         }
     } else {
-        eprintln!("Error ({}): {}", status, body);
+        eprintln!("Error ({}): {}", status, for_stderr(&body));
     }
     Ok(())
 }
@@ -169,6 +203,19 @@ mod tests {
         let map = parse_key_val_list(input);
         assert_eq!(map.get("num").unwrap().as_i64().unwrap(), 42);
         assert!(map.get("bool").unwrap().as_bool().unwrap());
+    }
+
+    #[test]
+    fn control_characters_are_removed_but_layout_is_kept() {
+        // Clear screen, set the title, then overwrite the line with a carriage return
+        let hostile = "ok\n\x1b[2J\x1b]0;owned\x07done\rFAKE\tend\u{9b}31m\x7f";
+        assert_eq!(strip_control(hostile), "ok\n[2J]0;owneddoneFAKE\tend31m");
+        // Ordinary text, including non-ASCII, is passed through without copying
+        let plain = "naïve ✓ line\n\tindented";
+        assert!(matches!(
+            strip_control(plain),
+            std::borrow::Cow::Borrowed(_)
+        ));
     }
 
     #[test]
