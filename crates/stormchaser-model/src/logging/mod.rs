@@ -37,6 +37,7 @@ pub enum LogBackend {
 /// The name goes into a log query, and a step name is whatever the workflow author
 /// wrote. Anything outside the characters a runner can use in a container or job name
 /// becomes `-`, so a name cannot close the label matcher and select other steps' logs.
+#[cfg(not(target_arch = "wasm32"))]
 fn log_job_name(step_name: &str, step_id: StepInstanceId) -> String {
     let name: String = step_name
         .to_lowercase()

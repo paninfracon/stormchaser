@@ -33,6 +33,7 @@ pub mod login_flow;
 /// NATS helpers.
 pub mod nats;
 /// SSRF protection for outbound HTTP requests.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod net_guard;
 /// Outbox pattern models for reliable message publishing.
 pub mod outbox;
