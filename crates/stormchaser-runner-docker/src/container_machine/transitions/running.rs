@@ -94,13 +94,7 @@ impl DockerContainerMachine<state::Running> {
             serde_json::from_value(self.metadata.step_dsl.spec.clone()).ok();
 
         let (artifacts, storage_hashes, test_reports) = self
-            .collect_metrics(
-                &container_name,
-                &storage_names,
-                mounts,
-                spec.as_ref(),
-                exit_code,
-            )
+            .collect_metrics(&storage_names, mounts, spec.as_ref(), exit_code)
             .await?;
 
         if let Some(a) = artifacts {
@@ -149,7 +143,6 @@ impl DockerContainerMachine<state::Running> {
 
     async fn collect_metrics(
         &self,
-        container_name: &str,
         storage_names: &[String],
         mounts: Vec<bollard::models::Mount>,
         spec: Option<&CommonContainerSpec>,
@@ -159,31 +152,14 @@ impl DockerContainerMachine<state::Running> {
         Option<HashMap<String, String>>,
         Option<Value>,
     )> {
-        let mut artifacts_out = None;
-        let mut hashes_out = None;
-        let mut reports_out = None;
-
-        if !storage_names.is_empty() || !self.metadata.step_dsl.reports.is_empty() {
-            let (a, h, r) = self
-                .run_parking_agent(storage_names, mounts, spec, exit_code)
-                .await?;
-            artifacts_out = a;
-            hashes_out = h;
-            reports_out = r;
-        } else {
-            // For adopted containers without parking, we still want to grab logs if possible
-            if let Ok(Some(artifacts)) = self.get_artifact_meta(container_name).await {
-                artifacts_out = Some(artifacts);
-            }
-            if let Ok(Some(hashes)) = self.get_storage_hashes(container_name).await {
-                hashes_out = Some(hashes);
-            }
-            if let Ok(Some(reports)) = self.get_test_reports(container_name).await {
-                reports_out = Some(reports);
-            }
+        // A step with no storage and no reports has nothing to hand in. Its own output is
+        // never searched for results: anything a step prints is the workflow author's to
+        // choose, so the only log read for results is the parking helper's.
+        if storage_names.is_empty() && self.metadata.step_dsl.reports.is_empty() {
+            return Ok((None, None, None));
         }
-
-        Ok((artifacts_out, hashes_out, reports_out))
+        self.run_parking_agent(storage_names, mounts, spec, exit_code)
+            .await
     }
 
     async fn run_parking_agent(

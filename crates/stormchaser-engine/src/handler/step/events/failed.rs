@@ -13,7 +13,8 @@ use tracing::{error, info};
 use crate::handler::step::quota::release_step_quota_for_instance;
 
 use super::helpers::{
-    completion_authorized, is_terminal_step_status, persist_step_test_reports, step_belongs_to_run,
+    completion_authorized, declared_test_reports, is_terminal_step_status,
+    persist_step_test_reports, step_belongs_to_run,
 };
 
 #[tracing::instrument(skip(event, pool, nats_client, tls_reloader), fields(run_id = tracing::field::Empty, step_id = tracing::field::Empty))]
@@ -88,6 +89,7 @@ pub async fn handle_step_failed(
             .await?;
     }
 
+    let step_name = instance.step_name.clone();
     let attributes = [
         KeyValue::new("step_name", instance.step_name),
         KeyValue::new("step_type", instance.step_type),
@@ -118,7 +120,18 @@ pub async fn handle_step_failed(
     }
 
     // Persist test reports even on failure
-    persist_step_test_reports(event.test_reports.as_ref(), &mut tx, run_id, step_id, &pool).await?;
+    if event.test_reports.is_some() {
+        let declared_reports = declared_test_reports(&mut tx, run_id, &step_name).await;
+        persist_step_test_reports(
+            event.test_reports.as_ref(),
+            &declared_reports,
+            &mut tx,
+            run_id,
+            step_id,
+            &pool,
+        )
+        .await?;
+    }
 
     let run = fetch_run(run_id, &mut *tx).await?;
     let run_machine = WorkflowMachine::<state::Running>::new_from_run(run.clone());

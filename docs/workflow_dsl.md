@@ -362,6 +362,12 @@ step "my_step" "RunContainer" {
 }
 ```
 
+On the Docker runner `mount_path` must be an absolute path that is not a system
+location: `/`, `/usr`, `/usr/local`, `/etc`, and anything at, above or inside
+`/bin`, `/sbin`, `/lib*`, `/usr/bin`, `/usr/sbin`, `/usr/lib*`, `/usr/libexec`,
+`/usr/local/bin`, `/proc`, `/sys` and `/dev` are refused. Paths such as
+`/workspace`, `/app`, `/usr/src/app` or `/etc/myapp` are fine.
+
 #### 4.4 Using Library Steps
 
 Imported steps are referenced by their library alias and name (e.g., `lib_alias/step_name`).
@@ -435,6 +441,9 @@ step "fetch_source" "GitCheckout" {
             format = "junit"
         }
     }
+    // Only reports declared here are stored. A report's files may total at most
+    // 32 MiB compressed, 64 MiB unpacked and 1,000 files; a larger report is
+    // dropped and the step's result is unaffected.
 
     // Output Mapping: Extract data from step execution
     outputs {

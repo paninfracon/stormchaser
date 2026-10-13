@@ -313,5 +313,10 @@ async fn test_test_report_persistence_on_completion() {
     assert_eq!(report.0, "unit-tests");
     assert_eq!(report.1, "results.xml");
     assert_eq!(report.2, "junit");
-    assert_eq!(report.3, "hash123");
+    // The checksum is the engine's own, not the one the step reported
+    use sha2::{Digest, Sha256};
+    assert_eq!(
+        report.3,
+        hex::encode(Sha256::digest(b"<testsuite>...</testsuite>"))
+    );
 }

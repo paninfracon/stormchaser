@@ -189,6 +189,23 @@ away from the control plane:
 `scripts/setup.sh` relaxes the network isolation and the privileged setting for
 local development; see [NATS: Quickstart and Production](nats.md).
 
+### What a step reports about itself
+
+Test reports, storage hashes and artifact metadata are produced inside the step,
+so the engine treats them as the workflow author's claims, not as facts:
+
+* A test report is stored only if the step declares it. The engine works out
+  where an uploaded report lives from the run, the step and the report name; it
+  does not read a location, format or checksum from the step's result. Report
+  archives are limited to 32 MiB compressed, 64 MiB unpacked and 1,000 files.
+* A storage hash is recorded only for a volume the workflow declares.
+* The Docker runner reads these results from its own helper container, never from
+  the step's output, and refuses storage mount paths that would cover the helper's
+  system directories (see [Mounting Storage in Steps](workflow_dsl.md)).
+* On the Kubernetes runner the agent runs inside the step's container, so a step
+  can still replace what the agent reports about its own storage, artifacts and
+  reports. It cannot use that to reach another run's data.
+
 When using the **Docker Runner** with the `STORMCHASER_SFS_HOST_PATH` optimization enabled, the runner creates direct bind mounts from the host file system into step containers.
 
 * **Host Access:** This bypasses Docker's native volume isolation. The directory specified must be securely owned by the user running the Docker daemon.

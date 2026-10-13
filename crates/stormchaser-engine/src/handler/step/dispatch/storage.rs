@@ -203,6 +203,21 @@ pub(crate) async fn setup_storage_urls(
     Ok(storage_urls)
 }
 
+/// Where a step's uploaded test report lives in the default SFS backend.
+///
+/// Used to issue the upload URL and again to read the report back, so the two cannot
+/// disagree and neither depends on what the step says.
+pub(crate) fn test_report_key(
+    run_id: RunId,
+    step_instance_id: StepInstanceId,
+    report_name: &str,
+) -> String {
+    format!(
+        "test-reports/{}/{}/{}.tar.gz",
+        run_id, step_instance_id, report_name
+    )
+}
+
 pub(crate) async fn setup_test_report_urls(
     run_id: RunId,
     step_instance_id: StepInstanceId,
@@ -222,10 +237,7 @@ pub(crate) async fn setup_test_report_urls(
                 .context("Missing bucket")?;
 
             for report in &step.reports {
-                let report_key = format!(
-                    "test-reports/{}/{}/{}.tar.gz",
-                    run_id, step_instance_id, report.name
-                );
+                let report_key = test_report_key(run_id, step_instance_id, &report.name);
                 let expires = Duration::from_secs(3600);
                 let put_url =
                     crate::s3::generate_presigned_url(&client, bucket, &report_key, true, expires)
