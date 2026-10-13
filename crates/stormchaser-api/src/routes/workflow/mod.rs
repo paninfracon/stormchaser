@@ -3,6 +3,7 @@ use super::{
     DirectRunRequest, EnqueueRequest, EnqueueResponse, ListRunsQuery, StepDetail,
     WorkflowRunDetail, WorkflowRunFullDetail,
 };
+use crate::authz::{self, Caller, Kind};
 use crate::db;
 use crate::{AppState, AuthClaims, RUNS_ENQUEUED};
 use async_nats::jetstream;
@@ -192,7 +193,7 @@ pub async fn enqueue_workflow(
 )]
 /// List workflow runs.
 pub async fn list_workflow_runs(
-    AuthClaims(_claims): AuthClaims,
+    caller: Caller,
     State(state): State<AppState>,
     Query(params): Query<ListRunsQuery>,
 ) -> Result<impl IntoResponse, StatusCode> {
@@ -206,7 +207,16 @@ pub async fn list_workflow_runs(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    Ok(Json(runs))
+    // Filtered after paging, so a page can come back shorter than `limit`
+    let mut filter = authz::ReadFilter::new(&state, &caller, Kind::Run);
+    let mut readable = Vec::with_capacity(runs.len());
+    for run in runs {
+        if filter.can_read(Some(&run.initiating_user)).await? {
+            readable.push(run);
+        }
+    }
+
+    Ok(Json(readable))
 }
 
 /// Gets workflow run details.

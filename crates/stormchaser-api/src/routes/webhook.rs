@@ -1,4 +1,5 @@
 use super::{CreateWebhookRequest, UpdateWebhookRequest};
+use crate::authz::{self, Caller, Kind};
 use crate::db;
 use crate::{AppState, AuthClaims};
 use async_nats::jetstream;
@@ -34,7 +35,7 @@ use stormchaser_model::WebhookId;
     tag = "webhook"
 )]
 pub async fn create_webhook(
-    AuthClaims(_claims): AuthClaims,
+    caller: Caller,
     State(state): State<AppState>,
     Json(payload): Json<CreateWebhookRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
@@ -52,6 +53,7 @@ pub async fn create_webhook(
         tracing::error!("Failed to create webhook: {:?}", e);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
+    authz::record_owner(&state.pool, Kind::Webhook, id.into_inner(), &caller).await?;
 
     Ok((StatusCode::CREATED, Json(serde_json::json!({ "id": id }))))
 }
@@ -69,13 +71,17 @@ pub async fn create_webhook(
     tag = "webhook"
 )]
 pub async fn list_webhooks(
-    AuthClaims(_claims): AuthClaims,
+    caller: Caller,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let webhooks = db::list_webhooks(&state.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
+    let webhooks = authz::filter_readable(&state, &caller, Kind::Webhook, webhooks, |w| {
+        w.id.into_inner()
+    })
+    .await?;
     let webhooks: Vec<_> = webhooks.into_iter().map(crate::redact::webhook).collect();
     Ok(Json(webhooks))
 }
@@ -420,11 +426,17 @@ async fn process_rule(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
+    // The run acts as whoever created the rule; rules that predate ownership keep the
+    // old label, which policy treats as "no owner".
+    let initiating_user = authz::owner_of(&state.pool, Kind::EventRule, rule.id.into_inner())
+        .await
+        .unwrap_or_else(|| format!("webhook:{}", webhook.name));
+
     db::insert_workflow_run(
         &mut tx,
         run_id,
         &rule.workflow_name,
-        &format!("webhook:{}", webhook.name),
+        &initiating_user,
         &rule.repo_url,
         &rule.workflow_path,
         &rule.git_ref,

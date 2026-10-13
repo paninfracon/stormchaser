@@ -8,13 +8,14 @@ pub async fn mutate(
     step_type: &mut String,
     resolved_spec: &mut Value,
     pool: Option<&PgPool>,
+    run_id: Option<stormchaser_model::RunId>,
 ) -> anyhow::Result<()> {
     if step_type == "GitCheckout" {
         let git_spec: Result<dsl::GitCheckoutSpec, _> =
             serde_json::from_value(resolved_spec.get("spec").unwrap_or(&*resolved_spec).clone());
 
         if let Ok(git) = git_spec {
-            let container_spec = build_git_container_spec(&git, pool).await?;
+            let container_spec = build_git_container_spec(&git, pool, run_id).await?;
             *step_type = "RunContainer".to_string();
             if let Ok(val) = serde_json::to_value(container_spec) {
                 *resolved_spec = val;
@@ -27,6 +28,7 @@ pub async fn mutate(
 async fn build_git_container_spec(
     git: &dsl::GitCheckoutSpec,
     pool: Option<&PgPool>,
+    run_id: Option<stormchaser_model::RunId>,
 ) -> anyhow::Result<dsl::CommonContainerSpec> {
     let depth = git.depth.unwrap_or(1);
     let dest = git.destination.clone().unwrap_or_else(|| ".".to_string());
@@ -48,6 +50,9 @@ async fn build_git_container_spec(
         >(pool, conn_name)
         .await?
         .with_context(|| format!("GitCheckout connection '{}' was not found", conn_name))?;
+        if let Some(run_id) = run_id {
+            crate::authz::ensure_run_may_use(pool, run_id, &conn).await?;
+        }
 
         if conn.connection_type != stormchaser_model::connections::ConnectionType::Git {
             anyhow::bail!(
@@ -139,7 +144,7 @@ mod tests {
             "repo": "https://github.com/example/repo.git"
         });
 
-        mutate(&mut step_type, &mut spec, None).await.unwrap();
+        mutate(&mut step_type, &mut spec, None, None).await.unwrap();
 
         assert_eq!(step_type, "RunContainer");
         let spec_obj = spec.as_object().unwrap();
@@ -164,7 +169,7 @@ mod tests {
             "destination": "/workspace/repo"
         });
 
-        mutate(&mut step_type, &mut spec, None).await.unwrap();
+        mutate(&mut step_type, &mut spec, None, None).await.unwrap();
 
         assert_eq!(step_type, "RunContainer");
         let spec_obj = spec.as_object().unwrap();

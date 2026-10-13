@@ -210,11 +210,26 @@ pub async fn execute_query(
             .ok_or_else(|| anyhow::anyhow!("Connection '{}' not found", conn_name))?;
 
             if app_state.opa.is_configured() {
-                let opa_ctx = stormchaser_model::auth::ConnectionOpaContext {
-                    connection_name: conn_name,
-                    initiating_user,
+                let owner: Option<String> =
+                    sqlx::query_scalar("SELECT created_by FROM connections WHERE id = $1")
+                        .bind(conn.id)
+                        .fetch_optional(&app_state.pool)
+                        .await?
+                        .flatten();
+                let opa_ctx = stormchaser_model::auth::ResourceOpaContext {
+                    action: "use",
+                    resource: stormchaser_model::auth::OpaResource {
+                        kind: "connection",
+                        id: conn_name,
+                        owner: owner.as_deref(),
+                    },
+                    subject: stormchaser_model::auth::OpaSubject {
+                        sub: initiating_user,
+                        email: Some(initiating_user),
+                    },
+                    token: None,
                 };
-                if !app_state.opa.check_connection(opa_ctx).await? {
+                if !app_state.opa.check_resource(opa_ctx).await? {
                     return Err(anyhow::anyhow!(
                         "Access to connection '{}' denied by OPA",
                         conn_name
@@ -229,7 +244,9 @@ pub async fn execute_query(
     }
 
     let pool = state.map(|s| &s.pool);
-    stormchaser_engine::query::execute_query(query_type, params, pool, db_url).await
+    stormchaser_engine::query::// Connection use was checked above, as the caller
+    execute_query(query_type, params, pool, db_url, None)
+    .await
 }
 
 pub async fn run_hydration_loop(

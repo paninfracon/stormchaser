@@ -26,14 +26,27 @@ To facilitate integration with external Identity Providers (IdPs), Stormchaser p
 
 ## 2. Authorization (Open Policy Agent)
 
-Stormchaser uses **Open Policy Agent (OPA)** to enforce fine-grained, decoupled authorization policies. Authorization occurs at two distinct stages of the workflow lifecycle.
+Stormchaser uses **Open Policy Agent (OPA)** to enforce fine-grained, decoupled authorization policies. Policy is asked four kinds of question, all at the same entrypoint and told apart by the shape of the input: about a request, about an object, about a run that is starting, and about an approval.
+
+> **Without OPA there is no isolation between users.** If no policy engine is configured (`OPA_URL` unset), every one of these checks is skipped: any authenticated user can read, change and delete every run, connection, webhook, rule and schedule. That is intended for single-user development only.
+
+The policy Stormchaser ships (`deploy/opa/policy.rego`, also packaged in the Helm chart) refuses anything it does not recognise, and by default:
+
+* lets any authenticated user call any endpoint and start any workflow;
+* lets users read and change only the runs, webhooks, event rules and cron schedules they created, and lets admins do anything;
+* shares connections: everyone may see them (credentials are always masked) and every run may use them, but only the creator or an admin may change or delete one;
+* leaves objects that predate ownership readable by everyone, and changeable by everyone until an admin is configured, by admins only after that.
+
+Settings for it live in `deploy/opa/settings.json` (Helm: `api.opa.sidecar.settings`): `admins` (emails or subject ids), `admin_groups` (values of the token's `groups` claim) and `separation_of_duties` (when true, whoever started a run may not approve its steps).
+
+OPA's own HTTP API is restricted (`deploy/opa/authz.rego`, with `--authorization=basic`) to evaluating the policy, so that nothing which can reach OPA's port can replace the policy or its data.
 
 ### Tier 1: API Level (Request Authorization)
 
 The first check occurs at the API gateway before a request is processed.
 
 * **Context Sent to OPA**:
-  * `path`: The requested URL path (e.g., `/api/v1/runs`).
+  * `path`: The requested URL path, including the `/api/v1` prefix (e.g., `/api/v1/runs`).
   * `method`: The HTTP method (e.g., `POST`).
   * `token`: The raw bearer token (if provided).
 * **Purpose**: To determine if the user is allowed to access specific API endpoints or perform certain actions (e.g., "Can this user trigger *any* workflow?").
@@ -51,6 +64,23 @@ The second check occurs in the Orchestration Engine immediately after the workfl
   * "Users in the 'Junior' group cannot trigger workflows containing 'Production' in the name."
   * "Workflows that use 'privileged' containers require 'Admin' group membership."
   * "Workflows cannot be triggered with a `timeout` parameter greater than 4 hours unless approved."
+
+### Per-object authorization (ownership)
+
+For every request whose path names a run, connection, webhook, event rule or cron schedule by id, the API looks the object up and asks policy whether this caller may act on it. Lists and the runs stream are filtered the same way, so a list never shows what fetching the object would refuse.
+
+* **Context Sent to OPA**:
+  * `action`: `read`, `update`, `delete` or `use`.
+  * `resource`: `{ "type": "run" | "connection" | "webhook" | "event_rule" | "cron_workflow", "id": "...", "owner": "alice@example.com" | null }`.
+  * `subject`: `{ "sub": "...", "email": "..." }`, the identity the API verified from the token.
+  * `token`: the raw bearer token, for policies that read further claims such as groups.
+* **Owner**: whoever created the object: their email, or their subject id when the token carries no email. For a run it is whoever started it. A run started by a webhook rule or a cron schedule acts as whoever created that rule or schedule. Objects created before ownership was recorded have no owner (`null`).
+* **Connection use**: before the engine or the query service uses a connection on a run's behalf, it asks with `action: "use"` and the run's user as the subject (and no token).
+* **Not covered**: approving or rejecting a step is decided by the approval question below, since approvers are by nature not the owner. Completing a `Wait` step through `POST /api/v1/events/correlate` is governed by request-level policy only. The runs list is filtered after paging, so a page can hold fewer than `limit` entries.
+
+### Approvals
+
+When a user approves or rejects a step, policy is asked with `run_id`, `initiating_user`, `step_ast`, `inputs`, `run_outputs`, the `approver` (`{ "sub", "email" }`, as verified) and the raw `token`.
 
 ## 3. Transport Security (mTLS)
 

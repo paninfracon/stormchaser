@@ -49,6 +49,10 @@ repos:
     hooks:
       - id: opa-fmt
       - id: opa-check
+        # The hook checks the whole repository at once. The Helm chart's files/opa
+        # holds links to deploy/opa, which would otherwise count as every rule being
+        # defined twice.
+        args: [".", "--strict", "--ignore", "files"]
 
   - repo: local
     hooks:

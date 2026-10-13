@@ -104,6 +104,7 @@ async fn handle_rest_api_invoke(
         >(&pool, conn_name)
         .await?
         {
+            crate::authz::ensure_run_may_use(&pool, run_id, &conn).await?;
             if conn.connection_type == stormchaser_model::connections::ConnectionType::HttpApi {
                 apply_http_connection(&mut spec, &conn)?;
             } else {

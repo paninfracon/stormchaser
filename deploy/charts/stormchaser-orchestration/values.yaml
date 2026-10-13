@@ -80,15 +80,19 @@ api:
         repository: openpolicyagent/opa
         tag: 0.62.1
       resources: {}
-      policy: |
-        package stormchaser
-
-        default allow := false
-
-        # Allow all requests for local development
-        allow := true if {
-            true
-        }
+      # Settings read by the shipped policy (files/opa/policy.rego, a link to
+      # deploy/opa/policy.rego so that there is one copy).
+      settings:
+        # Emails or subject ids that may act on any object.
+        admins: []
+        # Values of the token's `groups` claim that make a user an admin.
+        adminGroups: []
+        # When true, whoever started a run may not approve its steps.
+        separationOfDuties: false
+      # Replaces the shipped policy when set. It must define `stormchaser.allow` and
+      # answer the request, resource, engine and approval questions described in
+      # docs/opa-rbac.md.
+      policy: ""
 
 query:
   image:

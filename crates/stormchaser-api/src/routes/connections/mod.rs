@@ -2,6 +2,7 @@ use super::{
     CreateStorageBackendRequest, TestConnectionRequest, TestConnectionResponse,
     UpdateStorageBackendRequest,
 };
+use crate::authz::{self, Caller, Kind};
 use crate::db;
 use crate::{AppState, AuthClaims};
 use axum::{
@@ -31,7 +32,7 @@ use validate::validate_connection;
     tag = "storage"
 )]
 pub async fn create_connection(
-    AuthClaims(_claims): AuthClaims,
+    caller: Caller,
     State(state): State<AppState>,
     Json(payload): Json<CreateStorageBackendRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
@@ -70,6 +71,7 @@ pub async fn create_connection(
     tx.commit()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    authz::record_owner(&state.pool, Kind::Connection, id.into_inner(), &caller).await?;
 
     Ok((StatusCode::CREATED, Json(serde_json::json!({ "id": id }))))
 }
@@ -87,7 +89,7 @@ pub async fn create_connection(
     tag = "storage"
 )]
 pub async fn list_connections(
-    AuthClaims(_claims): AuthClaims,
+    caller: Caller,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let backends = db::list_connections(&state.pool).await.map_err(|e| {
@@ -95,6 +97,10 @@ pub async fn list_connections(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
+    let backends = authz::filter_readable(&state, &caller, Kind::Connection, backends, |c| {
+        c.id.into_inner()
+    })
+    .await?;
     let backends: Vec<_> = backends
         .into_iter()
         .map(crate::redact::connection)
@@ -334,9 +340,10 @@ pub async fn list_run_test_summaries(
 pub async fn get_test_report(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path((_run_id, report_id)): Path<(RunId, TestReportId)>,
+    Path((run_id, report_id)): Path<(RunId, TestReportId)>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let report = db::get_test_report(&state.pool, report_id)
+    // The run in the path is the one the caller was authorized for
+    let report = db::get_test_report(&state.pool, run_id, report_id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)

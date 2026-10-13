@@ -44,7 +44,7 @@ pub async fn handle_slack_message(
     let _machine = machine.start("system".to_string(), &mut *conn).await?;
 
     let webhook_url =
-        super::utils::fetch_http_api_url_from_connection(&pool, &spec.connection).await?;
+        super::utils::fetch_http_api_url_from_connection(&pool, run_id, &spec.connection).await?;
 
     // Post to Slack Webhook
     let (client, webhook_url) = stormchaser_model::net_guard::guarded_client(&webhook_url).await?;

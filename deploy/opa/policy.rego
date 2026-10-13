@@ -2,7 +2,43 @@ package stormchaser
 
 import rego.v1
 
-default allow := true
+# Stormchaser asks this policy four kinds of question, told apart by the shape of the
+# input:
+#
+#   request   {method, path, token}                      may this API request proceed?
+#   resource  {action, resource, subject, token}         may this user act on this object?
+#   engine    {run_id, initiating_user, workflow_ast, inputs}   may this run start?
+#   approval  {run_id, initiating_user, step_ast, inputs, run_outputs, approver, token}
+#
+# Anything else is refused.
+#
+# Deployment settings come from data.stormchaser_settings (see settings.json):
+#
+#   admins                 emails or subject ids that may act on any object
+#   admin_groups           values of the token's `groups` claim that make a user an admin
+#   separation_of_duties   when true, a run's initiator may not approve its steps
+
+default allow := false
+
+admins contains admin if some admin in data.stormchaser_settings.admins
+
+admin_groups contains group if some group in data.stormchaser_settings.admin_groups
+
+separation_of_duties if data.stormchaser_settings.separation_of_duties == true
+
+admins_configured if count(admins) + count(admin_groups) > 0
+
+# --- Request tier -------------------------------------------------------------------
+
+allow if {
+	is_request
+	not request_denied
+}
+
+is_request if {
+	input.method
+	input.path
+}
 
 read_only_methods := {"GET", "HEAD", "OPTIONS"}
 
@@ -10,11 +46,10 @@ token_is_empty if not input.token
 
 token_is_empty if input.token == null
 
-# Block calls via the MCP server that are not read-only.
-# Because the MCP server (rmcp-openapi) makes requests without proxying the user token,
-# its requests will have no token. We block any unauthenticated request that is not read-only.
-# (We exclude auth endpoints as they legitimately have no token).
-allow := false if {
+# Requests without a token come from the MCP server, which does not pass the user's
+# token on. They may only read. (The login and token exchange endpoints legitimately
+# have no token.)
+request_denied if {
 	token_is_empty
 	not input.method in read_only_methods
 	not startswith(input.path, "/api/v1/mcp")
@@ -35,10 +70,141 @@ mcp_transport_request if {
 	input.method in mcp_transport_methods
 }
 
-# Block calls to the MCP server that are not read-only, except for the transport's
-# own requests, which the JSON-RPC protocol needs in order to function.
-allow := false if {
+# Calls to the MCP server may only read, except for the transport's own requests,
+# which the JSON-RPC protocol needs in order to function.
+request_denied if {
 	startswith(input.path, "/api/v1/mcp")
 	not input.method in read_only_methods
 	not mcp_transport_request
+}
+
+# --- Who is asking ------------------------------------------------------------------
+
+# The API verifies the token before asking, and sends the verified subject and email.
+subject_ids contains id if {
+	id := input.subject.sub
+	is_string(id)
+	id != ""
+}
+
+subject_ids contains id if {
+	id := input.subject.email
+	is_string(id)
+	id != ""
+}
+
+token_groups := groups if {
+	is_string(input.token)
+	[_, payload, _] := io.jwt.decode(input.token)
+	groups := object.get(payload, "groups", [])
+} else := []
+
+is_admin if {
+	some id in subject_ids
+	id in admins
+}
+
+is_admin if {
+	some group in token_groups
+	group in admin_groups
+}
+
+# --- Resource tier ------------------------------------------------------------------
+#
+# resource.type is one of run, connection, webhook, event_rule, cron_workflow.
+# resource.owner is whoever created the object (for a run, whoever started it), or
+# null for objects that predate ownership and runs started by the system.
+# action is one of read, update, delete, use.
+
+allow if {
+	is_resource
+	resource_allowed
+}
+
+is_resource if {
+	input.action
+	input.resource
+}
+
+has_owner if {
+	owner := input.resource.owner
+	is_string(owner)
+	owner != ""
+	not is_system_label(owner)
+}
+
+# What runs started by the system, a schedule or a webhook record in place of a user
+# when there is no user to act as.
+is_system_label(owner) if owner == "system"
+
+is_system_label(owner) if startswith(owner, "system:")
+
+is_system_label(owner) if startswith(owner, "webhook:")
+
+owned_by_subject if {
+	has_owner
+	input.resource.owner in subject_ids
+}
+
+# Admins may do anything.
+resource_allowed if is_admin
+
+# Owners may do anything with what they own.
+resource_allowed if owned_by_subject
+
+# Objects with no owner can be read by everyone.
+resource_allowed if {
+	not has_owner
+	input.action == "read"
+}
+
+# Objects with no owner can be changed only by admins, once any are configured. Until
+# then everyone may, as before ownership existed, so that an upgrade locks nothing.
+resource_allowed if {
+	not has_owner
+	not admins_configured
+}
+
+# Connections are shared: everyone may see them (their credentials are masked) and
+# every run may use them. Only the owner or an admin may change or delete one.
+resource_allowed if {
+	input.resource.type == "connection"
+	input.action in {"read", "use"}
+}
+
+# --- Engine tier --------------------------------------------------------------------
+
+# Any authenticated user may start any workflow. Add rules here to restrict by
+# input.initiating_user, input.workflow_ast or input.inputs.
+allow if {
+	input.workflow_ast
+	not is_request
+	not is_resource
+}
+
+# --- Approval tier ------------------------------------------------------------------
+
+allow if {
+	input.step_ast
+	not is_request
+	not is_resource
+	not approval_denied
+}
+
+approver_ids contains id if {
+	id := input.approver.sub
+	is_string(id)
+	id != ""
+}
+
+approver_ids contains id if {
+	id := input.approver.email
+	is_string(id)
+	id != ""
+}
+
+# With separation of duties on, whoever started a run may not approve its steps.
+approval_denied if {
+	separation_of_duties
+	input.initiating_user in approver_ids
 }

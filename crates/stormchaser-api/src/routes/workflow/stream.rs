@@ -1,6 +1,6 @@
+use crate::authz::{self, Caller, Kind};
 use crate::db;
 use crate::AppState;
-use crate::AuthClaims;
 use axum::response::sse::Event;
 use axum::{extract::State, http::StatusCode};
 use futures::StreamExt;
@@ -21,7 +21,7 @@ use uuid::Uuid;
 )]
 /// Stream workflow runs api.
 pub async fn stream_workflow_runs_api(
-    AuthClaims(_claims): AuthClaims,
+    caller: Caller,
     State(state): State<AppState>,
 ) -> Result<
     axum::response::sse::Sse<
@@ -35,6 +35,9 @@ pub async fn stream_workflow_runs_api(
     let pool = state.pool.clone();
 
     tokio::spawn(async move {
+        // Only runs the caller may read are streamed to them
+        let mut filter = authz::ReadFilter::new(&state, &caller, Kind::Run);
+
         let legacy_subscriber = match nats.subscribe("stormchaser.v1.run.>").await {
             Ok(sub) => sub,
             Err(e) => {
@@ -74,6 +77,9 @@ pub async fn stream_workflow_runs_api(
                             .unwrap_or(None);
 
                     if let Some(mut run) = detail {
+                        if !matches!(filter.can_read(Some(&run.initiating_user)).await, Ok(true)) {
+                            continue;
+                        }
                         if let Some(status_str) = payload.get("status").and_then(|s| s.as_str()) {
                             if let Ok(status) = serde_json::from_value(serde_json::Value::String(
                                 status_str.to_string(),

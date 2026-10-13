@@ -121,7 +121,14 @@ pub(crate) async fn setup_storage_urls(
         }
 
         let backend: Option<Connection> = if let Some(ref backend_name) = storage.backend {
-            crate::db::get_storage_backend_by_name(pool, backend_name).await?
+            let named: Option<Connection> =
+                crate::db::get_storage_backend_by_name(pool, backend_name).await?;
+            // A backend the workflow names is a connection the run chose to use; the
+            // default one is the operator's choice.
+            if let Some(connection) = &named {
+                crate::authz::ensure_run_may_use(pool, run_id, connection).await?;
+            }
+            named
         } else {
             crate::db::get_default_sfs_backend(pool).await?
         };

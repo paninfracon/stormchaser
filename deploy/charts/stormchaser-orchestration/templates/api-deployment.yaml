@@ -120,7 +120,13 @@ spec:
             - "run"
             - "--server"
             - "--addr=0.0.0.0:8181"
+            # The engine and query service reach this port through the API Service, so it
+            # cannot be bound to loopback. authz.rego limits OPA's own API to evaluating
+            # the policy, which stops anything in the cluster from replacing it.
+            - "--authorization=basic"
             - "/config/policy.rego"
+            - "/config/authz.rego"
+            - "/config/settings.json"
           ports:
             - name: http-opa
               containerPort: 8181

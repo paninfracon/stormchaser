@@ -136,7 +136,9 @@ services:
       - "${STORMCHASER_CONTROL_PLANE_BIND:-127.0.0.1}:${PORT_OPA:-8181}:8181"
     volumes:
       - ./deploy/opa:/etc/opa
-    command: run --server --addr 0.0.0.0:8181 --log-level debug /etc/opa/policy.rego
+    # --authorization=basic applies deploy/opa/authz.rego to OPA's own API, so the policy
+    # can be evaluated but not replaced over the network.
+    command: run --server --addr 0.0.0.0:8181 --authorization=basic /etc/opa/policy.rego /etc/opa/authz.rego /etc/opa/settings.json
 
   orchestration-engine:
     build:

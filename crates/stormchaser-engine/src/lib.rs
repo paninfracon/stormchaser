@@ -6,6 +6,8 @@
 /// Artifact management and backend integrations.
 pub mod artifact;
 /// Operator allow-lists for AWS roles and Lambda functions.
+/// Policy checks on connection use.
+pub mod authz;
 pub mod aws_guard;
 /// Database interaction layer.
 pub mod db;

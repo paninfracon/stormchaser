@@ -175,9 +175,9 @@ impl stormchaser_model::auth::OpaAuthorizer for RecordingAuthorizer {
     ) -> anyhow::Result<bool> {
         Ok(true)
     }
-    async fn check_connection(
+    async fn check_resource(
         &self,
-        _context: stormchaser_model::auth::ConnectionOpaContext<'_>,
+        _context: stormchaser_model::auth::ResourceOpaContext<'_>,
     ) -> anyhow::Result<bool> {
         Ok(true)
     }
@@ -186,11 +186,10 @@ impl stormchaser_model::auth::OpaAuthorizer for RecordingAuthorizer {
     }
 }
 
-/// Documents what request-level policy can and cannot see today: the method, the path
-/// with the `/api/v1` prefix stripped, and the raw token. It is not told who owns the
-/// object in the path, so it cannot make per-object decisions.
+/// Request-level policy is shown the path the client asked for, `/api/v1` prefix
+/// included, which is what the shipped and example policies match on.
 #[tokio::test]
-async fn policy_sees_the_path_without_its_api_prefix() {
+async fn policy_sees_the_full_request_path() {
     let claims = stormchaser_model::auth::Claims {
         sub: "test-user".to_string(),
         email: Some("test-user@paninfracon.net".to_string()),
@@ -219,5 +218,5 @@ async fn policy_sees_the_path_without_its_api_prefix() {
     .await;
 
     let seen = authorizer.seen.lock().unwrap().clone();
-    assert_eq!(seen, vec![("GET".to_string(), format!("/runs/{run_id}"))]);
+    assert_eq!(seen, vec![("GET".to_string(), path)]);
 }

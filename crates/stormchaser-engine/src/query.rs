@@ -13,6 +13,7 @@ pub async fn execute_query(
     params: &HashMap<String, String>,
     pool: Option<&PgPool>,
     db_url_override: Option<String>,
+    acting_user: Option<&str>,
 ) -> Result<Vec<Value>, anyhow::Error> {
     let mut db_url = db_url_override;
 
@@ -25,6 +26,9 @@ pub async fn execute_query(
                 >(p, conn_name)
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("Connection '{}' not found", conn_name))?;
+                if let Some(user) = acting_user {
+                    crate::authz::ensure_user_may_use(p, user, &conn).await?;
+                }
 
                 if let Some(url) = conn.config.get("url").and_then(|u| u.as_str()) {
                     db_url = Some(url.to_string());
@@ -350,7 +354,9 @@ mod tests {
     async fn test_execute_query_mock() {
         let mut params = HashMap::new();
         params.insert("items".to_string(), "a,b,c".to_string());
-        let res = execute_query("mock", &params, None, None).await.unwrap();
+        let res = execute_query("mock", &params, None, None, None)
+            .await
+            .unwrap();
         assert_eq!(res.len(), 3);
         assert_eq!(res[0], serde_json::json!("a"));
     }
@@ -371,7 +377,9 @@ mod tests {
             format!("{}/api/options", mock_server.uri()),
         );
 
-        let res = execute_query("api", &params, None, None).await.unwrap();
+        let res = execute_query("api", &params, None, None, None)
+            .await
+            .unwrap();
         assert_eq!(res.len(), 2);
         assert_eq!(res[0], serde_json::json!("x"));
     }
@@ -403,7 +411,9 @@ mod tests {
             ".ResourceDescriptions[].Identifier".to_string(),
         );
 
-        let res = execute_query("api", &params, None, None).await.unwrap();
+        let res = execute_query("api", &params, None, None, None)
+            .await
+            .unwrap();
         assert_eq!(res.len(), 2);
         assert_eq!(res[0], serde_json::json!("Resource1"));
         assert_eq!(res[1], serde_json::json!("Resource2"));
@@ -436,7 +446,9 @@ mod tests {
             "my-secret-token".to_string(),
         );
 
-        let res = execute_query("api", &params, None, None).await.unwrap();
+        let res = execute_query("api", &params, None, None, None)
+            .await
+            .unwrap();
         assert_eq!(res.len(), 2);
         assert_eq!(res[0], serde_json::json!("result1"));
         assert_eq!(res[1], serde_json::json!("result2"));
@@ -444,7 +456,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_query_unsupported() {
-        let res = execute_query("unknown", &HashMap::new(), None, None).await;
+        let res = execute_query("unknown", &HashMap::new(), None, None, None).await;
         let err = res.unwrap_err();
         assert!(err.to_string().contains("Unsupported query protocol"));
     }
@@ -454,7 +466,9 @@ mod tests {
         let mut params = HashMap::new();
         params.insert("query".to_string(), "SELECT 1".to_string());
 
-        let err = execute_query("sql", &params, None, None).await.unwrap_err();
+        let err = execute_query("sql", &params, None, None, None)
+            .await
+            .unwrap_err();
         assert!(err.to_string().contains("require a 'connection'"));
     }
 
@@ -480,7 +494,9 @@ mod tests {
             "http://169.254.169.254/latest/meta-data/".to_string(),
         );
 
-        let err = execute_query("api", &params, None, None).await.unwrap_err();
+        let err = execute_query("api", &params, None, None, None)
+            .await
+            .unwrap_err();
         assert!(err.to_string().contains("restricted address"));
     }
 }

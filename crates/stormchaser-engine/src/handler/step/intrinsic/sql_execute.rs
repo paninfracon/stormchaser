@@ -102,6 +102,7 @@ async fn handle_sql_execute(
     >(&pool, &spec.connection)
     .await?
     .context(format!("Connection {} not found", spec.connection))?;
+    crate::authz::ensure_run_may_use(&pool, run_id, &conn).await?;
 
     let url = conn
         .config

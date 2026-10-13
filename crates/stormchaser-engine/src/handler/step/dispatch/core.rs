@@ -95,6 +95,7 @@ pub async fn dispatch_step_instance(
         >(&pool, reg_conn_name)
         .await?
         .with_context(|| format!("Registry connection '{}' not found", reg_conn_name))?;
+        crate::authz::ensure_run_may_use(&pool, run_id, &conn).await?;
 
         if conn.connection_type != stormchaser_model::connections::ConnectionType::Oci
             && conn.connection_type != stormchaser_model::connections::ConnectionType::Jfrog

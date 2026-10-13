@@ -10,6 +10,7 @@ use stormchaser_model::{Connection, RunId, StepInstanceId};
 /// Fetches the URL from a configured HttpApi connection by name.
 pub async fn fetch_http_api_url_from_connection(
     pool: &PgPool,
+    run_id: RunId,
     connection_name: &str,
 ) -> Result<String> {
     let mut conn = pool.acquire().await?;
@@ -19,6 +20,8 @@ pub async fn fetch_http_api_url_from_connection(
     >(&mut *conn, connection_name)
     .await?
     {
+        drop(conn);
+        crate::authz::ensure_run_may_use(pool, run_id, &connection).await?;
         if connection.connection_type == stormchaser_model::ConnectionType::HttpApi {
             if let Some(url) = connection
                 .config

@@ -93,6 +93,7 @@ pub async fn handle_workflow_direct(
             &resolved_params_map,
             Some(&pool),
             None,
+            Some(&initiating_user),
         )
         .await
         {

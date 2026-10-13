@@ -328,6 +328,7 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
     let git_cache = Arc::new(GitCache::new(config.git_cache_dir.clone()));
 
     let opa_client = setup_opa(&config, &tls_reloader)?;
+    crate::authz::install(opa_client.clone());
     let log_backend = setup_log_backend(&config);
 
     // Initialize Secret Backend

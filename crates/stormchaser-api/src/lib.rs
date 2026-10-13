@@ -3,6 +3,8 @@
 
 /// Authentication and authorization module
 pub mod auth;
+/// Per-object authorization
+pub mod authz;
 /// Configuration module
 pub mod config;
 /// Database access module
@@ -242,6 +244,11 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/connections/test", post(test_connection))
         .route("/schema/parse-git", post(routes::schema::parse_git))
+        // Runs after the two below: who may act on the object the path names.
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            authz::authorize_object,
+        ))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             opa_middleware,

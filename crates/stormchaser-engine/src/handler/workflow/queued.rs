@@ -241,6 +241,7 @@ pub async fn handle_workflow_queued(
             &resolved_params_map,
             Some(&pool),
             None,
+            Some(&machine.run.initiating_user),
         )
         .await
         {

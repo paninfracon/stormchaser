@@ -28,6 +28,40 @@ into the policy evaluation under the `input` document:
 
 The `token` is the raw JWT access token provided by the client (if available).
 
+The same entrypoint (`stormchaser/allow`) is also asked three other kinds of
+question, and a policy has to answer all four. They are told apart by the fields
+present in `input`:
+
+| Question | Fields | Asked by |
+| :--- | :--- | :--- |
+| Request | `method`, `path`, `token` | API, for every protected request |
+| Resource | `action`, `resource`, `subject`, `token` | API, when a request names an object; engine and query service, before using a connection |
+| Engine | `run_id`, `initiating_user`, `workflow_ast`, `inputs` | Engine, before a run starts |
+| Approval | `run_id`, `initiating_user`, `step_ast`, `inputs`, `run_outputs`, `approver`, `token` | API, when a step is approved or rejected |
+
+A resource question looks like this:
+
+```json
+{
+  "action": "delete",
+  "resource": { "type": "webhook", "id": "6f1c...", "owner": "alice@example.com" },
+  "subject": { "sub": "auth0|123", "email": "bob@example.com" },
+  "token": "eyJhbGc..."
+}
+```
+
+`action` is `read`, `update`, `delete` or `use`. `resource.type` is `run`,
+`connection`, `webhook`, `event_rule` or `cron_workflow`. `resource.owner` is
+`null` for objects created before ownership was recorded. `subject` is the
+identity the API verified; when the engine asks on a run's behalf, both of its
+fields hold the run's user and `token` is `null`.
+
+The policy Stormchaser ships, `deploy/opa/policy.rego`, answers all four and is the
+best starting point for your own. Its tests are in `deploy/opa/policy_test.rego`
+(`opa test deploy/opa`). A policy written before the resource question existed
+that denies by default will refuse every per-object request until it gains a rule
+for it.
+
 > 💡 **Tip:** The fastest way to learn and debug Rego policies is the
 > [Rego Playground](https://play.openpolicyagent.org/). You can paste your policy
 > there, supply a mock `input` JSON, and instantly see what evaluates to true

@@ -7,5 +7,11 @@ metadata:
     {{- include "stormchaser-orchestration.labels" . | nindent 4 }}
 data:
   policy.rego: |
-{{ .Values.api.opa.sidecar.policy | indent 4 }}
+{{ .Values.api.opa.sidecar.policy | default (.Files.Get "files/opa/policy.rego") | indent 4 }}
+  # Restricts OPA's own API to policy decisions and health checks.
+  authz.rego: |
+{{ .Files.Get "files/opa/authz.rego" | indent 4 }}
+  settings.json: |
+    {{- $settings := .Values.api.opa.sidecar.settings }}
+    {{ dict "stormchaser_settings" (dict "admins" $settings.admins "admin_groups" $settings.adminGroups "separation_of_duties" $settings.separationOfDuties) | toJson }}
 {{- end }}

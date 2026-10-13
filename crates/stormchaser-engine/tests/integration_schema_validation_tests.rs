@@ -99,7 +99,7 @@ async fn test_execute_query_sql_without_connection_is_rejected() {
     params.insert("query".to_string(), "SELECT 'test_val'".to_string());
 
     // A query that names no connection must never run on the system pool.
-    let err = stormchaser_engine::query::execute_query("sql", &params, Some(&pool), None)
+    let err = stormchaser_engine::query::execute_query("sql", &params, Some(&pool), None, None)
         .await
         .unwrap_err();
     assert!(err.to_string().contains("require a 'connection'"));
@@ -202,7 +202,7 @@ async fn test_execute_query_connection_resolution() {
     params.insert("connection".to_string(), "test-db-conn".to_string());
     params.insert("query".to_string(), "SELECT 'test_conn_val'".to_string());
 
-    let res = stormchaser_engine::query::execute_query("sql", &params, Some(&pool), None)
+    let res = stormchaser_engine::query::execute_query("sql", &params, Some(&pool), None, None)
         .await
         .unwrap();
     assert_eq!(res.len(), 1);
@@ -214,7 +214,7 @@ async fn test_execute_query_connection_resolution() {
         "UPDATE connections SET description = 'changed' WHERE name = 'test-db-conn' RETURNING name",
     ] {
         params.insert("query".to_string(), write.to_string());
-        let err = stormchaser_engine::query::execute_query("sql", &params, Some(&pool), None)
+        let err = stormchaser_engine::query::execute_query("sql", &params, Some(&pool), None, None)
             .await
             .unwrap_err();
         assert!(
@@ -229,7 +229,7 @@ async fn test_execute_query_connection_resolution() {
         "query".to_string(),
         "SET TRANSACTION READ WRITE".to_string(),
     );
-    let _ = stormchaser_engine::query::execute_query("sql", &params, Some(&pool), None).await;
+    let _ = stormchaser_engine::query::execute_query("sql", &params, Some(&pool), None, None).await;
     let description: Option<String> =
         sqlx::query_scalar("SELECT description FROM connections WHERE id = $1")
             .bind(conn_id)
@@ -243,7 +243,7 @@ async fn test_execute_query_connection_resolution() {
         "query".to_string(),
         "SELECT g::text FROM generate_series(1, 10001) g".to_string(),
     );
-    let err = stormchaser_engine::query::execute_query("sql", &params, Some(&pool), None)
+    let err = stormchaser_engine::query::execute_query("sql", &params, Some(&pool), None, None)
         .await
         .unwrap_err();
     assert!(err.to_string().contains("more than 10000 rows"), "{err}");

@@ -1,4 +1,5 @@
 use super::CreateEventRuleRequest;
+use crate::authz::{self, Caller, Kind};
 use crate::db;
 use crate::{AppState, AuthClaims};
 use axum::{
@@ -22,7 +23,7 @@ use stormchaser_model::RuleId;
     tag = "event_rule"
 )]
 pub async fn create_event_rule(
-    AuthClaims(_claims): AuthClaims,
+    caller: Caller,
     State(state): State<AppState>,
     Json(payload): Json<CreateEventRuleRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
@@ -39,6 +40,7 @@ pub async fn create_event_rule(
             .map_err(|_| StatusCode::NOT_FOUND)?
             .ok_or(StatusCode::NOT_FOUND)?
     };
+    authz::authorize_connection_use(&state, &caller, conn.id.into_inner()).await?;
 
     let repo_url = conn
         .config
@@ -75,6 +77,7 @@ pub async fn create_event_rule(
         tracing::error!("Failed to create rule: {:?}", e);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
+    authz::record_owner(&state.pool, Kind::EventRule, id.into_inner(), &caller).await?;
 
     Ok((StatusCode::CREATED, Json(serde_json::json!({ "id": id }))))
 }
@@ -92,12 +95,16 @@ pub async fn create_event_rule(
     tag = "event_rule"
 )]
 pub async fn list_event_rules(
-    AuthClaims(_claims): AuthClaims,
+    caller: Caller,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let rules = db::list_event_rules(&state.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let rules = authz::filter_readable(&state, &caller, Kind::EventRule, rules, |r| {
+        r.id.into_inner()
+    })
+    .await?;
 
     Ok(Json(rules))
 }
