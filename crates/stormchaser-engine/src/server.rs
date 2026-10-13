@@ -117,7 +117,11 @@ pub async fn setup_nats_consumers(
     }
 
     let (query_tx, query_rx) = tokio::sync::mpsc::channel(1000);
-    for subject in ["stormchaser.v1.*.step.query", "stormchaser.v1.step.query"] {
+    for subject in [
+        "stormchaser.v1.*.step.query",
+        "stormchaser.v1.step.query",
+        handler::step::events::artifact_auth::ARTIFACT_AUTH_SUBJECT,
+    ] {
         let mut query_subscriber = nats_client
             .queue_subscribe(subject.to_string(), "engine-query-group".into())
             .await?;
@@ -192,8 +196,16 @@ fn process_query_message(
         return;
     };
     let reply = message.reply.clone().map(|r| r.to_string());
+    let wants_artifact_auth =
+        message.subject.as_str() == handler::step::events::artifact_auth::ARTIFACT_AUTH_SUBJECT;
     tokio::spawn(async move {
-        if let Err(e) = handler::handle_step_query(payload, pool, nats_client, reply).await {
+        if wants_artifact_auth {
+            if let Err(e) =
+                handler::handle_artifact_auth_request(payload, pool, nats_client, reply).await
+            {
+                tracing::error!("Failed to handle artifact auth request: {:?}", e);
+            }
+        } else if let Err(e) = handler::handle_step_query(payload, pool, nats_client, reply).await {
             tracing::error!("Failed to handle step query: {:?}", e);
         }
     });

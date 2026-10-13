@@ -177,6 +177,7 @@ publish allow:
   stormchaser.v1.step.unpacking_sfs
   stormchaser.v1.step.packing_sfs
   stormchaser.v1.step.query
+  stormchaser.v1.step.artifact_auth
   $JS.API.STREAM.INFO.stormchaser
   $JS.API.STREAM.CREATE.stormchaser
   $JS.API.CONSUMER.INFO.stormchaser.*

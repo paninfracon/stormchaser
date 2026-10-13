@@ -1,3 +1,4 @@
+pub mod artifact_auth;
 pub mod completed;
 pub mod failed;
 pub mod helpers;
@@ -7,6 +8,7 @@ pub mod query;
 pub mod running;
 pub mod unpacking;
 
+pub use artifact_auth::handle_artifact_auth_request;
 pub use completed::handle_step_completed;
 pub use failed::handle_step_failed;
 pub use initializing::handle_step_initializing;

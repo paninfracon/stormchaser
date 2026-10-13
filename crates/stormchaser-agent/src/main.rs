@@ -65,6 +65,10 @@ pub enum Commands {
         #[arg(short, long, env = "STORMCHASER_REPORT_URLS")]
         report_urls: Option<String>,
 
+        /// Docker client configuration file holding the credentials for OCI artifact pushes
+        #[arg(long, env = "STORMCHASER_REGISTRY_CONFIG")]
+        registry_config: Option<String>,
+
         /// The user command to run
         #[arg(last = true)]
         command: Vec<String>,
@@ -127,6 +131,7 @@ pub async fn run_agent(cli: Cli) -> Result<()> {
             artifact_urls,
             test_reports,
             report_urls,
+            registry_config,
             command,
         } => {
             let urls: Value = serde_json::from_str(&parking_urls)?;
@@ -168,7 +173,8 @@ pub async fn run_agent(cli: Cli) -> Result<()> {
 
                 if let Some(artifacts_json) = artifact_urls {
                     let artifacts: Value = serde_json::from_str(&artifacts_json)?;
-                    let artifact_meta = park_artifacts(artifacts).await?;
+                    let artifact_meta =
+                        park_artifacts(artifacts, registry_config.as_deref()).await?;
                     if !artifact_meta.is_empty() {
                         let meta_json = serde_json::to_string(&artifact_meta)?;
                         info!("Parked artifacts: {}", meta_json);

@@ -72,6 +72,7 @@ async fn upload_to_oci(
     path: &str,
     file_size: u64,
     hash: String,
+    registry_config: Option<&str>,
     metadata_map: &mut HashMap<String, Value>,
 ) {
     if let Some(remote_path) = artifact_val.get("remote_path").and_then(|u| u.as_str()) {
@@ -85,8 +86,20 @@ async fn upload_to_oci(
             cmd.arg("--username").arg(user).arg("--password").arg(pass);
         }
 
+        // Credentials the runner placed for this push, outside the step's reach
+        if let Some(config) = registry_config.filter(|c| Path::new(c).is_file()) {
+            cmd.arg("--registry-config").arg(config);
+        }
+        if artifact_val.get("plain_http").and_then(|p| p.as_bool()) == Some(true) {
+            cmd.arg("--plain-http");
+        }
+
+        // oras refuses absolute paths and names the layer after the path it is given, so
+        // push the file by name from its own directory.
+        let (dir, file_name) = split_for_push(path);
+        cmd.current_dir(dir);
         cmd.arg(remote_path);
-        cmd.arg(path);
+        cmd.arg(file_name);
 
         let output = match cmd.output() {
             Ok(o) => o,
@@ -118,8 +131,24 @@ async fn upload_to_oci(
     }
 }
 
+/// Splits an artifact path into the directory to push from and the name to push.
+fn split_for_push(path: &str) -> (&Path, &std::ffi::OsStr) {
+    let path = Path::new(path);
+    match (path.parent(), path.file_name()) {
+        (Some(dir), Some(name)) if !dir.as_os_str().is_empty() => (dir, name),
+        (_, Some(name)) => (Path::new("."), name),
+        _ => (Path::new("."), path.as_os_str()),
+    }
+}
+
 /// Uploads artifacts to configured backends and returns metadata maps.
-pub async fn park_artifacts(artifacts: Value) -> Result<HashMap<String, Value>> {
+///
+/// `registry_config` is a Docker client configuration file with the credentials for OCI
+/// pushes, if the runner provided one.
+pub async fn park_artifacts(
+    artifacts: Value,
+    registry_config: Option<&str>,
+) -> Result<HashMap<String, Value>> {
     let client = crate::http_client()?;
     let mut metadata_map = HashMap::new();
 
@@ -170,7 +199,16 @@ pub async fn park_artifacts(artifacts: Value) -> Result<HashMap<String, Value>> 
                 )
                 .await;
             } else if connection_type == "oci" {
-                upload_to_oci(name, artifact_val, path, file_size, hash, &mut metadata_map).await;
+                upload_to_oci(
+                    name,
+                    artifact_val,
+                    path,
+                    file_size,
+                    hash,
+                    registry_config,
+                    &mut metadata_map,
+                )
+                .await;
             } else {
                 warn!("Unsupported artifact connection_type '{}'", connection_type);
             }
@@ -183,6 +221,23 @@ pub async fn park_artifacts(artifacts: Value) -> Result<HashMap<String, Value>> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn artifact_paths_are_pushed_by_name_from_their_directory() {
+        let (dir, name) = split_for_push("/workspace/bin/app");
+        assert_eq!(
+            (dir, name.to_str().unwrap()),
+            (Path::new("/workspace/bin"), "app")
+        );
+        // A trailing slash names a directory artifact
+        let (dir, name) = split_for_push("/workspace/dist/");
+        assert_eq!(
+            (dir, name.to_str().unwrap()),
+            (Path::new("/workspace"), "dist")
+        );
+        let (dir, name) = split_for_push("app.bin");
+        assert_eq!((dir, name.to_str().unwrap()), (Path::new("."), "app.bin"));
+    }
     use std::fs;
     use tempfile::tempdir;
     use wiremock::matchers::{method, path};
@@ -209,7 +264,7 @@ mod tests {
             }
         });
 
-        let metadata = park_artifacts(artifacts).await.unwrap();
+        let metadata = park_artifacts(artifacts, None).await.unwrap();
         assert!(metadata.contains_key("my-artifact"));
         assert_eq!(metadata["my-artifact"]["size"], 14);
     }

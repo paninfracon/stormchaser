@@ -264,6 +264,51 @@ pub fn build_cloudevent_and_headers(
     Ok((payload, headers))
 }
 
+/// The subject runners ask the engine on for the registry credentials of a step's
+/// artifact pushes.
+pub const ARTIFACT_AUTH_SUBJECT: &str = "stormchaser.v1.step.artifact_auth";
+
+/// Where a runner puts the registry credentials inside its parking helper, and the agent
+/// reads them. Step volumes can never be mounted over this path.
+pub const HELPER_REGISTRY_CONFIG_PATH: &str = "/stormchaser/auth/config.json";
+
+/// Asks the engine for the Docker client configuration a step's helper needs to push the
+/// step's OCI artifacts.
+///
+/// The engine keeps registry usernames and passwords to itself and answers with a token
+/// scoped to the run's own repositories, minted now so it is still valid for the push.
+pub async fn request_artifact_auth(
+    client: &async_nats::Client,
+    run_id: uuid::Uuid,
+    step_id: uuid::Uuid,
+) -> Result<Value> {
+    let event = EventBuilderV10::new()
+        .id(uuid::Uuid::new_v4().to_string())
+        .ty(ARTIFACT_AUTH_SUBJECT)
+        .source(EventSource::System.as_str())
+        .time(chrono::Utc::now())
+        .data(
+            crate::APPLICATION_JSON,
+            serde_json::json!({ "run_id": run_id, "step_id": step_id }),
+        )
+        .build()
+        .map_err(|e| anyhow::anyhow!("Failed to build CloudEvent: {}", e))?;
+
+    let reply = client
+        .request(ARTIFACT_AUTH_SUBJECT, serde_json::to_vec(&event)?.into())
+        .await
+        .map_err(|e| anyhow::anyhow!("no answer from the engine: {}", e))?;
+    let answer: Value = serde_json::from_slice(&reply.payload)?;
+
+    if answer["ok"].as_bool() != Some(true) {
+        anyhow::bail!(
+            "the engine refused: {}",
+            answer["error"].as_str().unwrap_or("no reason given")
+        );
+    }
+    Ok(answer["docker_config"].clone())
+}
+
 /// Name of the JetStream stream every Stormchaser component shares.
 pub const STREAM_NAME: &str = "stormchaser";
 

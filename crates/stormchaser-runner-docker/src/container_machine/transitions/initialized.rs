@@ -561,6 +561,8 @@ impl DockerContainerMachine<state::Initialized> {
             "/proc",
             "/sys",
             "/dev",
+            // Where the runner places registry credentials for the parking helper
+            "/stormchaser",
         ];
 
         let path = Path::new(mount_path);
@@ -870,6 +872,8 @@ mod tests {
             "/lib/x86_64-linux-gnu",
             "/etc",
             "/dev/shm",
+            "/stormchaser",
+            "/stormchaser/auth",
             "/workspace/../bin",
             "relative/path",
             "",

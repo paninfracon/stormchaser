@@ -12,6 +12,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::time::Duration;
 use stormchaser_model::dsl::CommonContainerSpec;
+use stormchaser_model::nats::{request_artifact_auth, HELPER_REGISTRY_CONFIG_PATH};
 use stormchaser_model::step::StepStatus;
 use stormchaser_model::APPLICATION_JSON;
 use tokio::time::sleep;
@@ -192,9 +193,17 @@ impl DockerContainerMachine<state::Running> {
             serde_json::to_string(&mount_paths)?,
         ];
 
+        // Registry credentials are fetched now, not at dispatch, so that a short-lived
+        // token is still good when the helper pushes.
+        let registry_config = self.fetch_artifact_registry_config(&artifact_urls).await;
+
         if !artifact_urls.is_empty() {
             agent_args.push("--artifact-urls".to_string());
             agent_args.push(serde_json::to_string(&artifact_urls)?);
+        }
+        if registry_config.is_some() {
+            agent_args.push("--registry-config".to_string());
+            agent_args.push(HELPER_REGISTRY_CONFIG_PATH.to_string());
         }
 
         if let Some(reports) = &self.metadata.test_report_urls {
@@ -263,6 +272,19 @@ impl DockerContainerMachine<state::Running> {
             )
             .await?;
 
+        // The credentials go into the helper's filesystem before it starts. They are not
+        // in its arguments or environment, so `docker inspect` does not show them, and no
+        // step volume can be mounted over the path.
+        if let Some(config) = &registry_config {
+            if let Err(e) = place_registry_config(&self.docker, &park_container_name, config).await
+            {
+                error!(
+                    "Could not give the parking helper its registry credentials; OCI artifacts will not be pushed: {:?}",
+                    e
+                );
+            }
+        }
+
         self.docker
             .start_container(&park_container_name, None::<StartContainerOptions>)
             .await?;
@@ -295,6 +317,33 @@ impl DockerContainerMachine<state::Running> {
 
         Ok((artifacts_out, hashes_out, reports_out))
     }
+
+    /// Asks the engine for the registry credentials of this step's OCI artifact pushes,
+    /// if it has any that need them.
+    async fn fetch_artifact_registry_config(
+        &self,
+        artifact_urls: &HashMap<String, Value>,
+    ) -> Option<Value> {
+        let needs_auth = artifact_urls
+            .values()
+            .any(|artifact| artifact.get("needs_auth").and_then(Value::as_bool) == Some(true));
+        if !needs_auth {
+            return None;
+        }
+        let nats = self.nats.as_ref()?;
+
+        match request_artifact_auth(nats, self.metadata.run_id, self.metadata.step_id).await {
+            Ok(config) => Some(config),
+            Err(e) => {
+                error!(
+                    "No registry credentials for step {}; its OCI artifacts will not be pushed: {:#}",
+                    self.metadata.step_id, e
+                );
+                None
+            }
+        }
+    }
+
     async fn parse_log_json<T: serde::de::DeserializeOwned>(
         &self,
         container_name: &str,
@@ -413,12 +462,149 @@ impl DockerContainerMachine<state::Running> {
     }
 }
 
+/// Writes a Docker client configuration into a created, not yet started, container.
+async fn place_registry_config(
+    docker: &bollard::Docker,
+    container_name: &str,
+    config: &Value,
+) -> Result<()> {
+    let archive = registry_config_archive(config)?;
+    docker
+        .upload_to_container(
+            container_name,
+            Some(
+                bollard::query_parameters::UploadToContainerOptionsBuilder::new()
+                    .path("/")
+                    .build(),
+            ),
+            bollard::body_full(archive.into()),
+        )
+        .await?;
+    Ok(())
+}
+
+/// A tar archive that, unpacked at `/`, leaves `config` at [`HELPER_REGISTRY_CONFIG_PATH`],
+/// readable by root only.
+fn registry_config_archive(config: &Value) -> Result<Vec<u8>> {
+    let content = serde_json::to_vec(config)?;
+    let file_path = HELPER_REGISTRY_CONFIG_PATH.trim_start_matches('/');
+    let mut builder = tar::Builder::new(Vec::new());
+
+    // Parent directories first, so the path exists whatever the helper image contains
+    let mut dir = String::new();
+    let mut parts: Vec<&str> = file_path.split('/').collect();
+    parts.pop();
+    for part in parts {
+        dir.push_str(part);
+        dir.push('/');
+        let mut header = tar::Header::new_gnu();
+        header.set_entry_type(tar::EntryType::Directory);
+        header.set_mode(0o700);
+        header.set_size(0);
+        builder.append_data(&mut header, &dir, std::io::empty())?;
+    }
+
+    let mut header = tar::Header::new_gnu();
+    header.set_mode(0o600);
+    header.set_size(content.len() as u64);
+    builder.append_data(&mut header, file_path, content.as_slice())?;
+    Ok(builder.into_inner()?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::container_machine::ContainerMetadata;
+
+    #[test]
+    fn registry_config_archive_unpacks_to_the_helper_path() {
+        let config = serde_json::json!({"auths": {"r.example.com": {"registrytoken": "t"}}});
+        let bytes = registry_config_archive(&config).unwrap();
+
+        let mut archive = tar::Archive::new(bytes.as_slice());
+        let mut seen = Vec::new();
+        for entry in archive.entries().unwrap() {
+            let mut entry = entry.unwrap();
+            let path = entry.path().unwrap().to_string_lossy().into_owned();
+            if entry.header().entry_type().is_file() {
+                assert_eq!(entry.header().mode().unwrap(), 0o600);
+                let mut content = String::new();
+                std::io::Read::read_to_string(&mut entry, &mut content).unwrap();
+                assert_eq!(serde_json::from_str::<Value>(&content).unwrap(), config);
+            }
+            seen.push(path);
+        }
+        assert_eq!(
+            seen,
+            vec![
+                "stormchaser/",
+                "stormchaser/auth/",
+                "stormchaser/auth/config.json"
+            ]
+        );
+    }
     use bollard::Docker;
     use stormchaser_model::dsl::Step;
+
+    #[tokio::test]
+    async fn registry_config_reaches_the_helper_without_showing_in_its_definition() {
+        let docker = Docker::connect_with_local_defaults().unwrap();
+        let name = format!("regcfg-test-{}", Uuid::new_v4());
+        let config =
+            serde_json::json!({"auths": {"r.example.com": {"registrytoken": "s3cr3t-token"}}});
+
+        // The same image the runner's helpers use; it prints the file and its mode
+        docker
+            .create_container(
+                Some(CreateContainerOptions {
+                    name: Some(name.clone()),
+                    ..Default::default()
+                }),
+                ContainerCreateBody {
+                    image: Some("stormchaser-agent:v1".to_string()),
+                    entrypoint: Some(vec!["/bin/sh".to_string(), "-c".to_string()]),
+                    cmd: Some(vec![format!(
+                        "stat -c %a {p} && cat {p}",
+                        p = HELPER_REGISTRY_CONFIG_PATH
+                    )]),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        place_registry_config(&docker, &name, &config)
+            .await
+            .unwrap();
+
+        let inspect = docker.inspect_container(&name, None).await.unwrap();
+        assert!(!format!("{inspect:?}").contains("s3cr3t-token"));
+
+        docker
+            .start_container(&name, None::<StartContainerOptions>)
+            .await
+            .unwrap();
+        let _ = docker
+            .wait_container(&name, None::<WaitContainerOptions>)
+            .next()
+            .await;
+        let mut output = String::new();
+        let mut logs = docker.logs(
+            &name,
+            Some(LogsOptions {
+                stdout: true,
+                stderr: true,
+                ..Default::default()
+            }),
+        );
+        while let Some(Ok(chunk)) = logs.next().await {
+            output.push_str(&chunk.to_string());
+        }
+        let _ = docker.remove_container(&name, None).await;
+
+        let (mode, content) = output.split_once('\n').expect(&output);
+        assert_eq!(mode.trim(), "600");
+        assert_eq!(serde_json::from_str::<Value>(content).unwrap(), config);
+    }
 
     fn create_test_metadata() -> ContainerMetadata {
         let spec = serde_json::json!({

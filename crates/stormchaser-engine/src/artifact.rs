@@ -35,30 +35,23 @@ pub async fn generate_parking_instructions(
             }))
         }
         ConnectionType::Oci => {
-            let registry = backend.config["registry"]
-                .as_str()
-                .context("Missing registry in OCI backend config")?;
-            let username = backend.config["username"].as_str();
-            let password = backend.config["password"].as_str();
+            let location = crate::registry_token::RegistryLocation::of(backend)?;
+            let repository = location.artifact_repository(run_id, storage_name);
+            let remote_path = format!("{}/{}:{}", location.host, repository, artifact.name);
+            let has_credentials = backend.config["username"].as_str().is_some()
+                && backend.config["password"].as_str().is_some();
 
-            let remote_path = format!("{}/{}/{}:{}", registry, run_id, storage_name, artifact.name);
-
-            let mut payload = serde_json::json!({
+            // The registry's username and password stay in the engine. A runner asks for
+            // a short-lived token for this run's repository when the step is ready to push.
+            Ok(serde_json::json!({
                 "connection_type": "oci",
-                "registry": registry,
+                "registry": location.host,
                 "remote_path": remote_path,
                 "path": artifact.path,
                 "retention": artifact.retention,
-            });
-
-            if let (Some(u), Some(p)) = (username, password) {
-                if let Some(map) = payload.as_object_mut() {
-                    map.insert("username".to_string(), Value::String(u.to_string()));
-                    map.insert("password".to_string(), Value::String(p.to_string()));
-                }
-            }
-
-            Ok(payload)
+                "plain_http": location.plain_http,
+                "needs_auth": has_credentials,
+            }))
         }
         _ => anyhow::bail!(
             "Unsupported artifact backend type: {:?}",
@@ -109,8 +102,10 @@ mod tests {
 
         assert_eq!(instructions["connection_type"], "oci");
         assert_eq!(instructions["registry"], "registry.paninfracon.net");
-        assert_eq!(instructions["username"], "user");
-        assert_eq!(instructions["password"], "pass");
+        // The stored credentials stay in the engine
+        assert_eq!(instructions["needs_auth"], true);
+        assert!(instructions.get("username").is_none());
+        assert!(!instructions.to_string().contains("pass"));
         assert!(instructions["remote_path"]
             .as_str()
             .unwrap()
