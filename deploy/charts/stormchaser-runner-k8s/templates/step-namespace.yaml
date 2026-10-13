@@ -1,0 +1,8 @@
+{{- if .Values.rbac.createTargetNamespace -}}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ include "stormchaser-runner-k8s.stepNamespace" . }}
+  labels:
+    {{- include "stormchaser-runner-k8s.labels" . | nindent 4 }}
+{{- end }}

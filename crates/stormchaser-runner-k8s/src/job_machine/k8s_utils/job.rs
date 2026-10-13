@@ -2,7 +2,6 @@ use crate::job_machine::{crypto, JobMetadata};
 use anyhow::Result;
 use k8s_openapi::api::batch::v1::{Job, JobSpec};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
-use std::collections::BTreeMap;
 
 use super::*;
 
@@ -13,6 +12,7 @@ pub fn do_build_job_spec(
     sfs_pvc_name: Option<String>,
 ) -> Result<Job> {
     let step_spec = parse_step_spec(metadata)?;
+    StepPolicy::from_env().check(&step_spec)?;
 
     let (volumes, volume_mounts) = build_k8s_volumes(
         agent_image.is_some(),
@@ -35,8 +35,10 @@ pub fn do_build_job_spec(
     let pod_template =
         build_k8s_pod_spec(container, init_containers, volumes, metadata, &step_spec);
 
-    // Job Labels
-    let mut labels = BTreeMap::from([
+    // Job Labels. Author-supplied entries go in first so they can never replace the
+    // ones Stormchaser relies on to find, attribute and reap its jobs.
+    let mut labels = step_spec.extra_labels.unwrap_or_default();
+    labels.extend([
         ("managed-by".to_string(), "stormchaser".to_string()),
         (
             "stormchaser-run-id".to_string(),
@@ -51,9 +53,6 @@ pub fn do_build_job_spec(
             metadata.fencing_token.to_string(),
         ),
     ]);
-    if let Some(el) = step_spec.extra_labels {
-        labels.extend(el);
-    }
 
     // Job Annotations
     let step_dsl_json = serde_json::to_string(&metadata.step_dsl).unwrap_or_default();
@@ -63,22 +62,22 @@ pub fn do_build_job_spec(
         step_dsl_json
     };
 
-    let mut annotations = BTreeMap::from([
+    let mut annotations = step_spec.extra_annotations.unwrap_or_default();
+    annotations.extend([
         (
             "stormchaser.v1.io/received-at".to_string(),
             metadata.received_at.to_rfc3339(),
         ),
         ("stormchaser.v1.io/step-dsl".to_string(), step_dsl_val),
     ]);
-    if let Some(ea) = step_spec.extra_annotations {
-        annotations.extend(ea);
-    }
 
     if metadata.encryption_key.is_some() {
         annotations.insert(
             "stormchaser.v1.io/state-encrypted".to_string(),
             "true".to_string(),
         );
+    } else {
+        annotations.remove("stormchaser.v1.io/state-encrypted");
     }
 
     Ok(Job {

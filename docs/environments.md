@@ -211,8 +211,11 @@ helm install stormchaser-runner ./deploy/charts/stormchaser-runner-k8s \
   --set rbac.create=true
 ```
 
-*Note: The runner chart creates a ServiceAccount and RoleBinding to allow it to
-spawn and monitor Jobs and Pods in the target namespace.*
+*Note: Workflow steps never run in the runner's own namespace. The chart creates
+a separate step namespace (`rbac.targetNamespace`, by default
+`<release namespace>-steps`, here `stormchaser-steps`) and a Role and
+RoleBinding there so the runner can spawn and monitor Jobs and Pods. The runner
+refuses to start if the step namespace is unset or equals its own.*
 
 ### Step 4: Verify Deployment
 

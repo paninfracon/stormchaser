@@ -10,6 +10,8 @@ To solve this, the Kubernetes runner can be configured to use a single, shared `
 
 The PVC optimization is configured globally at the **runner level**, not per-workflow.
 
+Workflow steps run in their own namespace (`rbac.targetNamespace`, by default `<release namespace>-steps`), so the PVC must be created in that namespace, not the runner's.
+
 To enable this feature, provide the `STORMCHASER_SFS_PVC_NAME` environment variable to the Kubernetes Runner deployment, pointing to an existing `ReadWriteMany` PVC in the same namespace.
 
 ```yaml

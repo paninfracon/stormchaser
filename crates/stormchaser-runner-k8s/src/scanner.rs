@@ -348,12 +348,13 @@ pub async fn scan_for_orphans(
     nats_client: async_nats::Client,
     runner_id: String,
     encryption_key: Option<String>,
+    step_namespace: &str,
 ) -> Result<()> {
     info!("Scanning all clusters for orphaned jobs...");
 
     for cluster_name in cluster_pool.cluster_names() {
         let (client, cluster_version) = cluster_pool.get_client(&cluster_name).await?;
-        let jobs: Api<Job> = Api::all(client.clone());
+        let jobs: Api<Job> = Api::namespaced(client.clone(), step_namespace);
 
         let lp = ListParams::default().labels("managed-by=stormchaser");
         let job_list = jobs.list(&lp).await?;

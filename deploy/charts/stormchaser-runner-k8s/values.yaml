@@ -69,6 +69,11 @@ config:
   rustLog: "stormchaser_runner_k8s=info"
   # Permit steps that set `privileged = true`. Such a step is root on the node.
   allowPrivileged: false
+  # Cluster objects a RunK8sJob step may attach to its pod. Empty lists permit none.
+  # An entry ending in `*` matches any name with that prefix.
+  allowedServiceAccounts: []
+  allowedSecretMounts: []
+  allowedConfigMapMounts: []
 
 nodeSelector: {}
 
@@ -78,9 +83,13 @@ affinity: {}
 
 rbac:
   create: true
-  # If you want to restrict the runner to a specific namespace for Jobs
-  # By default it operates in its own namespace
+  # Namespace workflow step Jobs run in. Defaults to "<release namespace>-steps".
+  # It must differ from the release namespace: steps run workflow authors' images and
+  # may not share a namespace with the runner or the control plane. The runner
+  # refuses to start otherwise.
   targetNamespace: ""
+  # Create that namespace as part of this release. Set to false if it already exists.
+  createTargetNamespace: true
 
 global:
   agent:

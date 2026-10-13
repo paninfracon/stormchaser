@@ -60,3 +60,15 @@ Create the name of the service account to use
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Namespace workflow step Jobs run in. It is always separate from the release namespace,
+which holds the runner (and, in the umbrella chart, the control plane and its secrets).
+*/}}
+{{- define "stormchaser-runner-k8s.stepNamespace" -}}
+{{- $ns := default (printf "%s-steps" .Release.Namespace) .Values.rbac.targetNamespace }}
+{{- if eq $ns .Release.Namespace }}
+{{- fail (printf "rbac.targetNamespace must differ from the release namespace %q: workflow steps may not share a namespace with Stormchaser" .Release.Namespace) }}
+{{- end }}
+{{- $ns }}
+{{- end }}

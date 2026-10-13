@@ -3,6 +3,7 @@ pub mod env;
 pub mod job;
 pub mod metrics;
 pub mod pod;
+pub mod policy;
 pub mod resources;
 pub mod volumes;
 
@@ -11,6 +12,7 @@ pub(crate) use env::*;
 pub(crate) use job::*;
 pub(crate) use metrics::*;
 pub(crate) use pod::*;
+pub(crate) use policy::*;
 pub(crate) use resources::*;
 pub(crate) use volumes::*;
 

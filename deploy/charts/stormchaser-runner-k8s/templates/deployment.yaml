@@ -47,6 +47,14 @@ spec:
             {{- end }}
             - name: RUST_LOG
               value: {{ .Values.config.rustLog | quote }}
+            - name: STORMCHASER_STEP_NAMESPACE
+              value: {{ include "stormchaser-runner-k8s.stepNamespace" . | quote }}
+            - name: STORMCHASER_ALLOWED_SERVICE_ACCOUNTS
+              value: {{ join "," .Values.config.allowedServiceAccounts | quote }}
+            - name: STORMCHASER_ALLOWED_SECRET_MOUNTS
+              value: {{ join "," .Values.config.allowedSecretMounts | quote }}
+            - name: STORMCHASER_ALLOWED_CONFIG_MAP_MOUNTS
+              value: {{ join "," .Values.config.allowedConfigMapMounts | quote }}
             - name: STORMCHASER_ALLOW_PRIVILEGED
               value: {{ .Values.config.allowPrivileged | quote }}
             - name: STORMCHASER_AGENT_IMAGE

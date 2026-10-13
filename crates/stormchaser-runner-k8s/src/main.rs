@@ -56,6 +56,8 @@ pub async fn run_runner(config: Config) -> Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
+    let step_namespace = config.resolve_step_namespace()?;
+
     let nats_url = config.nats_url;
     let runner_id = config.runner_id;
     let encryption_key = config.encryption_key;
@@ -191,8 +193,9 @@ pub async fn run_runner(config: Config) -> Result<()> {
 
     // 3.4 Start garbage collection (reaper) loop
     let reaper_pool = cluster_pool.clone();
+    let reaper_namespace = step_namespace.clone();
     tokio::spawn(async move {
-        if let Err(e) = run_reaper(reaper_pool).await {
+        if let Err(e) = run_reaper(reaper_pool, reaper_namespace).await {
             error!("Reaper error: {:?}", e);
         }
     });
@@ -203,6 +206,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
         nats_client.clone(),
         runner_id.clone(),
         encryption_key.clone(),
+        &step_namespace,
     )
     .await;
 
@@ -297,6 +301,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
                             nats_client.clone(),
                             runner_id.clone(),
                             encryption_key.clone(),
+                            step_namespace.clone(),
                         ));
                     }
                     Some(Err(e)) => {
@@ -318,6 +323,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
                             nats_client.clone(),
                             runner_id.clone(),
                             encryption_key.clone(),
+                            step_namespace.clone(),
                         ));
                     }
                     Some(Err(e)) => {

@@ -70,8 +70,8 @@ async fn execute_job_on_cluster(
     received_at: chrono::DateTime<chrono::Utc>,
     in_progress_handle: tokio::task::JoinHandle<()>,
     msg: async_nats::jetstream::message::Message,
+    namespace: String,
 ) {
-    let namespace = std::env::var("KUBERNETES_NAMESPACE").unwrap_or_else(|_| "default".to_string());
     let metadata = job_machine::JobMetadata {
         run_id,
         step_id,
@@ -309,6 +309,7 @@ pub async fn handle_task(
     nats_client: async_nats::Client,
     runner_id: String,
     encryption_key: Option<String>,
+    step_namespace: String,
 ) {
     let received_at = Utc::now();
     tracing::info!("Received task message: {:?}", msg.subject);
@@ -431,6 +432,7 @@ pub async fn handle_task(
                 received_at,
                 in_progress_handle,
                 msg,
+                step_namespace,
             )
             .await;
         }

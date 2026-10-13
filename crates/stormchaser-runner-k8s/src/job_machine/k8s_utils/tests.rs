@@ -308,3 +308,122 @@ fn test_do_build_job_spec_rejects_privileged_by_default() {
         );
     }
 }
+
+fn k8s_job_metadata(spec: serde_json::Value) -> JobMetadata {
+    let step_dsl = Step {
+        name: "test-step".into(),
+        r#type: "RunK8sJob".into(),
+        params: HashMap::new(),
+        spec,
+        aggregation: vec![],
+        next: vec![],
+        outputs: vec![],
+        reports: vec![],
+        condition: None,
+        strategy: None,
+        iterate: None,
+        iterate_as: None,
+        steps: None,
+        on_failure: None,
+        aliases: std::collections::HashMap::new(),
+        retry: None,
+        timeout: None,
+        allow_failure: None,
+        start_marker: None,
+        end_marker: None,
+        artifacts: None,
+    };
+
+    JobMetadata {
+        run_id: Uuid::new_v4(),
+        step_id: Uuid::new_v4(),
+        fencing_token: 7,
+        step_dsl,
+        namespace: "default".into(),
+        received_at: Utc::now(),
+        cluster_version: "v1.28.0".into(),
+        encryption_key: None,
+        storage: None,
+        test_report_urls: None,
+        registry_auth: None,
+    }
+}
+
+#[test]
+fn test_do_build_job_spec_rejects_unlisted_cluster_objects() {
+    let cases = [
+        (
+            serde_json::json!({ "image": "alpine", "service_account_name": "runner-sa" }),
+            ALLOWED_SERVICE_ACCOUNTS_ENV,
+        ),
+        (
+            serde_json::json!({
+                "image": "alpine",
+                "secret_mounts": [{ "name": "postgres-credentials", "mount_path": "/x" }]
+            }),
+            ALLOWED_SECRET_MOUNTS_ENV,
+        ),
+        (
+            serde_json::json!({
+                "image": "alpine",
+                "config_map_mounts": [{ "name": "opa-policy", "mount_path": "/x" }]
+            }),
+            ALLOWED_CONFIG_MAP_MOUNTS_ENV,
+        ),
+    ];
+
+    for (spec, env_name) in cases {
+        let metadata = k8s_job_metadata(spec);
+        let err = do_build_job_spec("test-job", &metadata, None, None).unwrap_err();
+        assert!(format!("{:#}", err).contains(env_name));
+    }
+}
+
+#[test]
+fn test_step_policy_allow_list_matching() {
+    let policy = StepPolicy {
+        allowed_service_accounts: vec!["deployer".into()],
+        allowed_secret_mounts: vec!["workflow-*".into()],
+        allowed_config_map_mounts: vec![],
+    };
+
+    let allowed = parse_step_spec(&k8s_job_metadata(serde_json::json!({
+        "image": "alpine",
+        "service_account_name": "deployer",
+        "secret_mounts": [{ "name": "workflow-npm-token", "mount_path": "/x" }]
+    })))
+    .unwrap();
+    assert!(policy.check(&allowed).is_ok());
+
+    let wrong_prefix = parse_step_spec(&k8s_job_metadata(serde_json::json!({
+        "image": "alpine",
+        "secret_mounts": [{ "name": "postgres-workflow-x", "mount_path": "/x" }]
+    })))
+    .unwrap();
+    assert!(policy.check(&wrong_prefix).is_err());
+}
+
+#[test]
+fn test_do_build_job_spec_withholds_api_token_and_protects_reserved_labels() {
+    let victim_run = Uuid::new_v4().to_string();
+    let metadata = k8s_job_metadata(serde_json::json!({
+        "image": "alpine",
+        "labels": { "managed-by": "someone-else", "stormchaser-run-id": victim_run, "team": "a" },
+        "annotations": { "stormchaser.v1.io/state-encrypted": "true", "note": "b" }
+    }));
+
+    let job = do_build_job_spec("test-job", &metadata, None, None).unwrap();
+
+    let labels = job.metadata.labels.unwrap();
+    assert_eq!(labels["managed-by"], "stormchaser");
+    assert_eq!(labels["stormchaser-run-id"], metadata.run_id.to_string());
+    assert_eq!(labels["team"], "a");
+
+    let annotations = job.metadata.annotations.unwrap();
+    assert!(!annotations.contains_key("stormchaser.v1.io/state-encrypted"));
+    assert_eq!(annotations["note"], "b");
+
+    let pod_spec = job.spec.unwrap().template.spec.unwrap();
+    assert_eq!(pod_spec.automount_service_account_token, Some(false));
+    assert_eq!(pod_spec.service_account_name, None);
+}

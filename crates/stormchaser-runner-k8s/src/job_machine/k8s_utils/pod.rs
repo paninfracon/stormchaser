@@ -86,6 +86,12 @@ pub(crate) fn build_k8s_pod_spec(
                 .node_selector
                 .clone()
                 .map(|ns| ns.into_iter().collect()),
+            // Steps get no API credentials unless the operator has allow-listed the
+            // service account they ask for.
+            automount_service_account_token: step_spec
+                .service_account_name
+                .is_none()
+                .then_some(false),
             service_account_name: step_spec.service_account_name.clone(),
             image_pull_secrets,
             ..Default::default()
