@@ -14,8 +14,17 @@ use stormchaser_api::setup::build_app_state;
 
 use routes::{hydrate_schema, hydrate_schema_direct};
 
+fn main() -> anyhow::Result<()> {
+    // Started as a jq worker (for a query's `jq_filter`), this process evaluates one
+    // program and exits here, before any runtime exists.
+    stormchaser_engine::jq_sandbox::run_worker_if_requested();
+    run()
+}
+
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn run() -> anyhow::Result<()> {
+    stormchaser_engine::jq_sandbox::install_current_exe_as_worker()?;
+
     tracing_subscriber::fmt::init();
 
     tracing::info!("Stormchaser Query Microservice starting");

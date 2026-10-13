@@ -19,6 +19,8 @@ pub mod handler;
 pub mod hcl_eval;
 /// Human-In-The-Loop (HITL) manual approval handling.
 pub mod hitl;
+/// Runs workflow-supplied jq programs in a child process that can be stopped.
+pub mod jq_sandbox;
 /// JUnit test report parsing and aggregation.
 pub mod junit;
 /// NATS JetStream integration for pub/sub events.

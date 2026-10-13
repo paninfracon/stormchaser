@@ -31,6 +31,7 @@ name = "stormchaser-engine"
 path = "src/main.rs"
 
 [dependencies]
+libc = "0.2"
 stormchaser-model = { workspace = true }
 stormchaser-dsl = { workspace = true }
 stormchaser-tls = { workspace = true }

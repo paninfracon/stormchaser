@@ -164,7 +164,7 @@ async fn execute_api_query(params: &HashMap<String, String>) -> Result<Vec<Value
     let response: Value = serde_json::from_slice(&body)?;
 
     if let Some(jq_filter_str) = params.get("jq_filter") {
-        apply_jq_filter(jq_filter_str, response)
+        apply_jq_filter(jq_filter_str, response).await
     } else {
         if let Value::Array(arr) = response {
             Ok(arr)
@@ -264,7 +264,7 @@ async fn execute_aws_cloudcontrol_query(
         }
 
         if let Some(jq_filter_str) = params.get("jq_filter") {
-            apply_jq_filter(jq_filter_str, Value::Array(all_resources))
+            apply_jq_filter(jq_filter_str, Value::Array(all_resources)).await
         } else {
             Ok(all_resources)
         }
@@ -309,34 +309,11 @@ pub(crate) fn jq_funs(
         .filter(|(name, _, _)| *name != "env")
 }
 
-fn apply_jq_filter(jq_filter_str: &str, input_val: Value) -> Result<Vec<Value>, anyhow::Error> {
-    use jaq_core::load::{Arena, File, Loader};
-    use jaq_core::{data, Ctx, Vars};
-    use jaq_json::Val;
-
-    let loader = Loader::new(
-        jaq_core::defs()
-            .chain(jaq_std::defs())
-            .chain(jaq_json::defs()),
-    );
-    let arena = Arena::default();
-    let program = File {
-        code: jq_filter_str,
-        path: (),
-    };
-
-    let modules = loader
-        .load(&arena, program)
-        .map_err(|e| anyhow::anyhow!("Failed to parse jq filter: {:?}", e))?;
-
-    let filter = jaq_core::Compiler::default()
-        .with_funs(jq_funs())
-        .compile(modules)
-        .map_err(|e| anyhow::anyhow!("Failed to compile jq filter: {:?}", e))?;
-
-    let input = json_to_jq_val(input_val)?;
-    let ctx = Ctx::<data::JustLut<Val>>::new(&filter.lut, Vars::new([]));
-    filter.id.run((ctx, input)).map(jq_output_to_json).collect()
+async fn apply_jq_filter(
+    jq_filter_str: &str,
+    input_val: Value,
+) -> Result<Vec<Value>, anyhow::Error> {
+    crate::jq_sandbox::evaluate(jq_filter_str, input_val).await
 }
 
 #[cfg(test)]
@@ -472,16 +449,19 @@ mod tests {
         assert!(err.to_string().contains("require a 'connection'"));
     }
 
-    #[test]
-    fn test_jq_filter_cannot_read_process_env() {
-        let err = apply_jq_filter("env", serde_json::json!(null)).unwrap_err();
-        assert!(err.to_string().contains("Failed to compile jq filter"));
+    #[tokio::test]
+    async fn test_jq_filter_cannot_read_process_env() {
+        let err = apply_jq_filter("env", serde_json::json!(null))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Failed to compile jq program"));
 
         // The rest of the standard library is still available.
         let res = apply_jq_filter(
             "[.[] | ascii_upcase] | length",
             serde_json::json!(["a", "b"]),
         )
+        .await
         .unwrap();
         assert_eq!(res, vec![serde_json::json!(2)]);
     }
