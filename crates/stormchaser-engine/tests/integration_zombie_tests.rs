@@ -117,3 +117,128 @@ async fn test_zombie_step_handler() {
     assert_eq!(row.0, StepStatus::LostZombie);
     assert_eq!(row.1.unwrap(), "lost_zombie");
 }
+
+/// Inserts a runner whose last heartbeat was `seconds_ago`.
+async fn insert_runner(pool: &PgPool, id: &str, seconds_ago: i32) {
+    sqlx::query(
+        "INSERT INTO runners (id, runner_type, protocol_version, nats_subject, last_heartbeat_at) VALUES ($1, 'docker', 'v1', $2, NOW() - make_interval(secs => $3))",
+    )
+    .bind(id)
+    .bind(format!("stormchaser.v1.runner.docker.{id}"))
+    .bind(seconds_ago as f64)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn is_zombie(pool: &PgPool, step_id: StepInstanceId) -> bool {
+    // Rolled back: the query locks the rows it returns
+    let mut tx = pool.begin().await.unwrap();
+    let zombies = stormchaser_engine::db::steps::fetch_zombie_steps(&mut *tx)
+        .await
+        .unwrap();
+    zombies.iter().any(|zombie| zombie.id == step_id)
+}
+
+#[tokio::test]
+async fn a_step_adopted_by_another_runner_is_no_longer_lost_with_the_old_one() {
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
+        dotenvy::dotenv().ok();
+        format!(
+            "postgres://stormchaser:{}@localhost:5432/stormchaser",
+            var("STORMCHASER_DEV_PASSWORD")
+                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
+        )
+    });
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&db_url)
+        .await
+        .unwrap();
+
+    let run_id = RunId::new_v4();
+    let step_id = StepInstanceId::new_v4();
+    let old_runner = format!("old-{}", uuid::Uuid::new_v4());
+    let new_runner = format!("new-{}", uuid::Uuid::new_v4());
+    insert_runner(&pool, &old_runner, 120).await;
+    insert_runner(&pool, &new_runner, 0).await;
+
+    sqlx::query(
+        "INSERT INTO workflow_runs (id, workflow_name, status, fencing_token, repo_url, workflow_path, git_ref) VALUES ($1, 'adoption-test', 'running', 1, 'http://git.local', 'workflow.storm', 'main')"
+    )
+    .bind(run_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO step_instances (id, run_id, step_name, status, step_type, runner_id, started_at) VALUES ($1, $2, 'long', 'running', 'RunContainer', $3, NOW())")
+        .bind(step_id)
+        .bind(run_id)
+        .bind(&old_runner)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // The runner that started the step has stopped heartbeating
+    assert!(is_zombie(&pool, step_id).await);
+
+    // Another runner adopts the step's container and says so
+    handler::step::events::handle_step_running(
+        stormchaser_model::events::StepRunningEvent {
+            run_id,
+            step_id,
+            event_type: EventType::Step(StepEventType::Running),
+            runner_id: Some(new_runner.clone()),
+            timestamp: Utc::now(),
+        },
+        pool.clone(),
+    )
+    .await
+    .unwrap();
+
+    let (status, assigned): (StepStatus, Option<String>) =
+        sqlx::query_as("SELECT status, runner_id FROM step_instances WHERE id = $1")
+            .bind(step_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(status, StepStatus::Running);
+    assert_eq!(assigned.as_deref(), Some(new_runner.as_str()));
+    assert!(!is_zombie(&pool, step_id).await);
+
+    // A finished step does not move
+    sqlx::query("UPDATE step_instances SET status = 'succeeded' WHERE id = $1")
+        .bind(step_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    handler::step::events::handle_step_running(
+        stormchaser_model::events::StepRunningEvent {
+            run_id,
+            step_id,
+            event_type: EventType::Step(StepEventType::Running),
+            runner_id: Some(old_runner.clone()),
+            timestamp: Utc::now(),
+        },
+        pool.clone(),
+    )
+    .await
+    .unwrap();
+    let assigned: Option<String> =
+        sqlx::query_scalar("SELECT runner_id FROM step_instances WHERE id = $1")
+            .bind(step_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(assigned.as_deref(), Some(new_runner.as_str()));
+
+    sqlx::query("DELETE FROM workflow_runs WHERE id = $1")
+        .bind(run_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM runners WHERE id = ANY($1)")
+        .bind(vec![old_runner, new_runner])
+        .execute(&pool)
+        .await
+        .unwrap();
+}

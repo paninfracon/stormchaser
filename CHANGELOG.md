@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A runner that restarts keeps its identity and its steps. Runner ids now default to the host or pod name (`docker-<host>`, `k8s-<pod>`) instead of a new random id on every start, and a runner that adopts a step's container or job tells the engine, which moves the step to it. Previously the engine failed such steps as lost about 30 seconds after the restart even though they were still running.
 - OCI artifacts are now pushed from the Docker runner. `oras` refuses absolute paths, so these pushes always failed.
 - The MCP server can now be reached through a non-loopback hostname. It accepts the host of `API_BASE_URL` and any hosts listed in the new `MCP_ALLOWED_HOSTS` setting (Helm: `api.mcpAllowedHosts`), in addition to loopback names.
 - The default OPA policy now permits the MCP transport's `POST` and `DELETE` requests on `/api/v1/mcp`. Previously only `POST /api/v1/mcp/messages` was permitted, so clients using the real endpoint were denied.

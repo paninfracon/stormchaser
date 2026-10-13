@@ -552,3 +552,31 @@ where
 
     Ok(record.map(|r| r.0))
 }
+
+/// Moves a step that is with a runner to another runner, returning true if it moved.
+///
+/// Used when a different runner reports that it is now executing the step: it adopted the
+/// step's container or job after a restart, or it received the redelivered task.
+pub async fn reassign_step_runner<'a, E>(
+    executor: E,
+    id: StepInstanceId,
+    runner_id: &str,
+) -> Result<bool, sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    let result = sqlx::query(
+        r#"
+        UPDATE step_instances
+        SET runner_id = $2
+        WHERE id = $1
+          AND status IN ('initializing', 'running', 'unpacking_sfs', 'packing_sfs')
+          AND runner_id IS DISTINCT FROM $2
+        "#,
+    )
+    .bind(id)
+    .bind(runner_id)
+    .execute(executor)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}

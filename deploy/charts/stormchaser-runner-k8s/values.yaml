@@ -67,7 +67,9 @@ config:
   natsUrl: "nats://172.17.0.1:4222"
   # Name of a Secret with `user` and `password` keys for NATS authentication.
   natsAuthSecret: ""
-  runnerId: "" # If empty, a UUID will be generated on startup
+  # If empty, the runner uses "k8s-<pod name>", which survives a restart of the runner
+  # container. Ids must be unique among running runners.
+  runnerId: ""
   rustLog: "stormchaser_runner_k8s=info"
   # Permit steps that set `privileged = true`. Such a step is root on the node.
   allowPrivileged: false

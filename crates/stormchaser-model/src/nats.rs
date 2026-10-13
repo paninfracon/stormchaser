@@ -309,6 +309,37 @@ pub async fn request_artifact_auth(
     Ok(answer["docker_config"].clone())
 }
 
+/// Tells the engine that `runner_id` is now the runner executing a step.
+///
+/// Sent when a step starts, and again by a runner that picks up a step someone else
+/// started (after a restart, or when a task is redelivered), so that the engine follows
+/// the step to the runner that actually holds it.
+pub async fn announce_step_running(
+    client: &async_nats::Client,
+    run_id: uuid::Uuid,
+    step_id: uuid::Uuid,
+    runner_id: &str,
+) -> Result<()> {
+    let run_id = crate::RunId::new(run_id);
+    let event = crate::events::StepRunningEvent {
+        run_id,
+        step_id: crate::StepInstanceId::new(step_id),
+        event_type: EventType::Step(crate::events::StepEventType::Running),
+        runner_id: Some(runner_id.to_string()),
+        timestamp: chrono::Utc::now(),
+    };
+    publish_cloudevent(
+        &jetstream::new(client.clone()),
+        NatsSubject::StepRunning(Some(compute_shard_id(&run_id))),
+        EventType::Step(crate::events::StepEventType::Running),
+        EventSource::System,
+        serde_json::to_value(event)?,
+        Some(SchemaVersion::new("1.0".to_string())),
+        None,
+    )
+    .await
+}
+
 /// Name of the JetStream stream every Stormchaser component shares.
 pub const STREAM_NAME: &str = "stormchaser";
 

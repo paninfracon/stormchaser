@@ -1,5 +1,3 @@
-use uuid::Uuid;
-
 #[derive(Debug, Clone)]
 /// Config.
 pub struct Config {
@@ -35,7 +33,8 @@ impl Config {
         V: AsRef<str>,
     {
         let mut nats_url = "nats://localhost:4222".to_string();
-        let mut runner_id = Uuid::new_v4().to_string();
+        let mut explicit_runner_id = None;
+        let mut hostname = None;
         let mut encryption_key = None;
         let mut rust_log = "stormchaser_runner_k8s=info".to_string();
         let mut own_namespace = None;
@@ -44,7 +43,8 @@ impl Config {
         for (k, v) in env {
             match k.as_ref() {
                 "NATS_URL" => nats_url = v.as_ref().to_string(),
-                "RUNNER_ID" => runner_id = v.as_ref().to_string(),
+                "RUNNER_ID" => explicit_runner_id = Some(v.as_ref().to_string()),
+                "HOSTNAME" => hostname = Some(v.as_ref().to_string()),
                 "STORMCHASER_STATE_ENCRYPTION_KEY" => encryption_key = Some(v.as_ref().to_string()),
                 "RUST_LOG" => rust_log = v.as_ref().to_string(),
                 "KUBERNETES_NAMESPACE" => own_namespace = Some(v.as_ref().to_string()),
@@ -52,6 +52,15 @@ impl Config {
                 _ => {}
             }
         }
+
+        // Stable across restarts of this runner, so it comes back as itself
+        let runner_id = stormchaser_model::runner::runner_id(
+            "k8s",
+            explicit_runner_id.as_deref(),
+            hostname
+                .or_else(stormchaser_model::runner::kernel_hostname)
+                .as_deref(),
+        );
 
         Self {
             nats_url,

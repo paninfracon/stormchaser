@@ -184,6 +184,14 @@ async fn handle_orphaned_container(
             received_at,
         };
 
+        // Tell the engine this runner now holds the step, so that it is not judged by the
+        // runner that started it and has gone.
+        if let Err(e) =
+            stormchaser_model::nats::announce_step_running(&nats, run_id, step_id, &r_id).await
+        {
+            error!("Failed to announce adoption of step {}: {:?}", step_id, e);
+        }
+
         let machine = DockerContainerMachine::new(docker_clone, metadata, Some(nats.clone()));
 
         match machine.adopt(container_name.clone()).wait().await {

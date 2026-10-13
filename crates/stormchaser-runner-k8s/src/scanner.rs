@@ -235,6 +235,14 @@ async fn handle_orphaned_job(
             registry_auth: None,
         };
 
+        // Tell the engine this runner now holds the step, so that it is not judged by the
+        // runner that started it and has gone.
+        if let Err(e) =
+            stormchaser_model::nats::announce_step_running(&nats, run_id, step_id, &runner_id).await
+        {
+            error!("Failed to announce adoption of step {}: {:?}", step_id, e);
+        }
+
         // An adopted job's sidecar still has to be told when its step has finished
         let machine =
             job_machine::K8sJobMachine::new(client_clone, metadata).with_nats(nats.clone());

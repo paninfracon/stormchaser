@@ -53,6 +53,22 @@ pub async fn handle_step_running(
             .await?;
         let _ = machine.start(&mut *conn).await?;
     } else {
+        // Already running. If another runner now reports it, that runner picked the step
+        // up (it adopted the container or job after a restart, or took the redelivered
+        // task), so the step follows it. Otherwise the liveness check would go on judging
+        // the step by a runner that no longer has it.
+        if let Some(reporting) = event.runner_id.as_deref() {
+            if crate::db::steps::reassign_step_runner(&mut *conn, step_id, reporting).await? {
+                info!(
+                    "Step {} (Run {}) moved from runner {} to runner {}",
+                    step_id,
+                    run_id,
+                    instance.runner_id.as_deref().unwrap_or("unknown"),
+                    reporting
+                );
+                return Ok(());
+            }
+        }
         info!(
             "Step {} is already past Initializing/Pending state, ignoring Running event.",
             step_id
