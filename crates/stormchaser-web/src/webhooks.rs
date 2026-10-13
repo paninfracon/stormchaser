@@ -177,7 +177,8 @@ pub fn CreateWebhookModal(on_close: Callback<()>, on_success: Callback<()>) -> i
                             on:change=move |ev| set_source_type.set(event_target_value(&ev))
                         >
                             <option value="github" selected=move || source_type.get() == "github">"GitHub"</option>
-                            <option value="generic" selected=move || source_type.get() == "generic">"Generic"</option>
+                            <option value="signed" selected=move || source_type.get() == "signed">"Signed (Standard Webhooks)"</option>
+                            <option value="generic" selected=move || source_type.get() == "generic">"Generic (bearer token)"</option>
                         </select>
                     </div>
 

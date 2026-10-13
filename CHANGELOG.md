@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Webhooks have a third source type, `signed`, which verifies deliveries the [Standard Webhooks](https://www.standardwebhooks.com/) way: an HMAC-SHA256 signature over the message id, a timestamp and the body (`webhook-id`, `webhook-timestamp`, `webhook-signature`). The secret never travels with the delivery, and a delivery more than five minutes old is refused. See `docs/security.md`.
+
 ### Changed
 
 - Upgraded all dependencies to their latest releases, including Axum 0.8, Leptos 0.8, SQLx 0.9, reqwest 0.13, kube 4, schemars 1, MiniJinja 3 and jaq 3.
@@ -96,6 +100,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Webhooks must have a secret: one is required to create a webhook, it can be replaced but not cleared, and a webhook without one refuses every delivery with 403 (previously it accepted them unauthenticated). Rules no longer see the `Authorization`, `Cookie` and signature headers of a delivery, and a rule's event-type pattern must match the whole event type.
 - Repository clones are staged and moved into the cache only when complete and on the requested revision. A failed clone, or a revision that did not exist, used to leave a cache entry that later runs used as if it were good, running the default branch's workflow instead. Cached branches and tags are fetched again after `STORMCHASER_GIT_CACHE_REFRESH_SECS` (default 60); they were never refreshed. Downloads are limited to `STORMCHASER_GIT_MAX_CLONE_MB` (default 1024) and `STORMCHASER_GIT_CLONE_TIMEOUT_SECS` (default 300), and the engine no longer clones on its async executor.
 - The web UI sends `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: same-origin` and a Content-Security-Policy on every response, and `Strict-Transport-Security` when `WEB_URL` is HTTPS. Pages allow scripts only from the site itself or with that response's nonce, may not be framed, and may frame only the configured Grafana. Logging out is a `POST` that other sites cannot trigger; `GET /auth/logout` no longer exists.
+- A webhook delivery is acted on once. A repeat of a GitHub delivery (recognised by a hash of its signed body) or of a signed delivery (by its signed id) within `STORMCHASER_WEBHOOK_DEDUPE_HOURS` (default 24) is answered with `"status": "duplicate"` and triggers nothing. Needs a new database migration (`webhook_deliveries`).
 - Removed `h2` 0.3 (RUSTSEC-2026-0258) by building the AWS SDK without its legacy HTTP client.
 - Removed the unmaintained `unsafe-libyaml` (RUSTSEC-2024-0449) by replacing `serde_yaml`.
 

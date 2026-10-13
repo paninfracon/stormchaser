@@ -364,7 +364,44 @@ the API or engine host:
 * A SOPS file named in a run request must be a regular file inside the
   repository; paths with `..`, absolute paths and symbolic links are refused.
 
-## 8. NATS Authentication
+## 8. Inbound Webhooks
+
+A webhook's URL is not a secret, and a delivery can start workflows, so every
+webhook must have a secret and a delivery that cannot prove it knows the secret
+is refused. A webhook has one of three source types:
+
+| `source_type` | How a delivery is authenticated | Replays |
+| :--- | :--- | :--- |
+| `github` | `X-Hub-Signature-256`: HMAC-SHA256 of the body, as GitHub sends it. | Ignored for 24 hours, recognised by a hash of the signed body. |
+| `signed` | [Standard Webhooks](https://www.standardwebhooks.com/): `webhook-id`, `webhook-timestamp` and `webhook-signature` (`v1,` followed by the base64 HMAC-SHA256 of `<id>.<timestamp>.<body>`). The timestamp must be within five minutes of the API's clock. | Ignored for 24 hours, recognised by the signed `webhook-id`; refused outright once the timestamp is too old. |
+| `generic` | `Authorization: Bearer <secret>`. | **Not detected.** |
+
+Prefer `signed` for anything you control. With a signature the secret never
+travels with the delivery, a captured delivery cannot be altered or relabelled,
+and it stops being accepted after five minutes. A `generic` webhook sends the
+secret itself on every delivery, so whoever captures one can send anything they
+like for as long as the secret stands; it remains for senders that can do
+nothing better.
+
+For `signed` webhooks:
+
+* A secret of the form `whsec_<base64>` is used as the decoded bytes, as the
+  Standard Webhooks libraries do. Any other secret is used as written.
+* Several space-separated signatures may be sent, which lets a sender sign with
+  the old and the new secret while one is being rotated. One valid signature is
+  enough.
+* The event type that rules match on is the payload's `type` field, or
+  `generic` if there is none.
+
+A repeated delivery is answered with `200` and `"status": "duplicate"` and
+triggers nothing, so a sender that retries is not told to retry again. GitHub's
+own delivery id (`X-GitHub-Delivery`) is not used because GitHub does not sign
+it. The window is `STORMCHASER_WEBHOOK_DEDUPE_HOURS` (default `24`).
+
+Rule expressions do not see the `Authorization`, `Cookie` or signature headers
+of a delivery.
+
+## 9. NATS Authentication
 
 NATS carries every task and every result, so anyone who can publish to it can
 schedule containers on runners and report on other users' steps. All components
@@ -377,7 +414,7 @@ and is meant for evaluation. [NATS: Quickstart and Production](nats.md) lists
 what the quickstart provides, the exact permissions each role needs, and the
 requirements for a hardened production server.
 
-## 9. MCP Server Security
+## 10. MCP Server Security
 
 The Model Context Protocol (MCP) server, which exposes the OpenAPI specification as tools for AI agents, is integrated with the same OPA enforcement as the rest of the system:
 

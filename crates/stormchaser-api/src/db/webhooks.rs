@@ -55,6 +55,64 @@ pub async fn get_active_webhook(
         .await
 }
 
+/// Records that a webhook accepted the delivery identified by `key`.
+///
+/// Returns `false` if the same delivery was already accepted within the last
+/// `retention_hours`: it is a replay or a redelivery and must not be acted on again.
+/// Recording and checking are one statement, so two replicas receiving the same delivery
+/// at once cannot both act on it.
+pub async fn record_delivery(
+    pool: &PgPool,
+    webhook_id: WebhookId,
+    key: &str,
+    retention_hours: i32,
+) -> Result<bool, sqlx::Error> {
+    let recorded = sqlx::query(
+        r#"
+        INSERT INTO webhook_deliveries (webhook_id, delivery_key)
+        VALUES ($1, $2)
+        ON CONFLICT (webhook_id, delivery_key) DO UPDATE SET received_at = NOW()
+        WHERE webhook_deliveries.received_at < NOW() - make_interval(hours => $3)
+        "#,
+    )
+    .bind(webhook_id)
+    .bind(key)
+    .bind(retention_hours)
+    .execute(pool)
+    .await?
+    .rows_affected()
+        > 0;
+
+    // Old records are of no further use; clearing them here keeps the table small
+    // without a separate job. A failure only delays the cleanup.
+    if let Err(e) = sqlx::query(
+        "DELETE FROM webhook_deliveries WHERE received_at < NOW() - make_interval(hours => $1)",
+    )
+    .bind(retention_hours)
+    .execute(pool)
+    .await
+    {
+        tracing::warn!("Failed to clear old webhook delivery records: {:?}", e);
+    }
+
+    Ok(recorded)
+}
+
+/// Forgets a delivery that was recorded but could not be processed, so the sender's
+/// retry is not mistaken for a replay.
+pub async fn forget_delivery(
+    pool: &PgPool,
+    webhook_id: WebhookId,
+    key: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM webhook_deliveries WHERE webhook_id = $1 AND delivery_key = $2")
+        .bind(webhook_id)
+        .bind(key)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 /// Updates an existing webhook configuration.
 pub async fn update_webhook(
     pool: &PgPool,

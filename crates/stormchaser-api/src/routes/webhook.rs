@@ -51,7 +51,10 @@ pub async fn create_webhook(
         );
         return Err(StatusCode::BAD_REQUEST);
     }
-    if !matches!(payload.source_type.as_str(), "github" | "generic") {
+    if !matches!(
+        payload.source_type.as_str(),
+        "github" | "generic" | "signed"
+    ) {
         return Err(StatusCode::BAD_REQUEST);
     }
 
@@ -233,24 +236,105 @@ pub async fn handle_webhook(
         })?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    // 2. Validate Source/Signature
-    let payload: Value = serde_json::from_slice(&body).map_err(|_| StatusCode::BAD_REQUEST)?;
-    let event_type = match webhook.source_type.as_str() {
+    // 2. Validate Source/Signature, before anything in the body is trusted or parsed
+    let secret = webhook.secret_token.as_deref();
+    let delivery_key = match webhook.source_type.as_str() {
         "github" => {
-            validate_github_signature(&headers, &body, webhook.secret_token.as_deref())?;
-            headers
-                .get("X-GitHub-Event")
-                .and_then(|h| h.to_str().ok())
-                .unwrap_or("unknown")
-                .to_string()
+            validate_github_signature(&headers, &body, secret)?;
+            // The delivery id GitHub sends is not covered by its signature, so whoever
+            // replays a delivery can change it. The body is what was signed.
+            Some(format!(
+                "sha256:{}",
+                hex::encode(<Sha256 as sha2::Digest>::digest(&body))
+            ))
+        }
+        "signed" => {
+            let id = validate_signed_delivery(&headers, &body, secret, Utc::now().timestamp())?;
+            Some(format!("id:{}", id))
         }
         "generic" => {
-            validate_generic_token(&headers, webhook.secret_token.as_deref())?;
-            "generic".to_string()
+            // A bearer token proves nothing about one delivery in particular: whoever
+            // holds it can send anything, so there is nothing to tell a replay by.
+            validate_generic_token(&headers, secret)?;
+            None
         }
         _ => return Err(StatusCode::NOT_IMPLEMENTED),
     };
 
+    let payload: Value = serde_json::from_slice(&body).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let event_type = match webhook.source_type.as_str() {
+        "github" => headers
+            .get("X-GitHub-Event")
+            .and_then(|h| h.to_str().ok())
+            .unwrap_or("unknown")
+            .to_string(),
+        // Signed senders conventionally name the event in the payload's `type`
+        "signed" => payload
+            .get("type")
+            .and_then(|t| t.as_str())
+            .unwrap_or("generic")
+            .to_string(),
+        _ => "generic".to_string(),
+    };
+
+    // 2b. A delivery already acted on is acknowledged and otherwise ignored
+    if let Some(key) = &delivery_key {
+        let first_time = db::record_delivery(&state.pool, webhook_id, key, dedupe_hours())
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to record webhook delivery: {:?}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+        if !first_time {
+            tracing::info!(
+                "Ignoring repeated delivery to webhook '{}' ({})",
+                webhook.name,
+                webhook.id
+            );
+            return Ok(Json(serde_json::json!({
+                "status": "duplicate",
+                "event_type": event_type,
+                "triggered_rules": 0
+            })));
+        }
+    }
+
+    let result = run_rules(&state, &webhook, &headers, &payload, &event_type).await;
+    if result.is_err() {
+        // Nothing was done with it, so the sender's retry must be allowed through
+        if let Some(key) = &delivery_key {
+            if let Err(e) = db::forget_delivery(&state.pool, webhook_id, key).await {
+                tracing::error!("Failed to forget an unprocessed webhook delivery: {:?}", e);
+            }
+        }
+    }
+    let triggered_count = result?;
+
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "event_type": event_type,
+        "triggered_rules": triggered_count
+    })))
+}
+
+/// Hours for which an accepted delivery is remembered and a repeat of it ignored.
+fn dedupe_hours() -> i32 {
+    std::env::var("STORMCHASER_WEBHOOK_DEDUPE_HOURS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|hours| *hours > 0)
+        .unwrap_or(24)
+}
+
+/// Runs the webhook's rules against a verified delivery and returns how many fired.
+async fn run_rules(
+    state: &AppState,
+    webhook: &WebhookConfig,
+    headers: &HeaderMap,
+    payload: &Value,
+    event_type: &str,
+) -> Result<usize, StatusCode> {
+    let webhook_id = webhook.id;
     tracing::info!(
         "Received webhook event '{}' for webhook '{}' ({})",
         event_type,
@@ -271,22 +355,18 @@ pub async fn handle_webhook(
     hcl_ctx.declare_var("event", hcl_eval::json_to_hcl(payload.clone()));
     hcl_ctx.declare_var(
         "headers",
-        hcl_eval::json_to_hcl(serde_json::to_value(headers_for_rules(&headers)).unwrap()),
+        hcl_eval::json_to_hcl(serde_json::to_value(headers_for_rules(headers)).unwrap()),
     );
 
     for rule in rules {
-        match process_rule(&state, &webhook, &rule, &event_type, &hcl_ctx).await {
+        match process_rule(state, webhook, &rule, event_type, &hcl_ctx).await {
             Ok(true) => triggered_count += 1,
             Ok(false) => continue,
             Err(e) => return Err(e),
         }
     }
 
-    Ok(Json(serde_json::json!({
-        "status": "ok",
-        "event_type": event_type,
-        "triggered_rules": triggered_count
-    })))
+    Ok(triggered_count)
 }
 
 use stormchaser_model::hcl_eval;
@@ -362,6 +442,79 @@ fn validate_github_signature(
     }
 
     Ok(())
+}
+
+/// Furthest a signed delivery's timestamp may be from the API's clock, in seconds.
+const SIGNED_TOLERANCE_SECS: i64 = 300;
+
+/// Verifies a delivery signed the Standard Webhooks way and returns its message id.
+///
+/// The sender puts a message id in `webhook-id`, the time in `webhook-timestamp`
+/// (seconds since the epoch) and, in `webhook-signature`, one or more space-separated
+/// `v1,<base64>` values, each the HMAC-SHA256 of `<id>.<timestamp>.<body>`. Because the
+/// id and the time are signed, a captured delivery cannot be relabelled, and it stops
+/// being accepted once its timestamp is older than [`SIGNED_TOLERANCE_SECS`].
+///
+/// A secret of the form `whsec_<base64>` is used as the decoded bytes; any other secret
+/// is used as it is written.
+fn validate_signed_delivery(
+    headers: &HeaderMap,
+    body: &[u8],
+    secret: Option<&str>,
+    now: i64,
+) -> Result<String, StatusCode> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+
+    let secret = required_secret(secret)?;
+    let header = |name: &str| {
+        headers
+            .get(name)
+            .and_then(|h| h.to_str().ok())
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                tracing::warn!("Missing {} header for signed webhook", name);
+                StatusCode::UNAUTHORIZED
+            })
+    };
+    let id = header("webhook-id")?;
+    let timestamp = header("webhook-timestamp")?;
+    let signatures = header("webhook-signature")?;
+
+    if id.len() > 256 {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    let sent_at: i64 = timestamp.parse().map_err(|_| StatusCode::UNAUTHORIZED)?;
+    if (now - sent_at).abs() > SIGNED_TOLERANCE_SECS {
+        tracing::warn!("Signed webhook delivery is outside the accepted time window");
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let key = secret
+        .strip_prefix("whsec_")
+        .and_then(|encoded| STANDARD.decode(encoded).ok())
+        .unwrap_or_else(|| secret.as_bytes().to_vec());
+    let mut mac = Hmac::<Sha256>::new_from_slice(&key).map_err(|e| {
+        tracing::error!("Failed to initialize HMAC: {:?}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    mac.update(id.as_bytes());
+    mac.update(b".");
+    mac.update(timestamp.as_bytes());
+    mac.update(b".");
+    mac.update(body);
+
+    // Several signatures are sent while a secret is being rotated; one must match
+    let verified = signatures
+        .split_whitespace()
+        .filter_map(|entry| entry.strip_prefix("v1,"))
+        .filter_map(|encoded| STANDARD.decode(encoded).ok())
+        .any(|candidate| mac.clone().verify_slice(&candidate).is_ok());
+    if !verified {
+        tracing::warn!("Signed webhook delivery has no valid signature");
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    Ok(id.to_string())
 }
 
 fn validate_generic_token(headers: &HeaderMap, secret: Option<&str>) -> Result<(), StatusCode> {
@@ -567,6 +720,97 @@ mod tests {
         let visible = headers_for_rules(&headers);
         assert_eq!(visible.len(), 1);
         assert_eq!(visible["x-github-event"], "push");
+    }
+
+    fn signed_headers(secret: &[u8], id: &str, timestamp: i64, body: &[u8]) -> HeaderMap {
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+        let mut mac = Hmac::<Sha256>::new_from_slice(secret).unwrap();
+        mac.update(format!("{id}.{timestamp}.").as_bytes());
+        mac.update(body);
+        let signature = STANDARD.encode(mac.finalize().into_bytes());
+
+        let mut headers = HeaderMap::new();
+        headers.insert("webhook-id", id.parse().unwrap());
+        headers.insert("webhook-timestamp", timestamp.to_string().parse().unwrap());
+        headers.insert(
+            "webhook-signature",
+            format!("v1,{signature}").parse().unwrap(),
+        );
+        headers
+    }
+
+    #[test]
+    fn a_signed_delivery_matches_the_standard_webhooks_reference_vector() {
+        // From the Standard Webhooks specification. The secret is the published example
+        // one, not a credential, hence the scanner exemption.
+        let secret = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"; // gitleaks:allow
+        let body = br#"{"test": 2432232314}"#;
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "webhook-id",
+            "msg_p5jXN8AQM9LWM0D4loKWxJek".parse().unwrap(),
+        );
+        headers.insert("webhook-timestamp", "1614265330".parse().unwrap());
+        headers.insert(
+            "webhook-signature",
+            "v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE="
+                .parse()
+                .unwrap(),
+        );
+        assert_eq!(
+            validate_signed_delivery(&headers, body, Some(secret), 1614265330),
+            Ok("msg_p5jXN8AQM9LWM0D4loKWxJek".to_string())
+        );
+    }
+
+    #[test]
+    fn a_signed_delivery_cannot_be_altered_relabelled_or_kept_for_later() {
+        let secret = "plain-shared-secret";
+        let body = br#"{"type":"deploy"}"#;
+        let now = 1_800_000_000;
+        let headers = signed_headers(secret.as_bytes(), "msg_1", now, body);
+        let check = |headers: &HeaderMap, body: &[u8], now: i64| {
+            validate_signed_delivery(headers, body, Some(secret), now)
+        };
+        assert_eq!(check(&headers, body, now), Ok("msg_1".to_string()));
+
+        // A different body, id or timestamp no longer matches the signature
+        assert!(check(&headers, br#"{"type":"destroy"}"#, now).is_err());
+        let mut relabelled = headers.clone();
+        relabelled.insert("webhook-id", "msg_2".parse().unwrap());
+        assert!(check(&relabelled, body, now).is_err());
+        let mut redated = headers.clone();
+        redated.insert("webhook-timestamp", (now + 60).to_string().parse().unwrap());
+        assert!(check(&redated, body, now + 60).is_err());
+
+        // The genuine delivery stops being accepted once it is old, or if it is from
+        // the future
+        assert!(check(&headers, body, now + SIGNED_TOLERANCE_SECS).is_ok());
+        assert!(check(&headers, body, now + SIGNED_TOLERANCE_SECS + 1).is_err());
+        assert!(check(&headers, body, now - SIGNED_TOLERANCE_SECS - 1).is_err());
+
+        // Another secret, a missing header, or no secret at all
+        assert!(validate_signed_delivery(&headers, body, Some("other"), now).is_err());
+        let mut unsigned = headers.clone();
+        unsigned.remove("webhook-signature");
+        assert!(check(&unsigned, body, now).is_err());
+        assert_eq!(
+            validate_signed_delivery(&headers, body, None, now),
+            Err(StatusCode::FORBIDDEN)
+        );
+    }
+
+    #[test]
+    fn any_one_of_several_signatures_is_enough() {
+        let body = b"{}";
+        let now = 1_800_000_000;
+        let mut headers = signed_headers(b"new-secret", "msg_1", now, body);
+        let current = headers["webhook-signature"].to_str().unwrap().to_string();
+        headers.insert(
+            "webhook-signature",
+            format!("v1,AAAA v2,ignored {current}").parse().unwrap(),
+        );
+        assert!(validate_signed_delivery(&headers, body, Some("new-secret"), now).is_ok());
     }
 
     #[test]

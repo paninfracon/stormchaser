@@ -400,3 +400,161 @@ async fn a_webhook_without_a_secret_accepts_no_deliveries() {
             .unwrap();
     }
 }
+
+#[tokio::test]
+async fn a_delivery_is_acted_on_once_however_often_it_is_sent() {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    use hmac::{Hmac, KeyInit, Mac};
+    use sha2::Sha256;
+
+    std::env::set_var("API_RATE_LIMIT_PER_SECOND", "1000");
+    std::env::set_var("API_RATE_LIMIT_BURST_SIZE", "1000");
+    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let Ok(nats_client) = stormchaser_model::nats::connect(nats_url).await else {
+        return;
+    };
+    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
+        dotenvy::dotenv().ok();
+        format!(
+            "postgres://stormchaser:{}@localhost:5432/stormchaser",
+            var("STORMCHASER_DEV_PASSWORD")
+                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
+        )
+    });
+    let Ok(pool) = PgPoolOptions::new().connect(&db_url).await else {
+        return;
+    };
+    let app = app(AppState {
+        pool: pool.clone(),
+        nats: nats_client,
+        opa: Arc::new(OpaClient::new(None, None)),
+        oidc_config: None,
+        jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+        log_backend: None,
+        api_base_url: "http://localhost:3000".to_string(),
+        mcp_allowed_hosts: Vec::new(),
+    });
+    let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
+    let secret = "replay-test-secret";
+
+    // A webhook of each signed kind, each with a rule that fires on everything
+    let mut webhooks = Vec::new();
+    for source_type in ["github", "signed"] {
+        let webhook_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO webhooks (id, name, source_type, secret_token, is_active) VALUES ($1, $2, $3, $4, true)",
+        )
+        .bind(webhook_id)
+        .bind(format!("replay-{}-{}", source_type, webhook_id))
+        .bind(source_type)
+        .bind(secret)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            r#"
+            INSERT INTO event_rules (
+                id, name, webhook_id, event_type_pattern,
+                workflow_name, repo_url, workflow_path, input_mappings
+            ) VALUES ($1, $2, $3, '.*', $4, 'https://github.com/org/repo', 'workflow.storm', '{}')
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(format!("replay-rule-{}", webhook_id))
+        .bind(webhook_id)
+        .bind(format!("replay-workflow-{}", webhook_id))
+        .execute(&pool)
+        .await
+        .unwrap();
+        webhooks.push((source_type, webhook_id));
+    }
+
+    let deliver = |source_type: &'static str, webhook_id: Uuid, body: Vec<u8>, message_id: &str| {
+        let mut request = Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/webhooks/{}", webhook_id))
+            .header("Content-Type", stormchaser_model::APPLICATION_JSON)
+            .extension(ConnectInfo(addr));
+        let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).unwrap();
+        if source_type == "github" {
+            mac.update(&body);
+            request = request
+                .header("X-GitHub-Event", "push")
+                // A replayer is free to change this header; it must make no difference
+                .header("X-GitHub-Delivery", Uuid::new_v4().to_string())
+                .header(
+                    "X-Hub-Signature-256",
+                    format!("sha256={}", hex::encode(mac.finalize().into_bytes())),
+                );
+        } else {
+            let timestamp = chrono::Utc::now().timestamp();
+            mac.update(format!("{message_id}.{timestamp}.").as_bytes());
+            mac.update(&body);
+            request = request
+                .header("webhook-id", message_id)
+                .header("webhook-timestamp", timestamp.to_string())
+                .header(
+                    "webhook-signature",
+                    format!("v1,{}", STANDARD.encode(mac.finalize().into_bytes())),
+                );
+        }
+        let app = app.clone();
+        async move {
+            let response = app
+                .oneshot(request.body(Body::from(body)).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+                .await
+                .unwrap();
+            serde_json::from_slice::<Value>(&bytes).unwrap()
+        }
+    };
+
+    for (source_type, webhook_id) in webhooks {
+        let body = serde_json::to_vec(&json!({ "type": "deploy", "n": 1 })).unwrap();
+
+        let first = deliver(source_type, webhook_id, body.clone(), "msg_1").await;
+        assert_eq!(first["status"], "ok", "{source_type}");
+        assert_eq!(first["triggered_rules"], 1, "{source_type}");
+
+        let replay = deliver(source_type, webhook_id, body.clone(), "msg_1").await;
+        assert_eq!(replay["status"], "duplicate", "{source_type}");
+        assert_eq!(replay["triggered_rules"], 0, "{source_type}");
+
+        // A different delivery is a different event
+        let other = serde_json::to_vec(&json!({ "type": "deploy", "n": 2 })).unwrap();
+        let second = deliver(source_type, webhook_id, other, "msg_2").await;
+        assert_eq!(second["status"], "ok", "{source_type}");
+        assert_eq!(second["triggered_rules"], 1, "{source_type}");
+
+        // Once the record is older than the retention window the delivery counts again
+        sqlx::query("UPDATE webhook_deliveries SET received_at = NOW() - INTERVAL '25 hours' WHERE webhook_id = $1")
+            .bind(webhook_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let later = deliver(source_type, webhook_id, body, "msg_1").await;
+        assert_eq!(later["status"], "ok", "{source_type}");
+
+        let runs: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM workflow_runs WHERE workflow_name = $1")
+                .bind(format!("replay-workflow-{}", webhook_id))
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(runs, 3, "{source_type}: one run per distinct delivery");
+
+        sqlx::query("DELETE FROM workflow_runs WHERE workflow_name = $1")
+            .bind(format!("replay-workflow-{}", webhook_id))
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM webhooks WHERE id = $1")
+            .bind(webhook_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+}
