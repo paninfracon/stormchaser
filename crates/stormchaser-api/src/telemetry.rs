@@ -65,10 +65,9 @@ pub fn init_telemetry() -> anyhow::Result<()> {
     }
 
     // Initialize Subscriber
-    let env_filter =
-        tracing_subscriber::EnvFilter::new(var("RUST_LOG").unwrap_or_else(|_| {
-            "stormchaser_api=debug,tower_http=debug,axum::rejection=trace".into()
-        }));
+    let env_filter = tracing_subscriber::EnvFilter::new(
+        var("RUST_LOG").unwrap_or_else(|_| "stormchaser_api=info,tower_http=info".into()),
+    );
 
     let registry = tracing_subscriber::registry()
         .with(env_filter)

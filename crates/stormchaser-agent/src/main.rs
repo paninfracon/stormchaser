@@ -206,7 +206,8 @@ pub async fn run_agent(cli: Cli) -> Result<()> {
                 anyhow::bail!("No command provided to run");
             }
 
-            info!("Running user command: {:?}", command);
+            // Arguments are not logged: they may hold interpolated secrets
+            info!("Running user command: {}", command[0]);
             let mut child = Command::new(&command[0]).args(&command[1..]).spawn()?;
 
             let status = child.wait()?;

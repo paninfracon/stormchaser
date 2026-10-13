@@ -64,7 +64,7 @@ impl Config {
         let mut vault_addr = "http://localhost:8200".to_string();
         let mut vault_token = "root".to_string();
         let mut nats_url = "nats://localhost:4222".to_string();
-        let mut rust_log = "stormchaser_engine=debug".to_string();
+        let mut rust_log = "stormchaser_engine=info".to_string();
 
         for (k, v) in env {
             match k.as_ref() {

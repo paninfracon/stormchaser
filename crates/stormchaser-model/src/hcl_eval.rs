@@ -112,18 +112,11 @@ pub fn evaluate_string(s: &str, ctx: &HclContext) -> Result<Option<Value>> {
         .evaluate(ctx)
         .map_err(|e| anyhow::anyhow!("Failed to evaluate HCL template '{}': {:?}", s, e))?;
 
-    tracing::info!("evaluate_string template result: {:?} for s: {}", result, s);
-
+    // Results are not logged: they carry resolved secrets and inputs.
     let re = Regex::new(r"^\$\{([^}]+)\}$").unwrap();
     if let Some(caps) = re.captures(s) {
         let expr_str = caps.get(1).unwrap().as_str();
-        let eval_res = evaluate_raw_expr(expr_str, ctx)?;
-        tracing::info!(
-            "evaluate_string raw_expr result: {:?} for expr_str: {}",
-            eval_res,
-            expr_str
-        );
-        return Ok(Some(eval_res));
+        return Ok(Some(evaluate_raw_expr(expr_str, ctx)?));
     }
 
     Ok(Some(Value::String(result)))

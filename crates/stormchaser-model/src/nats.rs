@@ -88,7 +88,8 @@ pub fn validate_against_schema(data: &Value, schema: Option<&Schema>) -> Result<
 
     let errors: Vec<String> = compiled
         .iter_errors(data)
-        .map(|e| format!("{}", e))
+        // Masked: the default message quotes the offending value, which may be a secret
+        .map(|e| format!("{} at '{}'", e.masked(), e.instance_path()))
         .collect();
 
     if errors.is_empty() {

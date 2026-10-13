@@ -261,12 +261,13 @@ async fn run_event_loop(
                             continue;
                         }
 
-                        tracing::debug!("Received event on {}: {:?}", subject, message.payload);
+                        // Payloads carry step specs, outputs and secrets, so only their size is logged
+                        tracing::debug!("Received event on {} ({} bytes)", subject, message.payload.len());
 
                         let ce: cloudevents::Event = match serde_json::from_slice(&message.payload) {
                             Ok(e) => e,
                             Err(e) => {
-                                tracing::error!("Failed to parse CloudEvent from {}: {:?}. Payload: {:?}", subject, e, String::from_utf8_lossy(&message.payload));
+                                tracing::error!("Failed to parse CloudEvent from {} ({} bytes): {:?}", subject, message.payload.len(), e);
                                 let _ = message.ack().await;
                                 continue;
                             }
