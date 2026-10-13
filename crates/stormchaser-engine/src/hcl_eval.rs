@@ -47,6 +47,10 @@ fn secret_lookup(args: hcl::eval::FuncArgs) -> Result<HclValue, String> {
             }
         };
 
+        if let Err(e) = crate::secrets::ensure_secret_path_allowed(&path) {
+            return Err(e.to_string());
+        }
+
         let val = match handle.runtime_flavor() {
             tokio::runtime::RuntimeFlavor::MultiThread => tokio::task::block_in_place(move || {
                 handle.block_on(async move { backend.get_secret(&path, &key).await })
@@ -131,6 +135,11 @@ mod tests {
     fn test_secret_function() {
         let mut secrets = HashMap::new();
         secrets.insert("kv/db:password".to_string(), "secret-password".to_string());
+        secrets.insert(
+            "infra/root:token".to_string(),
+            "not-for-workflows".to_string(),
+        );
+        std::env::set_var(crate::secrets::VAULT_ALLOWED_PATHS_ENV, "kv/*");
         let backend = Arc::new(MockBackend::new(secrets)) as SharedSecretBackend;
         set_secrets_backend(backend);
 
@@ -150,6 +159,9 @@ mod tests {
         rt.block_on(async {
             let result = evaluate_raw_expr("secret(\"kv/db#password\")", &ctx).unwrap();
             assert_eq!(result, serde_json::json!("secret-password"));
+
+            // The backend holds it, but the operator has not listed the path
+            assert!(evaluate_raw_expr("secret(\"infra/root#token\")", &ctx).is_err());
         });
     }
 }

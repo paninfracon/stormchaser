@@ -32,8 +32,8 @@ pub struct Config {
     pub elasticsearch_index: Option<String>,
     /// The vault addr.
     pub vault_addr: String,
-    /// The vault token.
-    pub vault_token: String,
+    /// The Vault token. Without one, `secret()` lookups are refused.
+    pub vault_token: Option<String>,
     /// The nats url.
     pub nats_url: String,
     /// The rust log.
@@ -62,7 +62,7 @@ impl Config {
         let mut elasticsearch_url = None;
         let mut elasticsearch_index = None;
         let mut vault_addr = "http://localhost:8200".to_string();
-        let mut vault_token = "root".to_string();
+        let mut vault_token = None;
         let mut nats_url = "nats://localhost:4222".to_string();
         let mut rust_log = "stormchaser_engine=info".to_string();
 
@@ -87,7 +87,12 @@ impl Config {
                 "ELASTICSEARCH_URL" => elasticsearch_url = Some(v.as_ref().to_string()),
                 "ELASTICSEARCH_INDEX" => elasticsearch_index = Some(v.as_ref().to_string()),
                 "VAULT_ADDR" => vault_addr = v.as_ref().to_string(),
-                "VAULT_TOKEN" => vault_token = v.as_ref().to_string(),
+                "VAULT_TOKEN" => {
+                    let val = v.as_ref().to_string();
+                    if !val.is_empty() {
+                        vault_token = Some(val);
+                    }
+                }
                 "NATS_URL" => nats_url = v.as_ref().to_string(),
                 "RUST_LOG" => rust_log = v.as_ref().to_string(),
                 _ => {}
@@ -164,7 +169,8 @@ mod tests {
         assert_eq!(config.nats_url, "nats://localhost:4222");
         assert_eq!(config.loki_url.as_deref(), Some("http://loki:3100"));
         assert_eq!(config.vault_addr, "http://vault:8200");
-        assert_eq!(config.vault_token, "root");
+        // No built-in token: Vault is off until the operator supplies one
+        assert_eq!(config.vault_token, None);
         assert_eq!(
             config.tls_cert_path,
             PathBuf::from("/etc/engine/certs/tls.crt")

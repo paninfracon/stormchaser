@@ -333,11 +333,15 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
     let log_backend = setup_log_backend(&config);
 
     // Initialize Secret Backend
-    let secret_backend = Arc::new(VaultBackend::new(
-        config.vault_addr.clone(),
-        config.vault_token.clone(),
-    )?) as secrets::SharedSecretBackend;
-    hcl_eval::set_secrets_backend(secret_backend);
+    match &config.vault_token {
+        Some(token) => {
+            let secret_backend =
+                Arc::new(VaultBackend::new(config.vault_addr.clone(), token.clone())?)
+                    as secrets::SharedSecretBackend;
+            hcl_eval::set_secrets_backend(secret_backend);
+        }
+        None => tracing::info!("VAULT_TOKEN is not set; secret() lookups are disabled"),
+    }
 
     let nats_options = async_nats::ConnectOptions::new()
         .retry_on_initial_connect()

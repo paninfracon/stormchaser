@@ -3,6 +3,45 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// Comma-separated secret paths that workflows may read with `secret()`. A trailing `*`
+/// matches a prefix. Empty by default, which refuses every lookup.
+///
+/// The engine's Vault token usually reaches more than any one workflow author should:
+/// without a limit, whoever can write a workflow can read everything the token can.
+pub const VAULT_ALLOWED_PATHS_ENV: &str = "STORMCHASER_VAULT_ALLOWED_PATHS";
+
+fn path_is_allowed(allow_list: &str, path: &str) -> bool {
+    // A prefix entry must not be escaped with `..`, and Vault ignores empty segments
+    if path
+        .split('/')
+        .any(|segment| segment.is_empty() || segment == "." || segment == "..")
+    {
+        return false;
+    }
+    allow_list
+        .split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .any(|entry| match entry.strip_suffix('*') {
+            Some(prefix) => path.starts_with(prefix),
+            None => entry == path,
+        })
+}
+
+/// Refuses a secret path the operator has not allow-listed.
+pub fn ensure_secret_path_allowed(path: &str) -> Result<()> {
+    let allow_list = std::env::var(VAULT_ALLOWED_PATHS_ENV).unwrap_or_default();
+    if path_is_allowed(&allow_list, path) {
+        Ok(())
+    } else {
+        anyhow::bail!(
+            "Secret path {} is not in {}; the engine will not read it",
+            path,
+            VAULT_ALLOWED_PATHS_ENV
+        )
+    }
+}
+
 #[async_trait]
 /// Secretbackend.
 pub trait SecretBackend: Send + Sync {
@@ -83,3 +122,31 @@ impl SecretBackend for MockBackend {
 
 /// A thread-safe, shareable reference to a `SecretBackend` implementation.
 pub type SharedSecretBackend = Arc<dyn SecretBackend>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_empty_list_allows_no_path() {
+        assert!(!path_is_allowed("", "apps/db"));
+        assert!(!path_is_allowed(" , ", "apps/db"));
+    }
+
+    #[test]
+    fn paths_match_exactly_or_by_prefix() {
+        let list = "shared/smtp, apps/*";
+        assert!(path_is_allowed(list, "shared/smtp"));
+        assert!(path_is_allowed(list, "apps/db"));
+        assert!(!path_is_allowed(list, "shared/smtp-admin"));
+        assert!(!path_is_allowed(list, "infra/root"));
+    }
+
+    #[test]
+    fn a_prefix_cannot_be_escaped() {
+        let list = "apps/*";
+        assert!(!path_is_allowed(list, "apps/../infra/root"));
+        assert!(!path_is_allowed(list, "apps//infra"));
+        assert!(!path_is_allowed(list, "apps/./db"));
+    }
+}
