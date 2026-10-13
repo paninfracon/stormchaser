@@ -232,7 +232,7 @@ pub async fn get_workflow_run(
     Path(run_id): Path<RunId>,
 ) -> Result<impl IntoResponse, StatusCode> {
     // 1. Fetch the workflow run detail
-    let detail: WorkflowRunDetail = db::get_workflow_run_detail(&state.pool, run_id)
+    let mut detail: WorkflowRunDetail = db::get_workflow_run_detail(&state.pool, run_id)
         .await
         .map_err(|e| {
             tracing::error!(
@@ -243,6 +243,16 @@ pub async fn get_workflow_run(
             StatusCode::INTERNAL_SERVER_ERROR
         })?
         .ok_or(StatusCode::NOT_FOUND)?;
+
+    // The run's secrets are interpolated into step specs and can surface in outputs, errors
+    // and logs; they are scrubbed from everything returned below.
+    let redactor = crate::redact::RunRedactor::load(&state.pool, run_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to load redaction data for {}: {:?}", run_id, e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    detail.error = detail.error.map(|error| redactor.text(&error));
 
     // 2. Fetch all step instances for this run (active or archived)
     let instances = db::get_step_instances(&state.pool, run_id)
@@ -287,10 +297,13 @@ pub async fn get_workflow_run(
         }
 
         steps.push(StepDetail {
-            instance,
-            outputs,
+            instance: redactor.step_instance(instance),
+            outputs: outputs
+                .into_iter()
+                .map(|output| redactor.step_output(output))
+                .collect(),
             history,
-            logs,
+            logs: logs.iter().map(|line| redactor.text(line)).collect(),
         });
     }
 

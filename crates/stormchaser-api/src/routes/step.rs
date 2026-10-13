@@ -70,11 +70,15 @@ pub async fn stream_step_logs_api(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    let stream = tokio_stream::wrappers::ReceiverStream::new(rx).flat_map(|res| match res {
+    let redactor = crate::redact::RunRedactor::load(&state.pool, run_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx).flat_map(move |res| match res {
         Ok(log_line) => {
             let events: Vec<_> = log_line
                 .lines()
-                .map(|line| Ok(format_log_event(line)))
+                .map(|line| Ok(format_log_event(&redactor.text(line))))
                 .collect();
             tokio_stream::iter(events)
         }
@@ -133,7 +137,11 @@ pub async fn get_step_logs_api(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    Ok(Json(logs))
+    let redactor = crate::redact::RunRedactor::load(&state.pool, run_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(logs.iter().map(|line| redactor.text(line)).collect()))
 }
 
 /// Streams run logs.
@@ -163,6 +171,10 @@ pub async fn stream_run_logs_api(
         Some(backend) => backend.clone(),
         None => return Err(StatusCode::NOT_IMPLEMENTED),
     };
+
+    let redactor = crate::redact::RunRedactor::load(&state.pool, run_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let (tx, rx) = mpsc::channel(100);
 
@@ -256,11 +268,11 @@ pub async fn stream_run_logs_api(
         }
     });
 
-    let stream = tokio_stream::wrappers::ReceiverStream::new(rx).flat_map(|res| match res {
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx).flat_map(move |res| match res {
         Ok(log_line) => {
             let events: Vec<_> = log_line
                 .lines()
-                .map(|line| Ok(format_log_event(line)))
+                .map(|line| Ok(format_log_event(&redactor.text(line))))
                 .collect();
             tokio_stream::iter(events)
         }

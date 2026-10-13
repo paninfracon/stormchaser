@@ -139,6 +139,31 @@ async fn test_workflow_run_detail_query() {
         assert!(!body.contains("sops-plaintext"));
     }
 
+    // 5. The run's secrets are scrubbed from what GET /runs/{id} returns about its steps.
+    let redactor = stormchaser_api::redact::RunRedactor::load(&pool, run_id)
+        .await
+        .unwrap();
+    let mut spec = json!({
+        "env": [{ "name": "PGPASSWORD", "value": "hunter2" }],
+        "args": ["--key", "sops-plaintext", "--name", "val1"]
+    });
+    redactor.value(&mut spec);
+    let body = spec.to_string();
+    assert!(!body.contains("hunter2"));
+    assert!(!body.contains("sops-plaintext"));
+    assert!(body.contains("val1"));
+    assert_eq!(
+        redactor.text("auth failed for password hunter2"),
+        "auth failed for password ********"
+    );
+
+    // A run with no stored context has nothing to scrub.
+    let unknown =
+        stormchaser_api::redact::RunRedactor::load(&pool, stormchaser_model::RunId::new_v4())
+            .await
+            .unwrap();
+    assert_eq!(unknown.text("hunter2"), "hunter2");
+
     // Cleanup
     sqlx::query("DELETE FROM workflow_runs WHERE id = $1")
         .bind(run_id)

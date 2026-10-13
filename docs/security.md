@@ -151,6 +151,14 @@ are stored:
 The API masks these values in its responses (see the relevant endpoints), but
 that is independent of how they are stored.
 
+Run details get the same treatment. A run's decrypted secrets and its
+`secret = true` inputs are replaced with `********` wherever they appear in the
+step specs, parameters, outputs, errors and log lines the API returns, and an
+output marked sensitive is masked whole. This works by matching known values,
+so it does not catch a secret that a step transforms (for example
+base64-encodes) before printing it, a value fetched with `secret()` from
+Vault, or a value shorter than four characters.
+
 The PostgreSQL bundled with docker-compose and the umbrella Helm chart is for
 evaluation: it has no encryption at rest and, in the chart, connects with
 `sslmode=disable`. Do not store real credentials in it.

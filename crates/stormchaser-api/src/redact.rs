@@ -9,6 +9,7 @@ use serde_json::Value;
 use stormchaser_model::connections::Connection;
 use stormchaser_model::cron::CronWorkflow;
 use stormchaser_model::event_rules::WebhookConfig;
+use stormchaser_model::step::{StepInstance, StepOutput};
 
 /// Shown in place of a stored secret.
 pub const MASK: &str = "********";
@@ -120,6 +121,147 @@ pub fn cron_workflow(mut cron: CronWorkflow) -> CronWorkflow {
     cron
 }
 
+/// Secret values shorter than this are not scrubbed: replacing every `1` or `ok` in a
+/// response would wreck it without protecting anything.
+const MIN_SECRET_LEN: usize = 4;
+
+/// Scrubs one run's known secret values out of whatever the API returns about it.
+///
+/// A run's decrypted secrets and its `secret = true` inputs get interpolated into step
+/// specs and parameters, and can come back in outputs, errors and log lines. Run details
+/// are readable by more people than may read those secrets, so every occurrence is
+/// replaced with [`MASK`] on the way out.
+#[derive(Debug, Default, Clone)]
+pub struct RunRedactor {
+    /// Longest first, so a secret that contains another is masked whole.
+    needles: Vec<String>,
+}
+
+impl RunRedactor {
+    /// Builds a redactor from a run's stored context.
+    pub fn new(
+        sensitive_values: Vec<String>,
+        secrets: &Value,
+        inputs: &Value,
+        inputs_schema: Option<&Value>,
+    ) -> Self {
+        let mut needles: Vec<String> = sensitive_values;
+        collect_leaves(secrets, &mut needles);
+
+        if let (Some(inputs), Some(props)) = (
+            inputs.as_object(),
+            inputs_schema
+                .and_then(|schema| schema.get("properties"))
+                .and_then(Value::as_object),
+        ) {
+            for (name, prop) in props {
+                if prop.get("secret").and_then(Value::as_bool) == Some(true) {
+                    if let Some(value) = inputs.get(name) {
+                        collect_leaves(value, &mut needles);
+                    }
+                }
+            }
+        }
+
+        needles.retain(|needle| needle.len() >= MIN_SECRET_LEN && needle != MASK);
+        needles.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
+        needles.dedup();
+        Self { needles }
+    }
+
+    /// Loads the redactor for a run, live or archived. A run with no stored context
+    /// yields a redactor that changes nothing.
+    pub async fn load(
+        pool: &sqlx::PgPool,
+        run_id: stormchaser_model::RunId,
+    ) -> Result<Self, sqlx::Error> {
+        let row: Option<(Vec<String>, Value, Value, Option<Value>)> = sqlx::query_as(
+            r#"
+            SELECT sensitive_values, secrets, inputs, workflow_definition->'inputs_schema'
+            FROM run_contexts WHERE run_id = $1
+            UNION ALL
+            SELECT sensitive_values, secrets, inputs, workflow_definition->'inputs_schema'
+            FROM archived_run_contexts WHERE run_id = $1
+            LIMIT 1
+            "#,
+        )
+        .bind(run_id)
+        .fetch_optional(pool)
+        .await?;
+
+        Ok(match row {
+            Some((sensitive_values, secrets, inputs, schema)) => {
+                Self::new(sensitive_values, &secrets, &inputs, schema.as_ref())
+            }
+            None => Self::default(),
+        })
+    }
+
+    /// Replaces every known secret in `text`.
+    pub fn text(&self, text: &str) -> String {
+        let mut out = text.to_string();
+        for needle in &self.needles {
+            if out.contains(needle.as_str()) {
+                out = out.replace(needle.as_str(), MASK);
+            }
+        }
+        out
+    }
+
+    /// Replaces every known secret in the strings and keys of a JSON value.
+    pub fn value(&self, value: &mut Value) {
+        if self.needles.is_empty() {
+            return;
+        }
+        match value {
+            Value::String(s) => *s = self.text(s),
+            Value::Number(n) => {
+                if self.needles.contains(&n.to_string()) {
+                    *value = Value::String(MASK.to_string());
+                }
+            }
+            Value::Array(items) => items.iter_mut().for_each(|item| self.value(item)),
+            Value::Object(map) => {
+                let entries = std::mem::take(map);
+                for (key, mut item) in entries {
+                    self.value(&mut item);
+                    map.insert(self.text(&key), item);
+                }
+            }
+            Value::Null | Value::Bool(_) => {}
+        }
+    }
+
+    /// Scrubs a step's spec, parameters and error message.
+    pub fn step_instance(&self, mut instance: StepInstance) -> StepInstance {
+        self.value(&mut instance.spec);
+        self.value(&mut instance.params);
+        instance.error = instance.error.map(|error| self.text(&error));
+        instance
+    }
+
+    /// Masks an output marked sensitive outright, and scrubs known secrets from the rest.
+    pub fn step_output(&self, mut output: StepOutput) -> StepOutput {
+        if output.is_sensitive {
+            output.value = Value::String(MASK.to_string());
+        } else {
+            self.value(&mut output.value);
+        }
+        output
+    }
+}
+
+/// Collects every string and number in a JSON value as text.
+fn collect_leaves(value: &Value, out: &mut Vec<String>) {
+    match value {
+        Value::String(s) => out.push(s.clone()),
+        Value::Number(n) => out.push(n.to_string()),
+        Value::Array(items) => items.iter().for_each(|item| collect_leaves(item, out)),
+        Value::Object(map) => map.values().for_each(|item| collect_leaves(item, out)),
+        Value::Null | Value::Bool(_) => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,5 +317,71 @@ mod tests {
         assert_eq!(edited["secret_key"], "s3-secret");
         assert_eq!(edited["url"], "postgres://app:db-pass@db.internal:5432/app");
         assert_eq!(edited["headers"]["Authorization"], "Bearer new");
+    }
+    fn run_redactor() -> RunRedactor {
+        RunRedactor::new(
+            vec!["sops-value-1".to_string()],
+            &serde_json::json!({"db": {"password": "hunter2hunter2", "port": 5432}, "pin": "12"}),
+            &serde_json::json!({"api_token": "tok_live_abcdef", "region": "eu-west-1"}),
+            Some(&serde_json::json!({"properties": {
+                "api_token": {"type": "string", "secret": true},
+                "region": {"type": "string"}
+            }})),
+        )
+    }
+
+    #[test]
+    fn run_secrets_are_scrubbed_from_text_and_json() {
+        let redactor = run_redactor();
+        assert_eq!(
+            redactor.text("curl -H 'Authorization: Bearer tok_live_abcdef' in eu-west-1"),
+            format!("curl -H 'Authorization: Bearer {MASK}' in eu-west-1")
+        );
+
+        let mut spec = serde_json::json!({
+            "env": [{"name": "PGPASSWORD", "value": "hunter2hunter2"}],
+            "args": ["--token=tok_live_abcdef", "--sops", "sops-value-1"],
+            "port": 5432,
+            "region": "eu-west-1",
+        });
+        redactor.value(&mut spec);
+        assert_eq!(spec["env"][0]["value"], MASK);
+        assert_eq!(spec["args"][0], format!("--token={MASK}"));
+        assert_eq!(spec["args"][2], MASK);
+        assert_eq!(spec["port"], MASK);
+        assert_eq!(spec["region"], "eu-west-1");
+    }
+
+    #[test]
+    fn short_values_and_ordinary_inputs_are_left_alone() {
+        let redactor = run_redactor();
+        // "12" is a secret but too short to scrub safely; region is not a secret input.
+        assert_eq!(
+            redactor.text("step 12 of 120 in eu-west-1"),
+            "step 12 of 120 in eu-west-1"
+        );
+    }
+
+    #[test]
+    fn a_secret_containing_another_is_masked_whole() {
+        let redactor = RunRedactor::new(
+            vec!["abcd".to_string(), "abcd-efgh-ijkl".to_string()],
+            &Value::Null,
+            &Value::Null,
+            None,
+        );
+        assert_eq!(redactor.text("key=abcd-efgh-ijkl"), format!("key={MASK}"));
+    }
+
+    #[test]
+    fn sensitive_outputs_are_masked_outright() {
+        let redactor = RunRedactor::default();
+        let output = redactor.step_output(StepOutput {
+            step_instance_id: stormchaser_model::StepInstanceId::new_v4(),
+            key: "session".to_string(),
+            value: serde_json::json!({"token": "never-seen-before"}),
+            is_sensitive: true,
+        });
+        assert_eq!(output.value, MASK);
     }
 }
