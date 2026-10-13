@@ -101,13 +101,13 @@ async fn execute_api_query(params: &HashMap<String, String>) -> Result<Vec<Value
         .map(|s| s.to_uppercase())
         .unwrap_or_else(|| "GET".to_string());
 
-    let client = reqwest::Client::new();
+    let (client, url) = stormchaser_model::net_guard::guarded_client(&url).await?;
     let mut req = match method_str.as_str() {
-        "POST" => client.post(&url),
-        "PUT" => client.put(&url),
-        "PATCH" => client.patch(&url),
-        "DELETE" => client.delete(&url),
-        _ => client.get(&url),
+        "POST" => client.post(url),
+        "PUT" => client.put(url),
+        "PATCH" => client.patch(url),
+        "DELETE" => client.delete(url),
+        _ => client.get(url),
     };
 
     if let Some(body) = params.get("body") {
@@ -121,12 +121,13 @@ async fn execute_api_query(params: &HashMap<String, String>) -> Result<Vec<Value
         }
     }
 
-    let response = req
-        .send()
-        .await?
-        .error_for_status()?
-        .json::<Value>()
-        .await?;
+    let res = req.send().await?.error_for_status()?;
+    let body = stormchaser_model::net_guard::read_body_capped(
+        res,
+        stormchaser_model::net_guard::MAX_RESPONSE_BYTES,
+    )
+    .await?;
+    let response: Value = serde_json::from_slice(&body)?;
 
     if let Some(jq_filter_str) = params.get("jq_filter") {
         apply_jq_filter(jq_filter_str, response)
@@ -309,6 +310,11 @@ mod tests {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    /// The mock servers listen on loopback, which the SSRF guard blocks by default.
+    fn allow_loopback() {
+        std::env::set_var(stormchaser_model::net_guard::ALLOWED_HOSTS_ENV, "127.0.0.1");
+    }
+
     #[tokio::test]
     async fn test_execute_query_mock() {
         let mut params = HashMap::new();
@@ -320,6 +326,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_query_api() {
+        allow_loopback();
         let mock_server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/api/options"))
@@ -340,6 +347,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_query_api_with_jq_filter() {
+        allow_loopback();
         let mock_server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/api/complex"))
@@ -373,6 +381,7 @@ mod tests {
     #[tokio::test]
     async fn test_execute_query_api_post() {
         use wiremock::matchers::{body_json, header};
+        allow_loopback();
         let mock_server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/api/complex"))
@@ -430,5 +439,17 @@ mod tests {
         )
         .unwrap();
         assert_eq!(res, vec![serde_json::json!(2)]);
+    }
+
+    #[tokio::test]
+    async fn test_execute_query_api_refuses_internal_addresses() {
+        let mut params = HashMap::new();
+        params.insert(
+            "url".to_string(),
+            "http://169.254.169.254/latest/meta-data/".to_string(),
+        );
+
+        let err = execute_query("api", &params, None, None).await.unwrap_err();
+        assert!(err.to_string().contains("restricted address"));
     }
 }

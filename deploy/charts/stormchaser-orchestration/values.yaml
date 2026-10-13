@@ -12,6 +12,11 @@ global:
     ssl: true
   nats:
     url: "nats://nats:4222"
+  # Internal hosts that workflow-driven HTTP requests (RestApi, WebhookInvoke, api
+  # queries, Slack/Teams, WASM downloads) may reach. Requests to private, loopback,
+  # link-local and metadata addresses are refused unless the host is listed here.
+  # Entries are hostnames, IP literals, or "*.suffix".
+  ssrfAllowedHosts: []
   loki:
     url: "http://loki:3100"
   grafana:

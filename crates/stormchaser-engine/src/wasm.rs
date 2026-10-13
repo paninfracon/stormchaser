@@ -2,6 +2,9 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 use wasmtime::*;
 
+/// Largest WASM module the engine will download.
+const MAX_WASM_MODULE_BYTES: usize = 64 * 1024 * 1024;
+
 /// Utility for executing WebAssembly (WASM) modules using Wasmtime.
 pub struct WasmExecutor {
     engine: Engine,
@@ -32,13 +35,17 @@ impl WasmExecutor {
         let module_bytes = if module_path.starts_with("http://")
             || module_path.starts_with("https://")
         {
-            reqwest::get(module_path)
+            let (client, url) = stormchaser_model::net_guard::guarded_client(module_path).await?;
+            let res = client
+                .get(url)
+                .send()
                 .await
                 .with_context(|| format!("Failed to fetch WASM module from {}", module_path))?
-                .bytes()
+                .error_for_status()
+                .with_context(|| format!("Failed to fetch WASM module from {}", module_path))?;
+            stormchaser_model::net_guard::read_body_capped(res, MAX_WASM_MODULE_BYTES)
                 .await
                 .with_context(|| format!("Failed to read bytes from {}", module_path))?
-                .to_vec()
         } else if let Some(base64_data) = module_path.strip_prefix("base64://") {
             use base64::{engine::general_purpose, Engine as _};
             general_purpose::STANDARD

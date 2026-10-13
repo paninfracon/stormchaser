@@ -41,6 +41,8 @@ spec:
               value: {{ .Values.global.database.ssl | quote }}
             - name: NATS_URL
               value: {{ .Values.global.nats.url | quote }}
+            - name: STORMCHASER_SSRF_ALLOWED_HOSTS
+              value: {{ join "," .Values.global.ssrfAllowedHosts | quote }}
             - name: RUST_LOG
               value: {{ .Values.api.rustLog | quote }}
             - name: OIDC_ISSUER

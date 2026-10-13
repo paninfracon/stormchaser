@@ -29,6 +29,8 @@ pub mod hcl_eval;
 pub mod logging;
 /// NATS helpers.
 pub mod nats;
+/// SSRF protection for outbound HTTP requests.
+pub mod net_guard;
 /// Outbox pattern models for reliable message publishing.
 pub mod outbox;
 /// Execution runner definitions and status models.

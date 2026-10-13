@@ -328,10 +328,10 @@ async fn execute_request(
     _pool: PgPool,
     nats_client: async_nats::Client,
 ) -> Result<()> {
-    let client = reqwest::Client::new();
+    let (client, url) = stormchaser_model::net_guard::guarded_client(&spec.url).await?;
     let method = build_request_method(spec);
 
-    let mut builder = client.request(method, &spec.url);
+    let mut builder = client.request(method, url);
 
     if let Some(headers) = &spec.headers {
         for (k, v) in headers {
@@ -351,7 +351,11 @@ async fn execute_request(
 
     let res = builder.timeout(timeout).send().await?;
     let status = res.status();
-    let body_bytes = res.bytes().await?;
+    let body_bytes = stormchaser_model::net_guard::read_body_capped(
+        res,
+        stormchaser_model::net_guard::MAX_RESPONSE_BYTES,
+    )
+    .await?;
 
     match parse_response(
         status.is_success(),

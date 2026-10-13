@@ -111,7 +111,28 @@ When using the **Docker Runner** with the `STORMCHASER_SFS_HOST_PATH` optimizati
 * **Path Traversal:** The runner sanitizes `provision` destination paths to prevent traversal attacks (`../`) that might attempt to write outside the run's isolated subdirectory.
 * **Data Remnants:** Host bind mounts are not automatically garbage collected by the runner. System administrators must ensure secure, automated cleanup (e.g., via cron) to prevent sensitive workflow data from accumulating on the host disk.
 
-## 7. MCP Server Security
+## 7. Outbound Request Protection (SSRF)
+
+Workflow authors choose the URLs that `RestApi` and `WebhookInvoke` steps, `api`
+queries, Slack and Teams notifications and WASM module downloads connect to, and
+they can read the responses. To stop a workflow from reaching the control plane
+or a cloud metadata endpoint, the engine, API and query service refuse any such
+URL that:
+
+* uses a scheme other than `http` or `https`, or
+* resolves to a loopback, private, link-local, carrier-grade NAT, reserved or
+  multicast address (including IPv6 forms that embed one of those).
+
+The connection is pinned to the addresses that were checked, and redirects are
+not followed, so a `30x` response is returned to the workflow as-is.
+
+Operators can permit specific internal hosts with
+`STORMCHASER_SSRF_ALLOWED_HOSTS` (Helm: `global.ssrfAllowedHosts`), a
+comma-separated list of hostnames, IP literals or `*.suffix` patterns, for
+example `vault.internal,*.svc.cluster.local`. The list is empty by default.
+Response bodies are limited to 10 MiB (64 MiB for WASM modules).
+
+## 8. MCP Server Security
 
 The Model Context Protocol (MCP) server, which exposes the OpenAPI specification as tools for AI agents, is integrated with the same OPA enforcement as the rest of the system:
 
