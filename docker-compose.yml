@@ -151,6 +151,9 @@ services:
       NATS_URL: nats://nats:4222
       NATS_USER: stormchaser
       NATS_PASSWORD: '${STORMCHASER_NATS_PASSWORD?Error: STORMCHASER_NATS_PASSWORD is not set}'
+      # Seals the approve and reject links in approval emails. Leave unset to send
+      # no links; set the same 32+ character value on the engine and the API.
+      STORMCHASER_APPROVAL_LINK_KEY: '${STORMCHASER_APPROVAL_LINK_KEY:-}'
       RUST_LOG: stormchaser_engine=debug
       GIT_CACHE_DIR: /tmp/stormchaser/git-cache
       LOKI_URL: http://loki:3100
@@ -225,6 +228,9 @@ services:
       NATS_URL: nats://nats:4222
       NATS_USER: stormchaser
       NATS_PASSWORD: '${STORMCHASER_NATS_PASSWORD?Error: STORMCHASER_NATS_PASSWORD is not set}'
+      # Seals the approve and reject links in approval emails. Leave unset to send
+      # no links; set the same 32+ character value on the engine and the API.
+      STORMCHASER_APPROVAL_LINK_KEY: '${STORMCHASER_APPROVAL_LINK_KEY:-}'
       RUST_LOG: stormchaser_api=debug
       OIDC_ISSUER: http://dex:5556/dex
       OIDC_EXTERNAL_ISSUER: http://localhost:${PORT_DEX:-5556}/dex

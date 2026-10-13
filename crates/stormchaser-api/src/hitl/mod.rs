@@ -31,7 +31,7 @@ use stormchaser_model::auth::OpaSubject;
 use stormchaser_model::dsl::{Step, Workflow};
 use stormchaser_model::nats::{publish_cloudevent, NatsSubject};
 
-async fn check_approval_opa(
+pub(super) async fn check_approval_opa(
     state: &AppState,
     run_id: RunId,
     step_name: &str,

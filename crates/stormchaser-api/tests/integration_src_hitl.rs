@@ -11,27 +11,30 @@ use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
 use uuid::Uuid;
 
-use aes_gcm::{
-    aead::{Aead, KeyInit},
-    Aes256Gcm, Nonce,
-};
 use axum::extract::{Path, State};
 use axum::Json;
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use reqwest::StatusCode;
-use sha2::{Digest, Sha256};
 use stormchaser_api::auth::AuthClaims;
 use stormchaser_api::hitl::*;
 use stormchaser_api::AppState;
-use stormchaser_api::JWT_SECRET;
+use stormchaser_engine::hitl::{seal_approval_link, ApprovalLink};
 
-#[derive(serde::Deserialize, serde::Serialize)]
-struct ApprovalLinkPayload {
-    run_id: stormchaser_model::RunId,
-    step_id: stormchaser_model::StepInstanceId,
-    action: String,
-    #[serde(default)]
-    inputs: Value,
+/// The key these tests seal links with; handlers are given it directly.
+const LINK_KEY: &str = "test-only-approval-link-key-aaaaaa";
+
+fn link(run_id: RunId, step_id: StepInstanceId, action: &str, inputs: Value) -> ApprovalLink {
+    ApprovalLink {
+        run_id,
+        step_id,
+        action: action.into(),
+        inputs,
+        exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp(),
+        approvers: vec!["lead@paninfracon.net".into()],
+    }
+}
+
+fn encrypt_token(link: &ApprovalLink) -> String {
+    seal_approval_link(link, LINK_KEY).unwrap()
 }
 
 async fn mock_state() -> AppState {
@@ -64,42 +67,80 @@ async fn mock_state() -> AppState {
     }
 }
 
-fn encrypt_token(payload: &ApprovalLinkPayload) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(JWT_SECRET);
-    let key_bytes = hasher.finalize();
-    let cipher = Aes256Gcm::new(&key_bytes);
-
-    let nonce_bytes = [0u8; 12]; // Fixed nonce for tests is fine
-    let nonce = Nonce::from(nonce_bytes);
-
-    let plaintext = serde_json::to_vec(payload).unwrap();
-    let ciphertext = cipher.encrypt(&nonce, plaintext.as_ref()).unwrap();
-
-    let mut combined = nonce_bytes.to_vec();
-    combined.extend_from_slice(&ciphertext);
-    URL_SAFE_NO_PAD.encode(combined)
-}
-
 #[tokio::test]
 async fn test_approve_step_link_invalid_token() {
     let state = mock_state().await;
-    let response = approve_step_link(State(state), Path("invalid-token".into())).await;
-    assert_eq!(response.into_response().status(), StatusCode::BAD_REQUEST);
+    let response = use_approval_link(&state, "invalid-token", Some(LINK_KEY)).await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
 async fn test_approve_step_not_found() {
     let state = mock_state().await;
-    let payload = ApprovalLinkPayload {
-        run_id: RunId::new_v4(),
-        step_id: StepInstanceId::new_v4(),
-        action: "approve".into(),
-        inputs: json!({}),
-    };
-    let token = encrypt_token(&payload);
-    let response = approve_step_link(State(state), Path(token)).await;
-    assert_eq!(response.into_response().status(), StatusCode::NOT_FOUND);
+    let token = encrypt_token(&link(
+        RunId::new_v4(),
+        StepInstanceId::new_v4(),
+        "approve",
+        json!({}),
+    ));
+    let response = use_approval_link(&state, &token, Some(LINK_KEY)).await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn approval_links_do_nothing_without_a_configured_key() {
+    let state = mock_state().await;
+    let token = encrypt_token(&link(
+        RunId::new_v4(),
+        StepInstanceId::new_v4(),
+        "approve",
+        json!({}),
+    ));
+    assert_eq!(
+        use_approval_link(&state, &token, None).await.status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        approval_link_page(&state, &token, None).await.status(),
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn an_expired_or_foreign_link_is_refused() {
+    let state = mock_state().await;
+    let mut expired = link(
+        RunId::new_v4(),
+        StepInstanceId::new_v4(),
+        "approve",
+        json!({}),
+    );
+    expired.exp = (chrono::Utc::now() - chrono::Duration::minutes(1)).timestamp();
+    let token = encrypt_token(&expired);
+    assert_eq!(
+        use_approval_link(&state, &token, Some(LINK_KEY))
+            .await
+            .status(),
+        StatusCode::GONE
+    );
+
+    // Sealed with some other key, such as the JWT secret links used to share
+    let foreign = seal_approval_link(
+        &link(
+            RunId::new_v4(),
+            StepInstanceId::new_v4(),
+            "approve",
+            json!({}),
+        ),
+        "another-key-another-key-another-key",
+    )
+    .unwrap();
+    assert_eq!(
+        use_approval_link(&state, &foreign, Some(LINK_KEY))
+            .await
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
 }
 
 #[tokio::test]
@@ -136,16 +177,47 @@ async fn test_approve_step_link_success() {
         .await
         .unwrap();
 
-    let payload = ApprovalLinkPayload {
+    let token = encrypt_token(&link(
         run_id,
         step_id,
-        action: "approve".into(),
-        inputs: json!({"decision": "yes"}),
-    };
-    let token = encrypt_token(&payload);
+        "approve",
+        json!({"decision": "yes"}),
+    ));
 
-    let response = approve_step_link(State(state), Path(token)).await;
-    assert_eq!(response.into_response().status(), StatusCode::OK);
+    // Opening the link only shows a confirmation page; the step is still waiting
+    let page = approval_link_page(&state, &token, Some(LINK_KEY)).await;
+    assert_eq!(page.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(page.into_body(), 64 * 1024)
+        .await
+        .unwrap();
+    let body = String::from_utf8_lossy(&body);
+    assert!(body.contains("approval-step") && body.contains("method=\"post\""));
+    assert!(!body.contains(&token), "the page must not repeat the token");
+    let status: String =
+        sqlx::query_scalar("SELECT status::text FROM step_instances WHERE id = $1")
+            .bind(step_id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+    assert_eq!(status, "waiting_for_event");
+    let decisions: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM approval_registry WHERE step_instance_id = $1")
+            .bind(step_id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+    assert_eq!(decisions, 0);
+
+    // Submitting it records the decision, against whoever the link was sent to
+    let response = use_approval_link(&state, &token, Some(LINK_KEY)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let recorded: String =
+        sqlx::query_scalar("SELECT user_id FROM approval_registry WHERE step_instance_id = $1")
+            .bind(step_id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+    assert_eq!(recorded, "link:lead@paninfracon.net");
 }
 
 #[tokio::test]

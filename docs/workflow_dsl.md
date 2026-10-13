@@ -614,7 +614,10 @@ step "manual_approval" "Approval" {
             from = "ops@paninfracon.net"
             to   = ["admin@paninfracon.net"]
             subject = "Approval required for run ${run.id}"
-            // The body can use 'approve_link' and 'reject_link' variables
+            // The body can use 'approve_link' and 'reject_link' variables. They are
+            // empty unless the operator has set STORMCHASER_APPROVAL_LINK_KEY. A link
+            // opens a confirmation page, expires (72 hours by default), and records
+            // the decision against the addresses in 'to'.
             body = <<-EOT
                 Hello,
 

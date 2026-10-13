@@ -105,6 +105,7 @@ pub use routes::*;
         routes::step::stream_run_logs_api,
         routes::step::stream_run_status_api,
         routes::schema::get_schema,
+        hitl::approve_step_link_page,
         hitl::approve_step_link
     ),
     components(
@@ -171,6 +172,17 @@ pub struct AppState {
     pub api_base_url: String,
     /// Additional `Host` header values the MCP server accepts
     pub mcp_allowed_hosts: Vec<String>,
+}
+
+/// A request URI as it may be written to logs and traces.
+///
+/// An approval link's token is a credential that sits in the path, so it is left out.
+pub fn loggable_uri(uri: &axum::http::Uri) -> String {
+    const LINK_PREFIX: &str = "/api/v1/approve-link/";
+    match uri.path().strip_prefix(LINK_PREFIX) {
+        Some(token) if !token.is_empty() => format!("{}[redacted]", LINK_PREFIX),
+        _ => uri.to_string(),
+    }
 }
 
 /// Constructs the Axum application router with all routes and middleware
@@ -282,7 +294,10 @@ pub fn app(state: AppState) -> Router {
         .route("/auth/login", get(login))
         .route("/auth/exchange", post(exchange_token))
         .route("/auth/refresh", post(refresh_token))
-        .route("/approve-link/{token}", get(hitl::approve_step_link))
+        .route(
+            "/approve-link/{token}",
+            get(hitl::approve_step_link_page).post(hitl::approve_step_link),
+        )
         .route(
             "/cron-trigger/{id}",
             post(routes::cron::trigger_cron_workflow),
@@ -318,7 +333,7 @@ pub fn app(state: AppState) -> Router {
         .layer(
             TraceLayer::new_for_http().make_span_with(|request: &axum::extract::Request| {
                 let method = request.method();
-                let uri = request.uri();
+                let uri = loggable_uri(request.uri());
                 tracing::info_span!(
                     "HTTP request",
                     method = %method,
@@ -330,4 +345,20 @@ pub fn app(state: AppState) -> Router {
             }),
         )
         .with_state(state)
+}
+
+#[cfg(test)]
+mod loggable_uri_tests {
+    use super::loggable_uri;
+
+    #[test]
+    fn approval_link_tokens_are_left_out_of_logged_uris() {
+        let uri: axum::http::Uri = "/api/v1/approve-link/c2VjcmV0LXRva2Vu".parse().unwrap();
+        let logged = loggable_uri(&uri);
+        assert_eq!(logged, "/api/v1/approve-link/[redacted]");
+        assert!(!logged.contains("c2VjcmV0"));
+
+        let other: axum::http::Uri = "/api/v1/runs?limit=5".parse().unwrap();
+        assert_eq!(loggable_uri(&other), "/api/v1/runs?limit=5");
+    }
 }

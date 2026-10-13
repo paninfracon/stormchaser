@@ -210,7 +210,7 @@ mod tests {
     #[tokio::test]
     async fn test_runs_approve_link() {
         let server = MockServer::start().await;
-        Mock::given(method("GET"))
+        Mock::given(method("POST"))
             .and(path("/api/v1/approve-link/my-secret-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "approved"})))
             .mount(&server)

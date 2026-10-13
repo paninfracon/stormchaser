@@ -53,6 +53,13 @@ spec:
                   name: {{ . }}
                   key: password
             {{- end }}
+            {{- with .Values.global.approvalLinks.existingSecret }}
+            - name: STORMCHASER_APPROVAL_LINK_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: {{ $.Values.global.approvalLinks.existingSecretKey }}
+            {{- end }}
             - name: STORMCHASER_SSRF_ALLOWED_HOSTS
               value: {{ join "," .Values.global.ssrfAllowedHosts | quote }}
             - name: RUST_LOG

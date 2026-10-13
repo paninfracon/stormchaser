@@ -82,6 +82,18 @@ For every request whose path names a run, connection, webhook, event rule or cro
 
 When a user approves or rejects a step, policy is asked with `run_id`, `initiating_user`, `step_ast`, `inputs`, `run_outputs`, the `approver` (`{ "sub", "email" }`, as verified) and the raw `token`.
 
+### Approval links
+
+An approval email can carry links that approve or reject the step without logging in. A link is a credential for one decision on one step, so:
+
+* Links are sealed with a key of their own, `STORMCHASER_APPROVAL_LINK_KEY` (at least 32 characters; Helm: `global.approvalLinks.existingSecret`), set to the same value on the engine and the API. There is no default: without it the engine sends emails with no links and the API refuses every link.
+* A link expires after `STORMCHASER_APPROVAL_LINK_TTL_HOURS` (default 72).
+* Opening a link (GET) only shows a confirmation page. The decision is recorded when that page's form is submitted (POST), so mail scanners and link previews cannot approve anything by fetching the URL.
+* The decision is recorded against the addresses the email was sent to. When that is one address, it is the `approver` in the approval policy question, so separation of duties applies; an email sent to several people carries one shared link and no single approver.
+* The link's token is left out of the API's request logs and traces.
+
+Anyone who obtains a link before it expires can use it. Send approval emails to individuals, keep the lifetime short, and prefer the UI or CLI where the approver's identity matters.
+
 ## 3. Transport Security (mTLS)
 
 Stormchaser supports **mutual TLS (mTLS)** for all server-to-server communications. This ensures that only authorized components (Engine, API, Runners, NATS, Postgres) can communicate with each other, and that all data in transit is encrypted.
@@ -121,6 +133,8 @@ Stormchaser follows a strict **Fail-Closed** security philosophy regarding OPA:
 | `NATS_CREDS_FILE`, `NATS_USER` / `NATS_PASSWORD`, `NATS_TOKEN` | NATS credentials (see [nats.md](nats.md)). | **Who may schedule and report on steps.** |
 | `NATS_CA_FILE`, `NATS_TLS_REQUIRED` | Verify the NATS server and refuse plaintext. | Protects credentials and events in transit. |
 | `OPA_URL` | URL of the remote OPA server. | **Enables Authorization Enforcement.** |
+| `STORMCHASER_APPROVAL_LINK_KEY` | Engine and API: key that seals approve and reject links in approval emails (32+ characters, same on both). Unset by default. | Whoever has it can forge approvals. Links are disabled without it. |
+| `STORMCHASER_APPROVAL_LINK_TTL_HOURS` | Engine: lifetime of an approval link. Default `72`. | Bounds how long a leaked link is usable. |
 | `STORMCHASER_OCI_ALLOW_STATIC_CREDENTIALS` | Engine: send an OCI artifact backend's stored credentials to runner helpers when its registry cannot issue scoped tokens. Default `false`. | Long-lived registry credentials leave the engine. |
 | `STORMCHASER_NATS_STREAM_MAX_AGE_HOURS` | Engine and runners: maximum age of messages in the NATS stream. Default `168`. | Bounds how long any message stays readable. |
 | `JWT_SECRET` | Secret key for signing/verifying JWTs. | **Must be kept highly secure.** |
