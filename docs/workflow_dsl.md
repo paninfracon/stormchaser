@@ -693,6 +693,8 @@ If not provided in the `spec`, the engine will look for the following environmen
 * `SMTP_USERNAME`
 * `SMTP_PASSWORD`
 
+`SMTP_USERNAME` and `SMTP_PASSWORD` are only used with the server and port the engine is configured with. A step that sets `smtp_server` or `smtp_port` to anything else must supply its own `smtp_username` and `smtp_password`; otherwise the message is sent without authentication.
+
 ---
 
 ### 5. Expressions (HCL)

@@ -16,8 +16,8 @@ The `spec` block for `EmailSend` supports the following fields:
 * `backend` (string, optional): The email delivery backend to use: `smtp` (default) or `ses`.
 * `smtp_server` (string, optional): SMTP server address. Defaults to `SMTP_SERVER` env var.
 * `smtp_port` (integer, optional): SMTP server port. Defaults to `SMTP_PORT` env var.
-* `smtp_username` (string, optional): SMTP authentication username.
-* `smtp_password` (string, optional): SMTP authentication password.
+* `smtp_username` (string, optional): SMTP authentication username. Defaults to `SMTP_USERNAME`, but only when the step uses the engine's own `SMTP_SERVER` and `SMTP_PORT`.
+* `smtp_password` (string, optional): SMTP authentication password. Defaults to `SMTP_PASSWORD` under the same condition; a step that names another server must supply its own credentials.
 * `smtp_use_tls` (boolean, optional): Whether to use TLS for SMTP. Defaults to `SMTP_USE_TLS` env var.
 * `smtp_use_mtls` (boolean, optional): Whether to use mutual TLS (mTLS) for SMTP. Defaults to `SMTP_USE_MTLS` env var.
 * `ses_region` (string, optional): AWS region for SES.

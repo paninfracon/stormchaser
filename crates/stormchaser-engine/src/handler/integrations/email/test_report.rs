@@ -1,7 +1,6 @@
 use anyhow::Result;
 use serde_json::Value;
 use sqlx::PgPool;
-use std::env::var;
 use std::sync::Arc;
 use stormchaser_tls::TlsReloader;
 
@@ -253,32 +252,17 @@ async fn send_test_report_via_smtp(
 
     let message = builder.body(rendered_body)?;
 
-    let smtp_params = smtp::SmtpParams {
-        server: spec
-            .smtp_server
-            .clone()
-            .unwrap_or_else(|| var("SMTP_SERVER").unwrap_or_else(|_| "localhost".to_string())),
-        port: spec.smtp_port.unwrap_or_else(|| {
-            var("SMTP_PORT")
-                .ok()
-                .and_then(|p| p.parse().ok())
-                .unwrap_or(25)
-        }),
-        username: spec
-            .smtp_username
-            .clone()
-            .or_else(|| var("SMTP_USERNAME").ok()),
-        password: spec
-            .smtp_password
-            .clone()
-            .or_else(|| var("SMTP_PASSWORD").ok()),
-        use_tls: spec
-            .smtp_use_tls
-            .unwrap_or_else(|| var("SMTP_USE_TLS").unwrap_or_default() == "true"),
-        use_mtls: spec
-            .smtp_use_mtls
-            .unwrap_or_else(|| var("SMTP_USE_MTLS").unwrap_or_default() == "true"),
-    };
+    let smtp_params = smtp::resolve_smtp_params(
+        smtp::SmtpOverrides {
+            server: spec.smtp_server.clone(),
+            port: spec.smtp_port,
+            username: spec.smtp_username.clone(),
+            password: spec.smtp_password.clone(),
+            use_tls: spec.smtp_use_tls,
+            use_mtls: spec.smtp_use_mtls,
+        },
+        smtp::EngineSmtp::from_env(),
+    );
 
     let mailer = smtp::build_smtp_transport(smtp_params)?;
     match mailer.send(&message) {

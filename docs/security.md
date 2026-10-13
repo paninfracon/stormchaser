@@ -216,6 +216,9 @@ someone else. The engine only sends those to the server they were issued for:
 * **`http_api` connections.** A `RestApi` step that names a connection gets the
   connection's headers and token only when the request goes to the scheme, host
   and port of the connection's `base_url`. Any other URL fails the step.
+* **Engine SMTP login.** `SMTP_USERNAME` and `SMTP_PASSWORD` are used only with
+  the engine's own `SMTP_SERVER` and `SMTP_PORT`. An email step that names
+  another server must supply its own credentials.
 
 ### Git repositories
 

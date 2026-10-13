@@ -104,28 +104,22 @@ fn generate_approval_links(
 
 #[cfg(feature = "email")]
 fn build_approval_mailer(spec: &stormchaser_model::dsl::EmailSpec) -> lettre::SmtpTransport {
+    use super::email::smtp::{resolve_smtp_params, EngineSmtp, SmtpOverrides};
     use lettre::SmtpTransport;
-    let smtp_server = spec
-        .smtp_server
-        .clone()
-        .unwrap_or_else(|| var("SMTP_SERVER").unwrap_or_else(|_| "localhost".to_string()));
-    let smtp_port = spec.smtp_port.unwrap_or_else(|| {
-        var("SMTP_PORT")
-            .ok()
-            .and_then(|p| p.parse().ok())
-            .unwrap_or(25)
-    });
+    let params = resolve_smtp_params(
+        SmtpOverrides {
+            server: spec.smtp_server.clone(),
+            port: spec.smtp_port,
+            username: spec.smtp_username.clone(),
+            password: spec.smtp_password.clone(),
+            ..Default::default()
+        },
+        EngineSmtp::from_env(),
+    );
 
-    let mut mailer_builder = SmtpTransport::builder_dangerous(&smtp_server).port(smtp_port);
+    let mut mailer_builder = SmtpTransport::builder_dangerous(&params.server).port(params.port);
 
-    if let (Some(user), Some(pass)) = (
-        spec.smtp_username
-            .clone()
-            .or_else(|| var("SMTP_USERNAME").ok()),
-        spec.smtp_password
-            .clone()
-            .or_else(|| var("SMTP_PASSWORD").ok()),
-    ) {
+    if let (Some(user), Some(pass)) = (params.username, params.password) {
         let credentials = lettre::transport::smtp::authentication::Credentials::new(user, pass);
         mailer_builder = mailer_builder.credentials(credentials);
     }
