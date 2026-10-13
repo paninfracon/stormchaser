@@ -67,6 +67,12 @@ config:
   natsUrl: "nats://172.17.0.1:4222"
   # Name of a Secret with `user` and `password` keys for NATS authentication.
   natsAuthSecret: ""
+  # Name of a Secret holding a 32-character key (under stateEncryptionSecretKey). With it
+  # the runner keeps each step's full definition, encrypted, on the Job it starts,
+  # so a restarted runner picks a step up with everything it had. Without it the runner
+  # keeps the definition with its environment and parameter values removed.
+  stateEncryptionSecret: ""
+  stateEncryptionSecretKey: "key"
   # If empty, the runner uses "k8s-<pod name>", which survives a restart of the runner
   # container. Ids must be unique among running runners.
   runnerId: ""

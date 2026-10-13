@@ -27,6 +27,8 @@ pub const AGENT_SIDECAR_CONTAINER: &str = "stormchaser-agent";
 /// finished. The sidecar sees it through a downward API volume.
 pub const WORKER_EXIT_ANNOTATION: &str = "stormchaser.v1.io/worker-exit";
 
+const PARKING_URLS_ENV: &str = "STORMCHASER_PARKING_URLS";
+const ARTIFACT_URLS_ENV: &str = "STORMCHASER_ARTIFACT_URLS";
 const CONTROL_VOLUME: &str = "storm-control";
 const CONTROL_DIR: &str = "/stormchaser/control";
 const WORKER_EXIT_FILE: &str = "worker-exit";
@@ -143,21 +145,30 @@ pub(crate) fn build_agent_sidecar(
     agent_image: &str,
     plan: SidecarPlan,
     storage_mounts: Vec<VolumeMount>,
+    secrets: &mut StepSecret,
 ) -> Container {
     let push_auth = plan.push_auth;
 
+    // The upload instructions hold presigned URLs. They reach the agent through its
+    // environment, from the step's Secret; `$(NAME)` in an argument is filled in by the
+    // kubelet when it starts the container and is never part of the pod.
+    let mut env = vec![secrets.env_var(
+        PARKING_URLS_ENV,
+        Value::Object(plan.parking_urls).to_string(),
+    )];
     let mut args = vec![
         "park".to_string(),
         "--wait-for".to_string(),
         format!("{}/{}", CONTROL_DIR, WORKER_EXIT_FILE),
         "--parking-urls".to_string(),
-        Value::Object(plan.parking_urls).to_string(),
+        format!("$({})", PARKING_URLS_ENV),
         "--mount-paths".to_string(),
         Value::Object(plan.mount_paths).to_string(),
     ];
     if !plan.artifacts.is_empty() {
+        env.push(secrets.env_var(ARTIFACT_URLS_ENV, Value::Object(plan.artifacts).to_string()));
         args.push("--artifact-urls".to_string());
-        args.push(Value::Object(plan.artifacts).to_string());
+        args.push(format!("$({})", ARTIFACT_URLS_ENV));
     }
     if push_auth {
         args.push("--registry-config".to_string());
@@ -192,6 +203,7 @@ pub(crate) fn build_agent_sidecar(
             .then(|| "IfNotPresent".to_string()),
         command: Some(vec!["/usr/local/bin/stormchaser-agent".to_string()]),
         args: Some(args),
+        env: Some(env),
         volume_mounts: Some(volume_mounts),
         // Enough to be scheduled under a quota; parking is not capped
         resources: Some(ResourceRequirements {

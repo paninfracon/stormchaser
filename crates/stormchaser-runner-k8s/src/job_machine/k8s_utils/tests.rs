@@ -85,7 +85,7 @@ fn test_do_build_job_spec_basic() {
         registry_auth: None,
     };
 
-    let job = do_build_job_spec("test-job", &metadata, None, None).unwrap();
+    let (job, _secrets) = do_build_job_spec("test-job", &metadata, None, None).unwrap();
     assert_eq!(job.metadata.name, Some("test-job".into()));
     let pod_spec = job.spec.unwrap().template.spec.unwrap();
     assert_eq!(pod_spec.containers[0].image, Some("alpine:latest".into()));
@@ -159,7 +159,7 @@ fn test_do_build_job_spec_with_pvc() {
         registry_auth: None,
     };
 
-    let job = do_build_job_spec(
+    let (job, _secrets) = do_build_job_spec(
         "test-job-pvc",
         &metadata,
         None,
@@ -412,7 +412,7 @@ fn test_do_build_job_spec_withholds_api_token_and_protects_reserved_labels() {
         "annotations": { "stormchaser.v1.io/state-encrypted": "true", "note": "b" }
     }));
 
-    let job = do_build_job_spec("test-job", &metadata, None, None).unwrap();
+    let (job, _secrets) = do_build_job_spec("test-job", &metadata, None, None).unwrap();
 
     let labels = job.metadata.labels.unwrap();
     assert_eq!(labels["managed-by"], "stormchaser");
@@ -468,7 +468,8 @@ fn oci_storage() -> serde_json::Value {
 #[test]
 fn storage_is_parked_by_a_sidecar_and_the_step_container_holds_nothing_to_upload_with() {
     let metadata = storage_step_metadata(oci_storage(), false);
-    let job = do_build_job_spec("storm-build-1", &metadata, Some("agent:1".into()), None).unwrap();
+    let (job, secrets) =
+        do_build_job_spec("storm-build-1", &metadata, Some("agent:1".into()), None).unwrap();
     let template = job.spec.unwrap().template;
     let pod = template.spec.unwrap();
 
@@ -501,13 +502,30 @@ fn storage_is_parked_by_a_sidecar_and_the_step_container_holds_nothing_to_upload
     let args = sidecar.args.as_ref().unwrap();
     assert_eq!(args[0], "park");
     assert!(args.contains(&"/stormchaser/control/worker-exit".to_string()));
-    assert!(args.iter().any(|a| a.contains("SECRET-PUT-URL")));
-    // Artifact paths are relative to the volume they belong to
-    assert!(args
+    // Its upload instructions are not in the pod: the arguments name environment
+    // variables, which read the step's Secret
+    assert!(args.contains(&"$(STORMCHASER_PARKING_URLS)".to_string()));
+    assert!(args.contains(&"$(STORMCHASER_ARTIFACT_URLS)".to_string()));
+    assert!(!serde_json::to_string(sidecar)
+        .unwrap()
+        .contains("SECRET-PUT-URL"));
+    let sidecar_env = sidecar.env.as_ref().unwrap();
+    assert!(sidecar_env.iter().all(|var| var.value.is_none()
+        && var
+            .value_from
+            .as_ref()
+            .and_then(|from| from.secret_key_ref.as_ref())
+            .is_some_and(|key| key.name == "storm-build-1-env")));
+    assert!(secrets
+        .values()
         .iter()
-        .any(|a| a.contains(r#""path":"/workspace/bin/app""#)));
+        .any(|v| v.contains("SECRET-PUT-URL")));
+    // Artifact paths are relative to the volume they belong to
+    assert!(secrets
+        .values()
+        .iter()
+        .any(|v| v.contains(r#""path":"/workspace/bin/app""#)));
     assert!(args.contains(&"/stormchaser/auth/config.json".to_string()));
-    assert!(sidecar.env.is_none());
     let sidecar_mounts: Vec<&str> = sidecar
         .volume_mounts
         .as_ref()
@@ -545,7 +563,7 @@ fn storage_is_parked_by_a_sidecar_and_the_step_container_holds_nothing_to_upload
 fn no_sidecar_without_an_agent_image_or_with_nothing_to_park() {
     // No agent image configured
     let metadata = storage_step_metadata(oci_storage(), false);
-    let job = do_build_job_spec("j", &metadata, None, None).unwrap();
+    let (job, _secrets) = do_build_job_spec("j", &metadata, None, None).unwrap();
     let template = job.spec.unwrap().template;
     assert_eq!(template.spec.unwrap().containers.len(), 1);
     assert!(template.metadata.unwrap().annotations.is_none());
@@ -555,7 +573,7 @@ fn no_sidecar_without_an_agent_image_or_with_nothing_to_park() {
         serde_json::json!({"put_url": "https://s3.example.com/put"}),
         false,
     );
-    let job =
+    let (job, _secrets) =
         do_build_job_spec("j", &metadata, Some("agent:1".into()), Some("pvc".into())).unwrap();
     assert_eq!(job.spec.unwrap().template.spec.unwrap().containers.len(), 1);
 }
@@ -563,7 +581,7 @@ fn no_sidecar_without_an_agent_image_or_with_nothing_to_park() {
 #[test]
 fn test_reports_are_still_collected_inside_the_step_container() {
     let metadata = storage_step_metadata(oci_storage(), true);
-    let job = do_build_job_spec("j", &metadata, Some("agent:1".into()), None).unwrap();
+    let (job, _secrets) = do_build_job_spec("j", &metadata, Some("agent:1".into()), None).unwrap();
     let pod = job.spec.unwrap().template.spec.unwrap();
     let worker = &pod.containers[0];
 
@@ -628,5 +646,113 @@ fn the_steps_exit_code_is_its_own_containers() {
     assert_eq!(
         do_extract_pod_metrics_with_reason(vec![pod(0, 1)]).exit_code,
         Some(1)
+    );
+}
+
+#[test]
+fn nothing_secret_is_written_into_the_job() {
+    let mut metadata = k8s_job_metadata(serde_json::json!({
+        "image": "alpine:latest",
+        "command": ["make", "deploy"],
+        "env": [
+            {"name": "DB_PASSWORD", "value": "hunter2-env-secret"},
+            {"name": "STORMCHASER_CONN_DB_PASSWORD", "value": "injected-connection-secret"},
+            {"name": "EMPTY", "value": ""}
+        ],
+        "storage_mounts": [{"name": "workspace", "mount_path": "/workspace"}]
+    }));
+    metadata
+        .step_dsl
+        .params
+        .insert("token".into(), "param-secret".into());
+    metadata.storage = Some(HashMap::from([(
+        "workspace".to_string(),
+        serde_json::json!({
+            "put_url": "https://s3.example.com/PRESIGNED-PUT",
+            "get_url": "https://s3.example.com/PRESIGNED-GET",
+            "expected_hash": "abc"
+        }),
+    )]));
+    metadata.encryption_key = None;
+
+    let (job, secrets) =
+        do_build_job_spec("storm-deploy-1", &metadata, Some("agent:1".into()), None).unwrap();
+
+    // The whole Job, as anyone who may read Jobs or pods would see it
+    let visible = serde_json::to_string(&job).unwrap();
+    for secret in [
+        "hunter2-env-secret",
+        "injected-connection-secret",
+        "param-secret",
+        "PRESIGNED-PUT",
+        "PRESIGNED-GET",
+    ] {
+        assert!(!visible.contains(secret), "{secret} is readable in the Job");
+        assert!(
+            secrets.values().iter().any(|v| v.contains(secret)) || secret == "param-secret",
+            "{secret} was dropped instead of being moved to the Secret"
+        );
+    }
+    // Names stay readable, so the pod can still be understood
+    assert!(visible.contains("DB_PASSWORD"));
+
+    // The step's container reads each value from the Secret
+    let pod = job.spec.as_ref().unwrap().template.spec.as_ref().unwrap();
+    let worker_env = pod.containers[0].env.as_ref().unwrap();
+    for name in ["DB_PASSWORD", "STORMCHASER_CONN_DB_PASSWORD", "EMPTY"] {
+        let var = worker_env.iter().find(|var| var.name == name).unwrap();
+        assert!(var.value.is_none());
+        assert_eq!(
+            var.value_from
+                .as_ref()
+                .unwrap()
+                .secret_key_ref
+                .as_ref()
+                .unwrap()
+                .name,
+            "storm-deploy-1-env"
+        );
+    }
+    // The init container that restores storage is told where to fetch through its
+    // environment, and the URL is not part of its script
+    let unpark = &pod.init_containers.as_ref().unwrap()[0];
+    assert!(unpark.args.as_ref().unwrap()[1].contains("$STORMCHASER_FETCH_URL"));
+    assert_eq!(
+        unpark.env.as_ref().unwrap()[0].name,
+        "STORMCHASER_FETCH_URL"
+    );
+
+    // No pod may exist before the Secret does
+    assert_eq!(job.spec.as_ref().unwrap().suspend, Some(true));
+}
+
+#[test]
+fn a_step_with_nothing_to_hide_needs_no_secret_and_starts_at_once() {
+    let metadata = k8s_job_metadata(serde_json::json!({
+        "image": "alpine:latest",
+        "command": ["true"]
+    }));
+    let (job, secrets) = do_build_job_spec("storm-plain-1", &metadata, None, None).unwrap();
+    assert!(secrets.is_empty());
+    assert_eq!(job.spec.unwrap().suspend, None);
+}
+
+#[test]
+fn the_step_secret_is_owned_by_its_job() {
+    let metadata = k8s_job_metadata(serde_json::json!({
+        "image": "alpine:latest",
+        "env": [{"name": "TOKEN", "value": "t-1"}]
+    }));
+    let (mut job, secrets) = do_build_job_spec("storm-own-1", &metadata, None, None).unwrap();
+    job.metadata.uid = Some("uid-123".into());
+
+    let secret = secrets.into_secret("storm-own-1", &job);
+    assert_eq!(secret.metadata.name.as_deref(), Some("storm-own-1-env"));
+    let owner = &secret.metadata.owner_references.as_ref().unwrap()[0];
+    assert_eq!(owner.kind, "Job");
+    assert_eq!(owner.uid, "uid-123");
+    assert_eq!(
+        secret.string_data.unwrap().values().collect::<Vec<_>>(),
+        vec!["t-1"]
     );
 }

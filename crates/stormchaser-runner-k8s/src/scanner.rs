@@ -383,6 +383,33 @@ pub async fn scan_for_orphans(
                 .and_then(|token| token.parse::<i64>().ok())
                 .unwrap_or(0);
 
+            // A Job is created suspended and resumed once its Secrets exist. One that is
+            // still suspended has run nothing, and never will without them.
+            match suspended(&job, chrono::Utc::now()) {
+                Suspended::No => {}
+                Suspended::SettingUp => {
+                    info!(
+                        "Job {} is still being set up by a runner; leaving it",
+                        job_name
+                    );
+                    continue;
+                }
+                Suspended::Abandoned => {
+                    warn!(
+                        "Job {} was never started; deleting it so its task can be run afresh",
+                        job_name
+                    );
+                    let dp = kube::api::DeleteParams {
+                        propagation_policy: Some(kube::api::PropagationPolicy::Background),
+                        ..Default::default()
+                    };
+                    if let Err(e) = jobs.delete(&job_name, &dp).await {
+                        error!("Failed to delete unstarted job {}: {:?}", job_name, e);
+                    }
+                    continue;
+                }
+            }
+
             if let (Some(run_id_s), Some(step_id_s)) = (run_id_str, step_id_str) {
                 handle_orphaned_job(
                     run_id_s,
@@ -406,10 +433,65 @@ pub async fn scan_for_orphans(
     Ok(())
 }
 
+/// How long a runner is given to create a new Job's Secrets and resume it.
+const SETUP_GRACE_SECS: i64 = 120;
+
+/// Where a Job stands between being created suspended and being resumed.
+#[derive(Debug, PartialEq)]
+enum Suspended {
+    /// Resumed: the step has started, or is free to.
+    No,
+    /// Created moments ago; some runner is still creating its Secrets.
+    SettingUp,
+    /// Left suspended: the runner that created it stopped before resuming it. The task
+    /// was never acknowledged, so it is delivered again and makes a new Job.
+    Abandoned,
+}
+
+fn suspended(job: &Job, now: DateTime<Utc>) -> Suspended {
+    if job.spec.as_ref().and_then(|spec| spec.suspend) != Some(true) {
+        return Suspended::No;
+    }
+    let recent = job
+        .metadata
+        .creation_timestamp
+        .as_ref()
+        .is_some_and(|created| now.timestamp() - created.0.as_second() < SETUP_GRACE_SECS);
+    if recent {
+        Suspended::SettingUp
+    } else {
+        Suspended::Abandoned
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
     use super::*;
+
+    #[test]
+    fn a_job_left_suspended_is_abandoned_only_after_the_setup_grace() {
+        use k8s_openapi::api::batch::v1::JobSpec;
+        use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
+
+        let now = chrono::Utc::now();
+        let job = |suspend: Option<bool>, age_secs: i64| {
+            let mut job = Job::default();
+            job.metadata.creation_timestamp = Some(Time(
+                k8s_openapi::jiff::Timestamp::from_second(now.timestamp() - age_secs).unwrap(),
+            ));
+            job.spec = Some(JobSpec {
+                suspend,
+                ..Default::default()
+            });
+            job
+        };
+        assert_eq!(suspended(&job(None, 600), now), Suspended::No);
+        assert_eq!(suspended(&job(Some(false), 600), now), Suspended::No);
+        assert_eq!(suspended(&job(Some(true), 5), now), Suspended::SettingUp);
+        assert_eq!(suspended(&job(Some(true), 600), now), Suspended::Abandoned);
+    }
+
     use serde_json::json;
 
     #[test]

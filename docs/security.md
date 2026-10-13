@@ -252,6 +252,42 @@ away from the control plane:
 `scripts/setup.sh` relaxes the network isolation and the privileged setting for
 local development; see [NATS: Quickstart and Production](nats.md).
 
+### Where a step's secrets are on a runner
+
+A step's environment carries the secrets its workflow resolved and the
+credentials of the connections it uses, and its helper containers are handed
+presigned URLs for the run's storage. A runner has to give those to the step
+without leaving them where others can read them.
+
+**Kubernetes.** Each step that has anything to protect gets one Secret,
+`<job name>-env`, in the step namespace. The pod's containers read their
+environment values and URLs from it by key, so `kubectl get` or `describe` on
+the Job or the pod shows variable names and never values. The Secret is owned
+by the Job and deleted with it, by the reaper or the Job's TTL. The Job is
+created suspended and resumed once its Secrets exist, so no pod starts without
+them. Reading the step namespace's Secrets is therefore what reading a step's
+secrets takes: grant `get` and `list` on Secrets there as narrowly as you
+would on any namespace that holds credentials, and enable encryption at rest
+for Secrets in the cluster. The runner itself can create and delete Secrets
+there but not read them.
+
+**Docker.** A container's environment is part of its configuration, and anyone
+who can use the Docker socket on a runner host can read it with `docker
+inspect`. That access is root on the host in any case; treat runner hosts
+accordingly. Presigned URLs go to the helper container, not the step's.
+
+**The definition a runner keeps.** So that a restarted runner can pick a step
+up again, each runner stores the step's definition on the Job (an annotation)
+or the container (a label). With `STORMCHASER_STATE_ENCRYPTION_KEY` set (32
+characters; Helm: `config.stateEncryptionSecret`) it is stored whole and
+encrypted. Without the key it is stored in clear with every environment and
+parameter value removed.
+
+**What is still readable.** A step's `command` and `args` are part of the pod
+or container and are stored as written, so a secret interpolated into a
+command line can be read there and in the process list. Pass secrets to steps
+through `env`, never on the command line.
+
 ### What a step reports about itself
 
 Test reports, storage hashes and artifact metadata are produced inside the step,

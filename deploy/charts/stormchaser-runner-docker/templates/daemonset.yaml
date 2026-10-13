@@ -34,6 +34,13 @@ spec:
                   name: {{ . }}
                   key: password
             {{- end }}
+            {{- with .Values.config.stateEncryptionSecret }}
+            - name: STORMCHASER_STATE_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: {{ $.Values.config.stateEncryptionSecretKey }}
+            {{- end }}
             - name: RUST_LOG
               value: {{ .Values.config.rustLog | quote }}
             - name: STORMCHASER_ALLOW_PRIVILEGED

@@ -12,6 +12,10 @@ pub(crate) fn uses_in_step_agent(agent_present: bool, metadata: &JobMetadata) ->
     agent_present && !metadata.step_dsl.reports.is_empty()
 }
 
+/// Environment variable through which a helper init container is given the presigned URL
+/// it downloads from.
+const FETCH_URL_ENV: &str = "STORMCHASER_FETCH_URL";
+
 /// Builds the pod's containers (the step's own first, then the agent sidecar if there is
 /// storage to park) and its init containers.
 pub(crate) fn build_k8s_containers(
@@ -21,6 +25,7 @@ pub(crate) fn build_k8s_containers(
     step_spec: &StepSpec,
     k8s_env: Vec<K8sEnvVar>,
     volume_mounts: Vec<VolumeMount>,
+    secrets: &mut StepSecret,
 ) -> (Vec<Container>, Vec<Container>) {
     let mut init_containers = Vec::new();
     let in_step_agent = uses_in_step_agent(agent_image.is_some(), metadata);
@@ -57,13 +62,16 @@ pub(crate) fn build_k8s_containers(
                             image: Some(agent_image.clone().unwrap_or_else(|| "alpine:latest".to_string())),
                             image_pull_policy: agent_image.as_ref().and_then(|img| if img.contains("stormchaser-agent") { Some("IfNotPresent".to_string()) } else { None }),
                             command: Some(vec!["/bin/sh".to_string()]),
+                            // The presigned URL is read from the step's Secret, not
+                            // written into the pod
                             args: Some(vec![
                                 "-c".to_string(),
                                 format!(
-                                    "mkdir -p \"{}\" && curl -sL \"{}\" | tar -xz -C \"{}\" || true",
-                                    mount.mount_path, get_url, mount.mount_path
+                                    "mkdir -p \"{}\" && curl -sL \"${}\" | tar -xz -C \"{}\" || true",
+                                    mount.mount_path, FETCH_URL_ENV, mount.mount_path
                                 ),
                             ]),
+                            env: Some(vec![secrets.env_var(FETCH_URL_ENV, get_url.to_string())]),
                             volume_mounts: Some(vec![VolumeMount {
                                 name: vol_name.clone(),
                                 mount_path: mount.mount_path.clone(),
@@ -94,10 +102,11 @@ pub(crate) fn build_k8s_containers(
                                 args: Some(vec![
                                     "-c".to_string(),
                                     format!(
-                                        "if [ -z \"$(ls -A \\\"{}\\\" 2>/dev/null)\" ]; then mkdir -p \"{}\" && curl -sL \"{}\" | tar -xz -C \"{}\" || true; fi",
-                                        dest_str, dest_str, url, dest_str
+                                        "if [ -z \"$(ls -A \\\"{}\\\" 2>/dev/null)\" ]; then mkdir -p \"{}\" && curl -sL \"${}\" | tar -xz -C \"{}\" || true; fi",
+                                        dest_str, dest_str, FETCH_URL_ENV, dest_str
                                     ),
                                 ]),
+                                env: Some(vec![secrets.env_var(FETCH_URL_ENV, url.to_string())]),
                                 volume_mounts: Some(vec![VolumeMount {
                                     name: vol_name.clone(),
                                     mount_path: mount.mount_path.clone(),
@@ -151,6 +160,7 @@ pub(crate) fn build_k8s_containers(
             agent_img,
             plan,
             storage_volume_mounts(sfs_pvc_name, metadata, step_spec),
+            secrets,
         ));
     }
 

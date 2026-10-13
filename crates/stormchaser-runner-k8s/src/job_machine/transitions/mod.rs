@@ -46,10 +46,15 @@ impl K8sJobMachine<state::Initialized> {
             ..Default::default()
         };
         jobs.delete(job_name, &dp).await?;
-        let secret_name = format!("{}-auth", job_name);
-        if let Err(e) = secrets.delete(&secret_name, &dp).await {
-            if !matches!(e, kube::Error::Api(ref err) if err.code == 404) {
-                return Err(e.into());
+        // Owned by the Job and so collected with it, but there is no reason to wait
+        for secret_name in [
+            format!("{}-auth", job_name),
+            k8s_utils::step_secret_name(job_name),
+        ] {
+            if let Err(e) = secrets.delete(&secret_name, &dp).await {
+                if !matches!(e, kube::Error::Api(ref err) if err.code == 404) {
+                    return Err(e.into());
+                }
             }
         }
         Ok(())
@@ -95,8 +100,10 @@ impl K8sJobMachine<state::Initialized> {
 
         let agent_image = var("STORMCHASER_AGENT_IMAGE").ok();
         let sfs_pvc_name = var("STORMCHASER_SFS_PVC_NAME").ok();
-        let job =
+        let (job, step_secret) =
             k8s_utils::do_build_job_spec(&job_name, &self.metadata, agent_image, sfs_pvc_name)?;
+        // Created suspended when it depends on Secrets that have to be owned by it
+        let gated = job.spec.as_ref().and_then(|spec| spec.suspend) == Some(true);
 
         let jobs: Api<Job> = Api::namespaced(self.client.clone(), &self.metadata.namespace);
 
@@ -120,30 +127,41 @@ impl K8sJobMachine<state::Initialized> {
             }
         };
 
-        // The pull secret is created after the Job so that it can be owned by it: deleting
-        // the Job, by the reaper or its TTL, then removes the registry credentials too.
+        // The Job's Secrets are created after it so that they can be owned by it: deleting
+        // the Job, by the reaper or its TTL, then removes the step's environment values
+        // and registry credentials too. The Job is suspended until they exist, so its pod
+        // never starts without them. Each step is safe to repeat: after a crash the task
+        // is redelivered and this runs again against the Job that is already there.
+        let mut secrets_to_create = Vec::new();
+        if !step_secret.is_empty() {
+            secrets_to_create.push(step_secret.into_secret(&job_name, &created));
+        }
         if let Some(auth) = &self.metadata.registry_auth {
-            let secret = build_pull_secret(&job_name, auth, &created);
-            let secrets: Api<Secret> =
-                Api::namespaced(self.client.clone(), &self.metadata.namespace);
-            if let Err(e) = secrets.create(&PostParams::default(), &secret).await {
+            secrets_to_create.push(build_pull_secret(&job_name, auth, &created));
+        }
+        let secrets: Api<Secret> = Api::namespaced(self.client.clone(), &self.metadata.namespace);
+        for secret in &secrets_to_create {
+            let name = secret.metadata.name.clone().unwrap_or_default();
+            if let Err(e) = secrets.create(&PostParams::default(), secret).await {
                 if !matches!(e, kube::Error::Api(ref err) if err.code == 409) {
-                    // Without its pull secret the Job would only sit in ImagePullBackOff.
-                    let dp = DeleteParams {
-                        propagation_policy: Some(PropagationPolicy::Background),
-                        ..Default::default()
-                    };
-                    if let Err(delete_err) = jobs.delete(&job_name, &dp).await {
-                        error!(
-                            "Failed to delete K8s job {} after its pull secret could not be created: {:?}",
-                            job_name, delete_err
-                        );
-                    }
-                    return Ok(self.failed(format!(
-                        "Failed to create image pull secret {}-auth: {}",
-                        job_name, e
-                    )));
+                    self.delete_unstarted_job(&jobs, &job_name).await;
+                    return Ok(self.failed(format!("Failed to create secret {}: {}", name, e)));
                 }
+            }
+        }
+
+        if gated {
+            let resume = serde_json::json!({ "spec": { "suspend": false } });
+            if let Err(e) = jobs
+                .patch(
+                    &job_name,
+                    &kube::api::PatchParams::default(),
+                    &kube::api::Patch::Merge(&resume),
+                )
+                .await
+            {
+                self.delete_unstarted_job(&jobs, &job_name).await;
+                return Ok(self.failed(format!("Failed to start K8s job {}: {}", job_name, e)));
             }
         }
 
@@ -156,6 +174,21 @@ impl K8sJobMachine<state::Initialized> {
                 dispatched_at: Utc::now(),
             },
         }))
+    }
+
+    /// Removes a Job that could not be given what it needs to run. Its Secrets, being
+    /// owned by it, go with it.
+    async fn delete_unstarted_job(&self, jobs: &Api<Job>, job_name: &str) {
+        let dp = DeleteParams {
+            propagation_policy: Some(PropagationPolicy::Background),
+            ..Default::default()
+        };
+        if let Err(e) = jobs.delete(job_name, &dp).await {
+            error!(
+                "Failed to delete K8s job {} after it could not be started: {:?}",
+                job_name, e
+            );
+        }
     }
 
     fn failed(self, reason: String) -> StartResult {

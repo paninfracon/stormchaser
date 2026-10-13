@@ -97,11 +97,16 @@ impl<S> DockerContainerMachine<S> {
             (spec.command.clone(), spec.args.clone())
         };
 
-        let step_dsl_json = serde_json::to_string(&self.metadata.step_dsl).unwrap_or_default();
-        let step_dsl_val = if let Some(key) = &self.metadata.encryption_key {
-            crypto::encrypt_state(&step_dsl_json, key)?
-        } else {
-            step_dsl_json
+        // The step's definition is kept on the container so that a restarted runner can
+        // pick the step up again. Encrypted, it is kept whole; in clear, it is kept
+        // without the values that are secret, which picking a step up does not need.
+        let step_dsl_val = match &self.metadata.encryption_key {
+            Some(key) => crypto::encrypt_state(
+                &serde_json::to_string(&self.metadata.step_dsl).unwrap_or_default(),
+                key,
+            )?,
+            None => serde_json::to_string(&self.metadata.step_dsl.without_secret_values())
+                .unwrap_or_default(),
         };
 
         let mut labels = HashMap::new();

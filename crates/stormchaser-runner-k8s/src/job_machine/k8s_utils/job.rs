@@ -10,8 +10,9 @@ pub fn do_build_job_spec(
     metadata: &JobMetadata,
     agent_image: Option<String>,
     sfs_pvc_name: Option<String>,
-) -> Result<Job> {
+) -> Result<(Job, StepSecret)> {
     let step_spec = parse_step_spec(metadata)?;
+    let mut secrets = StepSecret::new(job_name);
     StepPolicy::from_env().check(&step_spec)?;
 
     // Helper containers mount the step's volumes at the paths the step chose
@@ -30,7 +31,7 @@ pub fn do_build_job_spec(
         volumes.extend(sidecar_volumes(job_name, plan.push_auth));
     }
 
-    let k8s_env = build_k8s_env_vars(metadata, &step_spec);
+    let k8s_env = build_k8s_env_vars(metadata, &step_spec, &mut secrets);
 
     let (containers, init_containers) = build_k8s_containers(
         agent_image,
@@ -39,6 +40,7 @@ pub fn do_build_job_spec(
         &step_spec,
         k8s_env,
         volume_mounts,
+        &mut secrets,
     );
 
     let pod_template =
@@ -63,12 +65,17 @@ pub fn do_build_job_spec(
         ),
     ]);
 
-    // Job Annotations
-    let step_dsl_json = serde_json::to_string(&metadata.step_dsl).unwrap_or_default();
-    let step_dsl_val = if let Some(key) = &metadata.encryption_key {
-        crypto::encrypt_state(&step_dsl_json, key)?
-    } else {
-        step_dsl_json
+    // Job Annotations. The step's definition is kept so that a restarted runner can pick
+    // the step up again. Encrypted, it is kept whole; in clear, it is kept without the
+    // values that are secret, which picking a step up does not need.
+    let step_dsl_val = match &metadata.encryption_key {
+        Some(key) => crypto::encrypt_state(
+            &serde_json::to_string(&metadata.step_dsl).unwrap_or_default(),
+            key,
+        )?,
+        None => {
+            serde_json::to_string(&metadata.step_dsl.without_secret_values()).unwrap_or_default()
+        }
     };
 
     let mut annotations = step_spec.extra_annotations.unwrap_or_default();
@@ -89,7 +96,11 @@ pub fn do_build_job_spec(
         annotations.remove("stormchaser.v1.io/state-encrypted");
     }
 
-    Ok(Job {
+    // A Job that depends on Secrets is created suspended, so that no pod exists until
+    // the runner has created them (they are owned by the Job, so the Job comes first).
+    let suspend = (!secrets.is_empty() || metadata.registry_auth.is_some()).then_some(true);
+
+    let job = Job {
         metadata: ObjectMeta {
             name: Some(job_name.to_string()),
             labels: Some(labels),
@@ -110,8 +121,10 @@ pub fn do_build_job_spec(
             parallelism: Some(step_spec.parallelism.unwrap_or(1)),
             active_deadline_seconds: step_spec.active_deadline,
             ttl_seconds_after_finished: Some(step_spec.ttl_seconds_after_finished.unwrap_or(3600)),
+            suspend,
             ..Default::default()
         }),
         ..Default::default()
-    })
+    };
+    Ok((job, secrets))
 }
