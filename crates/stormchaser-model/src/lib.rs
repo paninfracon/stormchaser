@@ -25,6 +25,8 @@ pub mod event_rules;
 pub mod events;
 /// HCL expression evaluation models.
 pub mod hcl_eval;
+/// Keeps workflow-supplied HCL from overflowing the stack.
+pub mod hcl_guard;
 /// Logging configuration and log streaming types.
 pub mod logging;
 /// Browser login pieces shared by the CLI and the TUI.

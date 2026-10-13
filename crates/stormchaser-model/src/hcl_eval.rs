@@ -105,12 +105,16 @@ pub fn evaluate_string(s: &str, ctx: &HclContext) -> Result<Option<Value>> {
         return Ok(None);
     }
 
-    let template: hcl::Template = s
-        .parse()
-        .map_err(|e| anyhow::anyhow!("Failed to parse HCL template '{}': {:?}", s, e))?;
-    let result = template
-        .evaluate(ctx)
-        .map_err(|e| anyhow::anyhow!("Failed to evaluate HCL template '{}': {:?}", s, e))?;
+    // A template comes from a workflow author and can nest without limit; see
+    // `hcl_guard` for why it is parsed and evaluated under a guard
+    let result = crate::hcl_guard::guarded(s, crate::hcl_guard::expr_limit(), || {
+        let template: hcl::Template = s
+            .parse()
+            .map_err(|e| anyhow::anyhow!("Failed to parse HCL template '{}': {:?}", s, e))?;
+        template
+            .evaluate(ctx)
+            .map_err(|e| anyhow::anyhow!("Failed to evaluate HCL template '{}': {:?}", s, e))
+    })?;
 
     // Results are not logged: they carry resolved secrets and inputs.
     let re = Regex::new(r"^\$\{([^}]+)\}$").unwrap();
@@ -124,13 +128,16 @@ pub fn evaluate_string(s: &str, ctx: &HclContext) -> Result<Option<Value>> {
 
 /// Evaluates a raw HCL expression without the template wrapper.
 pub fn evaluate_raw_expr(expr_str: &str, ctx: &HclContext) -> Result<Value> {
-    let expr: hcl::Expression = expr_str
-        .parse()
-        .map_err(|e| anyhow::anyhow!("Failed to parse HCL expression '{}': {:?}", expr_str, e))?;
-    let result = expr.evaluate(ctx).map_err(|e| {
-        anyhow::anyhow!("Failed to evaluate HCL expression '{}': {:?}", expr_str, e)
-    })?;
-    Ok(hcl_to_json(result))
+    crate::hcl_guard::guarded(expr_str, crate::hcl_guard::expr_limit(), || {
+        let expr: hcl::Expression = expr_str.parse().map_err(|e| {
+            anyhow::anyhow!("Failed to parse HCL expression '{}': {:?}", expr_str, e)
+        })?;
+        let result = expr.evaluate(ctx).map_err(|e| {
+            anyhow::anyhow!("Failed to evaluate HCL expression '{}': {:?}", expr_str, e)
+        })?;
+        // Checked here, where there is room to drop a result that is too deep
+        crate::hcl_guard::ensure_shallow(hcl_to_json(result))
+    })
 }
 
 #[cfg(test)]
@@ -194,5 +201,58 @@ mod tests {
         assert_eq!(val["service"], "api-prod");
         assert_eq!(val["tags"][1], "prod");
         assert_eq!(val["config"]["db_suffix"], "_prod");
+    }
+
+    /// Text that used to end the process with a stack overflow. Each case is run on a
+    /// thread with the 2 MiB stack a server's worker threads have.
+    #[test]
+    fn hostile_nesting_is_evaluated_or_refused_but_never_overflows() {
+        let on_small_stack = |f: Box<dyn FnOnce() + Send>| {
+            std::thread::Builder::new()
+                .stack_size(2 * 1024 * 1024)
+                .spawn(f)
+                .unwrap()
+                .join()
+                .expect("the evaluation crashed");
+        };
+
+        on_small_stack(Box::new(|| {
+            let ctx = Context::new();
+            // Within the limit: evaluated, on a stack that is big enough
+            let nots = format!("{}true", "!".repeat(3000));
+            assert_eq!(evaluate_raw_expr(&nots, &ctx).unwrap(), json!(true));
+            let parens = format!("{}1{}", "(".repeat(3000), ")".repeat(3000));
+            assert_eq!(evaluate_raw_expr(&parens, &ctx).unwrap(), json!(1));
+            let sum = format!("1{}", " + 1".repeat(3000));
+            assert_eq!(evaluate_raw_expr(&sum, &ctx).unwrap(), json!(3001));
+
+            // Within the limit but producing a value too deep to hand on
+            let lists = format!("{}1{}", "[".repeat(3000), "]".repeat(3000));
+            let err = evaluate_raw_expr(&lists, &ctx).unwrap_err();
+            assert!(err.to_string().contains("nested too deeply"), "{err}");
+
+            // Over the limit: refused unread
+            for hostile in [
+                "!".repeat(50_000) + "true",
+                "(".repeat(50_000),
+                "-".repeat(1_000_000),
+            ] {
+                let err = evaluate_raw_expr(&hostile, &ctx).unwrap_err();
+                assert!(err.to_string().contains("too complex"));
+            }
+        }));
+
+        on_small_stack(Box::new(|| {
+            let ctx = Context::new();
+            let nested = format!("{}1{}", "\"${".repeat(2000), "}\"".repeat(2000));
+            assert!(evaluate_string(&nested, &ctx).is_ok());
+            let hostile = format!("${{{}true}}", "!".repeat(50_000));
+            assert!(evaluate_string(&hostile, &ctx).is_err());
+            // An ordinary template is unaffected
+            assert_eq!(
+                evaluate_string("build-${1 + 1}", &ctx).unwrap(),
+                Some(json!("build-2"))
+            );
+        }));
     }
 }

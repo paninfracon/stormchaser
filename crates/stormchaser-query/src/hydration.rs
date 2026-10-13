@@ -63,7 +63,18 @@ pub fn extract_vars(expr: &Expression, deps: &mut std::collections::HashSet<Stri
     }
 }
 
+/// The inputs a query's template refers to.
+///
+/// The template is parsed, walked and dropped under the guard that keeps deeply nested
+/// text from overflowing the stack. One that is refused has no dependencies found.
 pub fn extract_template_deps(query: &str) -> Vec<String> {
+    stormchaser_model::hcl_guard::guarded(query, stormchaser_model::hcl_guard::expr_limit(), || {
+        Ok(extract_template_deps_unguarded(query))
+    })
+    .unwrap_or_default()
+}
+
+fn extract_template_deps_unguarded(query: &str) -> Vec<String> {
     let mut deps = std::collections::HashSet::new();
     if let Ok(template) = query.parse::<hcl::Template>() {
         for el in template.elements() {

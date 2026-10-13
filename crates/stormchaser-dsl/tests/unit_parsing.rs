@@ -330,3 +330,66 @@ fn step_names_are_limited_to_safe_characters() {
         );
     }
 }
+
+/// Workflows that used to end the process with a stack overflow. Parsed on a thread with
+/// the 2 MiB stack a server's worker threads have.
+#[test]
+fn hostile_workflows_are_refused_and_never_overflow_the_stack() {
+    let workflow =
+        |expr: &str| format!("workflow \"w\" {{\n  inputs {{ x = {expr} }}\n  steps {{}}\n}}\n");
+    let cases: Vec<(&str, String)> = vec![
+        (
+            "parentheses",
+            workflow(&format!("{}1{}", "(".repeat(4000), ")".repeat(4000))),
+        ),
+        (
+            "lists",
+            workflow(&format!("{}1{}", "[".repeat(4000), "]".repeat(4000))),
+        ),
+        (
+            "objects",
+            workflow(&format!("{}1{}", "{a=".repeat(4000), "}".repeat(4000))),
+        ),
+        (
+            "calls",
+            workflow(&format!("{}1{}", "upper(".repeat(4000), ")".repeat(4000))),
+        ),
+        ("negations", workflow(&format!("{}true", "!".repeat(4000)))),
+        ("sums", workflow(&format!("1{}", "+1".repeat(4000)))),
+        ("ternaries", workflow(&format!("{}1", "1?1:".repeat(4000)))),
+        (
+            "interpolations",
+            workflow(&format!("{}1{}", "\"${".repeat(4000), "}\"".repeat(4000))),
+        ),
+        ("far too many brackets", workflow(&"(".repeat(200_000))),
+        ("far too big", workflow(&"a".repeat(2 * 1024 * 1024))),
+    ];
+    std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(move || {
+            let parser = StormchaserParser::new();
+            for (name, source) in cases {
+                // Accepting it is fine, refusing it is fine; what must not happen is
+                // the process dying, and what comes back must be safe to hold
+                if let Ok(workflow) = parser.parse(&source) {
+                    let json = serde_json::to_value(&workflow).unwrap();
+                    assert!(
+                        stormchaser_model::hcl_guard::value_depth(&json)
+                            <= stormchaser_model::hcl_guard::MAX_VALUE_DEPTH,
+                        "{name}: a workflow nested too deeply was returned"
+                    );
+                }
+            }
+        })
+        .unwrap()
+        .join()
+        .expect("parsing a hostile workflow crashed");
+
+    let parser = StormchaserParser::new();
+    let err = parser.parse(&workflow(&"(".repeat(200_000))).unwrap_err();
+    assert!(format!("{err:#}").contains("too complex"), "{err:#}");
+    let err = parser
+        .parse(&workflow(&"a".repeat(2 * 1024 * 1024)))
+        .unwrap_err();
+    assert!(format!("{err:#}").contains("the limit is"), "{err:#}");
+}
