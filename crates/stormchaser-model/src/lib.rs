@@ -27,6 +27,9 @@ pub mod events;
 pub mod hcl_eval;
 /// Logging configuration and log streaming types.
 pub mod logging;
+/// Browser login pieces shared by the CLI and the TUI.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod login_flow;
 /// NATS helpers.
 pub mod nats;
 /// SSRF protection for outbound HTTP requests.

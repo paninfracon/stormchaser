@@ -67,8 +67,6 @@ spec:
             {{- end }}
             - name: OIDC_CLIENT_ID
               value: {{ .Values.global.oidc.clientId | quote }}
-            - name: OIDC_CLIENT_SECRET
-              value: {{ .Values.global.oidc.clientSecret | quote }}
             - name: LOKI_URL
               value: {{ .Values.global.loki.url | quote }}
             - name: GRAFANA_URL

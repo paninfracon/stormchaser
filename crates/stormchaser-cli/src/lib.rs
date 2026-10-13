@@ -107,12 +107,19 @@ pub enum Commands {
 
     /// Interactive browser-based login
     Login {
-        /// The OIDC issuer URL.
-        #[arg(long, default_value = "http://localhost:5556/dex")]
-        issuer: String,
-        /// The OIDC client ID.
-        #[arg(long, default_value = "stormchaser-cli")]
-        client_id: String,
+        /// Loopback port the browser is sent back to. It must be one of the redirect
+        /// URLs registered with the identity provider.
+        #[arg(long, default_value_t = 8080)]
+        callback_port: u16,
+        /// Print the token instead of storing it in a profile.
+        #[arg(long)]
+        print_token: bool,
+        /// No longer used: the API knows its own identity provider.
+        #[arg(long, hide = true)]
+        issuer: Option<String>,
+        /// No longer used: the API knows its own client.
+        #[arg(long, hide = true)]
+        client_id: Option<String>,
     },
 }
 
@@ -130,11 +137,16 @@ pub async fn run_cli(cli: Cli) -> Result<()> {
     let mut final_token = cli.token.clone();
 
     if let Ok(Some(profile)) = commands::auth_profiles::get_active_profile() {
+        // A profile's token belongs to that profile's server: never send it to a URL
+        // given on the command line that points somewhere else
+        let same_server = final_url
+            .as_deref()
+            .is_none_or(|url| url.trim_end_matches('/') == profile.url.trim_end_matches('/'));
+        if final_token.is_none() && same_server {
+            final_token = profile.token;
+        }
         if final_url.is_none() {
             final_url = Some(profile.url);
-        }
-        if final_token.is_none() {
-            final_token = profile.token;
         }
     }
 
@@ -192,8 +204,16 @@ pub async fn run_cli(cli: Cli) -> Result<()> {
             auth::handle(&resolved_url, &http_client, command).await?;
         }
 
-        Commands::Login { issuer, client_id } => {
-            auth::handle_login(&resolved_url, &issuer, &client_id, &http_client).await?;
+        Commands::Login {
+            callback_port,
+            print_token,
+            issuer,
+            client_id,
+        } => {
+            if issuer.is_some() || client_id.is_some() {
+                eprintln!("--issuer and --client-id are ignored: login goes through the API.");
+            }
+            auth::handle_login(&resolved_url, callback_port, print_token, &http_client).await?;
         }
     }
 

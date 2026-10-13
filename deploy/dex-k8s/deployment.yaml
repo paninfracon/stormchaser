@@ -59,6 +59,11 @@ spec:
             secretKeyRef:
               name: stormchaser-postgresql
               key: password
+        - name: DEX_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: stormchaser-oidc-client
+              key: client-secret
         ports:
         - containerPort: 5556
           name: http

@@ -67,11 +67,15 @@ authenticate via the local Dex Identity Provider.
 **Using the CLI:**
 
 ```bash
-stormchaser login --issuer http://dex:5556/dex --client-id stormchaser-cli
+stormchaser --url http://localhost:3000 login
 ```
 
-This command automatically opens your default browser. Enter the credentials
-above.
+This command opens your default browser. Enter the credentials above. The
+token is stored in a profile for that URL (readable only by you) and used by
+later commands; pass `--print-token` to print it instead. The CLI listens on
+`http://localhost:8080/callback` for the browser to return; `--callback-port`
+changes the port, which must match a redirect URL registered with the
+identity provider.
 
 **Using the TUI:**
 

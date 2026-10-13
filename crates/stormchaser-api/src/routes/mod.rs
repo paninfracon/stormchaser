@@ -36,6 +36,9 @@ pub struct AuthExchangeRequest {
     pub sso_token: String,
     /// The callback url.
     pub callback_url: String,
+    /// The PKCE verifier, when the login was started with a `code_challenge`.
+    #[serde(default)]
+    pub code_verifier: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]

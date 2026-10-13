@@ -44,7 +44,11 @@ global:
     issuer: "http://dex:5556/dex"
     externalIssuer: ""
     clientId: "stormchaser-cli"
-    clientSecret: "stormchaser-cli-secret"
+    # The client secret the API uses to exchange login codes. There is no default:
+    # name a Secret (preferred) or set clientSecret, or browser login is unavailable.
+    existingSecret: ""
+    existingSecretKey: "client-secret"
+    clientSecret: ""
   otel:
     endpoint: "http://alloy:4317"
   tls:

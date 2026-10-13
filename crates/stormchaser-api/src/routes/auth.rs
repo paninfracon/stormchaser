@@ -23,13 +23,17 @@ pub struct LoginQuery {
     pub callback_url: String,
     /// Optional OAuth state parameter.
     pub state: Option<String>,
+    /// Optional PKCE challenge (S256) from a client that keeps the verifier.
+    pub code_challenge: Option<String>,
 }
 
 #[utoipa::path(
     get,
     path = "/api/v1/auth/login",
     params(
-        ("callback_url" = String, Query, description = "The local URL to redirect back to after login")
+        ("callback_url" = String, Query, description = "The local URL to redirect back to after login"),
+        ("state" = Option<String>, Query, description = "Opaque value returned to the callback"),
+        ("code_challenge" = Option<String>, Query, description = "PKCE S256 challenge; send the verifier with the code")
     ),
     responses(
         (status = 303, description = "Redirect to OIDC provider")
@@ -55,6 +59,12 @@ pub async fn login(
 
     if let Some(state) = &query.state {
         auth_url.push_str(&format!("&state={}", urlencoding::encode(state)));
+    }
+    if let Some(challenge) = &query.code_challenge {
+        auth_url.push_str(&format!(
+            "&code_challenge={}&code_challenge_method=S256",
+            urlencoding::encode(challenge)
+        ));
     }
 
     Ok(Redirect::to(&auth_url))
@@ -90,13 +100,16 @@ pub async fn exchange_token(
     let client = Client::new();
     let token_url = format!("{}/token", oidc_config.issuer.trim_end_matches('/'));
 
-    let params = [
+    let mut params = vec![
         ("grant_type", "authorization_code"),
-        ("code", &payload.sso_token),
-        ("client_id", &oidc_config.client_id),
-        ("client_secret", &oidc_config.client_secret),
-        ("redirect_uri", &payload.callback_url),
+        ("code", payload.sso_token.as_str()),
+        ("client_id", oidc_config.client_id.as_str()),
+        ("client_secret", oidc_config.client_secret.as_str()),
+        ("redirect_uri", payload.callback_url.as_str()),
     ];
+    if let Some(verifier) = &payload.code_verifier {
+        params.push(("code_verifier", verifier.as_str()));
+    }
 
     let res = client
         .post(&token_url)
