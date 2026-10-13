@@ -104,16 +104,20 @@ pub async fn schedule_step(
         let _ = crate::hcl_eval::resolve_expressions(&mut resolved_spec, hcl_ctx, true);
         let _ = crate::hcl_eval::resolve_expressions(&mut resolved_params, hcl_ctx, true);
 
+        // A Terraform approval is an approval from the moment it exists. Left as its own
+        // type it would start as pending and be handed to a runner, which could then
+        // report it complete without anyone approving.
+        crate::handler::step::intrinsic::terraform::mutate_if_terraform_approval(
+            &mut resolved_type,
+            &mut resolved_spec,
+        );
+
         let step_instance_id = StepInstanceId::new(Uuid::new_v4());
         let initial_status = match resolved_type.as_str() {
             "Approval" | "Wait" => StepStatus::WaitingForEvent,
             _ => StepStatus::Pending,
         };
 
-        println!(
-            "inserting step {} with type {}",
-            step_dsl.name, resolved_type
-        );
         let affinity_context = step_dsl.strategy.as_ref().and_then(|s| s.affinity.clone());
 
         let insert_result = crate::db::insert_step_instance_with_spec_on_conflict_do_nothing(
@@ -146,7 +150,7 @@ pub async fn schedule_step(
                     )
                     .await;
                 }
-            } else if step_dsl.r#type == "Approval" {
+            } else if resolved_type == "Approval" {
                 if let Ok(approval_spec) =
                     serde_json::from_value::<dsl::ApprovalSpec>(resolved_spec.clone())
                 {
@@ -212,19 +216,6 @@ async fn schedule_iterated_steps(
 
     for (idx, item) in items.into_iter().enumerate() {
         let step_instance_id = StepInstanceId::new(Uuid::new_v4());
-        let status = match step_dsl.r#type.as_str() {
-            "Approval" | "Wait" => StepStatus::WaitingForEvent,
-            _ => {
-                if (idx as u32) < max_parallel
-                    && current_running_count < quotas.max_concurrency as i64
-                {
-                    StepStatus::Pending
-                } else {
-                    StepStatus::WaitingForEvent
-                }
-            }
-        };
-
         let mut iteration_ctx = crate::hcl_eval::create_context(
             run_context.inputs.clone(),
             run_id,
@@ -242,6 +233,25 @@ async fn schedule_iterated_steps(
         let mut resolved_params_iter = resolved_params.clone();
         let _ =
             crate::hcl_eval::resolve_expressions(&mut resolved_params_iter, &iteration_ctx, true);
+
+        let mut resolved_type = resolved_type.to_string();
+        crate::handler::step::intrinsic::terraform::mutate_if_terraform_approval(
+            &mut resolved_type,
+            &mut resolved_spec_iter,
+        );
+        let resolved_type = resolved_type.as_str();
+        let status = match resolved_type {
+            "Approval" | "Wait" => StepStatus::WaitingForEvent,
+            _ => {
+                if (idx as u32) < max_parallel
+                    && current_running_count < quotas.max_concurrency as i64
+                {
+                    StepStatus::Pending
+                } else {
+                    StepStatus::WaitingForEvent
+                }
+            }
+        };
 
         let affinity_context = step_dsl.strategy.as_ref().and_then(|s| s.affinity.clone());
 

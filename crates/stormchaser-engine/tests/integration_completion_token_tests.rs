@@ -193,3 +193,74 @@ async fn runner_owned_step_is_reported_without_a_token() {
         "the run should have finished and been archived"
     );
 }
+
+#[tokio::test]
+async fn a_terraform_approval_waits_for_a_decision_and_is_never_a_runner_task() {
+    let pool = mock_pool().await;
+    let run_id = RunId::new_v4();
+    sqlx::query(
+        "INSERT INTO workflow_runs (id, workflow_name, status, fencing_token, repo_url, workflow_path, git_ref) VALUES ($1, 'tf-approval-test', 'running', 1, 'http://git.local', 'workflow.storm', 'main')"
+    )
+    .bind(run_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let workflow = stormchaser_dsl::StormchaserParser::new()
+        .parse(
+            r#"
+        stormchaser_dsl_version = "0.1"
+        workflow "tf" {
+            steps {
+                step "manual_approval" "TerraformApproval" {
+                    plan_summary = "Plan: 1 to add, 0 to change, 2 to destroy."
+                }
+            }
+        }
+    "#,
+        )
+        .unwrap();
+    let ctx = stormchaser_engine::hcl_eval::create_context(
+        json!({}),
+        run_id,
+        json!({}),
+        json!({}),
+        Some(&workflow),
+        None,
+    );
+    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+    let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
+
+    let mut conn = pool.acquire().await.unwrap();
+    handler::step::scheduling::schedule_step(
+        run_id,
+        &workflow.steps[0],
+        &mut conn,
+        nats_client,
+        &ctx,
+        pool.clone(),
+        &workflow,
+    )
+    .await
+    .unwrap();
+
+    let (step_type, status, token): (String, StepStatus, Option<String>) = sqlx::query_as(
+        "SELECT step_type, status, completion_token FROM step_instances WHERE run_id = $1",
+    )
+    .bind(run_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(step_type, "Approval");
+    assert_eq!(status, StepStatus::WaitingForEvent);
+    assert!(
+        token.is_some(),
+        "an approval is finished by the engine, so it keeps its completion token"
+    );
+
+    sqlx::query("DELETE FROM workflow_runs WHERE id = $1")
+        .bind(run_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
