@@ -332,7 +332,14 @@ impl DockerContainerMachine<state::Running> {
         }
         let nats = self.nats.as_ref()?;
 
-        match request_artifact_auth(nats, self.metadata.run_id, self.metadata.step_id).await {
+        match request_artifact_auth(
+            nats,
+            self.metadata.run_id,
+            self.metadata.step_id,
+            Some(&self.metadata.runner_id),
+        )
+        .await
+        {
             Ok(config) => Some(config),
             Err(e) => {
                 error!(

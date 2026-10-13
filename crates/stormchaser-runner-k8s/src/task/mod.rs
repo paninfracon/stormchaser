@@ -84,6 +84,7 @@ async fn execute_job_on_cluster(
         storage,
         test_report_urls,
         registry_auth,
+        runner_id: Some(runner_id.clone()),
     };
 
     let machine = job_machine::K8sJobMachine::new(client.clone(), metadata.clone())

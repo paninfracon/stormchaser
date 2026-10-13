@@ -207,6 +207,7 @@ async fn handle_orphaned_job(
                             storage: None,
                             test_report_urls: None,
                             registry_auth: None,
+                            runner_id: None,
                         },
                     );
                     let _ = machine.clean_up(&job_name).await;
@@ -233,21 +234,51 @@ async fn handle_orphaned_job(
             storage: None,
             test_report_urls: None,
             registry_auth: None,
+            runner_id: Some(r_id.clone()),
         };
 
         // Tell the engine this runner now holds the step, so that it is not judged by the
-        // runner that started it and has gone.
+        // runner that started it and has gone. The engine takes a step from a runner
+        // only once that runner has gone quiet, which it may not have yet: during a
+        // rolling restart the old runner is still alive when this one starts. So the
+        // claim is repeated until the job is done.
+        let adopted_at = std::time::Instant::now();
+        let claim = tokio::spawn({
+            let (nats, runner_id) = (nats.clone(), runner_id.clone());
+            async move {
+                loop {
+                    if let Err(e) = stormchaser_model::nats::announce_step_running(
+                        &nats, run_id, step_id, &runner_id,
+                    )
+                    .await
+                    {
+                        error!("Failed to announce adoption of step {}: {:?}", step_id, e);
+                    }
+                    tokio::time::sleep(ADOPTION_CLAIM_INTERVAL).await;
+                }
+            }
+        });
+
+        // An adopted job's sidecar still has to be told when its step has finished
+        let machine =
+            job_machine::K8sJobMachine::new(client_clone, metadata).with_nats(nats.clone());
+
+        let outcome = machine.adopt(job_name.clone()).wait().await;
+
+        // The result is accepted only from the runner the step is with. A job that
+        // finishes moments after adoption could be reported before the engine has let
+        // the step go to this runner, so wait out the time that takes and claim once more.
+        claim.abort();
+        if let Some(remaining) = ADOPTION_SETTLE.checked_sub(adopted_at.elapsed()) {
+            tokio::time::sleep(remaining).await;
+        }
         if let Err(e) =
             stormchaser_model::nats::announce_step_running(&nats, run_id, step_id, &runner_id).await
         {
             error!("Failed to announce adoption of step {}: {:?}", step_id, e);
         }
 
-        // An adopted job's sidecar still has to be told when its step has finished
-        let machine =
-            job_machine::K8sJobMachine::new(client_clone, metadata).with_nats(nats.clone());
-
-        match machine.adopt(job_name.clone()).wait().await {
+        match outcome {
             Ok(job_state) => match job_state {
                 job_machine::JobState::Succeeded(metrics) => {
                     info!("Adopted step {} completed successfully", step_id);
@@ -432,6 +463,13 @@ pub async fn scan_for_orphans(
 
     Ok(())
 }
+
+/// How often a runner that adopted a step repeats that it holds it.
+const ADOPTION_CLAIM_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// How long after adopting a step a runner waits before reporting its result: a little
+/// longer than it takes the engine to notice that the previous runner has gone quiet.
+const ADOPTION_SETTLE: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// How long a runner is given to create a new Job's Secrets and resume it.
 const SETUP_GRACE_SECS: i64 = 120;

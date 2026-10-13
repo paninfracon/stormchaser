@@ -58,6 +58,20 @@ pub async fn handle_step_running(
         // task), so the step follows it. Otherwise the liveness check would go on judging
         // the step by a runner that no longer has it.
         if let Some(reporting) = event.runner_id.as_deref() {
+            // A step is only taken from a runner that has gone quiet. While its runner is
+            // alive and heartbeating, another runner saying "it is mine now" is refused:
+            // otherwise any runner could take any step, and then report its result.
+            if let Some(current) = instance.runner_id.as_deref() {
+                if current != reporting
+                    && !crate::db::steps::runner_has_gone_quiet(&mut *conn, current).await?
+                {
+                    tracing::warn!(
+                        "Runner {} reports step {} (Run {}) as its own, but runner {} holds it and is alive; ignoring",
+                        reporting, step_id, run_id, current
+                    );
+                    return Ok(());
+                }
+            }
             if crate::db::steps::reassign_step_runner(&mut *conn, step_id, reporting).await? {
                 info!(
                     "Step {} (Run {}) moved from runner {} to runner {}",

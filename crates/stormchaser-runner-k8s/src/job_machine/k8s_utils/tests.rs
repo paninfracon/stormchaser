@@ -83,6 +83,7 @@ fn test_do_build_job_spec_basic() {
         storage: None,
         test_report_urls: None,
         registry_auth: None,
+        runner_id: None,
     };
 
     let (job, _secrets) = do_build_job_spec("test-job", &metadata, None, None).unwrap();
@@ -157,6 +158,7 @@ fn test_do_build_job_spec_with_pvc() {
         storage: Some(storage_map),
         test_report_urls: None,
         registry_auth: None,
+        runner_id: None,
     };
 
     let (job, _secrets) = do_build_job_spec(
@@ -298,6 +300,7 @@ fn test_do_build_job_spec_rejects_privileged_by_default() {
             storage: None,
             test_report_urls: None,
             registry_auth: None,
+            runner_id: None,
         };
 
         let err = do_build_job_spec("test-job", &metadata, None, None).unwrap_err();
@@ -346,6 +349,7 @@ fn k8s_job_metadata(spec: serde_json::Value) -> JobMetadata {
         storage: None,
         test_report_urls: None,
         registry_auth: None,
+        runner_id: None,
     }
 }
 

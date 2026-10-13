@@ -15,7 +15,8 @@ use crate::handler::step::dispatch::find_step;
 use crate::handler::step::quota::release_step_quota_for_instance;
 
 use super::helpers::{
-    completion_authorized, is_terminal_step_status, persist_step_test_reports, step_belongs_to_run,
+    completion_authorized, is_terminal_step_status, persist_step_test_reports,
+    reporter_is_assigned_runner, step_belongs_to_run,
 };
 
 mod artifacts;
@@ -84,6 +85,9 @@ pub async fn handle_step_completed(
     }
 
     if !completion_authorized(&mut tx, &instance, event.completion_token.as_deref()).await {
+        return Ok(());
+    }
+    if !reporter_is_assigned_runner(&mut tx, &instance, event.runner_id.as_deref()).await {
         return Ok(());
     }
 

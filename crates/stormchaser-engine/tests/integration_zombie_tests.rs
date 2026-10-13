@@ -104,7 +104,8 @@ async fn test_zombie_step_handler() {
         completion_token: None,
         event_type: EventType::Step(StepEventType::Failed),
         error: "lost_zombie".to_string(),
-        runner_id: Some("offline-runner-id".to_string()),
+        // As the liveness worker sends it: named for the runner the step was on
+        runner_id: Some(lost_runner.clone()),
         exit_code: None,
         storage_hashes: None,
         artifacts: None,

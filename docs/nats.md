@@ -258,11 +258,15 @@ the wire. If you use passwords, store bcrypt hashes in the server
 configuration and require TLS, because the client still sends the password
 itself.
 
-**What these permissions do not stop.** A runner credential can report
-`completed` or `failed` for any step that was handed to a runner, including
-steps another runner is executing, because the engine cannot yet tell which
-runner a report came from. It can also read tasks scheduled for other runners
-of any type. It cannot finish steps the engine handles itself, such as
+**What these permissions do not stop.** Runners share one credential, so NATS
+cannot tell them apart. The engine does check the runner named in each report:
+a step's result is accepted only from the runner the step is with, a step is
+taken over from a runner only once that runner has missed a heartbeat, and a
+step's registry token goes only to its own runner. That stops a runner that
+does not know which runner holds a step. A compromised runner that learns
+another runner's id can still name it in a report, because the name is part of
+the message and not something NATS vouches for. A runner credential can also
+read tasks scheduled for other runners of any type. It cannot finish steps the engine handles itself, such as
 approvals: those need a token that never leaves the database. Treat every
 runner host as trusted to that extent.
 

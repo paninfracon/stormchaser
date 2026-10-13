@@ -498,6 +498,37 @@ where
     .await
 }
 
+/// Whether a runner has gone quiet: it is unknown, offline, or has missed a heartbeat.
+///
+/// Runners send a heartbeat every 10 seconds. One that has sent none for
+/// `RUNNER_QUIET_SECS` has missed at least one, which is the earliest sign that the
+/// steps it holds may need another runner. It is a lower bar than the 30 seconds after
+/// which the engine gives a runner's steps up for lost: a task is redelivered to another
+/// runner before then, and that runner must be able to take the step over.
+pub async fn runner_has_gone_quiet<'a, E>(executor: E, runner_id: &str) -> Result<bool, sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    let alive: bool = sqlx::query_scalar(
+        r#"
+        SELECT EXISTS (
+            SELECT 1 FROM runners
+            WHERE id = $1
+              AND status <> 'offline'
+              AND last_heartbeat_at >= NOW() - make_interval(secs => $2)
+        )
+        "#,
+    )
+    .bind(runner_id)
+    .bind(RUNNER_QUIET_SECS)
+    .fetch_one(executor)
+    .await?;
+    Ok(!alive)
+}
+
+/// Seconds without a heartbeat after which another runner may take over a runner's steps.
+pub const RUNNER_QUIET_SECS: f64 = 12.0;
+
 /// Whether a step is still in flight on a runner that is offline or has stopped
 /// heartbeating: the same condition [`fetch_zombie_steps`] selects on.
 pub async fn step_runner_is_lost<'a, E>(

@@ -48,6 +48,10 @@ pub struct JobMetadata {
     pub test_report_urls: Option<HashMap<String, Value>>,
     /// Optional private registry authentication details.
     pub registry_auth: Option<Value>,
+    /// Id of the runner executing the step, which it gives the engine when asking for
+    /// the step's registry credentials.
+    #[serde(default)]
+    pub runner_id: Option<String>,
 }
 
 /// Metrics collected after a job execution completes.

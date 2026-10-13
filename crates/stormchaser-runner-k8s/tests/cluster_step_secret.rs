@@ -50,6 +50,7 @@ fn metadata(name: &str, spec: serde_json::Value) -> JobMetadata {
         storage: None,
         test_report_urls: None,
         registry_auth: None,
+        runner_id: None,
     }
 }
 

@@ -282,6 +282,7 @@ pub async fn request_artifact_auth(
     client: &async_nats::Client,
     run_id: uuid::Uuid,
     step_id: uuid::Uuid,
+    runner_id: Option<&str>,
 ) -> Result<Value> {
     let event = EventBuilderV10::new()
         .id(uuid::Uuid::new_v4().to_string())
@@ -290,7 +291,7 @@ pub async fn request_artifact_auth(
         .time(chrono::Utc::now())
         .data(
             crate::APPLICATION_JSON,
-            serde_json::json!({ "run_id": run_id, "step_id": step_id }),
+            serde_json::json!({ "run_id": run_id, "step_id": step_id, "runner_id": runner_id }),
         )
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to build CloudEvent: {}", e))?;

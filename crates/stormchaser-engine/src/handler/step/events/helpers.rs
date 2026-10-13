@@ -388,6 +388,44 @@ pub(crate) async fn completion_authorized(
     false
 }
 
+/// Whether a result for a step that is with a runner comes from the runner it is with.
+///
+/// Every runner can publish a step's result. Without this check any of them could
+/// complete or fail a step that another is running. A step the engine finishes itself
+/// is governed by its completion token instead (see [`completion_authorized`]) and is
+/// not looked at here.
+///
+/// The runner's name is taken from the event, so this stops a runner that does not know
+/// whose step it is; it does not stop one that knows and lies. Telling runners apart
+/// for certain needs a NATS identity per runner.
+pub(crate) async fn reporter_is_assigned_runner(
+    tx: &mut Transaction<'_, Postgres>,
+    instance: &stormchaser_model::step::StepInstance,
+    reporter: Option<&str>,
+) -> bool {
+    // Engine-owned: the token has already been checked
+    if crate::db::step_completion_token(&mut **tx, instance.id)
+        .await
+        .is_some()
+    {
+        return true;
+    }
+    let Some(assigned) = instance.runner_id.as_deref() else {
+        // No runner has reported on it yet; the first to do so is the one that has it
+        return true;
+    };
+    if reporter == Some(assigned) {
+        return true;
+    }
+    tracing::warn!(
+        "Rejecting result for step {} from runner {}: the step is assigned to runner {}",
+        instance.id,
+        reporter.unwrap_or("<unnamed>"),
+        assigned
+    );
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

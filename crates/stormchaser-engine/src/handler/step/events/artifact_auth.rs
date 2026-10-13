@@ -78,6 +78,16 @@ pub async fn artifact_push_auth(payload: &Value, pool: &PgPool) -> Result<Value>
     {
         bail!("step {} is not running on a runner", step_id);
     }
+    // The token lets its holder push to the run's repositories, so it goes only to the
+    // runner that has the step
+    if let Some(assigned) = instance.runner_id.as_deref() {
+        if payload["runner_id"].as_str() != Some(assigned) {
+            bail!(
+                "step {} is assigned to another runner than the one asking",
+                step_id
+            );
+        }
+    }
 
     let context = crate::handler::fetch_run_context(run_id, pool).await?;
     let workflow: Workflow = serde_json::from_value(context.workflow_definition)

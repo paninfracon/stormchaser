@@ -185,7 +185,13 @@ impl K8sJobMachine<state::Running> {
         let job_name = &self.state.job_name;
         let docker_config = match &self.nats {
             Some(nats) => {
-                request_artifact_auth(nats, self.metadata.run_id, self.metadata.step_id).await
+                request_artifact_auth(
+                    nats,
+                    self.metadata.run_id,
+                    self.metadata.step_id,
+                    self.metadata.runner_id.as_deref(),
+                )
+                .await
             }
             None => Err(anyhow::anyhow!(
                 "the runner has no connection to the engine"
