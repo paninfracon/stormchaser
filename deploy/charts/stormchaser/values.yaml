@@ -19,6 +19,9 @@ stormchaser-orchestration:
       ssl: false
     nats:
       url: "nats://stormchaser-nats:4222"
+      # Secret with `user` and `password` keys. The default is generated for the
+      # bundled NATS; for an external server, point this at your own Secret.
+      authSecret: "stormchaser-nats-control"
     loki:
       url: "http://stormchaser-loki:3100"
     grafana:
@@ -67,6 +70,8 @@ stormchaser-runner-k8s:
   enabled: true
   config:
     natsUrl: "nats://stormchaser-nats:4222"
+    # Secret with `user` and `password` keys for the restricted runner user.
+    natsAuthSecret: "stormchaser-nats-runner"
   rbac:
     create: true
 
@@ -90,9 +95,77 @@ postgresql:
     persistence:
       enabled: false
 
+# Generate the Secrets `stormchaser-nats-control` and `stormchaser-nats-runner` for the
+# bundled NATS server. Set to false if you create those Secrets yourself.
+natsAuth:
+  generate: true
+
+# The bundled NATS is a single node for evaluation. It requires authentication and
+# limits what the runner user may do, but it has no TLS and no clustering; see
+# docs/nats.md before using it for anything you care about.
 nats:
   enabled: true
+  # The debug pod would need credentials of its own; leave it off by default.
+  natsBox:
+    enabled: false
+  container:
+    env:
+      NATS_CONTROL_PASSWORD:
+        valueFrom:
+          secretKeyRef:
+            name: stormchaser-nats-control
+            key: password
+      NATS_RUNNER_PASSWORD:
+        valueFrom:
+          secretKeyRef:
+            name: stormchaser-nats-runner
+            key: password
   config:
+    merge:
+      authorization:
+        users:
+          # API, engine and query service: unrestricted.
+          - user: stormchaser
+            password: << $NATS_CONTROL_PASSWORD >>
+          # Runners: report on steps and consume their own task subjects only.
+          # Keep in step with deploy/nats/nats-server.conf.
+          - user: stormchaser-runner
+            password: << $NATS_RUNNER_PASSWORD >>
+            permissions:
+              publish:
+                allow:
+                  - "stormchaser.v1.runner.register"
+                  - "stormchaser.v1.global.runner.heartbeat"
+                  - "stormchaser.v1.global.runner.offline"
+                  - "stormchaser.v1.*.step.initializing"
+                  - "stormchaser.v1.*.step.running"
+                  - "stormchaser.v1.*.step.completed"
+                  - "stormchaser.v1.*.step.failed"
+                  - "stormchaser.v1.step.unpacking_sfs"
+                  - "stormchaser.v1.step.packing_sfs"
+                  - "stormchaser.v1.step.query"
+                  - "$JS.API.STREAM.INFO.stormchaser"
+                  - "$JS.API.STREAM.CREATE.stormchaser"
+                  - "$JS.API.CONSUMER.INFO.stormchaser.*"
+                  - "$JS.API.CONSUMER.CREATE.stormchaser.*.stormchaser.v1.*.step.scheduled.>"
+                  - "$JS.API.CONSUMER.CREATE.stormchaser.*.stormchaser.v1.runner.>"
+                  - "$JS.API.CONSUMER.MSG.NEXT.stormchaser.*"
+                  - "$JS.ACK.stormchaser.>"
+                # The engine's own consumers. Add a shard entry per engine shard.
+                deny:
+                  - "$JS.API.CONSUMER.MSG.NEXT.stormchaser.orchestration-engine-global"
+                  - "$JS.API.CONSUMER.MSG.NEXT.stormchaser.orchestration-engine-legacy-run"
+                  - "$JS.API.CONSUMER.MSG.NEXT.stormchaser.orchestration-engine-legacy-runner"
+                  - "$JS.API.CONSUMER.MSG.NEXT.stormchaser.orchestration-engine-legacy-step"
+                  - "$JS.API.CONSUMER.MSG.NEXT.stormchaser.orchestration-engine-shard-0"
+                  - "$JS.ACK.stormchaser.orchestration-engine-global.>"
+                  - "$JS.ACK.stormchaser.orchestration-engine-legacy-run.>"
+                  - "$JS.ACK.stormchaser.orchestration-engine-legacy-runner.>"
+                  - "$JS.ACK.stormchaser.orchestration-engine-legacy-step.>"
+                  - "$JS.ACK.stormchaser.orchestration-engine-shard-0.>"
+              subscribe:
+                allow:
+                  - "_INBOX.>"
     jetstream:
       enabled: true
       fileStore:

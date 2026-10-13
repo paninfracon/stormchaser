@@ -149,13 +149,15 @@ if [ "$CLEANUP" = true ] || [ ! -f "$ENV_FILE" ]; then
     STORMCHASER_DEV_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
     STORMCHASER_MINIO_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
     STORMCHASER_CLI_SECRET=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
-    if [ -z "$STORMCHASER_DEV_PASSWORD" ] || [ -z "$STORMCHASER_MINIO_PASSWORD" ] || [ -z "$STORMCHASER_CLI_SECRET" ]; then
+    STORMCHASER_NATS_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')
+    STORMCHASER_NATS_RUNNER_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')
+    if [ -z "$STORMCHASER_DEV_PASSWORD" ] || [ -z "$STORMCHASER_MINIO_PASSWORD" ] || [ -z "$STORMCHASER_CLI_SECRET" ] || [ -z "$STORMCHASER_NATS_PASSWORD" ] || [ -z "$STORMCHASER_NATS_RUNNER_PASSWORD" ]; then
         echo -e "${RED}Error: Failed to generate random passwords.${NC}" >&2
         exit 1
     fi
     # Upsert keys so that unrelated entries in .env are preserved
     touch "$ENV_FILE"
-    for key_val in "STORMCHASER_DEV_PASSWORD=$STORMCHASER_DEV_PASSWORD" "STORMCHASER_MINIO_PASSWORD=$STORMCHASER_MINIO_PASSWORD" "STORMCHASER_CLI_SECRET=$STORMCHASER_CLI_SECRET"; do
+    for key_val in "STORMCHASER_DEV_PASSWORD=$STORMCHASER_DEV_PASSWORD" "STORMCHASER_MINIO_PASSWORD=$STORMCHASER_MINIO_PASSWORD" "STORMCHASER_CLI_SECRET=$STORMCHASER_CLI_SECRET" "STORMCHASER_NATS_PASSWORD=$STORMCHASER_NATS_PASSWORD" "STORMCHASER_NATS_RUNNER_PASSWORD=$STORMCHASER_NATS_RUNNER_PASSWORD"; do
         key="${key_val%%=*}"
         val="${key_val#*=}"
         if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
@@ -166,6 +168,13 @@ if [ "$CLEANUP" = true ] || [ ! -f "$ENV_FILE" ]; then
         fi
     done
 fi
+
+# An .env written before NATS authentication was added lacks these; add them in place.
+for key in STORMCHASER_NATS_PASSWORD STORMCHASER_NATS_RUNNER_PASSWORD; do
+    if ! grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
+        echo "${key}=$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')" >> "$ENV_FILE"
+    fi
+done
 
 # Load .env into the current shell so subsequent steps can use the passwords
 # (handles the case where .env already existed and STORMCHASER_DEV_PASSWORD was not generated above)
@@ -269,8 +278,16 @@ if [ "$MODE" == "hybrid" ]; then
       --set "alloy.extraEnvVars[0].name=LOKI_HOST,alloy.extraEnvVars[0].value=$HOST_IP" \
       --wait
 
+    # The runner authenticates to the compose NATS as the restricted runner user.
+    microk8s kubectl create secret generic stormchaser-nats-runner \
+      --namespace default \
+      --from-literal=user=stormchaser-runner \
+      --from-literal=password="$STORMCHASER_NATS_RUNNER_PASSWORD" \
+      --dry-run=client -o yaml | microk8s kubectl apply -f -
+
     helm upgrade --install stormchaser-runner "$REPO_ROOT/deploy/charts/stormchaser-runner-k8s" \
       --namespace default \
+      --set config.natsAuthSecret=stormchaser-nats-runner \
       --set config.natsUrl="nats://$HOST_IP:${PORT_NATS}" \
       --set config.rustLog="stormchaser_runner_k8s=debug" \
       --set config.allowPrivileged="$STORMCHASER_ALLOW_PRIVILEGED" \

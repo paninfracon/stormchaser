@@ -1,14 +1,60 @@
 #![cfg(not(target_arch = "wasm32"))]
 use crate::id::EventId;
 use crate::RunId;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_nats::jetstream;
 use async_nats::HeaderMap;
 use cloudevents::{AttributesReader, EventBuilder, EventBuilderV10};
 use schemars::Schema;
 use serde_json::Value;
 use std::borrow::Cow;
-use tracing::error;
+use tracing::{error, warn};
+
+/// Applies NATS credentials and TLS settings from the environment to `options`.
+///
+/// Every component connects through this so that an operator can turn on NATS
+/// authentication in one place. Credentials come from, in order of preference:
+/// `NATS_CREDS_FILE` (a `.creds` file), `NATS_USER` + `NATS_PASSWORD`, or `NATS_TOKEN`.
+/// `NATS_CA_FILE` adds a root certificate and `NATS_TLS_REQUIRED=true` refuses to talk
+/// to a server without TLS.
+pub async fn apply_auth_from_env(
+    mut options: async_nats::ConnectOptions,
+) -> Result<async_nats::ConnectOptions> {
+    let var = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
+
+    if let Some(path) = var("NATS_CREDS_FILE") {
+        options = options
+            .credentials_file(&path)
+            .await
+            .with_context(|| format!("Failed to read NATS credentials file {}", path))?;
+    } else if let (Some(user), Some(password)) = (var("NATS_USER"), var("NATS_PASSWORD")) {
+        options = options.user_and_password(user, password);
+    } else if let Some(token) = var("NATS_TOKEN") {
+        options = options.token(token);
+    } else {
+        warn!(
+            "Connecting to NATS without credentials; set NATS_CREDS_FILE, NATS_USER/NATS_PASSWORD or NATS_TOKEN"
+        );
+    }
+
+    if let Some(ca) = var("NATS_CA_FILE") {
+        options = options.add_root_certificates(ca.into());
+    }
+    if var("NATS_TLS_REQUIRED").is_some_and(|v| v.eq_ignore_ascii_case("true") || v == "1") {
+        options = options.require_tls(true);
+    }
+
+    Ok(options)
+}
+
+/// Connects to NATS with the credentials and TLS settings found in the environment.
+///
+/// Use this instead of `async_nats::connect`, which would connect anonymously and be
+/// refused by a server that requires authentication.
+pub async fn connect(addrs: impl async_nats::ToServerAddrs) -> Result<async_nats::Client> {
+    let options = apply_auth_from_env(async_nats::ConnectOptions::new()).await?;
+    Ok(async_nats::connect_with_options(addrs, options).await?)
+}
 
 pub fn get_total_shards() -> u32 {
     std::env::var("STORMCHASER_TOTAL_SHARDS")

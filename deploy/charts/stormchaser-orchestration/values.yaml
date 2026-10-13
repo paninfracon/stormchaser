@@ -12,6 +12,9 @@ global:
     ssl: true
   nats:
     url: "nats://nats:4222"
+    # Name of a Secret with `user` and `password` keys for NATS authentication.
+    # Leave empty only if the NATS server accepts unauthenticated clients.
+    authSecret: ""
   # Internal hosts that workflow-driven HTTP requests (RestApi, WebhookInvoke, api
   # queries, Slack/Teams, WASM downloads) may reach. Requests to private, loopback,
   # link-local and metadata addresses are refused unless the host is listed here.

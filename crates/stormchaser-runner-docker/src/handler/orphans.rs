@@ -264,7 +264,7 @@ mod tests {
     async fn test_scan_for_orphans_finds_container() {
         let docker = Docker::connect_with_local_defaults().unwrap();
 
-        let nats_client = async_nats::connect("nats://localhost:4222").await;
+        let nats_client = stormchaser_model::nats::connect("nats://localhost:4222").await;
         if let Ok(nats) = nats_client {
             // Create a dummy container
             let mut labels = HashMap::new();

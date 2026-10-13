@@ -7,7 +7,7 @@ Stormchaser supports three primary deployment models: **Docker Only**,
 
 ## 1. Quick Start: Full Stack with MicroK8s
 
-This is the fastest way to get a production-like environment running on your
+This is the fastest way to get the full stack running on Kubernetes on your
 local machine, complete with automated log management and monitoring
 (Prometheus/Grafana).
 
@@ -23,6 +23,11 @@ local machine, complete with automated log management and monitoring
   ```
 
 - **Helm**: Ensure `helm` is installed locally.
+
+> **This is an evaluation environment.** It deploys single-node PostgreSQL,
+> NATS and MinIO alongside Stormchaser. NATS requires generated passwords but
+> has no TLS and no clustering. Before relying on it, read
+> [NATS: Quickstart and Production](nats.md).
 
 ### Step 1: Run the Deployment Script
 
@@ -156,7 +161,9 @@ and the Runners in isolated worker clusters).
 - `helm` and `kubectl` installed and configured to communicate with your
   cluster.
 - External dependencies provisioned (PostgreSQL Database, NATS JetStream
-  cluster).
+  cluster). NATS must require authentication, give runners a separate
+  restricted user, use TLS, and be unreachable from workflow step pods; see
+  [NATS: Quickstart and Production](nats.md) for the exact requirements.
 
 ### Step 1: Provision the Namespace and Secrets
 
@@ -170,6 +177,16 @@ kubectl create namespace stormchaser
 kubectl create secret generic stormchaser-db-secret \
   --namespace stormchaser \
   --from-literal=DATABASE_URL="postgres://user:password@host:5432/db"
+
+# NATS credentials: one Secret for the control plane, one for runners
+kubectl create secret generic nats-control \
+  --namespace stormchaser \
+  --from-literal=user=stormchaser \
+  --from-literal=password='<control password>'
+kubectl create secret generic nats-runner \
+  --namespace stormchaser \
+  --from-literal=user=stormchaser-runner \
+  --from-literal=password='<runner password>'
 
 # Example: Create the TLS secret for mTLS
 kubectl create secret tls stormchaser-tls-certs \
@@ -191,7 +208,8 @@ helm install stormchaser-orchestration \
   ./deploy/charts/stormchaser-orchestration \
   --namespace stormchaser \
   --set global.database.existingSecret="stormchaser-db-secret" \
-  --set global.nats.url="nats://my-nats-cluster:4222" \
+  --set global.nats.url="tls://my-nats-cluster:4222" \
+  --set global.nats.authSecret="nats-control" \
   --set global.oidc.issuer="https://my-identity-provider/dex"
 ```
 
@@ -207,7 +225,8 @@ NATS and runner behavior.
 ```bash
 helm install stormchaser-runner ./deploy/charts/stormchaser-runner-k8s \
   --namespace stormchaser \
-  --set config.natsUrl="nats://my-nats-cluster:4222" \
+  --set config.natsUrl="tls://my-nats-cluster:4222" \
+  --set config.natsAuthSecret="nats-runner" \
   --set rbac.create=true
 ```
 

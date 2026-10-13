@@ -14,7 +14,7 @@ use tracing::{debug, info};
 use crate::handler::step::dispatch::find_step;
 use crate::handler::step::quota::release_step_quota_for_instance;
 
-use super::helpers::{is_terminal_step_status, persist_step_test_reports};
+use super::helpers::{is_terminal_step_status, persist_step_test_reports, step_belongs_to_run};
 
 mod artifacts;
 mod logs;
@@ -72,6 +72,9 @@ pub async fn handle_step_completed(
 
     // 1. Update StepInstance status
     let instance = fetch_step_instance(step_id, &mut *tx).await?;
+    if !step_belongs_to_run(&instance, run_id) {
+        return Ok(());
+    }
 
     // Ensure we don't process duplicate completion events
     if is_terminal_step_status(&instance.status) {

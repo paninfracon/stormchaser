@@ -18,6 +18,9 @@ pub async fn handle_step_running(
     span.record("step_id", tracing::field::display(step_id));
     // 1. Fetch current instance
     let instance = fetch_step_instance(step_id, &pool).await?;
+    if !super::helpers::step_belongs_to_run(&instance, run_id) {
+        return Ok(());
+    }
 
     let runner_id = event
         .runner_id

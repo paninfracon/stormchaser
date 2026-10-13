@@ -130,7 +130,10 @@ pub async fn run_runner(config: Config) -> Result<()> {
     });
 
     // 2. Connect to NATS
-    let nats_options = async_nats::ConnectOptions::new().retry_on_initial_connect();
+    let nats_options = stormchaser_model::nats::apply_auth_from_env(
+        async_nats::ConnectOptions::new().retry_on_initial_connect(),
+    )
+    .await?;
     let nats_client = async_nats::connect_with_options(nats_url, nats_options)
         .await
         .context("Failed to connect to NATS")?;
@@ -231,6 +234,9 @@ pub async fn run_runner(config: Config) -> Result<()> {
 
     let runner_consumer = stream
         .create_consumer(async_nats::jetstream::consumer::pull::Config {
+            // Named so the create request carries the filter in its subject, which lets
+            // NATS permissions limit runners to consumers on their own task subjects.
+            name: Some(format!("runner-k8s-{}", runner_id)),
             filter_subject: nats_subject.clone(),
             ..Default::default()
         })

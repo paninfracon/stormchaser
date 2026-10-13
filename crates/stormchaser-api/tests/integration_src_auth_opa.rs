@@ -57,7 +57,7 @@ async fn mock_state(auth: MockAuthorizer) -> AppState {
         .unwrap();
 
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats = async_nats::connect(nats_url).await.unwrap();
+    let nats = stormchaser_model::nats::connect(nats_url).await.unwrap();
 
     AppState {
         pool,

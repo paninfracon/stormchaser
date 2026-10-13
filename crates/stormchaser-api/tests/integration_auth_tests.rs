@@ -96,7 +96,7 @@ async fn setup_app(mock_server_url: String) -> Option<axum::Router> {
     std::env::set_var("API_RATE_LIMIT_BURST_SIZE", "1000");
 
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = async_nats::connect(nats_url)
+    let nats_client = stormchaser_model::nats::connect(nats_url)
         .await
         .expect("Failed to connect to NATS");
 
@@ -348,7 +348,7 @@ async fn test_auth_refresh_success() {
 #[tokio::test]
 async fn test_auth_exchange_network_error() {
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
     let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         let pwd = var("STORMCHASER_DEV_PASSWORD")
@@ -666,7 +666,7 @@ async fn test_auth_exchange_invalid_signature() {
 #[tokio::test]
 async fn test_auth_refresh_network_error() {
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
     let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         let pwd = var("STORMCHASER_DEV_PASSWORD")

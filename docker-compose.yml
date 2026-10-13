@@ -20,7 +20,13 @@ services:
     ports:
       - "${PORT_NATS:-4222}:4222"
       - "${PORT_NATS_MGT:-8222}:8222"
-    command: ["-js"] # Enable JetStream if needed
+    environment:
+      NATS_CONTROL_PASSWORD: '${STORMCHASER_NATS_PASSWORD?Error: STORMCHASER_NATS_PASSWORD is not set}'
+      NATS_RUNNER_PASSWORD: '${STORMCHASER_NATS_RUNNER_PASSWORD?Error: STORMCHASER_NATS_RUNNER_PASSWORD is not set}'
+    volumes:
+      - ./deploy/nats/nats-server.conf:/etc/nats/nats-server.conf:ro
+    # JetStream, authentication and per-role permissions are set in the config file.
+    command: ["-c", "/etc/nats/nats-server.conf"]
 
   dex:
     image: dexidp/dex:v2.41.1
@@ -134,6 +140,8 @@ services:
     environment:
       DATABASE_URL: 'postgres://stormchaser:${STORMCHASER_DEV_PASSWORD?Error: STORMCHASER_DEV_PASSWORD is not set}@postgres:5432/stormchaser'
       NATS_URL: nats://nats:4222
+      NATS_USER: stormchaser
+      NATS_PASSWORD: '${STORMCHASER_NATS_PASSWORD?Error: STORMCHASER_NATS_PASSWORD is not set}'
       RUST_LOG: stormchaser_engine=debug
       GIT_CACHE_DIR: /tmp/stormchaser/git-cache
       LOKI_URL: http://loki:3100
@@ -167,6 +175,8 @@ services:
     environment:
       DATABASE_URL: 'postgres://stormchaser:${STORMCHASER_DEV_PASSWORD?Error: STORMCHASER_DEV_PASSWORD is not set}@postgres:5432/stormchaser'
       NATS_URL: nats://nats:4222
+      NATS_USER: stormchaser
+      NATS_PASSWORD: '${STORMCHASER_NATS_PASSWORD?Error: STORMCHASER_NATS_PASSWORD is not set}'
       RUST_LOG: stormchaser_query=debug
       OIDC_ISSUER: http://dex:5556/dex
       OIDC_EXTERNAL_ISSUER: http://localhost:${PORT_DEX:-5556}/dex
@@ -204,6 +214,8 @@ services:
     environment:
       DATABASE_URL: 'postgres://stormchaser:${STORMCHASER_DEV_PASSWORD?Error: STORMCHASER_DEV_PASSWORD is not set}@postgres:5432/stormchaser'
       NATS_URL: nats://nats:4222
+      NATS_USER: stormchaser
+      NATS_PASSWORD: '${STORMCHASER_NATS_PASSWORD?Error: STORMCHASER_NATS_PASSWORD is not set}'
       RUST_LOG: stormchaser_api=debug
       OIDC_ISSUER: http://dex:5556/dex
       OIDC_EXTERNAL_ISSUER: http://localhost:${PORT_DEX:-5556}/dex
@@ -257,6 +269,8 @@ services:
     profiles: ["docker"]
     environment:
       NATS_URL: nats://nats:4222
+      NATS_USER: stormchaser-runner
+      NATS_PASSWORD: '${STORMCHASER_NATS_RUNNER_PASSWORD?Error: STORMCHASER_NATS_RUNNER_PASSWORD is not set}'
       RUST_LOG: stormchaser_runner_docker=debug
       # Privileged steps are root on this host; tests/dogfood.storm needs this set to true.
       STORMCHASER_ALLOW_PRIVILEGED: ${STORMCHASER_ALLOW_PRIVILEGED:-false}

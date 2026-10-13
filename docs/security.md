@@ -61,7 +61,7 @@ Stormchaser supports **mutual TLS (mTLS)** for all server-to-server communicatio
 The Orchestration Engine and API support mounting certificates (e.g., from `cert-manager` in Kubernetes) and dynamically reloading them without a restart.
 
 * **Certificate Watching**: The `stormchaser-tls` crate uses the `notify` crate to watch for file modifications in the certificate directory. When certificates are rotated (e.g., by Vault or Let's Encrypt), the system automatically swaps the `rustls` configuration in memory.
-* **mTLS for NATS**: All NATS connections are configured to use client certificates for authentication and encryption.
+* **mTLS for NATS**: The API and Engine present their client certificate to NATS, and it is enforced only when the NATS server is configured with TLS and `verify: true`. The runners do not present a client certificate; they authenticate with NATS credentials. The bundled quickstart NATS has no TLS. See [NATS: Quickstart and Production](nats.md).
 * **mTLS for Postgres**: Database connections use `sqlx` with `rustls` to verify the server certificate and provide a client certificate for mutual authentication.
 * **mTLS for OPA**: Outbound requests to the OPA server can be configured to use mTLS certificates.
 
@@ -88,6 +88,8 @@ Stormchaser follows a strict **Fail-Closed** security philosophy regarding OPA:
 | :--- | :--- | :--- |
 | `DATABASE_URL` | Connection string for Postgres. | Core data security. |
 | `NATS_URL` | Connection string for NATS. | Message integrity. |
+| `NATS_CREDS_FILE`, `NATS_USER` / `NATS_PASSWORD`, `NATS_TOKEN` | NATS credentials (see [nats.md](nats.md)). | **Who may schedule and report on steps.** |
+| `NATS_CA_FILE`, `NATS_TLS_REQUIRED` | Verify the NATS server and refuse plaintext. | Protects credentials and events in transit. |
 | `OPA_URL` | URL of the remote OPA server. | **Enables Authorization Enforcement.** |
 | `JWT_SECRET` | Secret key for signing/verifying JWTs. | **Must be kept highly secure.** |
 | `TLS_CA_CERT_PATH` | Path to the CA certificate file. | Trust root for mTLS. |
@@ -132,7 +134,20 @@ comma-separated list of hostnames, IP literals or `*.suffix` patterns, for
 example `vault.internal,*.svc.cluster.local`. The list is empty by default.
 Response bodies are limited to 10 MiB (64 MiB for WASM modules).
 
-## 8. MCP Server Security
+## 8. NATS Authentication
+
+NATS carries every task and every result, so anyone who can publish to it can
+schedule containers on runners and report on other users' steps. All components
+authenticate to NATS with credentials read from the environment, and runners
+should use a separate, restricted NATS user.
+
+The bundled NATS (docker-compose and the umbrella Helm chart) requires
+passwords and restricts the runner user, but it is a single node without TLS
+and is meant for evaluation. [NATS: Quickstart and Production](nats.md) lists
+what the quickstart provides, the exact permissions each role needs, and the
+requirements for a hardened production server.
+
+## 9. MCP Server Security
 
 The Model Context Protocol (MCP) server, which exposes the OpenAPI specification as tools for AI agents, is integrated with the same OPA enforcement as the rest of the system:
 

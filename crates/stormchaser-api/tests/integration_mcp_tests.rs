@@ -45,7 +45,7 @@ async fn setup_app_with(
     env::set_var("API_RATE_LIMIT_BURST_SIZE", "1000");
 
     let nats_url = env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = async_nats::connect(nats_url).await.ok()?;
+    let nats_client = stormchaser_model::nats::connect(nats_url).await.ok()?;
 
     let db_url = env::var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();

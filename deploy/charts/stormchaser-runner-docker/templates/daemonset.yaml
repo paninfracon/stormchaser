@@ -22,6 +22,18 @@ spec:
               value: "stormchaser-runner-docker"
             - name: NATS_URL
               value: {{ .Values.config.natsUrl | quote }}
+            {{- with .Values.config.natsAuthSecret }}
+            - name: NATS_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: user
+            - name: NATS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: password
+            {{- end }}
             - name: RUST_LOG
               value: {{ .Values.config.rustLog | quote }}
             - name: STORMCHASER_ALLOW_PRIVILEGED

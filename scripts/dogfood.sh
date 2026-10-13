@@ -102,10 +102,12 @@ INPUTS=$(jq -n --arg url "$REPO_URL" --arg ip "$HOST_IP" --arg kubeconfig "$KUBE
   --argjson port_s3 "${PORT_S3:-9000}" \
   --argjson port_reg "${PORT_REG:-32000}" \
   --argjson port_opa "${PORT_OPA:-8181}" \
-  --arg db_pwd "$STORMCHASER_DEV_PASSWORD" '{
+  --arg db_pwd "$STORMCHASER_DEV_PASSWORD" \
+  --arg nats_pwd "$STORMCHASER_NATS_PASSWORD" '{
   "repo_url": $url,
   "host_ip": $ip,
   "db_password": $db_pwd,
+  "nats_password": $nats_pwd,
   "kubeconfig": $kubeconfig,
   "port_api": $port_api,
   "port_db": $port_db,

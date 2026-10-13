@@ -37,6 +37,18 @@ spec:
               value: {{ .Values.global.database.ssl | quote }}
             - name: NATS_URL
               value: {{ .Values.global.nats.url | quote }}
+            {{- with .Values.global.nats.authSecret }}
+            - name: NATS_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: user
+            - name: NATS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: password
+            {{- end }}
             - name: STORMCHASER_SSRF_ALLOWED_HOSTS
               value: {{ join "," .Values.global.ssrfAllowedHosts | quote }}
             - name: RUST_LOG

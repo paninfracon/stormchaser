@@ -57,12 +57,14 @@ if [ -z "$STORMCHASER_DEV_PASSWORD" ] && [ -z "$1" ]; then
     exit 1
 fi
 DB_PASSWORD="${1:-$STORMCHASER_DEV_PASSWORD}"
+# The bundled NATS requires authentication; the umbrella chart generates this Secret.
+NATS_PASSWORD=$(microk8s kubectl get secret -n stormchaser stormchaser-nats-control -o jsonpath='{.data.password}' | base64 -d)
 
 KUBECONFIG_DATA=$(microk8s config | sed 's|https://127.0.0.1:16443|https://kubernetes.default.svc:443|g' | sed 's|certificate-authority-data:.*|insecure-skip-tls-verify: true|g')
 
 echo -e "${BLUE}>>> Triggering CLI to launch workflow...${NC}"
 # Use the CLI to run the workflow and parse the run ID
-RUN_JSON=$(cargo run -q -p stormchaser-cli -- --url "$API_URL" --token "$TOKEN" run tests/dogfood-k8s.storm --input repo_url="$REPO_URL" --input kubeconfig="$KUBECONFIG_DATA" --input db_password="$DB_PASSWORD")
+RUN_JSON=$(cargo run -q -p stormchaser-cli -- --url "$API_URL" --token "$TOKEN" run tests/dogfood-k8s.storm --input repo_url="$REPO_URL" --input kubeconfig="$KUBECONFIG_DATA" --input db_password="$DB_PASSWORD" --input nats_password="$NATS_PASSWORD")
 RUN_ID=$(echo "$RUN_JSON" | grep -oP '(?<="run_id": ")[^"]*')
 
 if [ -z "$RUN_ID" ]; then

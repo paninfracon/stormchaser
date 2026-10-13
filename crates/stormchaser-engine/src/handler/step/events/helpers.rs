@@ -223,3 +223,24 @@ pub async fn persist_step_test_reports(
     }
     Ok(())
 }
+
+/// True when a step event names the run its step actually belongs to.
+///
+/// Step events arrive over NATS from runners. Without this check an event for one run
+/// could carry a step id from another, and the handler would fail or complete a step
+/// (and with it a run) the sender has nothing to do with.
+pub(crate) fn step_belongs_to_run(
+    instance: &stormchaser_model::step::StepInstance,
+    run_id: stormchaser_model::RunId,
+) -> bool {
+    if instance.run_id == run_id {
+        return true;
+    }
+    tracing::warn!(
+        "Rejecting step event: step {} belongs to run {}, not run {}",
+        instance.id,
+        instance.run_id,
+        run_id
+    );
+    false
+}

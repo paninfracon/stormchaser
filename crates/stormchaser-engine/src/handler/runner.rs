@@ -64,6 +64,12 @@ pub async fn handle_runner_registration(payload: Value, pool: PgPool) -> Result<
 /// Handle wasm registration.
 pub async fn handle_wasm_registration(payload: Value, pool: PgPool) -> Result<()> {
     let step_type = payload["step_type"].as_str().context("Missing step_type")?;
+    if crate::handler::step::intrinsic::wasm::is_builtin_step_type(step_type) {
+        anyhow::bail!(
+            "Refusing to register a WASM module for built-in step type {}",
+            step_type
+        );
+    }
     let module = payload["wasm_module"]
         .as_str()
         .context("Missing wasm_module")?;

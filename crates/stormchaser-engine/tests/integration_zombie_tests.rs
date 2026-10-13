@@ -74,7 +74,7 @@ async fn test_zombie_step_handler() {
 
     // 2. Setup mock nats and tls
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
     let tls_reloader = Arc::new(
         TlsReloader::new(stormchaser_tls::TlsConfig::default())
             .await

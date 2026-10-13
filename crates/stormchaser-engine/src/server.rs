@@ -328,6 +328,7 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
     let nats_options = async_nats::ConnectOptions::new()
         .retry_on_initial_connect()
         .tls_client_config((*tls_reloader.client_config()).clone());
+    let nats_options = stormchaser_model::nats::apply_auth_from_env(nats_options).await?;
 
     let nats_client =
         async_nats::connect_with_options(config.nats_url.clone(), nats_options).await?;

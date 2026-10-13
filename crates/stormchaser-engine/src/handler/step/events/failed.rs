@@ -12,7 +12,7 @@ use tracing::{error, info};
 
 use crate::handler::step::quota::release_step_quota_for_instance;
 
-use super::helpers::{is_terminal_step_status, persist_step_test_reports};
+use super::helpers::{is_terminal_step_status, persist_step_test_reports, step_belongs_to_run};
 
 #[tracing::instrument(skip(event, pool, nats_client, tls_reloader), fields(run_id = tracing::field::Empty, step_id = tracing::field::Empty))]
 /// Handle step failed.
@@ -58,6 +58,9 @@ pub async fn handle_step_failed(
     }
 
     let instance = fetch_step_instance(step_id, &mut *tx).await?;
+    if !step_belongs_to_run(&instance, run_id) {
+        return Ok(());
+    }
 
     // Ensure we don't process duplicate completion events
     if is_terminal_step_status(&instance.status) {

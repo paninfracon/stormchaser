@@ -39,7 +39,7 @@ async fn test_storage_backend_crud() {
     std::env::set_var("API_RATE_LIMIT_PER_SECOND", "1000");
     std::env::set_var("API_RATE_LIMIT_BURST_SIZE", "1000");
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = match async_nats::connect(nats_url).await {
+    let nats_client = match stormchaser_model::nats::connect(nats_url).await {
         Ok(c) => c,
         Err(_) => return,
     };
@@ -181,7 +181,7 @@ async fn test_artifact_listing() {
     std::env::set_var("API_RATE_LIMIT_PER_SECOND", "1000");
     std::env::set_var("API_RATE_LIMIT_BURST_SIZE", "1000");
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = match async_nats::connect(nats_url).await {
+    let nats_client = match stormchaser_model::nats::connect(nats_url).await {
         Ok(c) => c,
         Err(_) => return,
     };

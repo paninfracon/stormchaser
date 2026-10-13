@@ -26,7 +26,7 @@ async fn setup_db() -> sqlx::PgPool {
 async fn test_headless_validation_dynamic_query_success() {
     let pool = setup_db().await;
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
     let opa_client = Arc::new(OpaClient::new(None, None));
 
     let run_id = RunId::new_v4();
@@ -64,7 +64,7 @@ async fn test_headless_validation_dynamic_query_success() {
 async fn test_headless_validation_dynamic_query_failure() {
     let pool = setup_db().await;
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
     let opa_client = Arc::new(OpaClient::new(None, None));
 
     let run_id = RunId::new_v4();
@@ -109,7 +109,7 @@ async fn test_execute_query_sql_without_connection_is_rejected() {
 async fn test_headless_validation_malformed_schema_compile_error() {
     let pool = setup_db().await;
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
     let opa_client = Arc::new(OpaClient::new(None, None));
 
     let run_id = RunId::new_v4();
@@ -144,7 +144,7 @@ workflow "bad-schema" {
 async fn test_headless_validation_hcl_eval_error() {
     let pool = setup_db().await;
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
     let opa_client = Arc::new(OpaClient::new(None, None));
 
     let run_id = RunId::new_v4();

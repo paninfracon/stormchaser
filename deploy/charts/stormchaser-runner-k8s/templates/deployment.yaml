@@ -37,6 +37,18 @@ spec:
           env:
             - name: NATS_URL
               value: {{ .Values.config.natsUrl | quote }}
+            {{- with .Values.config.natsAuthSecret }}
+            - name: NATS_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: user
+            - name: NATS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: password
+            {{- end }}
             - name: KUBERNETES_NAMESPACE
               valueFrom:
                 fieldRef:

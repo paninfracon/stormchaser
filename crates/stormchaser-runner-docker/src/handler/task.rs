@@ -215,7 +215,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_task_invalid_event() {
         let docker = bollard::Docker::connect_with_local_defaults().unwrap();
-        let nats_client = async_nats::connect("nats://localhost:4222").await;
+        let nats_client = stormchaser_model::nats::connect("nats://localhost:4222").await;
         if let Ok(nats) = nats_client {
             let js = async_nats::jetstream::new(nats.clone());
 

@@ -12,7 +12,10 @@ The Docker-only setup includes:
 * **Stormchaser API & Engine**: Core orchestration services.
 * **PostgreSQL**: Database for state and configuration.
 * **NATS JetStream**: Message broker and persistent event store for service
-  communication and task queuing.
+  communication and task queuing. It requires passwords, which `setup.sh`
+  generates into `.env` (`STORMCHASER_NATS_PASSWORD` for the control plane,
+  `STORMCHASER_NATS_RUNNER_PASSWORD` for runners), but has no TLS; see
+  [NATS: Quickstart and Production](nats.md).
 * **Dex (OIDC)**: Identity provider for authentication.
 * **Open Policy Agent (OPA)**: Authorization engine.
 * **Stormchaser Docker Runner**: Executes container-based steps locally on

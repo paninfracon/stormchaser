@@ -31,6 +31,12 @@ workflow "dogfood" {
         secret      = true
         minLength   = 8
       }
+      nats_password {
+        type        = "string"
+        description = "Password of the NATS control-plane user"
+        secret      = true
+        minLength   = 8
+      }
       kubeconfig {
         type        = "string"
         description = "Kubeconfig YAML content"
@@ -76,7 +82,7 @@ workflow "dogfood" {
         maximum = 65535
       }
     }
-    required = ["repo_url", "host_ip", "db_password", "kubeconfig", "port_api", "port_db", "port_nats", "port_loki", "port_dex", "port_s3", "port_reg", "port_opa"]
+    required = ["repo_url", "host_ip", "db_password", "nats_password", "kubeconfig", "port_api", "port_db", "port_nats", "port_loki", "port_dex", "port_s3", "port_reg", "port_opa"]
   }
 
   # The main workspace volume shared across steps. It provisions the source code
@@ -155,7 +161,9 @@ workflow "dogfood" {
       ]
       env = [
         { name = "DATABASE_URL", value = "postgres://stormchaser:${inputs.db_password}@${inputs.host_ip}:${inputs.port_db}/stormchaser" },
-        { name = "NATS_URL", value = "nats://${inputs.host_ip}:${inputs.port_nats}" }
+        { name = "NATS_URL", value = "nats://${inputs.host_ip}:${inputs.port_nats}" },
+        { name = "NATS_USER", value = "stormchaser" },
+        { name = "NATS_PASSWORD", value = inputs.nats_password }
       ]
       command = ["/bin/sh", "-c"]
       args = [<<-EOF
@@ -212,7 +220,8 @@ workflow "dogfood" {
         { name = "workspace", mount_path = "/app" }
       ]
       env = [
-        { name = "KUBECONFIG_DATA", value = inputs.kubeconfig }
+        { name = "KUBECONFIG_DATA", value = inputs.kubeconfig },
+        { name = "NATS_PASSWORD", value = inputs.nats_password }
       ]
       command = ["/bin/sh", "-c"]
       args = [<<-EOF
@@ -224,6 +233,9 @@ workflow "dogfood" {
         kubectl get secret stormchaser-tls-certs -n stormchaser -o yaml \
           | grep -v -E '^( +namespace:| +uid:| +resourceVersion:| +creationTimestamp:)' \
           | kubectl apply -n stormchaser-dogfood -f -
+        kubectl create secret generic stormchaser-nats-control -n stormchaser-dogfood \
+          --from-literal=user=stormchaser --from-literal=password="$NATS_PASSWORD" \
+          --dry-run=client -o yaml | kubectl apply -f -
       EOF
       ]
       next = ["deploy"]
@@ -254,6 +266,7 @@ workflow "dogfood" {
           --set global.database.ssl=false \
           --set global.database.url=postgres://stormchaser:${inputs.db_password}@${inputs.host_ip}:${inputs.port_db}/stormchaser \
           --set global.nats.url=nats://${inputs.host_ip}:${inputs.port_nats} \
+          --set global.nats.authSecret=stormchaser-nats-control \
           --set global.loki.url=http://${inputs.host_ip}:${inputs.port_loki} \
           --set global.opa.url=http://${inputs.host_ip}:${inputs.port_opa}/v1/data/stormchaser/allow \
           --set global.oidc.issuer=http://${inputs.host_ip}:${inputs.port_dex}/dex

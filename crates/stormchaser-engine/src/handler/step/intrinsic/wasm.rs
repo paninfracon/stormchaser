@@ -11,6 +11,40 @@ use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
 use stormchaser_tls::TlsReloader;
 
+/// Step types the engine and its runners implement themselves.
+const BUILTIN_STEP_TYPES: [&str; 23] = [
+    "Approval",
+    "EmailSend",
+    "GitCheckout",
+    "JQ",
+    "JinjaRender",
+    "LambdaInvoke",
+    "Parallel",
+    "RestApi",
+    "RunContainer",
+    "RunK8sJob",
+    "Sequential",
+    "SlackMessage",
+    "SqlExecute",
+    "TeamsMessage",
+    "TerraformApply",
+    "TerraformApproval",
+    "TerraformPlan",
+    "TestReportEmail",
+    "Wait",
+    "WaitEvent",
+    "Wasm",
+    "WebhookInvoke",
+    "DryRun",
+];
+
+/// True for step types that a registered WASM definition must not take over.
+pub(crate) fn is_builtin_step_type(step_type: &str) -> bool {
+    BUILTIN_STEP_TYPES
+        .iter()
+        .any(|builtin| builtin.eq_ignore_ascii_case(step_type))
+}
+
 #[allow(clippy::too_many_arguments)]
 /// Attempts to dispatch a WebAssembly (WASM) module execution step instance.
 pub async fn try_dispatch(
@@ -24,8 +58,12 @@ pub async fn try_dispatch(
     nats_client: async_nats::Client,
     _tls_reloader: Arc<TlsReloader>,
 ) -> Result<bool> {
-    let wasm_def: Option<(String, String, Value)> =
-        crate::db::get_wasm_step_definition(&pool, step_type).await?;
+    // A registered WASM definition may add a step type but never replace a built-in one.
+    let wasm_def: Option<(String, String, Value)> = if is_builtin_step_type(step_type) {
+        None
+    } else {
+        crate::db::get_wasm_step_definition(&pool, step_type).await?
+    };
 
     let (module, function, wasm_config) = if let Some((m, f, c)) = wasm_def {
         (m, f, c)
@@ -169,5 +207,24 @@ async fn execute_wasm_step(
             )
             .await;
         }
+    }
+}
+
+#[cfg(test)]
+mod builtin_tests {
+    use super::is_builtin_step_type;
+
+    #[test]
+    fn builtin_step_types_cannot_be_shadowed() {
+        for step_type in [
+            "RunContainer",
+            "Approval",
+            "runcontainer",
+            "RestApi",
+            "Wasm",
+        ] {
+            assert!(is_builtin_step_type(step_type), "{}", step_type);
+        }
+        assert!(!is_builtin_step_type("MyCustomScanner"));
     }
 }

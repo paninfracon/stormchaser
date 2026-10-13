@@ -30,7 +30,7 @@ async fn setup_db() -> sqlx::PgPool {
 async fn test_handle_step_query_ephemeral_reply() {
     let pool = setup_db().await;
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
 
     let run_id = RunId::new_v4();
     let step_id = StepInstanceId::new_v4();

@@ -30,7 +30,7 @@ use stormchaser_tls::TlsReloader;
 async fn test_direct_run_inserts_quotas() {
     let pool = setup_db().await;
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
     let opa_client = Arc::new(OpaClient::new(None, None));
 
     let run_id = RunId::new_v4();
@@ -102,7 +102,7 @@ async fn test_direct_run_inserts_quotas() {
 async fn test_dispatch_pending_steps_column_created_at() {
     let pool = setup_db().await;
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
 
     let run_id = RunId::new_v4();
     let workflow_name = format!("test-dispatch-{}", run_id);
@@ -180,7 +180,7 @@ async fn test_workflow_step_completion_dispatches_next_step() {
     let _ = tracing_subscriber::fmt::try_init();
     let pool = setup_db().await;
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
     let _opa_client = Arc::new(OpaClient::new(None, None));
 
     let run_id = RunId::new_v4();

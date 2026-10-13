@@ -22,6 +22,12 @@ export STORMCHASER_DEV_PASSWORD=${STORMCHASER_TEST_DB_PASSWORD}
 # blocks unless the host is allow-listed.
 export STORMCHASER_SSRF_ALLOWED_HOSTS="127.0.0.1,localhost"
 
+# NATS requires authentication; tests connect as the control-plane user.
+export STORMCHASER_NATS_PASSWORD=${STORMCHASER_NATS_PASSWORD:-stormchaser_test_nats}
+export STORMCHASER_NATS_RUNNER_PASSWORD=${STORMCHASER_NATS_RUNNER_PASSWORD:-stormchaser_test_nats_runner}
+
 export DATABASE_URL="postgres://stormchaser:${STORMCHASER_DEV_PASSWORD}@127.0.0.1:${PORT_DB}/stormchaser"
 export NATS_URL="nats://127.0.0.1:${PORT_NATS}"
+export NATS_USER=stormchaser
+export NATS_PASSWORD="${STORMCHASER_NATS_PASSWORD}"
 export OPA_URL="http://127.0.0.1:${PORT_OPA}/v1/data/stormchaser/allow"
