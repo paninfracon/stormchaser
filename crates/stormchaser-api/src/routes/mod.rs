@@ -106,7 +106,7 @@ pub struct EnqueueResponse {
     pub status: RunStatus,
 }
 
-#[derive(Debug, Deserialize, ToSchema, IntoParams)]
+#[derive(Debug, Deserialize, ToSchema, IntoParams, Default)]
 #[into_params(parameter_in = Query)]
 /// Listrunsquery.
 pub struct ListRunsQuery {
@@ -163,15 +163,52 @@ pub struct WorkflowRunDetail {
     pub finished_at: Option<DateTime<Utc>>,
     /// The error.
     pub error: Option<String>,
-    /// The inputs.
+    /// The inputs. Values of inputs the workflow declares `secret = true` are masked.
     #[schema(value_type = Object)]
     pub inputs: Value,
-    /// The secrets.
-    pub secrets: Value,
+    /// The workflow's input schema, used only to find which inputs to mask.
+    #[serde(skip)]
+    #[sqlx(default)]
+    #[schema(ignore)]
+    pub inputs_schema: Option<Value>,
     /// The source code.
     pub source_code: String,
     /// The dsl version.
     pub dsl_version: String,
+}
+
+/// Shown in place of a secret input's value.
+pub const MASKED_INPUT: &str = "********";
+
+impl WorkflowRunDetail {
+    /// Masks the value of every input the workflow's schema marks `secret = true`.
+    ///
+    /// Run details are readable by any authenticated user, so secret inputs (passwords,
+    /// tokens) must not be echoed back in them.
+    pub fn mask_secret_inputs(mut self) -> Self {
+        let secret_names: Vec<String> = self
+            .inputs_schema
+            .as_ref()
+            .and_then(|schema| schema.get("properties"))
+            .and_then(|props| props.as_object())
+            .map(|props| {
+                props
+                    .iter()
+                    .filter(|(_, prop)| prop.get("secret").and_then(Value::as_bool) == Some(true))
+                    .map(|(name, _)| name.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if let Some(inputs) = self.inputs.as_object_mut() {
+            for name in secret_names {
+                if let Some(value) = inputs.get_mut(&name) {
+                    *value = Value::String(MASKED_INPUT.to_string());
+                }
+            }
+        }
+        self
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -407,4 +444,58 @@ pub struct TestSummaryResponse {
     pub duration_ms: i64,
     /// The created at.
     pub created_at: DateTime<Utc>,
+}
+
+#[cfg(test)]
+mod run_detail_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn detail(inputs: Value, inputs_schema: Option<Value>) -> WorkflowRunDetail {
+        WorkflowRunDetail {
+            id: stormchaser_model::RunId::new_v4(),
+            workflow_name: "wf".into(),
+            initiating_user: "user".into(),
+            repo_url: String::new(),
+            workflow_path: String::new(),
+            git_ref: String::new(),
+            status: RunStatus::Running,
+            version: 1,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            started_resolving_at: None,
+            started_at: None,
+            finished_at: None,
+            error: None,
+            inputs,
+            inputs_schema,
+            source_code: String::new(),
+            dsl_version: "1.0".into(),
+        }
+    }
+
+    #[test]
+    fn secret_inputs_are_masked_and_secrets_are_not_serialized() {
+        let run = detail(
+            json!({ "env": "prod", "db_password": "hunter2" }),
+            Some(json!({ "properties": {
+                "env": { "type": "string" },
+                "db_password": { "type": "string", "secret": true }
+            }})),
+        )
+        .mask_secret_inputs();
+
+        let body = serde_json::to_value(&run).unwrap();
+        assert_eq!(body["inputs"]["env"], "prod");
+        assert_eq!(body["inputs"]["db_password"], MASKED_INPUT);
+        assert!(body.get("secrets").is_none());
+        assert!(body.get("inputs_schema").is_none());
+        assert!(!body.to_string().contains("hunter2"));
+    }
+
+    #[test]
+    fn inputs_without_a_schema_are_left_alone() {
+        let run = detail(json!({ "env": "prod" }), None).mask_secret_inputs();
+        assert_eq!(run.inputs, json!({ "env": "prod" }));
+    }
 }

@@ -86,7 +86,6 @@ pub struct WorkflowRunDetail {
     pub finished_at: Option<DateTime<Utc>>,
     pub error: Option<String>,
     pub inputs: Value,
-    pub secrets: Value,
 }
 
 /// Detailed information about a single step within a workflow run.
