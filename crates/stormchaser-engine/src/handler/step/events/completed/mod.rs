@@ -14,7 +14,9 @@ use tracing::{debug, info};
 use crate::handler::step::dispatch::find_step;
 use crate::handler::step::quota::release_step_quota_for_instance;
 
-use super::helpers::{is_terminal_step_status, persist_step_test_reports, step_belongs_to_run};
+use super::helpers::{
+    completion_authorized, is_terminal_step_status, persist_step_test_reports, step_belongs_to_run,
+};
 
 mod artifacts;
 mod logs;
@@ -78,6 +80,10 @@ pub async fn handle_step_completed(
 
     // Ensure we don't process duplicate completion events
     if is_terminal_step_status(&instance.status) {
+        return Ok(());
+    }
+
+    if !completion_authorized(&mut tx, &instance, event.completion_token.as_deref()).await {
         return Ok(());
     }
 

@@ -107,6 +107,11 @@ async fn test_artifact_persistence_on_completion() {
     .unwrap();
 
     // 3. Mock completion with artifacts
+    // The completion below stands in for a runner's report, so mark the step as handed
+    // to one (dispatch does this in production).
+    stormchaser_engine::db::clear_step_completion_token(&pool, step.id)
+        .await
+        .unwrap();
     let fencing_token: i64 =
         sqlx::query_scalar("SELECT fencing_token FROM workflow_runs WHERE id = $1")
             .bind(run_id)
@@ -242,6 +247,11 @@ async fn test_test_report_persistence_on_completion() {
     .unwrap();
 
     // 2. Mock completion with test reports
+    // The completion below stands in for a runner's report, so mark the step as handed
+    // to one (dispatch does this in production).
+    stormchaser_engine::db::clear_step_completion_token(&pool, step.id)
+        .await
+        .unwrap();
     let fencing_token: i64 =
         sqlx::query_scalar("SELECT fencing_token FROM workflow_runs WHERE id = $1")
             .bind(run_id)

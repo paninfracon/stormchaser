@@ -304,6 +304,7 @@ fn parse_response(
             run_id,
             step_id,
             fencing_token,
+            completion_token: None,
             event_type: EventType::Step(StepEventType::Completed),
             test_reports: None,
             artifacts: None,
@@ -325,7 +326,7 @@ async fn execute_request(
     fencing_token: i64,
     spec: &RestApiSpec,
     rendered_body: Option<String>,
-    _pool: PgPool,
+    pool: PgPool,
     nats_client: async_nats::Client,
 ) -> Result<()> {
     let (client, url) = stormchaser_model::net_guard::guarded_client(&spec.url).await?;
@@ -365,7 +366,8 @@ async fn execute_request(
         step_id,
         fencing_token,
     ) {
-        Ok(event) => {
+        Ok(mut event) => {
+            event.completion_token = crate::db::step_completion_token(&pool, step_id).await;
             let js = async_nats::jetstream::new(nats_client);
             let event_payload = serde_json::to_value(event)
                 .context("failed to serialize RestApi completion event")?;

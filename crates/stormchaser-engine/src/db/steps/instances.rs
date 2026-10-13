@@ -438,6 +438,46 @@ where
         .await
 }
 
+/// Returns the secret that must accompany the event finishing a step the engine handles
+/// itself, or `None` once the step has been handed to a runner.
+///
+/// A lookup failure is reported as `None`: the resulting event is then rejected by the
+/// handler, which is the safe outcome.
+pub async fn step_completion_token<'a, E>(executor: E, id: StepInstanceId) -> Option<String>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    match sqlx::query_scalar::<_, Option<String>>(
+        "SELECT completion_token FROM step_instances WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_optional(executor)
+    .await
+    {
+        Ok(token) => token.flatten(),
+        Err(e) => {
+            tracing::error!("Failed to read completion token for step {}: {:?}", id, e);
+            None
+        }
+    }
+}
+
+/// Clears a step's completion token because it is being handed to a runner, which
+/// reports the result itself and never holds the token.
+pub async fn clear_step_completion_token<'a, E>(
+    executor: E,
+    id: StepInstanceId,
+) -> Result<(), sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    sqlx::query("UPDATE step_instances SET completion_token = NULL WHERE id = $1")
+        .bind(id)
+        .execute(executor)
+        .await?;
+    Ok(())
+}
+
 /// Fetch steps that are currently running on offline runners.
 pub async fn fetch_zombie_steps<'a, E>(executor: E) -> Result<Vec<ZombieStep>, sqlx::Error>
 where

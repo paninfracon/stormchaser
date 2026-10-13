@@ -120,6 +120,7 @@ async fn save_output_and_complete(
         run_id,
         step_id,
         fencing_token: 0,
+        completion_token: crate::db::step_completion_token(&pool, step_id).await,
         event_type: EventType::Step(StepEventType::Completed),
         outputs: Some(outputs_map),
         exit_code: Some(0),

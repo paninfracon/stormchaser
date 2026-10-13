@@ -168,6 +168,7 @@ async fn handle_lambda_response(
             run_id,
             step_id,
             fencing_token: 0,
+            completion_token: crate::db::step_completion_token(&pool, step_id).await,
             event_type: EventType::Step(StepEventType::Completed),
             outputs: Some(outputs_map),
             exit_code: Some(0),
@@ -208,6 +209,7 @@ async fn handle_lambda_response(
             run_id,
             step_id,
             fencing_token: 0, // Intrinsic step, don't strictly need fencing token but passing 0 is safe as it's generated internally, though ideal would be passing the actual run's token. Let's pass 0, or since it's an intrinsic step, we could pass it from the try_dispatch function. For now 0 is fine because intrinsic steps are not subject to the same runner reassignment race conditions.
+            completion_token: crate::db::step_completion_token(&pool, step_id).await,
             event_type: EventType::Step(StepEventType::Failed),
             error: error_msg,
             runner_id: None,

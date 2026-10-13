@@ -48,12 +48,14 @@ pub async fn publish_step_completed_event(
     step_id: StepInstanceId,
     fencing_token: i64,
     outputs: Option<std::collections::HashMap<String, serde_json::Value>>,
+    pool: &PgPool,
     nats_client: async_nats::Client,
 ) -> Result<()> {
     let event = StepCompletedEvent {
         run_id,
         step_id,
         fencing_token,
+        completion_token: crate::db::step_completion_token(pool, step_id).await,
         event_type: EventType::Step(StepEventType::Completed),
         runner_id: None,
         storage_hashes: None,

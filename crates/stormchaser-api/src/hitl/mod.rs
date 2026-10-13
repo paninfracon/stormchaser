@@ -180,6 +180,7 @@ pub async fn approve_step(
         run_id,
         step_id,
         fencing_token,
+        completion_token: stormchaser_engine::db::step_completion_token(&state.pool, step_id).await,
         event_type: EventType::Step(StepEventType::Completed),
         runner_id: None,
         exit_code: Some(0),
@@ -236,6 +237,7 @@ pub async fn reject_step(
         run_id,
         step_id,
         fencing_token,
+        completion_token: stormchaser_engine::db::step_completion_token(&state.pool, step_id).await,
         event_type: EventType::Step(StepEventType::Failed),
         error: "Rejected by human".to_string(),
         exit_code: Some(1),
@@ -292,6 +294,11 @@ pub async fn correlate_event(
         run_id: corr.run_id,
         step_id: corr.step_instance_id,
         fencing_token,
+        completion_token: stormchaser_engine::db::step_completion_token(
+            &state.pool,
+            corr.step_instance_id,
+        )
+        .await,
         event_type: EventType::Step(StepEventType::Completed),
         runner_id: None,
         exit_code: Some(0),

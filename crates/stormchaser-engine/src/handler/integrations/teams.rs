@@ -107,6 +107,7 @@ pub async fn handle_teams_message(
             step_instance_id,
             fencing_token,
             Some(HashMap::new()),
+            &pool,
             nats_client,
         )
         .await?;

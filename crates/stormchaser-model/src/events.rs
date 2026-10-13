@@ -297,6 +297,10 @@ pub struct StepCompletedEvent {
     pub run_id: RunId,
     pub step_id: StepInstanceId,
     pub fencing_token: i64,
+    /// Secret proving the sender may finish a step the engine handles itself. Runners
+    /// never have one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_token: Option<String>,
     pub event_type: EventType,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runner_id: Option<String>,
@@ -318,6 +322,10 @@ pub struct StepFailedEvent {
     pub run_id: RunId,
     pub step_id: StepInstanceId,
     pub fencing_token: i64,
+    /// Secret proving the sender may finish a step the engine handles itself. Runners
+    /// never have one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_token: Option<String>,
     pub event_type: EventType,
     pub error: String,
     #[serde(skip_serializing_if = "Option::is_none")]

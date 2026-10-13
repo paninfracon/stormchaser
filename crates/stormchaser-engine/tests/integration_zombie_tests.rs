@@ -71,6 +71,10 @@ async fn test_zombie_step_handler() {
     .await
     .unwrap();
     tx.commit().await.unwrap();
+    // The step is running on a runner, which is when the engine drops its completion token.
+    stormchaser_engine::db::clear_step_completion_token(&pool, step_id)
+        .await
+        .unwrap();
 
     // 2. Setup mock nats and tls
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
@@ -86,6 +90,7 @@ async fn test_zombie_step_handler() {
         run_id,
         step_id,
         fencing_token: 1, // Matches the inserted run's fencing_token
+        completion_token: None,
         event_type: EventType::Step(StepEventType::Failed),
         error: "lost_zombie".to_string(),
         runner_id: Some("offline-runner-id".to_string()),

@@ -244,3 +244,27 @@ pub(crate) fn step_belongs_to_run(
     );
     false
 }
+
+/// True when the sender of a completion or failure event is allowed to finish the step.
+///
+/// Steps the engine handles itself (approvals, waits, built-in steps) keep a secret in
+/// the database that only the engine and API can read; the event must carry it. A step
+/// handed to a runner has no secret, and the runner's report is accepted as before.
+pub(crate) async fn completion_authorized(
+    tx: &mut Transaction<'_, Postgres>,
+    instance: &stormchaser_model::step::StepInstance,
+    presented: Option<&str>,
+) -> bool {
+    let Some(expected) = crate::db::step_completion_token(&mut **tx, instance.id).await else {
+        return true;
+    };
+    if presented == Some(expected.as_str()) {
+        return true;
+    }
+    tracing::warn!(
+        "Rejecting event for step {} ({}): it is completed by the engine and the event carries no valid completion token",
+        instance.id,
+        instance.step_type
+    );
+    false
+}

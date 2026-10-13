@@ -207,6 +207,9 @@ pub async fn dispatch_step_instance(
         }
     }
 
+    // From here the runner owns the step and reports its result without a token.
+    crate::db::clear_step_completion_token(&pool, step_instance_id).await?;
+
     publish_cloudevent(
         &js,
         subject,

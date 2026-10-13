@@ -145,6 +145,11 @@ pub async fn approve_step_link(
             run_id: payload.run_id,
             step_id: payload.step_id,
             fencing_token,
+            completion_token: stormchaser_engine::db::step_completion_token(
+                &state.pool,
+                payload.step_id,
+            )
+            .await,
             event_type: EventType::Step(StepEventType::Completed),
             runner_id: None,
             exit_code: Some(0),
@@ -172,6 +177,11 @@ pub async fn approve_step_link(
             run_id: payload.run_id,
             step_id: payload.step_id,
             fencing_token,
+            completion_token: stormchaser_engine::db::step_completion_token(
+                &state.pool,
+                payload.step_id,
+            )
+            .await,
             event_type: EventType::Step(StepEventType::Failed),
             error: "Rejected by human via link".to_string(),
             exit_code: Some(1),

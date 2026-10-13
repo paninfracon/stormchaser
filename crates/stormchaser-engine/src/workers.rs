@@ -49,6 +49,7 @@ pub fn start_liveness_worker(pool: sqlx::PgPool, _nats_client: async_nats::Clien
                                 run_id: zombie.run_id,
                                 step_id: zombie.id,
                                 fencing_token: zombie.fencing_token,
+                                completion_token: None,
                                 event_type: stormchaser_model::events::EventType::Step(
                                     stormchaser_model::events::StepEventType::Failed,
                                 ),
