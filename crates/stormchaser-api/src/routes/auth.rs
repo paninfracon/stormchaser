@@ -150,23 +150,9 @@ pub async fn exchange_token(
         }
     };
 
-    let jwk_opt = state.jwks.read().await.get(&kid).cloned();
-    let jwk = match jwk_opt {
-        Some(j) => j,
-        None => {
-            tracing::warn!("kid {} not found in JWKS cache, attempting refresh", kid);
-            let new_jwks = auth::jwks::fetch_jwks(&oidc_config.jwks_url).await;
-            let mut jwks_write = state.jwks.write().await;
-            *jwks_write = new_jwks;
-
-            match jwks_write.get(&kid) {
-                Some(j) => j.clone(),
-                None => {
-                    tracing::error!("kid {} not found in JWKS cache even after refresh", kid);
-                    return Err(StatusCode::UNAUTHORIZED);
-                }
-            }
-        }
+    let Some(jwk) = auth::jwks::key_for(&state.jwks, &oidc_config.jwks_url, &kid).await else {
+        tracing::error!("kid {} is not one of the identity provider's keys", kid);
+        return Err(StatusCode::UNAUTHORIZED);
     };
 
     let mut validation = Validation::new(header.alg);
@@ -297,23 +283,9 @@ pub async fn refresh_token(
         StatusCode::UNAUTHORIZED
     })?;
 
-    let jwk_opt = state.jwks.read().await.get(&kid).cloned();
-    let jwk = match jwk_opt {
-        Some(j) => j,
-        None => {
-            tracing::warn!("kid {} not found in JWKS cache, attempting refresh", kid);
-            let new_jwks = auth::jwks::fetch_jwks(&oidc_config.jwks_url).await;
-            let mut jwks_write = state.jwks.write().await;
-            *jwks_write = new_jwks;
-
-            match jwks_write.get(&kid) {
-                Some(j) => j.clone(),
-                None => {
-                    tracing::error!("kid {} not found in JWKS cache even after refresh", kid);
-                    return Err(StatusCode::UNAUTHORIZED);
-                }
-            }
-        }
+    let Some(jwk) = auth::jwks::key_for(&state.jwks, &oidc_config.jwks_url, &kid).await else {
+        tracing::error!("kid {} is not one of the identity provider's keys", kid);
+        return Err(StatusCode::UNAUTHORIZED);
     };
 
     let mut validation = Validation::new(header.alg);

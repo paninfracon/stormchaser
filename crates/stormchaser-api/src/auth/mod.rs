@@ -51,15 +51,8 @@ pub async fn authenticate(
     if let Some(oidc_config) = &state.oidc_config {
         if let Ok(header) = decode_header(token) {
             if let Some(kid) = header.kid {
-                let mut jwk_opt = state.jwks.read().await.get(&kid).cloned();
-
-                if jwk_opt.is_none() {
-                    tracing::warn!("kid {} not found in JWKS cache, attempting refresh", kid);
-                    let new_jwks = crate::auth::jwks::fetch_jwks(&oidc_config.jwks_url).await;
-                    let mut jwks_write = state.jwks.write().await;
-                    *jwks_write = new_jwks;
-                    jwk_opt = jwks_write.get(&kid).cloned();
-                }
+                let jwk_opt =
+                    crate::auth::jwks::key_for(&state.jwks, &oidc_config.jwks_url, &kid).await;
 
                 if let Some(jwk) = jwk_opt {
                     let mut validation = Validation::new(header.alg);
