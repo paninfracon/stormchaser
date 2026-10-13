@@ -87,7 +87,7 @@ authenticate with the credentials above.
   `orchestration-engine-legacy-runner`, `orchestration-engine-legacy-step`,
   `docker-runner`, `k8s-runner`, and one ephemeral consumer per running runner
   named `runner-<type>-<runner id>`.
-- A key-value bucket for API rate limiting, created by the API.
+- A key-value bucket for API rate limiting (`api_rate_limit_buckets`), created by the API.
 
 ## Dedicated or shared NATS
 

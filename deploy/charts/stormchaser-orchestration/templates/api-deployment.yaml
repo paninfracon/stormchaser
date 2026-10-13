@@ -90,6 +90,8 @@ spec:
               value: {{ .Values.api.rateLimitPerSecond | quote }}
             - name: API_RATE_LIMIT_BURST_SIZE
               value: {{ .Values.api.rateLimitBurstSize | quote }}
+            - name: STORMCHASER_TRUSTED_PROXIES
+              value: {{ join "," .Values.api.trustedProxies | quote }}
             {{- if .Values.api.mcpAllowedHosts }}
             - name: MCP_ALLOWED_HOSTS
               value: {{ .Values.api.mcpAllowedHosts | quote }}

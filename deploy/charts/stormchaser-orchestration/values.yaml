@@ -61,8 +61,14 @@ api:
     tag: "latest"
   replicaCount: 1
   rustLog: "stormchaser_api=info"
+  # Each client gets a bucket of rateLimitBurstSize requests that refills at
+  # rateLimitPerSecond.
   rateLimitPerSecond: 5
   rateLimitBurstSize: 10
+  # Addresses or CIDR ranges of the ingress or load balancer in front of the API.
+  # Only requests arriving from these have X-Forwarded-For believed; without them
+  # every client behind the proxy shares one rate-limit bucket.
+  trustedProxies: []
   # Comma-separated Host header values the MCP server accepts in addition to
   # loopback names and the API_BASE_URL host, e.g. "stormchaser.example.com".
   mcpAllowedHosts: ""

@@ -82,6 +82,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Logs no longer contain evaluated template results, raw event payloads, a step's definition on a parse failure, the values that failed event schema validation, or a step command's arguments. The engine and API log at `info` unless `RUST_LOG` says otherwise (they defaulted to `debug`), as do the services in the compose file.
 - `secret()` reads only the Vault paths listed in `STORMCHASER_VAULT_ALLOWED_PATHS` (empty by default), and the engine no longer falls back to the Vault token `root` when `VAULT_TOKEN` is unset: lookups are disabled instead.
 - Step names are limited to letters, digits, `_` and `-`, and a step name can no longer alter the log query used to fetch its logs.
+- The API rate limiter is a token bucket per client (`API_RATE_LIMIT_BURST_SIZE` requests, refilled at `API_RATE_LIMIT_PER_SECOND`; the rate was previously ignored). Behind a reverse proxy, set `STORMCHASER_TRUSTED_PROXIES` (Helm: `api.trustedProxies`) so clients are told apart by `X-Forwarded-For`; the header is ignored from any other source. IPv6 clients are counted per /64. The `TEST_BYPASS_RATE_LIMIT` switch is gone.
+- The run log and status streams return 404 for a run that does not exist and stop polling the database when the client disconnects or the run is removed.
 - Removed `h2` 0.3 (RUSTSEC-2026-0258) by building the AWS SDK without its legacy HTTP client.
 - Removed the unmaintained `unsafe-libyaml` (RUSTSEC-2024-0449) by replacing `serde_yaml`.
 

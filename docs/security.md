@@ -137,6 +137,10 @@ Stormchaser follows a strict **Fail-Closed** security philosophy regarding OPA:
 | `STORMCHASER_APPROVAL_LINK_TTL_HOURS` | Engine: lifetime of an approval link. Default `72`. | Bounds how long a leaked link is usable. |
 | `STORMCHASER_OCI_ALLOW_STATIC_CREDENTIALS` | Engine: send an OCI artifact backend's stored credentials to runner helpers when its registry cannot issue scoped tokens. Default `false`. | Long-lived registry credentials leave the engine. |
 | `STORMCHASER_NATS_STREAM_MAX_AGE_HOURS` | Engine and runners: maximum age of messages in the NATS stream. Default `168`. | Bounds how long any message stays readable. |
+| `VAULT_TOKEN` | Engine: token for `secret()` lookups. No default; lookups are disabled without it. | Everything the token can read is within reach of the paths below. |
+| `STORMCHASER_VAULT_ALLOWED_PATHS` | Engine: secret paths workflows may read with `secret()` (comma-separated, trailing `*` for a prefix). Empty by default. | Limits which secrets a workflow author can read. |
+| `STORMCHASER_TRUSTED_PROXIES` | API: addresses or CIDR ranges of the reverse proxies in front of it. Empty by default. | `X-Forwarded-For` is believed only from these; anything else could pick its own rate-limit bucket. |
+| `API_RATE_LIMIT_PER_SECOND`, `API_RATE_LIMIT_BURST_SIZE` | API: refill rate and size of each client's request bucket. Defaults `5` and `10`. | Bounds request floods and credential guessing per client. |
 | `JWT_SECRET` | Secret key for signing/verifying JWTs. | **Must be kept highly secure.** |
 | `TLS_CA_CERT_PATH` | Path to the CA certificate file. | Trust root for mTLS. |
 | `TLS_CERT_PATH` | Path to the component's client certificate. | Component identity for mTLS. |

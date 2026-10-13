@@ -201,6 +201,9 @@ pub fn app(state: AppState) -> Router {
         store: Arc::new(sync::OnceCell::new()),
         per_second,
         burst_size,
+        trusted_proxies: rate_limit::parse_trusted_proxies(
+            &env::var(rate_limit::TRUSTED_PROXIES_ENV).unwrap_or_default(),
+        ),
     });
 
     // Every route here requires a valid bearer token, enforced by `require_auth` below
