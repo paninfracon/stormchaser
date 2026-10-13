@@ -39,25 +39,30 @@ Because MCP tools often need to "call back" to the very API that hosts them, the
 
 - **`API_BASE_URL`**: The base URL used by generated tools to construct callback requests. Defaults to `http://localhost:3000`.
 
-### Host header restriction
+### Allowed hosts
 
-To guard against DNS rebinding, the transport only accepts requests whose `Host` header is a loopback name: `localhost`, `127.0.0.1` or `::1`. Any other `Host` is rejected with `403 Forbidden: Host header is not allowed`. This list is not currently configurable, so a client that reaches the API through another hostname must do so via a local port-forward or a proxy that rewrites the `Host` header.
+To guard against DNS rebinding, the transport only accepts requests whose `Host` header is on an allow-list. Any other `Host` is rejected with `403 Forbidden: Host header is not allowed`. The list is made up of:
+
+- the loopback names `localhost`, `127.0.0.1` and `::1`, which are always accepted;
+- the host of `API_BASE_URL`;
+- any hosts listed in **`MCP_ALLOWED_HOSTS`**, a comma-separated list such as `stormchaser.example.com,api.example.com:8443`.
+
+An entry without a port matches that host on any port; an entry with a port matches only that port. When the API is reached through a hostname other than the one in `API_BASE_URL` (for example an ingress), add that hostname to `MCP_ALLOWED_HOSTS`. In the Helm chart this is the `api.mcpAllowedHosts` value.
 
 ## Security & OPA Policies
 
 The MCP server is fully integrated with Stormchaser's Open Policy Agent (OPA) integration.
 
-1. **Transport Endpoint**: The default policy denies every non-read-only request under `/api/v1/mcp` except `POST /api/v1/mcp/messages`, which is permitted without a token. Because the transport needs `POST`, clients running against the default policy must use `/api/v1/mcp/messages` as the endpoint URL; a `POST` to `/api/v1/mcp` itself is denied, as is the `DELETE` that ends a session. Read-only requests (`GET`) are permitted on any path under the mount.
+1. **Transport Endpoint**: The default policy permits the requests the transport itself needs on `/api/v1/mcp` without a token: `POST` (JSON-RPC messages), `DELETE` (ending a session) and read-only requests such as `GET`. Every other non-read-only request under `/api/v1/mcp` is denied. `POST` and `DELETE` are also permitted at `/api/v1/mcp/messages`, which older client configurations used; it is served by the same handler.
 2. **Tool Execution**: When an AI executes a tool (which triggers a REST API call), that secondary API call is evaluated by OPA. If the AI client does not pass the user's token during the tool execution, the request will be unauthenticated.
 3. **Default Policy**: The default Rego policy explicitly blocks unauthenticated requests that are not read-only (e.g., `POST`, `DELETE`), preventing an AI client from modifying state without proper authorization proxying.
 
 ## Connecting an AI Client
 
-Configure the AI client to use the Streamable HTTP transport with one of these URLs:
+Configure the AI client to use the Streamable HTTP transport with this URL:
 
-- **With the default OPA policy**: `http://localhost:3000/api/v1/mcp/messages`
-- **With OPA disabled, or a policy that permits `POST /api/v1/mcp`**: `http://localhost:3000/api/v1/mcp`
+- **MCP Endpoint**: `http://<stormchaser-api-host>/api/v1/mcp`
 
-Replace the port as needed, but keep a loopback host name (see [Host header restriction](#host-header-restriction)). Clients that only support the older HTTP+SSE transport, with separate SSE and message endpoints, are not supported.
+The host the client uses must be on the server's allow-list (see [Allowed hosts](#allowed-hosts)). Clients that only support the older HTTP+SSE transport, with separate SSE and message endpoints, are not supported.
 
 Clients should provide a valid Authorization header (`Bearer <token>`) when available, especially for tool calls that require authenticated write access.

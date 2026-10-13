@@ -46,6 +46,7 @@ async fn test_webhook_trigger() {
         jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
         api_base_url: "http://localhost:3000".to_string(),
+        mcp_allowed_hosts: Vec::new(),
     };
 
     let app = app(state);
@@ -170,6 +171,7 @@ async fn test_github_webhook_signature() {
         jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
         api_base_url: "http://localhost:3000".to_string(),
+        mcp_allowed_hosts: Vec::new(),
     };
 
     let app = app(state);
@@ -269,6 +271,7 @@ async fn test_generic_webhook_secret() {
         jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
         api_base_url: "http://localhost:3000".to_string(),
+        mcp_allowed_hosts: Vec::new(),
     };
 
     let app = app(state);

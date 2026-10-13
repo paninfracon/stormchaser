@@ -47,6 +47,7 @@ async fn mock_state(mock_server_uri: String) -> AppState {
         jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
         api_base_url: "http://localhost:3000".to_string(),
+        mcp_allowed_hosts: Vec::new(),
     }
 }
 

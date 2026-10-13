@@ -50,6 +50,7 @@ async fn test_api_enqueue_inserts_quotas() {
         jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
         api_base_url: "http://localhost:3000".to_string(),
+        mcp_allowed_hosts: Vec::new(),
     };
 
     let conn_id = Uuid::new_v4();

@@ -67,6 +67,10 @@ spec:
               value: {{ .Values.api.rateLimitPerSecond | quote }}
             - name: API_RATE_LIMIT_BURST_SIZE
               value: {{ .Values.api.rateLimitBurstSize | quote }}
+            {{- if .Values.api.mcpAllowedHosts }}
+            - name: MCP_ALLOWED_HOSTS
+              value: {{ .Values.api.mcpAllowedHosts | quote }}
+            {{- end }}
             {{- if .Values.global.tls.enabled }}
             - name: TLS_CA_CERT_PATH
               value: {{ .Values.global.tls.caCertPath | quote }}

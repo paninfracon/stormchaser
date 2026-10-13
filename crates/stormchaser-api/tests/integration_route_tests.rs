@@ -62,6 +62,7 @@ async fn setup_app_with_pool() -> Option<(axum::Router, sqlx::PgPool)> {
             jwks: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
             log_backend: None,
             api_base_url: "http://localhost:3000".to_string(),
+            mcp_allowed_hosts: Vec::new(),
         }),
         pool,
     ))

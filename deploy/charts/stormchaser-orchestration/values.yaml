@@ -41,6 +41,9 @@ api:
   rustLog: "stormchaser_api=info"
   rateLimitPerSecond: 5
   rateLimitBurstSize: 10
+  # Comma-separated Host header values the MCP server accepts in addition to
+  # loopback names and the API_BASE_URL host, e.g. "stormchaser.example.com".
+  mcpAllowedHosts: ""
   service:
     type: ClusterIP
     port: 3000

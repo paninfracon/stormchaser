@@ -43,6 +43,7 @@ async fn test_rate_limiting() {
         jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
         api_base_url: "http://localhost:3000".to_string(),
+        mcp_allowed_hosts: Vec::new(),
     });
 
     let ip_last_octet = rand::RngExt::random_range(&mut rand::rng(), 10..250);

@@ -131,5 +131,6 @@ pub async fn build_app_state(config: Config) -> anyhow::Result<AppState> {
         jwks: Arc::new(sync::RwLock::new(jwks)),
         log_backend,
         api_base_url: config.api_base_url.clone(),
+        mcp_allowed_hosts: config.mcp_allowed_hosts.clone(),
     })
 }

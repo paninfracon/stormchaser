@@ -22,12 +22,23 @@ allow := false if {
 	input.path != "/api/v1/auth/login"
 }
 
-# Block calls to the MCP server that are not read-only.
-# The MCP server is mounted at /api/v1/mcp.
-# We block any non-read-only requests to it, except for the required /messages endpoint
-# which must accept POST requests for the JSON-RPC protocol to function.
+# The MCP server is a single Streamable HTTP endpoint mounted at /api/v1/mcp.
+# /api/v1/mcp/messages is served by the same handler and is kept for clients that
+# were configured with it before the mount point itself was permitted.
+mcp_transport_paths := {"/api/v1/mcp", "/api/v1/mcp/", "/api/v1/mcp/messages"}
+
+# The transport needs POST for JSON-RPC messages and DELETE to end a session.
+mcp_transport_methods := {"POST", "DELETE"}
+
+mcp_transport_request if {
+	input.path in mcp_transport_paths
+	input.method in mcp_transport_methods
+}
+
+# Block calls to the MCP server that are not read-only, except for the transport's
+# own requests, which the JSON-RPC protocol needs in order to function.
 allow := false if {
 	startswith(input.path, "/api/v1/mcp")
 	not input.method in read_only_methods
-	input.path != "/api/v1/mcp/messages"
+	not mcp_transport_request
 }

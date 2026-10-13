@@ -165,6 +165,8 @@ pub struct AppState {
     pub log_backend: Option<LogBackend>,
     /// API base URL for MCP tool callback
     pub api_base_url: String,
+    /// Additional `Host` header values the MCP server accepts
+    pub mcp_allowed_hosts: Vec<String>,
 }
 
 /// Constructs the Axum application router with all routes and middleware
@@ -240,7 +242,7 @@ pub fn app(state: AppState) -> Router {
 
     #[cfg(feature = "mcp")]
     {
-        if let Some(service) = mcp_service(&state.api_base_url) {
+        if let Some(service) = mcp_service(&state.api_base_url, &state.mcp_allowed_hosts) {
             authenticated_routes = authenticated_routes.nest_service("/mcp", service);
         }
     }

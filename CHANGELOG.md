@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Generated JSON Schemas remain Draft 7; documented enum variants are now expressed with `const` instead of a single-value `enum`.
 - A `JQ` step whose program calls `halt` now fails the step.
 
+### Fixed
+
+- The MCP server can now be reached through a non-loopback hostname. It accepts the host of `API_BASE_URL` and any hosts listed in the new `MCP_ALLOWED_HOSTS` setting (Helm: `api.mcpAllowedHosts`), in addition to loopback names.
+- The default OPA policy now permits the MCP transport's `POST` and `DELETE` requests on `/api/v1/mcp`. Previously only `POST /api/v1/mcp/messages` was permitted, so clients using the real endpoint were denied.
+
 ### Removed
 
 - The embedded OPA WASM runtime no longer provides the YAML builtins (`yaml.marshal`, `yaml.unmarshal`, `yaml.is_valid`).

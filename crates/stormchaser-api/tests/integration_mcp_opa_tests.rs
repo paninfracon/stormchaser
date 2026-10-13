@@ -198,6 +198,40 @@ async fn test_mcp_opa_policy() {
         "Auth POST to other mcp paths should be denied"
     );
 
+    // The transport endpoint itself accepts POST (JSON-RPC) and DELETE (end session),
+    // with or without a token; other non-read-only methods and paths stay blocked.
+    let cases = [
+        ("/api/v1/mcp", "POST", None, true),
+        ("/api/v1/mcp", "POST", Some("dummy_token"), true),
+        ("/api/v1/mcp", "DELETE", None, true),
+        ("/api/v1/mcp", "DELETE", Some("dummy_token"), true),
+        ("/api/v1/mcp", "GET", None, true),
+        ("/api/v1/mcp/", "POST", None, true),
+        ("/api/v1/mcp", "PUT", None, false),
+        ("/api/v1/mcp", "PATCH", Some("dummy_token"), false),
+        ("/api/v1/mcp/messages", "PUT", Some("dummy_token"), false),
+        (
+            "/api/v1/mcp/something_else",
+            "DELETE",
+            Some("dummy_token"),
+            false,
+        ),
+    ];
+    for (path, method, token, expected) in cases {
+        let ctx = ApiOpaContext {
+            path,
+            method,
+            token,
+        };
+        assert_eq!(
+            client.check(ctx).await.unwrap(),
+            expected,
+            "{method} {path} (token: {}) should be {}",
+            token.is_some(),
+            if expected { "allowed" } else { "denied" }
+        );
+    }
+
     // Authenticated GET to /api/v1/mcp/sse -> allow
     let ctx = ApiOpaContext {
         path: "/api/v1/mcp/sse",
