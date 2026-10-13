@@ -1,10 +1,13 @@
 dependencies:
 - name: stormchaser-orchestration
   repository: file://../stormchaser-orchestration
-  version: 1.4.2
+  version: 1.5.1
 - name: stormchaser-runner-k8s
   repository: file://../stormchaser-runner-k8s
-  version: 1.4.2
+  version: 1.5.1
+- name: stormchaser-runner-docker
+  repository: file://../stormchaser-runner-docker
+  version: 1.5.1
 - name: postgresql
   repository: https://charts.bitnami.com/bitnami
   version: 15.5.38
@@ -16,12 +19,12 @@ dependencies:
   version: 14.10.5
 - name: stormchaser-telemetry
   repository: file://../stormchaser-telemetry
-  version: 1.4.2
+  version: 1.5.1
 - name: loki
   repository: https://grafana.github.io/helm-charts
   version: 5.43.7
 - name: tempo
   repository: https://grafana.github.io/helm-charts
   version: 1.10.3
-digest: sha256:3490468c1143d2f2e634c9af984f4338bf8a26e84657dded8d4d20942dd1171e
-generated: "2026-05-21T18:35:51.479052764-05:00"
+digest: sha256:b7b26fa2992420f6294ef792895bf9180bc79ec33138eedb79007a85669cadd1
+generated: "2026-10-13T12:53:09.306712393-05:00"
