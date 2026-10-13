@@ -50,12 +50,23 @@ pub async fn decrypt_sops_secrets(
         ]
     };
 
+    // `sops_file` comes from the run request. It must stay inside this repository and may
+    // not be, or pass through, a symlink; a named file that fails that check is an error
+    // rather than "no secrets".
     let mut target_path = None;
     for f in possible_files {
-        let p = repo_dir.join(&f);
-        if p.exists() {
-            target_path = Some(p);
-            break;
+        match crate::git_cache::safe_worktree_path(repo_dir, &f) {
+            Ok(p) => {
+                target_path = Some(p);
+                break;
+            }
+            Err(e) => {
+                let missing = crate::git_cache::validate_relative_path(&f).is_ok()
+                    && repo_dir.join(&f).symlink_metadata().is_err();
+                if sops_file.is_some() && !missing {
+                    return Err(e.context("Refusing SOPS file"));
+                }
+            }
         }
     }
 

@@ -151,6 +151,23 @@ comma-separated list of hostnames, IP literals or `*.suffix` patterns, for
 example `vault.internal,*.svc.cluster.local`. The list is empty by default.
 Response bodies are limited to 10 MiB (64 MiB for WASM modules).
 
+### Git repositories
+
+Workflow files are read from repositories named by Git connections, which any
+API user can create. To keep a repository from being used to read files off
+the API or engine host:
+
+* Workflow and included files are read from the git object database, never
+  the working tree, so a symbolic link committed to a repository is refused
+  rather than followed.
+* Repository URLs must use `https` or `ssh` (including the
+  `git@host:org/repo.git` form). Local paths and `file://`, `git://`, `http://`
+  and `ext::` URLs are rejected. Operators can change the list with
+  `STORMCHASER_GIT_ALLOWED_SCHEMES` (comma-separated, for example
+  `https,ssh,http`).
+* A SOPS file named in a run request must be a regular file inside the
+  repository; paths with `..`, absolute paths and symbolic links are refused.
+
 ## 8. NATS Authentication
 
 NATS carries every task and every result, so anyone who can publish to it can

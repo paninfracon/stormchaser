@@ -3,7 +3,6 @@ use crate::handler::{fetch_inputs, fetch_run};
 use crate::workflow_machine::{state, WorkflowMachine};
 use anyhow::{Context, Result};
 use sqlx::PgPool;
-use std::fs;
 use std::sync::Arc;
 use stormchaser_dsl::StormchaserParser;
 use stormchaser_model::auth::{EngineOpaContext, OpaClient};
@@ -68,21 +67,19 @@ pub async fn handle_workflow_queued(
             .await?;
         return Err(anyhow::anyhow!(err_msg));
     }
-    let storm_file_path = repo_path.join(workflow_req_path);
-    if !storm_file_path.exists() {
-        let err_msg = format!(
-            "Workflow file {} not found in repo",
-            machine.run.workflow_path
-        );
-        let _ = machine
-            .fail(err_msg.clone(), &mut *pool.acquire().await?)
-            .await?;
-        return Err(anyhow::anyhow!(err_msg));
-    }
-
-    // 4. Read and Parse the workflow file
-    let workflow_content = fs::read_to_string(&storm_file_path)
-        .with_context(|| format!("Failed to read workflow file at {:?}", storm_file_path))?;
+    // 4. Read and Parse the workflow file. It is read from the git object database, not
+    // the working tree, so a symlink committed to the repository cannot redirect the read.
+    let workflow_content =
+        match crate::git_cache::read_blob_at_head(&repo_path, &machine.run.workflow_path) {
+            Ok(content) => content,
+            Err(e) => {
+                let err_msg = format!("Failed to load workflow file: {}", e);
+                let _ = machine
+                    .fail(err_msg.clone(), &mut *pool.acquire().await?)
+                    .await?;
+                return Err(anyhow::anyhow!(err_msg));
+            }
+        };
 
     debug!(
         "Workflow content loaded for {}: {} bytes",
@@ -129,16 +126,16 @@ pub async fn handle_workflow_queued(
                 .await?;
             return Err(anyhow::anyhow!(err_msg));
         }
-        let inc_path = repo_path.join(req_inc_path);
-        if !inc_path.exists() {
-            let err_msg = format!("Included workflow file {} not found", inc.workflow);
-            let _ = machine
-                .fail(err_msg.clone(), &mut *pool.acquire().await?)
-                .await?;
-            return Err(anyhow::anyhow!(err_msg));
-        }
-
-        let inc_content = fs::read_to_string(&inc_path)?;
+        let inc_content = match crate::git_cache::read_blob_at_head(&repo_path, &inc.workflow) {
+            Ok(content) => content,
+            Err(e) => {
+                let err_msg = format!("Failed to load included workflow: {}", e);
+                let _ = machine
+                    .fail(err_msg.clone(), &mut *pool.acquire().await?)
+                    .await?;
+                return Err(anyhow::anyhow!(err_msg));
+            }
+        };
         let inc_workflow = match parser.parse(&inc_content) {
             Ok(w) => w,
             Err(e) => {

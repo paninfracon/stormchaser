@@ -86,24 +86,25 @@ pub async fn parse_git(
         return Err(axum::http::StatusCode::BAD_REQUEST);
     }
 
-    // Use GitCache to clone/fetch the file
-    let git_cache = stormchaser_engine::git_cache::GitCache::new("/tmp/stormchaser-api-git-cache");
-    let target_dir = git_cache
-        .ensure_files(
-            &repo_url,
-            &payload.git_ref,
-            std::slice::from_ref(&payload.workflow_path),
-        )
+    // Clone (if needed) and read the file from the git object database, off the async
+    // executor. Reading the blob rather than the working tree means a symlink committed to
+    // the repository cannot be used to read files from this host.
+    let git_ref = payload.git_ref.clone();
+    let workflow_path = payload.workflow_path.clone();
+    let dsl =
+        tokio::task::spawn_blocking(move || {
+            stormchaser_engine::git_cache::GitCache::new("/tmp/stormchaser-api-git-cache")
+                .read_file(&repo_url, &git_ref, &workflow_path)
+        })
+        .await
         .map_err(|e| {
-            tracing::error!("Failed to fetch git repo: {:?}", e);
+            tracing::error!("Git read task failed: {:?}", e);
             axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .map_err(|e| {
+            tracing::error!("Failed to read workflow file from git: {:?}", e);
+            axum::http::StatusCode::BAD_REQUEST
         })?;
-
-    let file_path = target_dir.join(&payload.workflow_path);
-    let dsl = tokio::fs::read_to_string(&file_path).await.map_err(|e| {
-        tracing::error!("Failed to read workflow file {:?}: {:?}", file_path, e);
-        axum::http::StatusCode::INTERNAL_SERVER_ERROR
-    })?;
 
     Ok(dsl)
 }
