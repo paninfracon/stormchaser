@@ -36,7 +36,7 @@ pub use stream::*;
     ),
     tag = "stormchaser"
 )]
-#[tracing::instrument(skip(state, claims), fields(run_id = tracing::field::Empty, initiating_user = tracing::field::Empty))]
+#[tracing::instrument(skip(state, claims, payload), fields(run_id = tracing::field::Empty, initiating_user = tracing::field::Empty))]
 /// Enqueue workflow.
 pub async fn enqueue_workflow(
     AuthClaims(claims): AuthClaims,
@@ -389,7 +389,7 @@ pub async fn delete_workflow_run_api(
     tag = "workflow"
 )]
 /// Executes a direct run.
-#[tracing::instrument(skip(state, claims), fields(run_id = tracing::field::Empty, initiating_user = tracing::field::Empty))]
+#[tracing::instrument(skip(state, claims, payload), fields(run_id = tracing::field::Empty, initiating_user = tracing::field::Empty))]
 pub async fn direct_run(
     AuthClaims(claims): AuthClaims,
     State(state): State<AppState>,

@@ -12,7 +12,7 @@ use stormchaser_model::RunId;
 use stormchaser_tls::TlsReloader;
 use tracing::{debug, error, info};
 
-#[tracing::instrument(skip(pool, git_cache, opa_client, _nats_client, _tls_reloader), fields(run_id = %run_id))]
+#[tracing::instrument(skip(payload, pool, git_cache, opa_client, _nats_client, _tls_reloader), fields(run_id = %run_id))]
 /// Handles the event when a workflow is queued and ready for resolution.
 pub async fn handle_workflow_queued(
     run_id: RunId,

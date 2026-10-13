@@ -56,7 +56,7 @@ impl StepMachine<state::Pending> {
         })
     }
 
-    #[tracing::instrument(skip(self, executor), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
+    #[tracing::instrument(skip(self, executor, reason), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
     /// Fail immediately from Pending (e.g., timeout or bad intrinsic setup).
     pub async fn fail(
         mut self,

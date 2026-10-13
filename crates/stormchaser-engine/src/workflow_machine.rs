@@ -111,7 +111,7 @@ impl WorkflowMachine<state::Resolving> {
         })
     }
 
-    #[tracing::instrument(skip(self, executor), fields(run_id = %self.run.id))]
+    #[tracing::instrument(skip(self, executor, error), fields(run_id = %self.run.id))]
     /// Fail.
     pub async fn fail(
         mut self,
@@ -169,7 +169,7 @@ impl WorkflowMachine<state::StartPending> {
         })
     }
 
-    #[tracing::instrument(skip(self, executor), fields(run_id = %self.run.id))]
+    #[tracing::instrument(skip(self, executor, error), fields(run_id = %self.run.id))]
     /// Fail.
     pub async fn fail(
         mut self,
@@ -227,7 +227,7 @@ impl WorkflowMachine<state::Running> {
         })
     }
 
-    #[tracing::instrument(skip(self, executor), fields(run_id = %self.run.id))]
+    #[tracing::instrument(skip(self, executor, error), fields(run_id = %self.run.id))]
     /// Fail.
     pub async fn fail(
         mut self,
