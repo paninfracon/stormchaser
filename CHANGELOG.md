@@ -16,6 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Templates are rendered with MiniJinja 3, which aligns more closely with Jinja2 (for example `tojson` separator spacing, round-half-even rounding, and an error on division by zero).
 - Generated JSON Schemas remain Draft 7; documented enum variants are now expressed with `const` instead of a single-value `enum`.
 - A `JQ` step whose program calls `halt` now fails the step.
+- **Upgrade notes for the security changes below.** Each of these fails closed until configured:
+  - Workflows that use `env()` need the variables adding to `STORMCHASER_ENV_ALLOWLIST`.
+  - `sql` queries with no `connection` no longer run; name a connection with a `url`.
+  - Workflows with `privileged = true` need `STORMCHASER_ALLOW_PRIVILEGED=true` on the runner.
+  - Every IAM role in use, including an S3 storage connection's `aws_assume_role_arn`, needs adding to `STORMCHASER_AWS_ALLOWED_ROLE_ARNS`.
+  - Steps that call internal hosts over HTTP need those hosts adding to `STORMCHASER_SSRF_ALLOWED_HOSTS`. Redirects are no longer followed.
+  - NATS clients need credentials (`NATS_USER` and `NATS_PASSWORD`, a creds file or a token).
+  - Kubernetes runner: Jobs still running in the old shared namespace are no longer seen after the upgrade and need manual cleanup. An SFS PVC must live in the step namespace. ServiceAccounts, Secrets and ConfigMaps used by steps need allow-listing.
+  - A `RestApi` step with a connection must call the connection's own origin, and an email step that names another SMTP server must supply its own credentials.
+- OPA policies: the connection check from the query service now carries the calling user instead of the fixed `schema_hydration_service`, and the engine's input for queued runs no longer includes schema defaults derived from queries.
+- API responses: `secrets` is no longer part of run details, and stored secrets come back masked. Sending the mask back in an update keeps the stored value.
 - Storage `mount_path` values that are system locations (for example `/`, `/usr`, `/etc`, `/bin`, `/stormchaser`) are refused on both runners.
 - Kubernetes runner: an artifact's `path` is now relative to its storage volume, as on the Docker runner (it was relative to the container's working directory). Volumes on a shared PVC are no longer also parked to object storage.
 - Kubernetes runner: the runner Role needs `patch` on pods in the step namespace, and the runner's NATS user needs to publish on `stormchaser.v1.step.artifact_auth`. Drain running steps before upgrading: jobs started by an older runner lose their storage hashes and artifacts.
@@ -34,6 +45,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Outbound HTTP requests chosen by workflow authors (`RestApi` and `WebhookInvoke` steps, `api` queries, Slack and Teams notifications, WASM module downloads, the API's connection test) are refused when they point at loopback, private, link-local, carrier-grade NAT or other internal addresses, including IPv6 forms that embed an IPv4 address. Connections are pinned to the validated addresses and redirects are not followed. Operators can exempt hosts with `STORMCHASER_SSRF_ALLOWED_HOSTS` (Helm: `global.ssrfAllowedHosts`). Response bodies are capped at 10 MiB and WASM modules at 64 MiB.
+- `env()` in workflow expressions only reads variables listed in `STORMCHASER_ENV_ALLOWLIST` (empty by default), and `jq` programs can no longer read the engine's environment. Rotate any secret that was in the engine's environment.
+- `sql` queries never run on the engine's own database: they must name a connection, run as a single statement in a read-only transaction that is rolled back, and are limited to 30 seconds and 10,000 rows. The query service checks connection use as the authenticated caller. The policy check for queued runs happens before any query executes.
+- Privileged steps are refused unless a runner is started with `STORMCHASER_ALLOW_PRIVILEGED=true` (Helm: `config.allowPrivileged`).
+- Kubernetes runner: steps run in a dedicated namespace (`STORMCHASER_STEP_NAMESPACE`, by default `<release namespace>-steps`) with a NetworkPolicy that blocks cluster-internal addresses. Step pods get no API token, and the ServiceAccounts, Secrets and ConfigMaps a `RunK8sJob` step names must be allow-listed by the operator. The runner's Role is reduced accordingly, and author-supplied labels and annotations cannot replace Stormchaser's own.
+- Docker runner: step containers join `STORMCHASER_STEP_NETWORK` instead of the runner's network. The compose file publishes the Postgres, NATS and OPA ports on loopback only.
+- NATS requires authentication in the quickstart (docker-compose and the umbrella chart), with a separate, restricted user for runners. All components read NATS credentials and TLS settings from the environment. See `docs/nats.md`.
+- A step event is rejected if its step does not belong to the run it names, and steps the engine finishes itself (approvals, waits, built-in steps) require a per-step completion token, so a runner credential cannot complete an approval. A registered WASM step definition can no longer replace a built-in step type.
+- Every route in the API's protected group now requires a valid token. `POST /api/v1/events/correlate` was reachable without one.
+- Run details no longer return a run's decrypted secrets. Secret inputs are masked, and a run's known secret values are replaced with a mask in step specs, parameters, outputs, errors and log lines returned by the API. Outputs marked sensitive are masked whole.
+- Connection credentials, webhook signing secrets and cron trigger tokens are masked in API responses. A cron trigger token is shown once, when the schedule is created.
+- Workflow and include files are read from the git object database, so a symlink committed to a repository is refused instead of followed. SOPS files may not be or pass through a symlink. Repository URLs are limited to `https` and `ssh` (`STORMCHASER_GIT_ALLOWED_SCHEMES`).
+- A `RestApi` step that names an `http_api` connection gets the connection's headers and token only when the request goes to the connection's own `base_url`.
+- The engine's SMTP username and password are used only with the engine's own SMTP server, and a step cannot turn off TLS the operator turned on while they are in use.
+- WASM steps have a wall-clock limit (30 s, `STORMCHASER_WASM_TIMEOUT_SECS`), a memory cap (256 MiB, `STORMCHASER_WASM_MAX_MEMORY_MB`) and a 10 MiB result limit.
+- The engine assumes an IAM role only if it is listed in `STORMCHASER_AWS_ALLOWED_ROLE_ARNS`, and a `LambdaInvoke` step without a role may only invoke functions listed in `STORMCHASER_AWS_ALLOWED_LAMBDA_FUNCTIONS` (Helm: `global.aws.allowedRoleArns`, `global.aws.allowedLambdaFunctions`). Both are empty by default.
+- A step's image must be on the registry its `registry_connection` belongs to, so pull credentials are never sent to another registry. The Kubernetes runner's per-step pull secret is now deleted with the step's Job.
+- Encryption at rest for the database is a documented requirement on the database administrator; Stormchaser adds no encryption layer of its own. See `docs/security.md`.
 - A step can no longer make the engine read arbitrary objects from storage: test reports are accepted only if the step declares them, their location is worked out by the engine, and report archives are size-limited (32 MiB compressed, 64 MiB unpacked, 1,000 files).
 - Storage is parked and artifacts are published by a helper the step's code does not share (an agent sidecar on Kubernetes, the parking container on Docker), and runners read storage hashes and artifact metadata from that helper only. The step's container no longer receives upload URLs.
 - The username and password of an OCI artifact registry no longer leave the engine. Runners get a token scoped to the run's repositories, minted when the step is ready to push. Registries that cannot issue such tokens need `STORMCHASER_OCI_ALLOW_STATIC_CREDENTIALS=true` on the engine.
