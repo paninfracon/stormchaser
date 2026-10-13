@@ -66,6 +66,17 @@ pub async fn get_grafana_url() -> Result<Option<String>, ServerFnError> {
         .filter(|s| !s.is_empty() && is_valid_grafana_url(s)))
 }
 
+/// The origin of the configured Grafana, which pages embed in a frame, if there is one.
+#[cfg(feature = "ssr")]
+pub fn grafana_origin() -> Option<String> {
+    let url = std::env::var("GRAFANA_URL").ok()?;
+    let url = url.trim();
+    if url.is_empty() || !is_valid_grafana_url(url) {
+        return None;
+    }
+    Some(Url::parse(url).ok()?.origin().ascii_serialization())
+}
+
 #[cfg(feature = "ssr")]
 fn is_valid_grafana_url(url: &str) -> bool {
     Url::parse(url).ok().is_some_and(|parsed| {

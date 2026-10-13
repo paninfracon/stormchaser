@@ -25,13 +25,14 @@ async fn main() {
         )
         .route("/api/{*fn_name}", post(leptos_axum::handle_server_fns))
         .route("/auth/login", get(auth_login_handler))
-        .route("/auth/logout", get(auth_logout_handler))
+        .route("/auth/logout", post(auth_logout_handler))
         .route("/auth/callback", get(auth_callback_handler))
         .leptos_routes(&leptos_options, routes, {
             let leptos_options = leptos_options.clone();
             move || shell(leptos_options.clone())
         })
         .fallback(leptos_axum::file_and_error_handler(shell))
+        .layer(axum::middleware::from_fn(security_headers))
         .with_state(leptos_options);
 
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
@@ -82,12 +83,71 @@ async fn auth_login_handler() -> impl axum::response::IntoResponse {
     (axum::http::StatusCode::SEE_OTHER, headers).into_response()
 }
 
+/// Adds the response headers every page and endpoint should carry.
+///
+/// Rendered pages bring their own Content-Security-Policy, which names their nonce (see
+/// `shell`). Everything else gets one that allows nothing to run.
 #[cfg(feature = "ssr")]
-async fn auth_logout_handler() -> impl axum::response::IntoResponse {
+async fn security_headers(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::http::{header, HeaderValue};
+
+    let mut res = next.run(req).await;
+    let headers = res.headers_mut();
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    // For browsers that predate frame-ancestors
+    headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    headers.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("same-origin"),
+    );
+    if !headers.contains_key(header::CONTENT_SECURITY_POLICY) {
+        headers.insert(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static("default-src 'none'; frame-ancestors 'none'"),
+        );
+    }
+    if serves_https() {
+        headers.insert(
+            header::STRICT_TRANSPORT_SECURITY,
+            HeaderValue::from_static("max-age=31536000; includeSubDomains"),
+        );
+    }
+    res
+}
+
+/// Whether users reach this site over HTTPS, going by its public URL. HSTS is sent only
+/// then: on a plain-HTTP development site browsers ignore it anyway.
+#[cfg(feature = "ssr")]
+fn serves_https() -> bool {
+    static HTTPS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *HTTPS.get_or_init(|| std::env::var("WEB_URL").is_ok_and(|url| url.starts_with("https://")))
+}
+
+/// Whether a request was sent by another site. Browsers say so in `Sec-Fetch-Site`;
+/// a client that sends no such header is not a browser being steered by a page.
+#[cfg(feature = "ssr")]
+fn is_cross_site(headers: &axum::http::HeaderMap) -> bool {
+    headers
+        .get("sec-fetch-site")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|site| site != "same-origin" && site != "none")
+}
+
+#[cfg(feature = "ssr")]
+async fn auth_logout_handler(headers: axum::http::HeaderMap) -> impl axum::response::IntoResponse {
     use axum::http::header;
     use axum::response::IntoResponse;
-    let cookie =
-        "auth_token=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax";
+    // Another site must not be able to log a user out by posting a form here
+    if is_cross_site(&headers) {
+        return axum::http::StatusCode::FORBIDDEN.into_response();
+    }
+    let cookie = "auth_token=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax; Secure";
     let mut headers = axum::http::HeaderMap::new();
     headers.insert(header::SET_COOKIE, header::HeaderValue::from_static(cookie));
     headers.insert(header::LOCATION, header::HeaderValue::from_static("/"));

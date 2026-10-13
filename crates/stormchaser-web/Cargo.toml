@@ -61,6 +61,7 @@ ssr = [
     "dep:futures",
     "dep:stormchaser-dsl",
     "leptos/ssr",
+    "leptos/nonce",
     "leptos_meta/ssr",
     "leptos_router/ssr",
 ]
