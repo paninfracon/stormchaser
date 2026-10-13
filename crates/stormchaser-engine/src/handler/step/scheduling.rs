@@ -88,6 +88,9 @@ pub async fn schedule_step(
             Ok(_) => return Err(anyhow::anyhow!("Iterate must evaluate to an array")),
             Err(e) => return Err(e),
         };
+        // Each item becomes a step instance and, in time, a container. The list comes
+        // from the workflow, or from whatever a query or an input put in it.
+        ensure_iteration_count_allowed(&step_dsl.name, items.len())?;
 
         schedule_iterated_steps(
             executor,
@@ -288,4 +291,43 @@ async fn schedule_iterated_steps(
     }
 
     Ok(())
+}
+
+/// Most step instances one `iterate` may create. Defaults to 1000.
+pub const MAX_ITERATIONS_ENV: &str = "STORMCHASER_MAX_ITERATIONS";
+
+fn max_iterations() -> usize {
+    std::env::var(MAX_ITERATIONS_ENV)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(1000)
+}
+
+/// Refuses an `iterate` over more items than the operator allows.
+fn ensure_iteration_count_allowed(step_name: &str, count: usize) -> Result<()> {
+    let limit = max_iterations();
+    if count > limit {
+        anyhow::bail!(
+            "Step '{}' iterates over {} items; the limit is {} ({})",
+            step_name,
+            count,
+            limit,
+            MAX_ITERATIONS_ENV
+        );
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod iteration_limit_tests {
+    use super::*;
+
+    #[test]
+    fn an_iteration_over_too_many_items_is_refused() {
+        assert!(ensure_iteration_count_allowed("fan_out", 1000).is_ok());
+        let err = ensure_iteration_count_allowed("fan_out", 1001).unwrap_err();
+        assert!(err.to_string().contains("fan_out"));
+        assert!(err.to_string().contains("1001"));
+    }
 }

@@ -35,5 +35,6 @@ A module runs inside the engine process, with no access to the host: it has no i
 | Linear memory | 256 MiB | `STORMCHASER_WASM_MAX_MEMORY_MB` |
 | Module size | 64 MiB | fixed |
 | Result size | 10 MiB | fixed |
+| Modules running at once | 4 | `STORMCHASER_WASM_MAX_CONCURRENT` |
 
-A module that exceeds a limit fails the step. Both settings are environment variables on the engine and apply to every module, including registered step definitions.
+A module that exceeds a limit fails the step; one that has to wait for a free slot starts its time limit when it gets one. The settings are environment variables on the engine and apply to every module, including registered step definitions.

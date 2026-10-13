@@ -27,6 +27,15 @@ fn env_or<T: std::str::FromStr>(name: &str, default: T) -> T {
         .unwrap_or(default)
 }
 
+/// Modules that may run at the same time (`STORMCHASER_WASM_MAX_CONCURRENT`, default 4).
+/// With the default memory allowance that bounds WASM steps to about 1 GiB in all.
+fn concurrency() -> &'static tokio::sync::Semaphore {
+    static PERMITS: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
+    PERMITS.get_or_init(|| {
+        tokio::sync::Semaphore::new(env_or("STORMCHASER_WASM_MAX_CONCURRENT", 4usize).max(1))
+    })
+}
+
 /// Utility for executing WebAssembly (WASM) modules using Wasmtime.
 ///
 /// Modules are untrusted: they get no host imports, a capped linear memory and a wall-clock
@@ -75,6 +84,13 @@ impl WasmExecutor {
         function_name: &str,
         input: Value,
     ) -> Result<Value> {
+        // Each module may use its whole memory allowance at once, so only so many run
+        // together; the rest wait their turn, and their own time limit starts when they
+        // get it.
+        let _permit = concurrency()
+            .acquire()
+            .await
+            .map_err(|_| anyhow::anyhow!("WASM execution is shutting down"))?;
         match tokio::time::timeout(
             self.timeout,
             self.execute_unbounded(module_path, function_name, input),

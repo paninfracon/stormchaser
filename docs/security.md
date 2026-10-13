@@ -413,7 +413,42 @@ the API or engine host:
 * A SOPS file named in a run request must be a regular file inside the
   repository; paths with `..`, absolute paths and symbolic links are refused.
 
-## 8. Inbound Webhooks
+## 8. Limits on What a Workflow Can Cost
+
+A workflow's text, its expressions and the programs it embeds are written by
+whoever can write a workflow, and are run by services every tenant shares. Each
+is bounded so that one workflow cannot stop or exhaust them.
+
+| What | Limit | Setting |
+| :--- | :--- | :--- |
+| Workflow file size | 1 MiB | fixed |
+| Nesting in a workflow file | 16,384 brackets and operators in the file; no value nested deeper than 100 levels | `STORMCHASER_DSL_MAX_COMPLEXITY` |
+| Nesting in one expression or template | 8,192 brackets and operators; no result nested deeper than 100 levels | `STORMCHASER_EXPR_MAX_COMPLEXITY` |
+| `jq` program run time (`JQ` steps and a query's `jq_filter`) | 10 seconds | `STORMCHASER_JQ_TIMEOUT_SECS` |
+| `jq` program memory | 512 MiB | `STORMCHASER_JQ_MAX_MEMORY_MB` |
+| `jq` program output | 10 MiB | fixed |
+| Items in one `iterate` | 1,000 | `STORMCHASER_MAX_ITERATIONS` |
+| WASM modules running at once | 4 | `STORMCHASER_WASM_MAX_CONCURRENT` |
+| WASM module run time and memory | 30 seconds, 256 MiB | see [Wasm](steps/Wasm.md) |
+| API request body | 2 MiB | fixed (the web framework's default) |
+
+Two of these work in ways worth knowing:
+
+* **Nesting.** The parser for workflow text and expressions calls itself once
+  for every level of nesting and every link in a chain of operators, and has no
+  limit of its own; text nested a few hundred levels deep would overflow the
+  stack, which ends the process. Stormchaser counts the characters that can
+  nest (opening brackets and operator characters) without interpreting the
+  text, refuses text that counts over the limit, and parses the rest on a stack
+  sized for its count. Because nothing is interpreted, brackets and operators
+  inside literal text such as an embedded shell script count too. Raise the
+  setting if a legitimate workflow is refused as "too complex".
+* **`jq`.** A `jq` program cannot be interrupted from outside, so it is run in a
+  child process (the service's own executable in a worker mode) that is given
+  none of the service's environment, has a memory ceiling, and is killed when
+  its time is up.
+
+## 9. Inbound Webhooks
 
 A webhook's URL is not a secret, and a delivery can start workflows, so every
 webhook must have a secret and a delivery that cannot prove it knows the secret
@@ -450,7 +485,7 @@ it. The window is `STORMCHASER_WEBHOOK_DEDUPE_HOURS` (default `24`).
 Rule expressions do not see the `Authorization`, `Cookie` or signature headers
 of a delivery.
 
-## 9. NATS Authentication
+## 10. NATS Authentication
 
 NATS carries every task and every result, so anyone who can publish to it can
 schedule containers on runners and report on other users' steps. All components
@@ -466,7 +501,7 @@ and is meant for evaluation. [NATS: Quickstart and Production](nats.md) lists
 what the quickstart provides, the exact permissions each role needs, and the
 requirements for a hardened production server.
 
-## 10. MCP Server Security
+## 11. MCP Server Security
 
 The Model Context Protocol (MCP) server, which exposes the OpenAPI specification as tools for AI agents, is integrated with the same OPA enforcement as the rest of the system:
 
