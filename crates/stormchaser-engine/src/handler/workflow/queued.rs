@@ -33,11 +33,18 @@ pub async fn handle_workflow_queued(
     let machine = machine.start_resolving(&mut *pool.acquire().await?).await?;
 
     // 3. Resolve the workflow file into cache
-    let repo_path_res = git_cache.ensure_files(
-        &machine.run.repo_url,
-        &machine.run.git_ref,
-        std::slice::from_ref(&machine.run.workflow_path),
-    );
+    // Cloning blocks on the network, so it runs off the async executor
+    let repo_path_res = {
+        let git_cache = git_cache.clone();
+        let repo_url = machine.run.repo_url.clone();
+        let git_ref = machine.run.git_ref.clone();
+        let workflow_path = machine.run.workflow_path.clone();
+        tokio::task::spawn_blocking(move || {
+            git_cache.ensure_files(&repo_url, &git_ref, std::slice::from_ref(&workflow_path))
+        })
+        .await
+        .unwrap_or_else(|e| Err(anyhow::anyhow!("Git resolution task failed: {}", e)))
+    };
 
     let repo_path = match repo_path_res {
         Ok(path) => path,

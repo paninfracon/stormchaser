@@ -94,6 +94,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The web UI no longer writes the runs list to its log, the request's cookies (session token included) to its log, or stream events to the browser console.
 - The TUI offers the development auto-login from `deploy/dex/credentials.generated` only when `STORMCHASER_TUI_DEV_LOGIN=true`.
 - Webhooks must have a secret: one is required to create a webhook, it can be replaced but not cleared, and a webhook without one refuses every delivery with 403 (previously it accepted them unauthenticated). Rules no longer see the `Authorization`, `Cookie` and signature headers of a delivery, and a rule's event-type pattern must match the whole event type.
+- Repository clones are staged and moved into the cache only when complete and on the requested revision. A failed clone, or a revision that did not exist, used to leave a cache entry that later runs used as if it were good, running the default branch's workflow instead. Cached branches and tags are fetched again after `STORMCHASER_GIT_CACHE_REFRESH_SECS` (default 60); they were never refreshed. Downloads are limited to `STORMCHASER_GIT_MAX_CLONE_MB` (default 1024) and `STORMCHASER_GIT_CLONE_TIMEOUT_SECS` (default 300), and the engine no longer clones on its async executor.
 - Removed `h2` 0.3 (RUSTSEC-2026-0258) by building the AWS SDK without its legacy HTTP client.
 - Removed the unmaintained `unsafe-libyaml` (RUSTSEC-2024-0449) by replacing `serde_yaml`.
 
