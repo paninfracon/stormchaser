@@ -74,6 +74,20 @@ pub async fn handle_step_failed(
         return Ok(());
     }
 
+    // "lost_zombie" is the engine's own verdict on a step whose runner has gone. The
+    // event arrives over NATS like any other, so check the verdict still holds: a runner
+    // credential cannot use it to end someone else's step, and a step that another runner
+    // adopted after the verdict was queued keeps running.
+    let lost_zombie = error_msg == "lost_zombie";
+    if lost_zombie && !crate::db::steps::step_runner_is_lost(&mut *tx, step_id).await? {
+        tracing::warn!(
+            "Ignoring lost_zombie event for run {} step {}: its runner is alive",
+            run_id,
+            step_id
+        );
+        return Ok(());
+    }
+
     let _ = release_step_quota_for_instance(&mut *tx, run_id, step_id).await;
 
     let machine =
@@ -81,7 +95,7 @@ pub async fn handle_step_failed(
             instance.clone(),
         );
 
-    if error_msg == "lost_zombie" {
+    if lost_zombie {
         let _ = machine.zombify(&mut *tx).await?;
     } else {
         let _ = machine

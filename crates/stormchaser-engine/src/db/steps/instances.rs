@@ -498,6 +498,32 @@ where
     .await
 }
 
+/// Whether a step is still in flight on a runner that is offline or has stopped
+/// heartbeating: the same condition [`fetch_zombie_steps`] selects on.
+pub async fn step_runner_is_lost<'a, E>(
+    executor: E,
+    id: StepInstanceId,
+) -> Result<bool, sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    sqlx::query_scalar(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM step_instances s
+            JOIN runners r ON s.runner_id = r.id
+            WHERE s.id = $1
+            AND s.status IN ('running', 'unpacking_sfs', 'packing_sfs')
+            AND (r.status = 'offline' OR r.last_heartbeat_at < NOW() - INTERVAL '30 seconds')
+        )
+        "#,
+    )
+    .bind(id)
+    .fetch_one(executor)
+    .await
+}
+
 /// Get runner id for a given affinity context in a run.
 pub async fn get_affinity_runner_id<'a, E>(
     executor: E,

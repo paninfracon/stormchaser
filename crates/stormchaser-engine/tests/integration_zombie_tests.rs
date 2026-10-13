@@ -71,6 +71,17 @@ async fn test_zombie_step_handler() {
     .await
     .unwrap();
     tx.commit().await.unwrap();
+    // The runner the step is on stopped heartbeating two minutes ago
+    let lost_runner = format!("lost-{}", uuid::Uuid::new_v4());
+    let live_runner = format!("live-{}", uuid::Uuid::new_v4());
+    insert_runner(&pool, &lost_runner, 120).await;
+    insert_runner(&pool, &live_runner, 0).await;
+    sqlx::query("UPDATE step_instances SET runner_id = $2 WHERE id = $1")
+        .bind(step_id)
+        .bind(&live_runner)
+        .execute(&pool)
+        .await
+        .unwrap();
     // The step is running on a runner, which is when the engine drops its completion token.
     stormchaser_engine::db::clear_step_completion_token(&pool, step_id)
         .await
@@ -102,6 +113,28 @@ async fn test_zombie_step_handler() {
         timestamp: Utc::now(),
     };
 
+    // While the step's runner is alive the verdict is not believed, whoever sent it
+    handler::step::events::handle_step_failed(
+        event.clone(),
+        pool.clone(),
+        nats_client.clone(),
+        tls_reloader.clone(),
+    )
+    .await
+    .unwrap();
+    let status: StepStatus = sqlx::query_scalar("SELECT status FROM step_instances WHERE id = $1")
+        .bind(step_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(status, StepStatus::Running);
+
+    sqlx::query("UPDATE step_instances SET runner_id = $2 WHERE id = $1")
+        .bind(step_id)
+        .bind(&lost_runner)
+        .execute(&pool)
+        .await
+        .unwrap();
     handler::step::events::handle_step_failed(event, pool.clone(), nats_client, tls_reloader)
         .await
         .unwrap();
@@ -116,6 +149,12 @@ async fn test_zombie_step_handler() {
 
     assert_eq!(row.0, StepStatus::LostZombie);
     assert_eq!(row.1.unwrap(), "lost_zombie");
+
+    sqlx::query("DELETE FROM runners WHERE id = ANY($1)")
+        .bind(vec![lost_runner, live_runner])
+        .execute(&pool)
+        .await
+        .unwrap();
 }
 
 /// Inserts a runner whose last heartbeat was `seconds_ago`.
