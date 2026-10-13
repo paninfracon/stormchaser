@@ -89,6 +89,62 @@ authenticate with the credentials above.
   named `runner-<type>-<runner id>`.
 - A key-value bucket for API rate limiting, created by the API.
 
+## Dedicated or shared NATS
+
+Whether Stormchaser gets its own NATS cluster or uses one you already run is
+your decision. It matters more than usual here, because of what travels over
+NATS:
+
+- **Task messages contain secrets.** The engine resolves a step before
+  dispatching it, so the message a runner receives holds any secret the
+  workflow passes to a container, registry credentials, and storage access
+  URLs, as plain JSON.
+- **A task message is an instruction to run a container.** Whoever can publish
+  one on the right subject can make a runner execute it.
+- **Stormchaser does not encrypt or sign these messages itself.** It relies on
+  NATS for confidentiality (TLS, authentication, permissions) and on the
+  filesystem for encryption at rest.
+- **Messages are retained.** The `stormchaser` stream currently has no age
+  limit and is not purged when a run finishes, so secrets from past runs stay
+  readable through the NATS API until you set a limit (see
+  [Availability and storage](#4-availability-and-storage)).
+
+So the question to answer is: *who, other than Stormchaser, can read or
+publish on this NATS server, and do you trust them with every secret your
+workflows use and with the ability to run containers on your runners?*
+
+| | Dedicated cluster | Shared cluster, own NATS account | Shared cluster, shared account |
+| --- | --- | --- | --- |
+| Who can read task messages and their secrets | Stormchaser components and your NATS administrators | Stormchaser components and the cluster's operators. Other tenants cannot: accounts have separate subject spaces and separate JetStream storage | Anyone in the account whose permissions cover `stormchaser.>` or the JetStream API, plus the cluster's operators |
+| Who can publish a task to your runners | The control-plane user only | The control-plane user, and a cluster operator acting inside your account | Any user in the account without an explicit deny, plus operators |
+| Is the documented runner permission list enough | Yes | Yes, applied to users inside your account | Only if every other user in the account is denied `stormchaser.>`, `$JS.API.*.stormchaser.>` and `$JS.ACK.stormchaser.>`. That is a deny list you must maintain as others add users |
+| Name collisions | None | None | The stream is always named `stormchaser` and consumers have fixed names; another application could clash |
+| TLS, client verification and encryption at rest | You set them | Set by the cluster's operators; check they meet the requirements below | Set by the cluster's operators |
+| Retention, backups and mirrors of the stream | Under your control | Limits are yours within the account; backups and mirrors are the operators' and will contain task secrets | Same, and other users may be able to read or copy the stream |
+| Availability | Yours alone to size | Shared hardware; ask for account-level JetStream limits so another tenant cannot exhaust storage | Shared hardware and shared limits |
+| NATS version and upgrades | You choose. Stormchaser's permissions were checked against NATS 2.10 | Operators choose; confirm the version supports filtered consumer-create subjects (2.9 or later) | Operators choose |
+| Operating cost | A cluster to run, monitor and upgrade | Low: an account and two or three users | Lowest |
+| Fits when | Workflows handle production credentials, or you cannot vouch for everyone on an existing cluster | You already run NATS as a platform and trust its operators with these secrets | Evaluation, or a cluster where every user is already trusted with everything Stormchaser handles |
+
+Things to weigh:
+
+- **A shared account is the one to avoid for production.** Isolation then
+  rests on deny lists in other people's user definitions.
+- **A dedicated account on a shared cluster isolates you from other tenants,
+  not from the operators.** Anyone who administers the cluster can read the
+  stream and publish into your account. If they are outside the group you
+  would trust with your deployment credentials, use a dedicated cluster.
+- **If you must use a server you do not fully trust,** keep long-lived secrets
+  out of task messages: have steps fetch what they need at run time (for
+  example from Vault with a short-lived token) instead of passing secrets in
+  step environment variables, and set a short maximum age on the stream.
+  Stormchaser has no payload encryption or message signing to fall back on.
+- Running Stormchaser inside a NATS account (rather than the default global
+  account) has not been tested by the project. It uses only standard
+  JetStream APIs, so it is expected to work; verify it in your environment.
+
+Whichever you choose, the requirements in the next section apply.
+
 ## Production requirements
 
 ### 1. Separate users with scoped permissions
@@ -210,6 +266,11 @@ it with a NetworkPolicy; elsewhere bind it to localhost.
   replicas. Stormchaser does not set a replica count, so a stream it creates
   gets the server default of one; create the stream yourself, or update it,
   to raise that.
+- Set a maximum age on the `stormchaser` stream (for example
+  `nats stream edit stormchaser --max-age 72h`). Stormchaser creates it with
+  no limit and does not yet purge a run's messages when the run finishes, so
+  without one every task message, secrets included, is kept indefinitely.
+  Choose an age longer than your longest-running workflow.
 - Use persistent, adequately sized file storage. Set a container memory limit
   above the JetStream memory-store size, and `GOMEMLIMIT` a little below the
   limit.
@@ -250,3 +311,6 @@ and `stormchaser-runner-k8s.config` at your server and Secrets.
 - [ ] Port 8222 is not reachable outside the NATS hosts or namespace.
 - [ ] Three or more nodes; the `stormchaser` stream has three replicas.
 - [ ] The store directory is on persistent, encrypted storage.
+- [ ] The `stormchaser` stream has a maximum age.
+- [ ] You have decided between a dedicated cluster and a shared one, and
+      everyone who can read or publish on it is trusted with workflow secrets.
