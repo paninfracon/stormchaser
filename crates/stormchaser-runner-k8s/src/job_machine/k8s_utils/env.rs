@@ -14,43 +14,11 @@ pub(crate) fn map_dsl_env_to_k8s(env: Vec<dsl::EnvVar>) -> Vec<K8sEnvVar> {
         .collect()
 }
 
-pub(crate) fn build_k8s_env_vars(
-    metadata: &JobMetadata,
-    step_spec: &StepSpec,
-    sfs_pvc_name: Option<&str>,
-) -> Vec<K8sEnvVar> {
+pub(crate) fn build_k8s_env_vars(metadata: &JobMetadata, step_spec: &StepSpec) -> Vec<K8sEnvVar> {
     let mut k8s_env = step_spec.env.clone();
 
-    // Storage URLs
-    for mount in &step_spec.storage_mounts {
-        if let Some(storage_data) = &metadata.storage {
-            if let Some(urls) = storage_data.get(&mount.name) {
-                if sfs_pvc_name.is_none() {
-                    if let Some(put_url) = urls.get("put_url").and_then(|u| u.as_str()) {
-                        k8s_env.push(K8sEnvVar {
-                            name: format!("STORMCHASER_PUT_URL_{}", mount.name),
-                            value: Some(put_url.to_string()),
-                            ..Default::default()
-                        });
-                        k8s_env.push(K8sEnvVar {
-                            name: format!("STORMCHASER_MOUNT_PATH_{}", mount.name),
-                            value: Some(mount.mount_path.clone()),
-                            ..Default::default()
-                        });
-                    }
-                }
-
-                if let Some(arts) = urls.get("artifacts") {
-                    k8s_env.push(K8sEnvVar {
-                        name: format!("STORMCHASER_ARTIFACTS_{}", mount.name),
-                        value: Some(arts.to_string()),
-                        ..Default::default()
-                    });
-                }
-            }
-        }
-    }
-
+    // Upload URLs and artifact instructions are not here: they go to the agent sidecar,
+    // which the step's own code cannot read.
     let storage_names: Vec<String> = step_spec
         .storage_mounts
         .iter()

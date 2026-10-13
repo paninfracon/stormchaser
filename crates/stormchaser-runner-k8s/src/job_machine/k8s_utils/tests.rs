@@ -194,7 +194,7 @@ fn test_do_build_job_spec_with_pvc() {
         .unwrap();
     assert_eq!(mount.sub_path, Some(format!("{}/workspace", run_id)));
 
-    // Because we are using PVC, it should NOT inject STORMCHASER_PUT_URL_workspace for S3
+    // The step's container never gets upload URLs
     let env = main_container.env.as_ref().unwrap();
     assert!(!env
         .iter()
@@ -426,4 +426,207 @@ fn test_do_build_job_spec_withholds_api_token_and_protects_reserved_labels() {
     let pod_spec = job.spec.unwrap().template.spec.unwrap();
     assert_eq!(pod_spec.automount_service_account_token, Some(false));
     assert_eq!(pod_spec.service_account_name, None);
+}
+
+fn storage_step_metadata(storage: serde_json::Value, reports: bool) -> JobMetadata {
+    let mut metadata = k8s_job_metadata(serde_json::json!({
+        "image": "alpine:latest",
+        "command": ["make", "build"],
+        "env": [{"name": "MODE", "value": "release"}],
+        "storage_mounts": [{"name": "workspace", "mount_path": "/workspace"}]
+    }));
+    metadata.storage = Some(HashMap::from([("workspace".to_string(), storage)]));
+    if reports {
+        metadata.step_dsl.reports = vec![stormchaser_model::dsl::TestReport {
+            name: "unit".into(),
+            path: "out/*.xml".into(),
+            format: "junit".into(),
+        }];
+        metadata.test_report_urls = Some(HashMap::from([(
+            "unit".to_string(),
+            serde_json::json!({"put_url": "https://s3.example.com/report-put"}),
+        )]));
+    }
+    metadata
+}
+
+fn oci_storage() -> serde_json::Value {
+    serde_json::json!({
+        "put_url": "https://s3.example.com/SECRET-PUT-URL",
+        "get_url": null,
+        "artifacts": {
+            "app": {
+                "connection_type": "oci",
+                "remote_path": "registry.example.com/run/workspace:app",
+                "path": "bin/app",
+                "needs_auth": true
+            }
+        }
+    })
+}
+
+#[test]
+fn storage_is_parked_by_a_sidecar_and_the_step_container_holds_nothing_to_upload_with() {
+    let metadata = storage_step_metadata(oci_storage(), false);
+    let job = do_build_job_spec("storm-build-1", &metadata, Some("agent:1".into()), None).unwrap();
+    let template = job.spec.unwrap().template;
+    let pod = template.spec.unwrap();
+
+    assert_eq!(pod.containers.len(), 2);
+    let worker = &pod.containers[0];
+    let sidecar = &pod.containers[1];
+    assert_eq!(worker.name, "worker");
+    assert_eq!(sidecar.name, "stormchaser-agent");
+
+    // The step runs the author's command and nothing of the agent's
+    let worker_text = serde_json::to_string(worker).unwrap();
+    assert!(!worker_text.contains("SECRET-PUT-URL"));
+    assert!(!worker_text.contains("stormchaser-agent"));
+    assert!(!worker_text.contains("registry.example.com"));
+    let worker_mounts: Vec<&str> = worker
+        .volume_mounts
+        .as_ref()
+        .unwrap()
+        .iter()
+        .map(|m| m.mount_path.as_str())
+        .collect();
+    assert_eq!(worker_mounts, vec!["/workspace"]);
+    assert!(pod
+        .init_containers
+        .unwrap()
+        .iter()
+        .all(|c| c.name != "inject-agent"));
+
+    // The sidecar shares the storage volume, waits for the runner, and does the uploads
+    let args = sidecar.args.as_ref().unwrap();
+    assert_eq!(args[0], "park");
+    assert!(args.contains(&"/stormchaser/control/worker-exit".to_string()));
+    assert!(args.iter().any(|a| a.contains("SECRET-PUT-URL")));
+    // Artifact paths are relative to the volume they belong to
+    assert!(args
+        .iter()
+        .any(|a| a.contains(r#""path":"/workspace/bin/app""#)));
+    assert!(args.contains(&"/stormchaser/auth/config.json".to_string()));
+    assert!(sidecar.env.is_none());
+    let sidecar_mounts: Vec<&str> = sidecar
+        .volume_mounts
+        .as_ref()
+        .unwrap()
+        .iter()
+        .map(|m| m.mount_path.as_str())
+        .collect();
+    assert_eq!(
+        sidecar_mounts,
+        vec!["/workspace", "/stormchaser/control", "/stormchaser/auth"]
+    );
+
+    // The runner's signal, and credentials that do not exist until the step is done
+    assert_eq!(
+        template.metadata.unwrap().annotations.unwrap()["stormchaser.v1.io/worker-exit"],
+        ""
+    );
+    let volumes = pod.volumes.unwrap();
+    let auth = volumes
+        .iter()
+        .find(|v| v.name == "storm-push-auth")
+        .unwrap();
+    let secret = auth.secret.as_ref().unwrap();
+    assert_eq!(
+        secret.secret_name.as_deref(),
+        Some("storm-build-1-push-auth")
+    );
+    assert_eq!(secret.optional, Some(true));
+    assert!(volumes
+        .iter()
+        .any(|v| v.name == "storm-control" && v.downward_api.is_some()));
+}
+
+#[test]
+fn no_sidecar_without_an_agent_image_or_with_nothing_to_park() {
+    // No agent image configured
+    let metadata = storage_step_metadata(oci_storage(), false);
+    let job = do_build_job_spec("j", &metadata, None, None).unwrap();
+    let template = job.spec.unwrap().template;
+    assert_eq!(template.spec.unwrap().containers.len(), 1);
+    assert!(template.metadata.unwrap().annotations.is_none());
+
+    // A shared PVC keeps the volume by itself, and there are no artifacts
+    let metadata = storage_step_metadata(
+        serde_json::json!({"put_url": "https://s3.example.com/put"}),
+        false,
+    );
+    let job =
+        do_build_job_spec("j", &metadata, Some("agent:1".into()), Some("pvc".into())).unwrap();
+    assert_eq!(job.spec.unwrap().template.spec.unwrap().containers.len(), 1);
+}
+
+#[test]
+fn test_reports_are_still_collected_inside_the_step_container() {
+    let metadata = storage_step_metadata(oci_storage(), true);
+    let job = do_build_job_spec("j", &metadata, Some("agent:1".into()), None).unwrap();
+    let pod = job.spec.unwrap().template.spec.unwrap();
+    let worker = &pod.containers[0];
+
+    // The agent wraps the command there, with report settings only
+    let script = &worker.args.as_ref().unwrap()[1];
+    assert!(script.contains("stormchaser-agent run --parking-urls '{}' --mount-paths '{}'"));
+    let env: Vec<&str> = worker
+        .env
+        .as_ref()
+        .unwrap()
+        .iter()
+        .map(|e| e.name.as_str())
+        .collect();
+    assert!(env.contains(&"STORMCHASER_TEST_REPORTS"));
+    assert!(env.contains(&"STORMCHASER_REPORT_URLS"));
+    assert!(!serde_json::to_string(worker)
+        .unwrap()
+        .contains("SECRET-PUT-URL"));
+    assert!(pod
+        .init_containers
+        .unwrap()
+        .iter()
+        .any(|c| c.name == "inject-agent"));
+    assert_eq!(pod.containers.len(), 2);
+}
+
+#[test]
+fn storage_mount_paths_that_cover_a_helper_are_refused() {
+    let mut metadata = storage_step_metadata(oci_storage(), false);
+    metadata.step_dsl.spec["storage_mounts"][0]["mount_path"] =
+        serde_json::json!("/stormchaser/auth");
+    let err = do_build_job_spec("j", &metadata, Some("agent:1".into()), None).unwrap_err();
+    assert!(err.to_string().contains("reserved"), "{err}");
+}
+
+#[test]
+fn the_steps_exit_code_is_its_own_containers() {
+    let pod = |worker: i32, sidecar: i32| -> k8s_openapi::api::core::v1::Pod {
+        serde_json::from_value(serde_json::json!({
+            "status": {"containerStatuses": [
+                {"name": "stormchaser-agent", "ready": false, "restartCount": 0, "image": "", "imageID": "",
+                 "state": {"terminated": {"exitCode": sidecar}}},
+                {"name": "worker", "ready": false, "restartCount": 0, "image": "", "imageID": "",
+                 "state": {"terminated": {"exitCode": worker}}}
+            ]}
+        }))
+        .unwrap()
+    };
+    assert_eq!(
+        do_extract_pod_metrics_with_reason(vec![pod(0, 0)]).exit_code,
+        Some(0)
+    );
+    assert_eq!(
+        do_extract_pod_metrics_with_reason(vec![pod(3, 3)]).exit_code,
+        Some(3)
+    );
+    assert_eq!(
+        do_extract_pod_metrics_with_reason(vec![pod(3, 0)]).exit_code,
+        Some(3)
+    );
+    // Parking failed after the step succeeded
+    assert_eq!(
+        do_extract_pod_metrics_with_reason(vec![pod(0, 1)]).exit_code,
+        Some(1)
+    );
 }

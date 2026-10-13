@@ -9,6 +9,7 @@ pub struct PodMetrics {
 pub fn do_extract_pod_metrics_with_reason(pods: Vec<Pod>) -> PodMetrics {
     let mut max_restart_count = 0;
     let mut exit_code = None;
+    let mut step_exit_code = None;
     let mut failure_reason = None;
 
     for pod in pods {
@@ -18,7 +19,14 @@ pub fn do_extract_pod_metrics_with_reason(pods: Vec<Pod>) -> PodMetrics {
                     max_restart_count = max_restart_count.max(cs.restart_count);
                     if let Some(state) = cs.state {
                         if let Some(terminated) = state.terminated {
-                            exit_code = Some(terminated.exit_code);
+                            // The step's exit code is its own container's; a helper's
+                            // only counts when it failed and the step did not.
+                            let is_step = cs.name == super::WORKER_CONTAINER;
+                            if is_step {
+                                step_exit_code = Some(terminated.exit_code);
+                            } else if terminated.exit_code != 0 || exit_code.is_none() {
+                                exit_code = Some(terminated.exit_code);
+                            }
                             if terminated.exit_code != 0 {
                                 let reason = terminated.reason.as_deref().unwrap_or("Terminated");
                                 let message = terminated.message.as_deref().unwrap_or("");
@@ -42,6 +50,12 @@ pub fn do_extract_pod_metrics_with_reason(pods: Vec<Pod>) -> PodMetrics {
             }
         }
     }
+
+    let exit_code = match (step_exit_code, exit_code) {
+        (Some(0), Some(helper)) if helper != 0 => Some(helper),
+        (Some(step), _) => Some(step),
+        (None, other) => other,
+    };
 
     PodMetrics {
         exit_code,

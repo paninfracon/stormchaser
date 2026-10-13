@@ -91,6 +91,8 @@ Stormchaser follows a strict **Fail-Closed** security philosophy regarding OPA:
 | `NATS_CREDS_FILE`, `NATS_USER` / `NATS_PASSWORD`, `NATS_TOKEN` | NATS credentials (see [nats.md](nats.md)). | **Who may schedule and report on steps.** |
 | `NATS_CA_FILE`, `NATS_TLS_REQUIRED` | Verify the NATS server and refuse plaintext. | Protects credentials and events in transit. |
 | `OPA_URL` | URL of the remote OPA server. | **Enables Authorization Enforcement.** |
+| `STORMCHASER_OCI_ALLOW_STATIC_CREDENTIALS` | Engine: send an OCI artifact backend's stored credentials to runner helpers when its registry cannot issue scoped tokens. Default `false`. | Long-lived registry credentials leave the engine. |
+| `STORMCHASER_NATS_STREAM_MAX_AGE_HOURS` | Engine and runners: maximum age of messages in the NATS stream. Default `168`. | Bounds how long any message stays readable. |
 | `JWT_SECRET` | Secret key for signing/verifying JWTs. | **Must be kept highly secure.** |
 | `TLS_CA_CERT_PATH` | Path to the CA certificate file. | Trust root for mTLS. |
 | `TLS_CERT_PATH` | Path to the component's client certificate. | Component identity for mTLS. |
@@ -199,12 +201,37 @@ so the engine treats them as the workflow author's claims, not as facts:
   does not read a location, format or checksum from the step's result. Report
   archives are limited to 32 MiB compressed, 64 MiB unpacked and 1,000 files.
 * A storage hash is recorded only for a volume the workflow declares.
-* The Docker runner reads these results from its own helper container, never from
-  the step's output, and refuses storage mount paths that would cover the helper's
-  system directories (see [Mounting Storage in Steps](workflow_dsl.md)).
-* On the Kubernetes runner the agent runs inside the step's container, so a step
-  can still replace what the agent reports about its own storage, artifacts and
-  reports. It cannot use that to reach another run's data.
+* Storage is parked and artifacts are published by a helper the step's code does
+  not share: a separate container on the Docker runner, an agent sidecar in the pod
+  on the Kubernetes runner. Both runners read storage hashes and artifact metadata
+  from that helper's output only, never from the step's, and refuse storage mount
+  paths that would cover the helper's system directories (see
+  [Mounting Storage in Steps](workflow_dsl.md)).
+* Test reports are files anywhere in the step's own filesystem, so on Kubernetes
+  they are still collected inside the step's container, with upload URLs for that
+  step's own reports only.
+
+### Credentials for artifact registries
+
+The username and password of an OCI artifact backend stay in the engine. They are
+not in task messages, pod specs, container arguments or environment variables.
+When a step's command has finished, the runner asks the engine for push
+credentials, and the engine answers with a token it has just obtained from the
+registry's token endpoint for that run's repositories only. The engine answers
+only for a step that is with a runner at that moment. The runner hands the token
+to the helper alone: written into the helper container's filesystem on Docker, in
+a Secret only the sidecar mounts on Kubernetes (deleted with the step's Job).
+
+* The step's own container holds no upload URLs and no registry credentials.
+* Any runner credential can ask for the token of any step that is currently
+  running, so the token's narrow scope and short life are the limit there.
+* The token's lifetime is the registry's (often five minutes). A push that
+  outlasts it fails; raise the token lifetime at the registry for large artifacts.
+* A registry that cannot issue per-repository tokens gets no credentials unless
+  the engine runs with `STORMCHASER_OCI_ALLOW_STATIC_CREDENTIALS=true`. The stored
+  username and password then go to the helper, still not to the step.
+* The Kubernetes runner needs `patch` on pods in the step namespace (to signal the
+  sidecar) in addition to `create` on secrets. The chart grants both.
 
 When using the **Docker Runner** with the `STORMCHASER_SFS_HOST_PATH` optimization enabled, the runner creates direct bind mounts from the host file system into step containers.
 

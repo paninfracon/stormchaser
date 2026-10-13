@@ -535,62 +535,6 @@ impl DockerContainerMachine<state::Initialized> {
         Ok(())
     }
 
-    /// Refuses a storage mount path that would cover part of a helper container.
-    ///
-    /// The unpark and parking helpers run the agent image with the step's volumes mounted
-    /// at the same paths the step uses. A volume holds whatever earlier steps wrote to it,
-    /// so one mounted over the agent binary, a shell, the loader or its configuration
-    /// would run the workflow author's code as the helper.
-    fn validate_storage_mount_path(mount_path: &str) -> Result<()> {
-        /// Directories the helpers execute or load from: nothing may be mounted on, above
-        /// or inside them.
-        const HELPER_TREES: &[&str] = &[
-            "/bin",
-            "/sbin",
-            "/lib",
-            "/lib32",
-            "/lib64",
-            "/libx32",
-            "/usr/bin",
-            "/usr/sbin",
-            "/usr/lib",
-            "/usr/lib32",
-            "/usr/lib64",
-            "/usr/libexec",
-            "/usr/local/bin",
-            "/proc",
-            "/sys",
-            "/dev",
-            // Where the runner places registry credentials for the parking helper
-            "/stormchaser",
-        ];
-
-        let path = Path::new(mount_path);
-        let plain = path.is_absolute()
-            && path
-                .components()
-                .all(|c| matches!(c, Component::RootDir | Component::Normal(_)));
-        if !plain {
-            return Err(anyhow::anyhow!(
-                "Storage mount path '{}' must be absolute and free of '..'",
-                mount_path
-            ));
-        }
-
-        // `/etc` holds the loader's preload list; mounts below it are harmless
-        let covers_helper = Path::new("/etc").starts_with(path)
-            || HELPER_TREES
-                .iter()
-                .any(|tree| path.starts_with(tree) || Path::new(tree).starts_with(path));
-        if covers_helper {
-            return Err(anyhow::anyhow!(
-                "Storage mount path '{}' is reserved: it would cover system files of the runner's helper containers",
-                mount_path
-            ));
-        }
-        Ok(())
-    }
-
     fn validate_bind_mount_name(mount_name: &str) -> Result<()> {
         if mount_name.is_empty() || mount_name.contains('/') || mount_name.contains('\\') {
             anyhow::bail!(
@@ -645,7 +589,7 @@ impl DockerContainerMachine<state::Initialized> {
         if let Some(storage_mounts) = &spec.storage_mounts {
             // Before any volume is created
             for mount in storage_mounts {
-                Self::validate_storage_mount_path(&mount.mount_path)?;
+                stormchaser_model::dsl::ensure_mount_path_clear_of_helpers(&mount.mount_path)?;
             }
             for mount in storage_mounts {
                 self.setup_single_mount(
@@ -857,52 +801,6 @@ mod tests {
         let expected_source = host_path.path().join(run_id.to_string()).join("workspace");
         assert!(expected_source.is_dir());
         assert_eq!(mount.source.as_deref(), expected_source.to_str());
-    }
-
-    #[test]
-    fn storage_mount_paths_that_cover_a_helper_are_refused() {
-        type Machine = DockerContainerMachine<state::Initialized>;
-        for path in [
-            "/",
-            "/usr",
-            "/usr/local",
-            "/usr/local/bin",
-            "/usr/local/bin/stormchaser-agent",
-            "/bin",
-            "/lib/x86_64-linux-gnu",
-            "/etc",
-            "/dev/shm",
-            "/stormchaser",
-            "/stormchaser/auth",
-            "/workspace/../bin",
-            "relative/path",
-            "",
-        ] {
-            assert!(
-                Machine::validate_storage_mount_path(path).is_err(),
-                "{path:?} should be refused"
-            );
-        }
-    }
-
-    #[test]
-    fn ordinary_storage_mount_paths_are_accepted() {
-        type Machine = DockerContainerMachine<state::Initialized>;
-        for path in [
-            "/workspace",
-            "/app",
-            "/data/",
-            "/usr/src/app",
-            "/usr/local/share/data",
-            "/etc/myapp",
-            "/binaries",
-            "/tmp/cache",
-        ] {
-            assert!(
-                Machine::validate_storage_mount_path(path).is_ok(),
-                "{path:?} should be accepted"
-            );
-        }
     }
 
     #[tokio::test]

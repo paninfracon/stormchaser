@@ -33,7 +33,7 @@ pub(crate) struct StepSpec {
 }
 
 pub(crate) fn build_k8s_pod_spec(
-    container: Container,
+    containers: Vec<Container>,
     init_containers: Vec<Container>,
     volumes: Vec<Volume>,
     metadata: &JobMetadata,
@@ -53,6 +53,8 @@ pub(crate) fn build_k8s_pod_spec(
         None
     };
 
+    let has_sidecar = containers.iter().any(|c| c.name == AGENT_SIDECAR_CONTAINER);
+
     PodTemplateSpec {
         metadata: Some(ObjectMeta {
             labels: Some(BTreeMap::from([
@@ -70,10 +72,13 @@ pub(crate) fn build_k8s_pod_spec(
                     metadata.fencing_token.to_string(),
                 ),
             ])),
+            // Empty until the runner reports the step container's exit code to the sidecar
+            annotations: has_sidecar
+                .then(|| BTreeMap::from([(WORKER_EXIT_ANNOTATION.to_string(), String::new())])),
             ..Default::default()
         }),
         spec: Some(PodSpec {
-            containers: vec![container],
+            containers,
             init_containers: Some(init_containers),
             restart_policy: Some(
                 step_spec

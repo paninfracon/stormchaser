@@ -1,10 +1,19 @@
 use crate::job_machine::JobMetadata;
 use k8s_openapi::api::core::v1::{Container, EnvVar as K8sEnvVar, VolumeMount};
-use serde_json::Value;
 use std::path::PathBuf;
 
 use super::*;
 
+/// True when the agent binary is copied into the step's own container to collect the
+/// test reports the step declares. Reports are files the step wrote anywhere in its own
+/// filesystem, so only something inside that container can read them; what it uploads is
+/// the author's own data either way.
+pub(crate) fn uses_in_step_agent(agent_present: bool, metadata: &JobMetadata) -> bool {
+    agent_present && !metadata.step_dsl.reports.is_empty()
+}
+
+/// Builds the pod's containers (the step's own first, then the agent sidecar if there is
+/// storage to park) and its init containers.
 pub(crate) fn build_k8s_containers(
     agent_image: Option<String>,
     sfs_pvc_name: Option<&str>,
@@ -12,11 +21,12 @@ pub(crate) fn build_k8s_containers(
     step_spec: &StepSpec,
     k8s_env: Vec<K8sEnvVar>,
     volume_mounts: Vec<VolumeMount>,
-) -> (Container, Vec<Container>) {
+) -> (Vec<Container>, Vec<Container>) {
     let mut init_containers = Vec::new();
+    let in_step_agent = uses_in_step_agent(agent_image.is_some(), metadata);
 
     // Agent injection
-    if let Some(agent_img) = &agent_image {
+    if let Some(agent_img) = agent_image.as_ref().filter(|_| in_step_agent) {
         init_containers.push(Container {
             name: "inject-agent".to_string(),
             image: Some(agent_img.clone()),
@@ -108,22 +118,10 @@ pub(crate) fn build_k8s_containers(
     let final_command = cmd_info.command;
     let final_args = cmd_info.args;
 
-    let mut container_volume_mounts = volume_mounts;
-    if agent_image.is_some()
-        && !step_spec.storage_mounts.is_empty()
-        && !container_volume_mounts
-            .iter()
-            .any(|m| m.mount_path == "/stormchaser/agent")
-    {
-        container_volume_mounts.push(VolumeMount {
-            name: "storm-agent".to_string(),
-            mount_path: "/stormchaser/agent".to_string(),
-            ..Default::default()
-        });
-    }
+    let container_volume_mounts = volume_mounts;
 
     let container = Container {
-        name: "worker".to_string(),
+        name: WORKER_CONTAINER.to_string(),
         image: Some(final_image.clone()),
         image_pull_policy: if final_image.contains("stormchaser-agent") {
             Some("IfNotPresent".to_string())
@@ -144,7 +142,19 @@ pub(crate) fn build_k8s_containers(
         ..Default::default()
     };
 
-    (container, init_containers)
+    let mut containers = vec![container];
+    if let (Some(agent_img), Some(plan)) = (
+        agent_image.as_ref(),
+        plan_sidecar(agent_image.is_some(), sfs_pvc_name, metadata, step_spec),
+    ) {
+        containers.push(build_agent_sidecar(
+            agent_img,
+            plan,
+            storage_volume_mounts(sfs_pvc_name, metadata, step_spec),
+        ));
+    }
+
+    (containers, init_containers)
 }
 
 pub(crate) struct ContainerCommandInfo {
@@ -167,8 +177,7 @@ pub(crate) fn wrap_main_command(
     }
 
     let step_name = &metadata.step_dsl.name;
-    let needs_agent = agent_present
-        && (!step_spec.storage_mounts.is_empty() || !metadata.step_dsl.reports.is_empty());
+    let needs_agent = uses_in_step_agent(agent_present, metadata);
 
     if original_cmd.is_empty() {
         return ContainerCommandInfo {
@@ -179,41 +188,11 @@ pub(crate) fn wrap_main_command(
     }
 
     let wrapped_script = if needs_agent {
-        let mut parking_urls = serde_json::Map::new();
-        let mut mount_paths = serde_json::Map::new();
-        let mut artifact_urls = serde_json::Map::new();
-
-        if let Some(storage_data) = &metadata.storage {
-            for (name, urls) in storage_data {
-                if urls.get("put_url").is_some() {
-                    parking_urls.insert(name.clone(), urls.clone());
-                }
-                if let Some(mount) = step_spec.storage_mounts.iter().find(|x| x.name == *name) {
-                    mount_paths.insert(name.clone(), Value::String(mount.mount_path.clone()));
-                }
-                if let Some(artifacts) = urls.get("artifacts").and_then(|a| a.as_object()) {
-                    for (art_name, art_data) in artifacts {
-                        artifact_urls.insert(art_name.clone(), art_data.clone());
-                    }
-                }
-            }
-        }
-
-        let parking_urls_json =
-            serde_json::to_string(&parking_urls).unwrap_or_else(|_| "{}".to_string());
-        let mount_paths_json =
-            serde_json::to_string(&mount_paths).unwrap_or_else(|_| "{}".to_string());
-        let artifact_urls_json =
-            serde_json::to_string(&artifact_urls).unwrap_or_else(|_| "{}".to_string());
-
-        let mut agent_cmd = format!(
-            "/stormchaser/agent/stormchaser-agent run --parking-urls '{}' --mount-paths '{}'",
-            parking_urls_json, mount_paths_json
-        );
-
-        if !artifact_urls.is_empty() {
-            agent_cmd.push_str(&format!(" --artifact-urls '{}'", artifact_urls_json));
-        }
+        // Here the agent only collects test reports (named in its environment). Storage
+        // and artifacts are parked by the sidecar, so it is given nothing to upload them
+        // with.
+        let agent_cmd =
+            "/stormchaser/agent/stormchaser-agent run --parking-urls '{}' --mount-paths '{}'";
 
         format!(
             "echo '========================================'; \

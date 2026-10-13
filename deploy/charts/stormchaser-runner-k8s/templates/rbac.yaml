@@ -10,13 +10,16 @@ rules:
   - apiGroups: ["batch"]
     resources: ["jobs"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  # patch: the runner tells a step pod's agent sidecar, through a pod annotation, that the
+  # step's container has finished.
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get", "list", "watch", "patch"]
   - apiGroups: [""]
     resources: ["pods/log"]
     verbs: ["get", "list", "watch"]
-  # Only the per-step image pull secrets the runner writes itself; it never reads secrets.
+  # Only the per-step image pull and artifact push secrets the runner writes itself; it
+  # never reads secrets.
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create", "delete"]

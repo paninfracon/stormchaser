@@ -362,11 +362,36 @@ step "my_step" "RunContainer" {
 }
 ```
 
-On the Docker runner `mount_path` must be an absolute path that is not a system
-location: `/`, `/usr`, `/usr/local`, `/etc`, and anything at, above or inside
-`/bin`, `/sbin`, `/lib*`, `/usr/bin`, `/usr/sbin`, `/usr/lib*`, `/usr/libexec`,
-`/usr/local/bin`, `/proc`, `/sys` and `/dev` are refused. Paths such as
+`mount_path` must be an absolute path that is not a system location: `/`,
+`/usr`, `/usr/local`, `/etc`, and anything at, above or inside `/bin`, `/sbin`,
+`/lib*`, `/usr/bin`, `/usr/sbin`, `/usr/lib*`, `/usr/libexec`, `/usr/local/bin`,
+`/proc`, `/sys`, `/dev` and `/stormchaser` are refused. Paths such as
 `/workspace`, `/app`, `/usr/src/app` or `/etc/myapp` are fine.
+
+An artifact's `path` is relative to the root of the storage volume it is
+declared in, wherever a step mounts that volume. Storage is parked and artifacts
+are published by a helper outside the step's own container (a separate container
+on Docker, a sidecar in the pod on Kubernetes), after the step's command has
+exited successfully.
+
+##### OCI registries as artifact backends
+
+A storage block whose `backend` names an `oci` connection publishes its artifacts
+to that registry, as `<registry>/<run id>/<storage name>:<artifact name>`. The
+connection's `config` takes:
+
+| Key | Meaning |
+| :--- | :--- |
+| `registry` | Registry host, optionally followed by a path that every repository starts with (`ghcr.io/my-org`). |
+| `username`, `password` | Credentials allowed to push there. They never leave the engine: at push time it exchanges them for a token limited to that run's repositories. |
+| `plain_http` | `true` for a registry served without TLS. |
+
+The registry must support token authentication (Harbor, GHCR, GitLab, Docker Hub
+and the reference registry with a token service do). For one that only does basic
+authentication, or issues tokens that are not per repository (ECR), artifacts are
+not pushed unless the operator sets `STORMCHASER_OCI_ALLOW_STATIC_CREDENTIALS=true`
+on the engine, which sends the stored username and password to the runner's helper
+instead.
 
 #### 4.4 Using Library Steps
 

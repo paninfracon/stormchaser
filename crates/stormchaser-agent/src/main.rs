@@ -4,7 +4,9 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use serde_json::Value;
 use std::fs;
+use std::path::Path;
 use std::process::{exit, Command};
+use std::time::Duration;
 use tracing::info;
 
 mod connections;
@@ -73,6 +75,34 @@ pub enum Commands {
         #[arg(last = true)]
         command: Vec<String>,
     },
+    /// Waits for a step's container to finish, then parks its storage and artifacts.
+    ///
+    /// Runs as a sidecar next to the step's container, sharing only its storage volumes.
+    Park {
+        /// File the runner fills with the step container's exit code once it has finished
+        #[arg(long)]
+        wait_for: String,
+
+        /// The JSON map of storage name to parking (put) URL
+        #[arg(long)]
+        parking_urls: String,
+
+        /// The mount path for each storage (JSON map: name -> path)
+        #[arg(long)]
+        mount_paths: String,
+
+        /// The JSON map of artifact name to {put_url, path}
+        #[arg(long)]
+        artifact_urls: Option<String>,
+
+        /// Docker client configuration file the runner provides for OCI artifact pushes
+        #[arg(long)]
+        registry_config: Option<String>,
+
+        /// How long to wait for that file to appear before pushing without it
+        #[arg(long, default_value_t = 120)]
+        registry_config_wait_secs: u64,
+    },
     /// Downloads and extracts a storage tarball with hash verification
     Unpark {
         /// The download (get) URL
@@ -125,6 +155,41 @@ pub async fn run_agent(cli: Cli) -> Result<()> {
             .await?;
             Ok(())
         }
+        Commands::Park {
+            wait_for,
+            parking_urls,
+            mount_paths,
+            artifact_urls,
+            registry_config,
+            registry_config_wait_secs,
+        } => {
+            let urls: Value = serde_json::from_str(&parking_urls)?;
+            let paths: Value = serde_json::from_str(&mount_paths)?;
+
+            info!("Waiting for the step's container to finish");
+            let code = tokio::select! {
+                code = wait_for_exit_code(Path::new(&wait_for)) => code,
+                // The pod is being deleted; there is nothing left to park
+                _ = terminated() => exit(143),
+            };
+            if code != 0 {
+                info!(
+                    "Step exited with code {}, skipping storage and artifact parking",
+                    code
+                );
+                exit(code);
+            }
+
+            if let Some(config) = &registry_config {
+                wait_for_file(
+                    Path::new(config),
+                    Duration::from_secs(registry_config_wait_secs),
+                )
+                .await;
+            }
+            park_all(urls, paths, artifact_urls, registry_config.as_deref()).await?;
+            Ok(())
+        }
         Commands::Run {
             parking_urls,
             mount_paths,
@@ -162,25 +227,7 @@ pub async fn run_agent(cli: Cli) -> Result<()> {
             }
 
             if status.success() {
-                let hashes = park_storage(urls, paths).await?;
-                // Print hashes to stdout for the runner to capture if needed
-                if !hashes.is_empty() {
-                    // Write hashes to a known file for the runner to read
-                    let hashes_json = serde_json::to_string(&hashes)?;
-                    info!("Parked storage hashes: {}", hashes_json);
-                    fs::write("/tmp/stormchaser_storage_hashes.json", hashes_json)?;
-                }
-
-                if let Some(artifacts_json) = artifact_urls {
-                    let artifacts: Value = serde_json::from_str(&artifacts_json)?;
-                    let artifact_meta =
-                        park_artifacts(artifacts, registry_config.as_deref()).await?;
-                    if !artifact_meta.is_empty() {
-                        let meta_json = serde_json::to_string(&artifact_meta)?;
-                        info!("Parked artifacts: {}", meta_json);
-                        fs::write("/tmp/stormchaser_artifact_meta.json", meta_json)?;
-                    }
-                }
+                park_all(urls, paths, artifact_urls, registry_config.as_deref()).await?;
             } else {
                 info!("User command failed, skipping storage and artifact parking");
             }
@@ -190,9 +237,104 @@ pub async fn run_agent(cli: Cli) -> Result<()> {
     }
 }
 
+/// Parks storage volumes and artifacts, and logs what was parked for the runner to read.
+async fn park_all(
+    urls: Value,
+    paths: Value,
+    artifact_urls: Option<String>,
+    registry_config: Option<&str>,
+) -> Result<()> {
+    let hashes = park_storage(urls, paths).await?;
+    if !hashes.is_empty() {
+        let hashes_json = serde_json::to_string(&hashes)?;
+        info!("Parked storage hashes: {}", hashes_json);
+        fs::write("/tmp/stormchaser_storage_hashes.json", hashes_json)?;
+    }
+
+    if let Some(artifacts_json) = artifact_urls {
+        let artifacts: Value = serde_json::from_str(&artifacts_json)?;
+        let artifact_meta = park_artifacts(artifacts, registry_config).await?;
+        if !artifact_meta.is_empty() {
+            let meta_json = serde_json::to_string(&artifact_meta)?;
+            info!("Parked artifacts: {}", meta_json);
+            fs::write("/tmp/stormchaser_artifact_meta.json", meta_json)?;
+        }
+    }
+    Ok(())
+}
+
+/// Reads an exit code from `path`, if the file holds one yet.
+fn read_exit_code(path: &Path) -> Option<i32> {
+    fs::read_to_string(path).ok()?.trim().parse().ok()
+}
+
+/// Waits until the runner has written the step container's exit code to `path`.
+async fn wait_for_exit_code(path: &Path) -> i32 {
+    loop {
+        if let Some(code) = read_exit_code(path) {
+            return code;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
+/// Waits for `path` to exist, giving up after `limit`.
+async fn wait_for_file(path: &Path, limit: Duration) {
+    let deadline = tokio::time::Instant::now() + limit;
+    while !path.is_file() {
+        if tokio::time::Instant::now() >= deadline {
+            tracing::warn!(
+                "{} did not appear within {:?}; continuing without it",
+                path.display(),
+                limit
+            );
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
+/// Resolves when the process is asked to stop.
+async fn terminated() {
+    use tokio::signal::unix::{signal, SignalKind};
+    match signal(SignalKind::terminate()) {
+        Ok(mut term) => {
+            term.recv().await;
+        }
+        Err(_) => std::future::pending().await,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exit_code_is_read_only_once_the_runner_has_written_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("worker-exit");
+        assert_eq!(read_exit_code(&path), None);
+        fs::write(&path, "").unwrap();
+        assert_eq!(read_exit_code(&path), None);
+        fs::write(&path, "137\n").unwrap();
+        assert_eq!(read_exit_code(&path), Some(137));
+        fs::write(&path, "0").unwrap();
+        assert_eq!(read_exit_code(&path), Some(0));
+    }
+
+    #[tokio::test]
+    async fn waiting_for_a_file_gives_up_at_the_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let started = std::time::Instant::now();
+        wait_for_file(&dir.path().join("never"), Duration::from_millis(300)).await;
+        assert!(started.elapsed() >= Duration::from_millis(300));
+
+        let present = dir.path().join("config.json");
+        fs::write(&present, "{}").unwrap();
+        let started = std::time::Instant::now();
+        wait_for_file(&present, Duration::from_secs(30)).await;
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
 
     #[test]
     fn test_http_client_builds_with_bundled_roots() {

@@ -14,16 +14,25 @@ pub fn do_build_job_spec(
     let step_spec = parse_step_spec(metadata)?;
     StepPolicy::from_env().check(&step_spec)?;
 
-    let (volumes, volume_mounts) = build_k8s_volumes(
-        agent_image.is_some(),
+    // Helper containers mount the step's volumes at the paths the step chose
+    for mount in &step_spec.storage_mounts {
+        stormchaser_model::dsl::ensure_mount_path_clear_of_helpers(&mount.mount_path)?;
+    }
+
+    let agent_present = agent_image.is_some();
+    let (mut volumes, volume_mounts) = build_k8s_volumes(
+        uses_in_step_agent(agent_present, metadata),
         sfs_pvc_name.as_deref(),
         metadata,
         &step_spec,
     );
+    if let Some(plan) = plan_sidecar(agent_present, sfs_pvc_name.as_deref(), metadata, &step_spec) {
+        volumes.extend(sidecar_volumes(job_name, plan.push_auth));
+    }
 
-    let k8s_env = build_k8s_env_vars(metadata, &step_spec, sfs_pvc_name.as_deref());
+    let k8s_env = build_k8s_env_vars(metadata, &step_spec);
 
-    let (container, init_containers) = build_k8s_containers(
+    let (containers, init_containers) = build_k8s_containers(
         agent_image,
         sfs_pvc_name.as_deref(),
         metadata,
@@ -33,7 +42,7 @@ pub fn do_build_job_spec(
     );
 
     let pod_template =
-        build_k8s_pod_spec(container, init_containers, volumes, metadata, &step_spec);
+        build_k8s_pod_spec(containers, init_containers, volumes, metadata, &step_spec);
 
     // Job Labels. Author-supplied entries go in first so they can never replace the
     // ones Stormchaser relies on to find, attribute and reap its jobs.

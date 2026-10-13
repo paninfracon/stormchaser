@@ -86,7 +86,8 @@ async fn execute_job_on_cluster(
         registry_auth,
     };
 
-    let machine = job_machine::K8sJobMachine::new(client.clone(), metadata.clone());
+    let machine = job_machine::K8sJobMachine::new(client.clone(), metadata.clone())
+        .with_nats(nats_client.clone());
 
     let result = match machine.start().await {
         Ok(job_machine::StartResult::Running(running_machine)) => {

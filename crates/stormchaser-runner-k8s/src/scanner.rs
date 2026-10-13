@@ -235,7 +235,9 @@ async fn handle_orphaned_job(
             registry_auth: None,
         };
 
-        let machine = job_machine::K8sJobMachine::new(client_clone, metadata);
+        // An adopted job's sidecar still has to be told when its step has finished
+        let machine =
+            job_machine::K8sJobMachine::new(client_clone, metadata).with_nats(nats.clone());
 
         match machine.adopt(job_name.clone()).wait().await {
             Ok(job_state) => match job_state {

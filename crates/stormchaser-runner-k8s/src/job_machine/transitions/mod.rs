@@ -23,6 +23,7 @@ impl K8sJobMachine<state::Initialized> {
         );
         K8sJobMachine {
             client: self.client,
+            nats: self.nats,
             metadata: self.metadata.clone(),
             state: state::Running {
                 job_name,
@@ -78,6 +79,7 @@ impl K8sJobMachine<state::Initialized> {
                         warn!("Version check failed for {}: {}", job_name, e);
                         return Ok(StartResult::Failed(K8sJobMachine {
                             client: self.client,
+                            nats: self.nats,
                             metadata: self.metadata,
                             state: state::Finished {
                                 result: JobState::Failed(
@@ -147,6 +149,7 @@ impl K8sJobMachine<state::Initialized> {
 
         Ok(StartResult::Running(K8sJobMachine {
             client: self.client,
+            nats: self.nats,
             metadata: self.metadata,
             state: state::Running {
                 job_name,
@@ -158,12 +161,31 @@ impl K8sJobMachine<state::Initialized> {
     fn failed(self, reason: String) -> StartResult {
         StartResult::Failed(K8sJobMachine {
             client: self.client,
+            nats: self.nats,
             metadata: self.metadata,
             state: state::Finished {
                 result: JobState::Failed(reason, JobMetrics::default()),
             },
         })
     }
+}
+
+/// An owner reference that makes Kubernetes delete an object together with a step's Job.
+pub(crate) fn job_owner_reference(
+    job_name: &str,
+    owner: &Job,
+) -> Option<Vec<k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference>> {
+    let uid = owner.metadata.uid.as_ref()?;
+    Some(vec![
+        k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference {
+            api_version: "batch/v1".to_string(),
+            kind: "Job".to_string(),
+            name: job_name.to_string(),
+            uid: uid.clone(),
+            controller: Some(false),
+            block_owner_deletion: Some(false),
+        },
+    ])
 }
 
 /// Builds the per-step image pull secret, owned by the step's Job so that Kubernetes
@@ -198,18 +220,7 @@ pub(crate) fn build_pull_secret(job_name: &str, auth: &serde_json::Value, owner:
         "managed-by".to_string(),
         "stormchaser".to_string(),
     )]));
-    if let Some(uid) = &owner.metadata.uid {
-        secret.metadata.owner_references = Some(vec![
-            k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference {
-                api_version: "batch/v1".to_string(),
-                kind: "Job".to_string(),
-                name: job_name.to_string(),
-                uid: uid.clone(),
-                controller: Some(false),
-                block_owner_deletion: Some(false),
-            },
-        ]);
-    }
+    secret.metadata.owner_references = job_owner_reference(job_name, owner);
     secret.type_ = Some("kubernetes.io/dockerconfigjson".to_string());
     secret.data = Some(BTreeMap::from([(
         ".dockerconfigjson".to_string(),
@@ -221,8 +232,16 @@ pub(crate) fn build_pull_secret(job_name: &str, auth: &serde_json::Value, owner:
 }
 
 impl K8sJobMachine<state::Running> {
-    /// Wait.
+    /// Waits for the job to finish, telling its agent sidecars along the way when the
+    /// step's own container is done.
     pub async fn wait(self) -> Result<JobState> {
+        tokio::select! {
+            result = self.wait_for_job() => result,
+            never = self.signal_sidecars() => match never {},
+        }
+    }
+
+    async fn wait_for_job(&self) -> Result<JobState> {
         let job_name = &self.state.job_name;
         let dispatched_at = self.state.dispatched_at;
         let jobs: Api<Job> = Api::namespaced(self.client.clone(), &self.metadata.namespace);
@@ -422,7 +441,8 @@ impl K8sJobMachine<state::Running> {
                 .logs(
                     pod_name,
                     &kube::api::LogParams {
-                        container: Some("worker".to_string()),
+                        // Only the agent sidecar's output: the step cannot write to it
+                        container: Some(k8s_utils::AGENT_SIDECAR_CONTAINER.to_string()),
                         ..Default::default()
                     },
                 )
@@ -457,7 +477,8 @@ impl K8sJobMachine<state::Running> {
                 .logs(
                     pod_name,
                     &kube::api::LogParams {
-                        container: Some("worker".to_string()),
+                        // Only the agent sidecar's output: the step cannot write to it
+                        container: Some(k8s_utils::AGENT_SIDECAR_CONTAINER.to_string()),
                         ..Default::default()
                     },
                 )
@@ -557,6 +578,8 @@ impl<S> K8sJobMachine<S> {
             .collect()
     }
 }
+
+mod sidecar_signal;
 
 #[cfg(test)]
 mod tests;
