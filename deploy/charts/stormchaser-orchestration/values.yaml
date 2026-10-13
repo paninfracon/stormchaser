@@ -14,7 +14,13 @@ global:
     url: "nats://nats:4222"
     # Name of a Secret with `user` and `password` keys for NATS authentication.
     # Leave empty only if the NATS server accepts unauthenticated clients.
+    # The engine uses this one.
     authSecret: ""
+    # Secrets of the same shape for the API and the query service, which should have
+    # NATS users of their own with far narrower permissions than the engine's (see
+    # docs/nats.md). Left empty, each falls back to authSecret.
+    apiAuthSecret: ""
+    queryAuthSecret: ""
   # Approval emails can carry links that approve or reject a step without logging in.
   # They are sealed with a key of their own, given to both the engine and the API.
   # Leave existingSecret empty to send no links.

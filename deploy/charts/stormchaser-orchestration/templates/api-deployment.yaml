@@ -41,7 +41,7 @@ spec:
               value: {{ .Values.global.database.ssl | quote }}
             - name: NATS_URL
               value: {{ .Values.global.nats.url | quote }}
-            {{- with .Values.global.nats.authSecret }}
+            {{- with (.Values.global.nats.apiAuthSecret | default .Values.global.nats.authSecret) }}
             - name: NATS_USER
               valueFrom:
                 secretKeyRef:

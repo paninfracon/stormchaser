@@ -418,11 +418,14 @@ of a delivery.
 
 NATS carries every task and every result, so anyone who can publish to it can
 schedule containers on runners and report on other users' steps. All components
-authenticate to NATS with credentials read from the environment, and runners
-should use a separate, restricted NATS user.
+authenticate to NATS with credentials read from the environment. Only the
+engine should be able to publish a task: runners, the API and the query service
+each get a NATS user of their own, limited to what that component does, so that
+a compromise of one of the user-facing services cannot schedule containers or
+read the secrets in task messages.
 
 The bundled NATS (docker-compose and the umbrella Helm chart) requires
-passwords and restricts the runner user, but it is a single node without TLS
+passwords and restricts the runner, API and query users, but it is a single node without TLS
 and is meant for evaluation. [NATS: Quickstart and Production](nats.md) lists
 what the quickstart provides, the exact permissions each role needs, and the
 requirements for a hardened production server.

@@ -22,9 +22,12 @@ export STORMCHASER_DEV_PASSWORD=${STORMCHASER_TEST_DB_PASSWORD}
 # blocks unless the host is allow-listed.
 export STORMCHASER_SSRF_ALLOWED_HOSTS="127.0.0.1,localhost"
 
-# NATS requires authentication; tests connect as the control-plane user.
+# NATS requires authentication; tests connect as the engine user, which is unrestricted,
+# because they play every role (queueing runs, dispatching tasks, reporting on steps).
 export STORMCHASER_NATS_PASSWORD=${STORMCHASER_NATS_PASSWORD:-stormchaser_test_nats}
 export STORMCHASER_NATS_RUNNER_PASSWORD=${STORMCHASER_NATS_RUNNER_PASSWORD:-stormchaser_test_nats_runner}
+export STORMCHASER_NATS_API_PASSWORD=${STORMCHASER_NATS_API_PASSWORD:-stormchaser_test_nats_api}
+export STORMCHASER_NATS_QUERY_PASSWORD=${STORMCHASER_NATS_QUERY_PASSWORD:-stormchaser_test_nats_query}
 
 export DATABASE_URL="postgres://stormchaser:${STORMCHASER_DEV_PASSWORD}@127.0.0.1:${PORT_DB}/stormchaser"
 export NATS_URL="nats://127.0.0.1:${PORT_NATS}"

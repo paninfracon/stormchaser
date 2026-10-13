@@ -22,6 +22,9 @@ stormchaser-orchestration:
       # Secret with `user` and `password` keys. The default is generated for the
       # bundled NATS; for an external server, point this at your own Secret.
       authSecret: "stormchaser-nats-control"
+      # The API and the query service have users of their own, limited to what each does.
+      apiAuthSecret: "stormchaser-nats-api"
+      queryAuthSecret: "stormchaser-nats-query"
     loki:
       url: "http://stormchaser-loki:3100"
     grafana:
@@ -105,8 +108,9 @@ postgresql:
     persistence:
       enabled: false
 
-# Generate the Secrets `stormchaser-nats-control` and `stormchaser-nats-runner` for the
-# bundled NATS server. Set to false if you create those Secrets yourself.
+# Generate the Secrets `stormchaser-nats-control` (the engine), `stormchaser-nats-api`,
+# `stormchaser-nats-query` and `stormchaser-nats-runner` for the bundled NATS server.
+# Set to false if you create those Secrets yourself.
 natsAuth:
   generate: true
 
@@ -125,6 +129,16 @@ nats:
           secretKeyRef:
             name: stormchaser-nats-control
             key: password
+      NATS_API_PASSWORD:
+        valueFrom:
+          secretKeyRef:
+            name: stormchaser-nats-api
+            key: password
+      NATS_QUERY_PASSWORD:
+        valueFrom:
+          secretKeyRef:
+            name: stormchaser-nats-query
+            key: password
       NATS_RUNNER_PASSWORD:
         valueFrom:
           secretKeyRef:
@@ -134,9 +148,43 @@ nats:
     merge:
       authorization:
         users:
-          # API, engine and query service: unrestricted.
+          # Keep every user here in step with deploy/nats/nats-server.conf, which
+          # explains each permission.
+          # The engine: unrestricted. Only it may hand tasks to runners.
           - user: stormchaser
             password: << $NATS_CONTROL_PASSWORD >>
+          # The API: queue runs, report approvals and waits, watch run events, and
+          # keep its rate-limit buckets. It can neither publish nor read a task.
+          - user: stormchaser-api
+            password: << $NATS_API_PASSWORD >>
+            permissions:
+              publish:
+                allow:
+                  - "stormchaser.v1.*.run.queued"
+                  - "stormchaser.v1.run.direct"
+                  - "stormchaser.v1.*.step.completed"
+                  - "stormchaser.v1.*.step.failed"
+                  - "$JS.API.INFO"
+                  - "$JS.API.STREAM.CREATE.KV_api_rate_limit_buckets"
+                  - "$JS.API.STREAM.INFO.KV_api_rate_limit_buckets"
+                  - "$JS.API.DIRECT.GET.KV_api_rate_limit_buckets.>"
+                  - "$JS.API.STREAM.MSG.GET.KV_api_rate_limit_buckets"
+                  - "$KV.api_rate_limit_buckets.>"
+              subscribe:
+                allow:
+                  - "_INBOX.>"
+                  - "stormchaser.v1.run.>"
+                  - "stormchaser.v1.*.run.>"
+          # The query service: connects, and may do nothing else.
+          - user: stormchaser-query
+            password: << $NATS_QUERY_PASSWORD >>
+            permissions:
+              publish:
+                deny:
+                  - ">"
+              subscribe:
+                allow:
+                  - "_INBOX.>"
           # Runners: report on steps and consume their own task subjects only.
           # Keep in step with deploy/nats/nats-server.conf.
           - user: stormchaser-runner

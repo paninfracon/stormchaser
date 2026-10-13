@@ -15,8 +15,8 @@ service) and configure it as described [below](#production-requirements).
 
 | | Quickstart (compose and umbrella chart) | Production requirement |
 | --- | --- | --- |
-| Authentication | Two users with generated passwords | Yes, per role |
-| Runner permissions | Restricted to the subjects below | Yes |
+| Authentication | Four users with generated passwords: engine, API, query service, runners | Yes, per role |
+| Permissions | Runners, the API and the query service restricted to the subjects below; the engine unrestricted | Yes |
 | TLS | None; traffic is plaintext | TLS on every link, verified |
 | Nodes | 1 | 3 or more, clustered |
 | Stream replicas | 1 | 3 |
@@ -33,7 +33,9 @@ travel in plaintext, and a single node loses in-flight work when it restarts.
 
 | User | Used by | Where the password lives |
 | --- | --- | --- |
-| `stormchaser` | API, engine, query service | compose: `STORMCHASER_NATS_PASSWORD` in `.env`; Helm: Secret `stormchaser-nats-control` |
+| `stormchaser` | Engine | compose: `STORMCHASER_NATS_PASSWORD` in `.env`; Helm: Secret `stormchaser-nats-control` |
+| `stormchaser-api` | API | compose: `STORMCHASER_NATS_API_PASSWORD` in `.env`; Helm: Secret `stormchaser-nats-api` |
+| `stormchaser-query` | Query service | compose: `STORMCHASER_NATS_QUERY_PASSWORD` in `.env`; Helm: Secret `stormchaser-nats-query` |
 | `stormchaser-runner` | Docker and Kubernetes runners | compose: `STORMCHASER_NATS_RUNNER_PASSWORD` in `.env`; Helm: Secret `stormchaser-nats-runner` |
 
 `scripts/setup.sh` generates the compose passwords. The umbrella chart
@@ -42,7 +44,8 @@ generates the Helm Secrets on first install and keeps them across upgrades
 `deploy/nats/nats-server.conf` for compose and under `nats.config.merge` in the
 umbrella chart's `values.yaml`; keep the two in step.
 
-To talk to the quickstart server yourself, pass the control-plane credentials:
+To talk to the quickstart server yourself, pass the engine's credentials, which are
+the only unrestricted ones:
 
 ```bash
 nats --server nats://localhost:4222 \
@@ -119,7 +122,7 @@ workflows use and with the ability to run containers on your runners?*
 | | Dedicated cluster | Shared cluster, own NATS account | Shared cluster, shared account |
 | --- | --- | --- | --- |
 | Who can read task messages and their secrets | Stormchaser components and your NATS administrators | Stormchaser components and the cluster's operators. Other tenants cannot: accounts have separate subject spaces and separate JetStream storage | Anyone in the account whose permissions cover `stormchaser.>` or the JetStream API, plus the cluster's operators |
-| Who can publish a task to your runners | The control-plane user only | The control-plane user, and a cluster operator acting inside your account | Any user in the account without an explicit deny, plus operators |
+| Who can publish a task to your runners | The engine's user only | The control-plane user, and a cluster operator acting inside your account | Any user in the account without an explicit deny, plus operators |
 | Is the documented runner permission list enough | Yes | Yes, applied to users inside your account | Only if every other user in the account is denied `stormchaser.>`, `$JS.API.*.stormchaser.>` and `$JS.ACK.stormchaser.>`. That is a deny list you must maintain as others add users |
 | Name collisions | None | None | The stream is always named `stormchaser` and consumers have fixed names; another application could clash |
 | TLS, client verification and encryption at rest | You set them | Set by the cluster's operators; check they meet the requirements below | Set by the cluster's operators |
@@ -152,13 +155,55 @@ Whichever you choose, the requirements in the next section apply.
 
 ### 1. Separate users with scoped permissions
 
-Give the control plane and the runners different identities. NATS treats a user
-with no `permissions` block as unrestricted, and a grant of `>` includes the
-JetStream control plane under `$JS.API.>`, so the runner user must have an
-explicit allow list.
+Give the engine, the API, the query service and the runners an identity each.
+NATS treats a user with no `permissions` block as unrestricted, and a grant of
+`>` includes the JetStream control plane under `$JS.API.>`, so every user but
+the engine's must have an explicit allow list.
 
-**Control plane** (API, engine, query service): publish and subscribe on
-`stormchaser.>`, `$JS.API.>`, `$JS.ACK.>`, `$KV.>` and `_INBOX.>`.
+**Engine**: publish and subscribe on `stormchaser.>`, `$JS.API.>`,
+`$JS.ACK.>` and `_INBOX.>`. It owns the stream, and it should be the only
+identity that can publish a task (`stormchaser.v1.*.step.scheduled.>`): a task
+tells a runner which container to start, with which secrets, and the engine
+publishes one only after its policy check.
+
+**API**: exactly the list below. The API faces users, so it is the component
+most likely to be compromised, and with the engine's identity it could
+schedule containers on runners directly and read the resolved secrets in task
+messages. With this list it can queue runs, report the outcome of approvals
+and waits (which the engine accepts only with the step's completion token),
+watch run events for its event stream, and keep its rate-limit buckets.
+
+```text
+publish allow:
+  stormchaser.v1.*.run.queued
+  stormchaser.v1.run.direct
+  stormchaser.v1.*.step.completed
+  stormchaser.v1.*.step.failed
+  $JS.API.INFO
+  $JS.API.STREAM.CREATE.KV_api_rate_limit_buckets
+  $JS.API.STREAM.INFO.KV_api_rate_limit_buckets
+  $JS.API.DIRECT.GET.KV_api_rate_limit_buckets.>
+  $JS.API.STREAM.MSG.GET.KV_api_rate_limit_buckets
+  $KV.api_rate_limit_buckets.>
+
+subscribe allow:
+  _INBOX.>
+  stormchaser.v1.run.>
+  stormchaser.v1.*.run.>
+```
+
+**Query service**: it connects and does nothing else, so deny it all
+publishing and allow it to subscribe to `_INBOX.>` only.
+
+The API and query lists are the ones the quickstart ships and have been
+checked against a NATS 2.10 server with the configuration from both the
+compose file and the umbrella chart: the API's and the query service's whole
+test suites pass under their own users, and the API is refused when it tries
+to publish a task or a run's completion.
+
+In the orchestration chart, give the API and the query service their Secrets
+with `global.nats.apiAuthSecret` and `global.nats.queryAuthSecret`; left empty,
+each falls back to the engine's `global.nats.authSecret`.
 
 **Runners**: exactly the list below. It is the one the quickstart ships, and it
 has been checked against a NATS 2.10 server: a runner starts, registers,
@@ -294,14 +339,20 @@ it with a NetworkPolicy; elsewhere bind it to localhost.
 
 ```bash
 kubectl create secret generic nats-control -n stormchaser \
-  --from-literal=user=stormchaser --from-literal=password='<control password>'
+  --from-literal=user=stormchaser --from-literal=password='<engine password>'
+kubectl create secret generic nats-api -n stormchaser \
+  --from-literal=user=stormchaser-api --from-literal=password='<API password>'
+kubectl create secret generic nats-query -n stormchaser \
+  --from-literal=user=stormchaser-query --from-literal=password='<query password>'
 kubectl create secret generic nats-runner -n stormchaser \
   --from-literal=user=stormchaser-runner --from-literal=password='<runner password>'
 
 helm install stormchaser-orchestration ./deploy/charts/stormchaser-orchestration \
   --namespace stormchaser \
   --set global.nats.url="tls://nats.example.internal:4222" \
-  --set global.nats.authSecret=nats-control
+  --set global.nats.authSecret=nats-control \
+  --set global.nats.apiAuthSecret=nats-api \
+  --set global.nats.queryAuthSecret=nats-query
 
 helm install stormchaser-runner ./deploy/charts/stormchaser-runner-k8s \
   --namespace stormchaser \
@@ -316,7 +367,10 @@ and `stormchaser-runner-k8s.config` at your server and Secrets.
 ### Checklist
 
 - [ ] NATS rejects anonymous connections.
-- [ ] Control plane and runners use different credentials.
+- [ ] The engine, the API, the query service and the runners each use their
+      own credentials.
+- [ ] The API and query users have the allow lists above; only the engine can
+      publish `step.scheduled` subjects.
 - [ ] The runner user has the allow and deny lists above, with a deny entry
       for every engine shard.
 - [ ] TLS is on for clients and routes; components set `NATS_TLS_REQUIRED`.

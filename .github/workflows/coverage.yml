@@ -57,10 +57,16 @@ jobs:
           STORMCHASER_CLI_SECRET="stormchaser-cli-secret"
           STORMCHASER_NATS_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
           STORMCHASER_NATS_RUNNER_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
+          STORMCHASER_NATS_API_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
+          STORMCHASER_NATS_QUERY_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
           echo "STORMCHASER_NATS_PASSWORD=$STORMCHASER_NATS_PASSWORD" >> .env
           echo "STORMCHASER_NATS_RUNNER_PASSWORD=$STORMCHASER_NATS_RUNNER_PASSWORD" >> .env
           echo "STORMCHASER_NATS_PASSWORD=$STORMCHASER_NATS_PASSWORD" >> $GITHUB_ENV
           echo "STORMCHASER_NATS_RUNNER_PASSWORD=$STORMCHASER_NATS_RUNNER_PASSWORD" >> $GITHUB_ENV
+          echo "STORMCHASER_NATS_API_PASSWORD=$STORMCHASER_NATS_API_PASSWORD" >> .env
+          echo "STORMCHASER_NATS_API_PASSWORD=$STORMCHASER_NATS_API_PASSWORD" >> $GITHUB_ENV
+          echo "STORMCHASER_NATS_QUERY_PASSWORD=$STORMCHASER_NATS_QUERY_PASSWORD" >> .env
+          echo "STORMCHASER_NATS_QUERY_PASSWORD=$STORMCHASER_NATS_QUERY_PASSWORD" >> $GITHUB_ENV
           echo "NATS_USER=stormchaser" >> $GITHUB_ENV
           echo "NATS_PASSWORD=$STORMCHASER_NATS_PASSWORD" >> $GITHUB_ENV
           echo "STORMCHASER_DEV_PASSWORD=$STORMCHASER_DEV_PASSWORD" >> .env

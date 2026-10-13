@@ -151,13 +151,15 @@ if [ "$CLEANUP" = true ] || [ ! -f "$ENV_FILE" ]; then
     STORMCHASER_CLI_SECRET=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
     STORMCHASER_NATS_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')
     STORMCHASER_NATS_RUNNER_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')
-    if [ -z "$STORMCHASER_DEV_PASSWORD" ] || [ -z "$STORMCHASER_MINIO_PASSWORD" ] || [ -z "$STORMCHASER_CLI_SECRET" ] || [ -z "$STORMCHASER_NATS_PASSWORD" ] || [ -z "$STORMCHASER_NATS_RUNNER_PASSWORD" ]; then
+    STORMCHASER_NATS_API_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')
+    STORMCHASER_NATS_QUERY_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')
+    if [ -z "$STORMCHASER_DEV_PASSWORD" ] || [ -z "$STORMCHASER_MINIO_PASSWORD" ] || [ -z "$STORMCHASER_CLI_SECRET" ] || [ -z "$STORMCHASER_NATS_PASSWORD" ] || [ -z "$STORMCHASER_NATS_RUNNER_PASSWORD" ] || [ -z "$STORMCHASER_NATS_API_PASSWORD" ] || [ -z "$STORMCHASER_NATS_QUERY_PASSWORD" ]; then
         echo -e "${RED}Error: Failed to generate random passwords.${NC}" >&2
         exit 1
     fi
     # Upsert keys so that unrelated entries in .env are preserved
     touch "$ENV_FILE"
-    for key_val in "STORMCHASER_DEV_PASSWORD=$STORMCHASER_DEV_PASSWORD" "STORMCHASER_MINIO_PASSWORD=$STORMCHASER_MINIO_PASSWORD" "STORMCHASER_CLI_SECRET=$STORMCHASER_CLI_SECRET" "STORMCHASER_NATS_PASSWORD=$STORMCHASER_NATS_PASSWORD" "STORMCHASER_NATS_RUNNER_PASSWORD=$STORMCHASER_NATS_RUNNER_PASSWORD"; do
+    for key_val in "STORMCHASER_DEV_PASSWORD=$STORMCHASER_DEV_PASSWORD" "STORMCHASER_MINIO_PASSWORD=$STORMCHASER_MINIO_PASSWORD" "STORMCHASER_CLI_SECRET=$STORMCHASER_CLI_SECRET" "STORMCHASER_NATS_PASSWORD=$STORMCHASER_NATS_PASSWORD" "STORMCHASER_NATS_RUNNER_PASSWORD=$STORMCHASER_NATS_RUNNER_PASSWORD" "STORMCHASER_NATS_API_PASSWORD=$STORMCHASER_NATS_API_PASSWORD" "STORMCHASER_NATS_QUERY_PASSWORD=$STORMCHASER_NATS_QUERY_PASSWORD"; do
         key="${key_val%%=*}"
         val="${key_val#*=}"
         if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
@@ -169,8 +171,9 @@ if [ "$CLEANUP" = true ] || [ ! -f "$ENV_FILE" ]; then
     done
 fi
 
-# An .env written before NATS authentication was added lacks these; add them in place.
-for key in STORMCHASER_NATS_PASSWORD STORMCHASER_NATS_RUNNER_PASSWORD; do
+# An .env written before NATS authentication was added, or before the API and query
+# service got users of their own, lacks some of these; add them in place.
+for key in STORMCHASER_NATS_PASSWORD STORMCHASER_NATS_RUNNER_PASSWORD STORMCHASER_NATS_API_PASSWORD STORMCHASER_NATS_QUERY_PASSWORD; do
     if ! grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
         echo "${key}=$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')" >> "$ENV_FILE"
     fi

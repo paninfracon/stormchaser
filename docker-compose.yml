@@ -24,6 +24,8 @@ services:
       - "${STORMCHASER_CONTROL_PLANE_BIND:-127.0.0.1}:${PORT_NATS_MGT:-8222}:8222"
     environment:
       NATS_CONTROL_PASSWORD: '${STORMCHASER_NATS_PASSWORD?Error: STORMCHASER_NATS_PASSWORD is not set}'
+      NATS_API_PASSWORD: '${STORMCHASER_NATS_API_PASSWORD?Error: STORMCHASER_NATS_API_PASSWORD is not set}'
+      NATS_QUERY_PASSWORD: '${STORMCHASER_NATS_QUERY_PASSWORD?Error: STORMCHASER_NATS_QUERY_PASSWORD is not set}'
       NATS_RUNNER_PASSWORD: '${STORMCHASER_NATS_RUNNER_PASSWORD?Error: STORMCHASER_NATS_RUNNER_PASSWORD is not set}'
     volumes:
       - ./deploy/nats/nats-server.conf:/etc/nats/nats-server.conf:ro
@@ -187,8 +189,8 @@ services:
     environment:
       DATABASE_URL: 'postgres://stormchaser:${STORMCHASER_DEV_PASSWORD?Error: STORMCHASER_DEV_PASSWORD is not set}@postgres:5432/stormchaser'
       NATS_URL: nats://nats:4222
-      NATS_USER: stormchaser
-      NATS_PASSWORD: '${STORMCHASER_NATS_PASSWORD?Error: STORMCHASER_NATS_PASSWORD is not set}'
+      NATS_USER: stormchaser-query
+      NATS_PASSWORD: '${STORMCHASER_NATS_QUERY_PASSWORD?Error: STORMCHASER_NATS_QUERY_PASSWORD is not set}'
       RUST_LOG: ${RUST_LOG:-stormchaser_query=info}
       OIDC_ISSUER: http://dex:5556/dex
       OIDC_EXTERNAL_ISSUER: http://localhost:${PORT_DEX:-5556}/dex
@@ -226,8 +228,8 @@ services:
     environment:
       DATABASE_URL: 'postgres://stormchaser:${STORMCHASER_DEV_PASSWORD?Error: STORMCHASER_DEV_PASSWORD is not set}@postgres:5432/stormchaser'
       NATS_URL: nats://nats:4222
-      NATS_USER: stormchaser
-      NATS_PASSWORD: '${STORMCHASER_NATS_PASSWORD?Error: STORMCHASER_NATS_PASSWORD is not set}'
+      NATS_USER: stormchaser-api
+      NATS_PASSWORD: '${STORMCHASER_NATS_API_PASSWORD?Error: STORMCHASER_NATS_API_PASSWORD is not set}'
       # Seals the approve and reject links in approval emails. Leave unset to send
       # no links; set the same 32+ character value on the engine and the API.
       STORMCHASER_APPROVAL_LINK_KEY: '${STORMCHASER_APPROVAL_LINK_KEY:-}'
