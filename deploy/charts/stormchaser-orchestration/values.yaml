@@ -106,6 +106,12 @@ api:
         adminGroups: []
         # When true, whoever started a run may not approve its steps.
         separationOfDuties: false
+        # Values of the token's `groups` claim whose members may write workflows.
+        # Empty means everyone may. When set, everyone else can only run workflows
+        # from repositories that an author or admin has registered as a connection:
+        # they may not start direct runs, hydrate a form from pasted workflow text,
+        # or create or change connections.
+        authorGroups: []
       # Replaces the shipped policy when set. It must define `stormchaser.allow` and
       # answer the request, resource, engine and approval questions described in
       # docs/opa-rbac.md.

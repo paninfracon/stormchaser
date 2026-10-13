@@ -13,6 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 stormchaser-model = { workspace = true }
+stormchaser-dsl = { workspace = true }
 stormchaser-engine = { version = "1.5.1", path = "../stormchaser-engine" }
 tokio = { workspace = true }
 serde = { workspace = true }
@@ -31,3 +32,12 @@ stormchaser-api = { version = "1.5.1", path = "../stormchaser-api" }
 stormchaser-tls = { version = "1.5.1", path = "../stormchaser-tls" }
 stormchaser-opa = { version = "1.5.1", path = "../stormchaser-opa" }
 async-nats.workspace = true
+
+[dev-dependencies]
+tower = { workspace = true }
+jsonwebtoken = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+git2 = { version = "0.21", features = ["vendored-openssl", "https", "ssh"] }
+tempfile = "3.27.0"
+wiremock = "0.6"

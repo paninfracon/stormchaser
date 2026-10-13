@@ -13,5 +13,5 @@ data:
 {{ .Files.Get "files/opa/authz.rego" | indent 4 }}
   settings.json: |
     {{- $settings := .Values.api.opa.sidecar.settings }}
-    {{ dict "stormchaser_settings" (dict "admins" $settings.admins "admin_groups" $settings.adminGroups "separation_of_duties" $settings.separationOfDuties) | toJson }}
+    {{ dict "stormchaser_settings" (dict "admins" $settings.admins "admin_groups" $settings.adminGroups "separation_of_duties" $settings.separationOfDuties "author_groups" ($settings.authorGroups | default list)) | toJson }}
 {{- end }}

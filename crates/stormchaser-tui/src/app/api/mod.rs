@@ -27,7 +27,7 @@ impl<'a> App<'a> {
         body: Option<Value>,
     ) -> Result<reqwest::Response> {
         let client = get_client();
-        let base_url = if path == "/api/v1/schema/hydrate" {
+        let base_url = if path.starts_with("/api/v1/schema/hydrate") {
             &self.query_url
         } else {
             &self.url

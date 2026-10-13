@@ -163,3 +163,64 @@ test_separation_of_duties_stops_the_initiator_approving if {
 	not allow with input as approval(alice) with data.stormchaser_settings as sod
 	allow with input as approval(bob) with data.stormchaser_settings as sod
 }
+
+# --- Authors and run-only users -------------------------------------------------------
+
+with_authors := {
+	"admins": ["root@example.com"],
+	"admin_groups": ["platform-admins"],
+	"author_groups": ["workflow-authors"],
+}
+
+token_for(claims) := io.jwt.encode_sign({"alg": "HS256", "typ": "JWT"}, claims, {"kty": "oct", "k": "c2VjcmV0"})
+
+runner_token := token_for({"sub": "carol-id", "email": "carol@example.com", "groups": ["engineers"]})
+
+author_token := token_for({"sub": "dave-id", "email": "dave@example.com", "groups": ["workflow-authors"]})
+
+author_only_requests := [
+	{"method": "POST", "path": "/api/v1/runs/direct"},
+	{"method": "POST", "path": "/api/v1/schema/hydrate-direct"},
+	{"method": "POST", "path": "/api/v1/connections"},
+	{"method": "POST", "path": "/api/v1/connections/test"},
+	{"method": "PUT", "path": "/api/v1/connections/5f0c1e0e-0000-0000-0000-000000000000"},
+	{"method": "DELETE", "path": "/api/v1/connections/5f0c1e0e-0000-0000-0000-000000000000"},
+]
+
+test_without_author_groups_everyone_may_write_workflows if {
+	every request in author_only_requests {
+		allow with input as object.union(request, {"token": runner_token})
+			with data.stormchaser_settings as with_admins
+	}
+}
+
+test_run_only_users_may_not_supply_workflows_or_change_connections if {
+	every request in author_only_requests {
+		not allow with input as object.union(request, {"token": runner_token})
+			with data.stormchaser_settings as with_authors
+	}
+}
+
+test_run_only_users_may_still_run_and_hydrate_repository_workflows if {
+	every request in [
+		{"method": "POST", "path": "/api/v1/runs"},
+		{"method": "POST", "path": "/api/v1/schema/hydrate"},
+		{"method": "POST", "path": "/api/v1/schema/parse-git"},
+		{"method": "GET", "path": "/api/v1/connections"},
+		{"method": "GET", "path": "/api/v1/runs/direct"},
+	] {
+		allow with input as object.union(request, {"token": runner_token})
+			with data.stormchaser_settings as with_authors
+	}
+}
+
+test_authors_and_admins_may_write_workflows if {
+	admin_by_group := token_for({"sub": "erin-id", "groups": ["platform-admins"]})
+	admin_by_email := token_for({"sub": "root-id", "email": "root@example.com"})
+	every token in [author_token, admin_by_group, admin_by_email] {
+		every request in author_only_requests {
+			allow with input as object.union(request, {"token": token})
+				with data.stormchaser_settings as with_authors
+		}
+	}
+}

@@ -17,6 +17,10 @@ import rego.v1
 #   admins                 emails or subject ids that may act on any object
 #   admin_groups           values of the token's `groups` claim that make a user an admin
 #   separation_of_duties   when true, a run's initiator may not approve its steps
+#   author_groups          values of the token's `groups` claim whose members may write
+#                          workflows. Empty (the default) means everyone may. When set,
+#                          everyone else may only run workflows held in repositories
+#                          that an author or admin has registered as a connection.
 
 default allow := false
 
@@ -27,6 +31,10 @@ admin_groups contains group if some group in data.stormchaser_settings.admin_gro
 separation_of_duties if data.stormchaser_settings.separation_of_duties == true
 
 admins_configured if count(admins) + count(admin_groups) > 0
+
+author_groups contains group if some group in data.stormchaser_settings.author_groups
+
+authors_configured if count(author_groups) > 0
 
 # --- Request tier -------------------------------------------------------------------
 
@@ -76,6 +84,54 @@ request_denied if {
 	startswith(input.path, "/api/v1/mcp")
 	not input.method in read_only_methods
 	not mcp_transport_request
+}
+
+# --- Authors and run-only users -----------------------------------------------------
+#
+# With author_groups set, a user outside them (and not an admin) may run workflows but
+# not write them. Three things would let such a user choose what runs, or what a run
+# form's queries are, and are refused:
+#
+#   - starting a run from workflow text they supply (a direct run);
+#   - having a run form hydrated from workflow text they supply;
+#   - creating or changing a connection, which is how a repository of their own, or a
+#     database or API of their choosing, would become something workflows can use.
+#
+# What is left to them is workflows in the repositories authors have registered.
+
+token_claims := payload if {
+	is_string(input.token)
+	[_, payload, _] := io.jwt.decode(input.token)
+} else := {}
+
+request_is_from_author if {
+	some group in object.get(token_claims, "groups", [])
+	group in author_groups
+}
+
+request_is_from_author if {
+	some group in object.get(token_claims, "groups", [])
+	group in admin_groups
+}
+
+request_is_from_author if {
+	some claim in ["email", "sub"]
+	object.get(token_claims, claim, "") in admins
+}
+
+author_only_paths := {"/api/v1/runs/direct", "/api/v1/schema/hydrate-direct"}
+
+author_only_request if input.path in author_only_paths
+
+author_only_request if input.path == "/api/v1/connections"
+
+author_only_request if startswith(input.path, "/api/v1/connections/")
+
+request_denied if {
+	authors_configured
+	author_only_request
+	not input.method in read_only_methods
+	not request_is_from_author
 }
 
 # --- Who is asking ------------------------------------------------------------------

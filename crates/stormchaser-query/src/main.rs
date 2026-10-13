@@ -12,7 +12,7 @@ use stormchaser_api::auth::opa::opa_middleware;
 use stormchaser_api::config::Config;
 use stormchaser_api::setup::build_app_state;
 
-use routes::hydrate_schema;
+use routes::{hydrate_schema, hydrate_schema_direct};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -30,6 +30,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/healthz", axum::routing::get(|| async { "OK" }))
         .route("/api/health", axum::routing::get(|| async { "OK" }))
         .route("/api/v1/schema/hydrate", post(hydrate_schema))
+        .route("/api/v1/schema/hydrate-direct", post(hydrate_schema_direct))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             opa_middleware, // Reusing identical authentication and OPA gates

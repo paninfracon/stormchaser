@@ -187,6 +187,25 @@ allow if {
 }
 ```
 
+**Run-only users**
+The shipped policy has this built in: set `author_groups` in its settings (Helm:
+`api.opa.sidecar.settings.authorGroups`) and users outside those groups can run
+workflows from registered repositories but cannot supply workflow text or change
+connections. In a policy of your own, the requests to refuse are the non-read
+methods on these paths, which the API and the query service both ask about:
+
+```rego
+author_only_request if input.path in {"/api/v1/runs/direct", "/api/v1/schema/hydrate-direct"}
+author_only_request if input.path == "/api/v1/connections"
+author_only_request if startswith(input.path, "/api/v1/connections/")
+
+request_denied if {
+    author_only_request
+    not input.method in {"GET", "HEAD", "OPTIONS"}
+    not "workflow-authors" in token_payload.groups
+}
+```
+
 **Approval Separation of Duties (SoD)**
 Prevent the person who initiated a run from approving their own manual steps.
 

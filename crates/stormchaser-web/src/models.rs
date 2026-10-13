@@ -222,3 +222,17 @@ pub struct CronWorkflow {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
+
+/// Where the workflow behind a run form comes from. Hydration sends this to the query
+/// service, which reads the workflow's schema and queries from there itself.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum HydrationSource {
+    /// A workflow file in a Git connection's repository.
+    Git {
+        connection: String,
+        workflow_path: String,
+        git_ref: String,
+    },
+    /// Workflow text the user supplied for a direct run.
+    Direct { dsl: String },
+}

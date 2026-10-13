@@ -37,7 +37,9 @@ The policy Stormchaser ships (`deploy/opa/policy.rego`, also packaged in the Hel
 * shares connections: everyone may see them (credentials are always masked) and every run may use them, but only the creator or an admin may change or delete one;
 * leaves objects that predate ownership readable by everyone, and changeable by everyone until an admin is configured, by admins only after that.
 
-Settings for it live in `deploy/opa/settings.json` (Helm: `api.opa.sidecar.settings`): `admins` (emails or subject ids), `admin_groups` (values of the token's `groups` claim) and `separation_of_duties` (when true, whoever started a run may not approve its steps).
+Settings for it live in `deploy/opa/settings.json` (Helm: `api.opa.sidecar.settings`): `admins` (emails or subject ids), `admin_groups` (values of the token's `groups` claim), `separation_of_duties` (when true, whoever started a run may not approve its steps) and `author_groups`.
+
+**Authors and run-only users.** By default every user may write workflows. Set `author_groups` (Helm: `authorGroups`) to the groups whose members may, and everyone else becomes run-only: they can run, and fill in the forms of, workflows held in repositories that an author or admin has registered as a connection, and nothing else. Specifically they may not start a direct run from workflow text, have a run form hydrated from workflow text (`/api/v1/schema/hydrate-direct`), or create, change, test or delete connections. Those are the three ways a user could otherwise choose what a run does or which queries a form executes. Admins count as authors. The repositories themselves need protecting where they live: whoever can push to a registered repository is an author in practice.
 
 OPA's own HTTP API is restricted (`deploy/opa/authz.rego`, with `--authorization=basic`) to evaluating the policy, so that nothing which can reach OPA's port can replace the policy or its data.
 

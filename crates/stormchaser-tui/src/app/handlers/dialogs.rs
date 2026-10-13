@@ -49,13 +49,7 @@ impl<'a> App<'a> {
                 let inputs = dialog.get_inputs();
                 let dsl = dialog.dsl.clone();
                 let schema = dialog.base_schema.clone();
-                let mut queries_val = None;
-                if let Ok(workflow) = stormchaser_dsl::StormchaserParser.parse(&dsl) {
-                    queries_val = serde_json::to_value(&workflow.queries).ok();
-                }
-                let res = self
-                    .hydrate_schema_blocking(&schema, &inputs, queries_val.as_ref())
-                    .await;
+                let res = self.hydrate_schema_blocking(&schema, &inputs, &dsl).await;
                 if let Ok((new_schema, status)) = res {
                     if status == "Completed" {
                         self.direct_submit_dsl = Some(dsl);
@@ -90,20 +84,16 @@ impl<'a> App<'a> {
             // Ideally we do this async, but `hydrate_schema_blocking` streams out until it's done.
             let mut schema = serde_json::Value::Null;
             let mut inputs = serde_json::Value::Null;
-            let mut queries_val = None;
+            let mut dsl = String::new();
             if let Some(dialog) = &mut self.pending_schema_ui {
                 dialog.hydration_status = "Updating...".to_string();
                 dialog.is_hydrating = true;
                 schema = dialog.base_schema.clone();
                 inputs = dialog.get_inputs();
-                if let Ok(workflow) = stormchaser_dsl::StormchaserParser.parse(&dialog.dsl) {
-                    queries_val = serde_json::to_value(&workflow.queries).ok();
-                }
+                dsl = dialog.dsl.clone();
             }
 
-            let res = self
-                .hydrate_schema_blocking(&schema, &inputs, queries_val.as_ref())
-                .await;
+            let res = self.hydrate_schema_blocking(&schema, &inputs, &dsl).await;
 
             if let Some(dialog) = &mut self.pending_schema_ui {
                 if let Ok((hydrated, status)) = res {

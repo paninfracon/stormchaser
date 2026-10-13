@@ -181,7 +181,11 @@ fn GitRunForm(on_success: Callback<()>) -> impl IntoView {
                             <SchemaForm
                                 base_schema=pd.inputs_schema
                                 initial_inputs=pd.inputs
-                                queries=pd.queries
+                                source=crate::models::HydrationSource::Git {
+                                    connection: selected_connection.get_untracked(),
+                                    workflow_path: workflow_path.get_untracked(),
+                                    git_ref: git_ref.get_untracked(),
+                                }
                                 inputs_view=pd.inputs_view
                                 on_submit=Callback::new(submit)
                                 on_back=Callback::new(move |_| set_parsed_data.set(None))
@@ -255,7 +259,7 @@ fn DirectRunForm(on_success: Callback<()>) -> impl IntoView {
                     <SchemaForm
                         base_schema=data.inputs_schema.clone()
                         initial_inputs=data.inputs.clone()
-                        queries=data.queries.clone()
+                        source=crate::models::HydrationSource::Direct { dsl: dsl.get_untracked() }
                         inputs_view=data.inputs_view.clone()
                         on_submit=Callback::new(move |final_inputs| {
                             let current_dsl = dsl.get();

@@ -151,54 +151,8 @@ pub async fn parse_dsl(dsl: String) -> Result<ParseDslResult, ServerFnError> {
                 let initial_inputs = serde_json::json!({});
                 let queries_val = serde_json::to_value(&workflow.queries).ok();
 
-                let inputs_schema = if let Some(mut schema) = workflow.inputs_schema {
-                    if schema.get("properties").is_none() && schema.get("input").is_some() {
-                        let mut properties = serde_json::Map::new();
-                        if let Some(inputs_obj) = schema.get("input").and_then(|v| v.as_object()) {
-                            for (k, v) in inputs_obj {
-                                properties.insert(k.clone(), v.clone());
-                            }
-                        }
-                        if let Some(obj) = schema.as_object_mut() {
-                            obj.insert(
-                                "properties".to_string(),
-                                serde_json::Value::Object(properties),
-                            );
-                            obj.insert("type".to_string(), serde_json::json!("object"));
-                        }
-                    }
-                    Some(schema)
-                } else if !workflow.inputs.is_empty() {
-                    let mut properties = serde_json::Map::new();
-                    for input in workflow.inputs {
-                        let mut prop = serde_json::Map::new();
-                        prop.insert("type".to_string(), serde_json::json!("string"));
-                        prop.insert(
-                            "description".to_string(),
-                            serde_json::json!(input.description.as_deref().unwrap_or(&input.name)),
-                        );
-                        if let Some(default) = &input.default {
-                            if let Some(s) = default.as_str() {
-                                prop.insert("default".to_string(), serde_json::json!(s));
-                            } else {
-                                prop.insert(
-                                    "default".to_string(),
-                                    serde_json::json!(default.to_string()),
-                                );
-                            }
-                        }
-                        properties.insert(input.name, serde_json::Value::Object(prop));
-                    }
-                    Some(serde_json::json!({
-                        "type": "object",
-                        "title": "Workflow Inputs",
-                        "properties": properties
-                    }))
-                } else {
-                    None
-                };
-
-                tracing::info!("parse_dsl returning inputs_schema: {:?}", inputs_schema);
+                // The same derivation the query service uses when it hydrates this form
+                let inputs_schema = stormchaser_dsl::form::inputs_form_schema(&workflow);
 
                 Ok(ParseDslResult {
                     inputs_schema,

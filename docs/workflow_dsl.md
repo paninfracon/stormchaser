@@ -161,7 +161,10 @@ inputs {
 
 Stormchaser supports dynamic options populated via external systems (e.g., Rundeck-style). First, define a `query` block with the data source details. Then, reference the query results in your inputs using the `${queries.QUERY_NAME}` interpolator within an `enum` constraint (or using the shorthand type function `enum("${queries.QUERY_NAME}")`).
 
-When the TUI or Web UI requests the schema, the Query microservice (`/api/v1/schema/hydrate`) dynamically resolves these queries and converts the result into an `enum` list, embedding it back into the schema before returning it to the UI.
+When the TUI or Web UI shows a run form, the Query microservice resolves these queries and converts the result into an `enum` list, embedding it back into the schema before returning it to the UI. The UI tells the service which workflow the form is for and the service reads the schema and queries from the workflow itself, so the queries that run are the workflow's and not whatever a client sends:
+
+* `POST /api/v1/schema/hydrate` takes `connection`, `workflow_path`, `git_ref` and `inputs`, and reads the workflow from that Git connection's repository. The caller must be allowed to use the connection.
+* `POST /api/v1/schema/hydrate-direct` takes `dsl` (the workflow text) and `inputs`, for direct runs. Whoever calls it is choosing the queries, so policy can refuse it to users who may run workflows but not write them (see `author_groups` in [OPA RBAC](opa-rbac.md)).
 
 ##### Mock Data
 

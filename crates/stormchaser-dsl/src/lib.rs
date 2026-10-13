@@ -5,6 +5,8 @@
 
 /// Abstract Syntax Tree components for the DSL.
 pub mod ast;
+/// The input form derived from a workflow.
+pub mod form;
 pub mod hcl_schema;
 pub mod parser;
 

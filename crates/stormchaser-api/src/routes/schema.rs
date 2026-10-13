@@ -1,4 +1,4 @@
-use crate::{AppState, AuthClaims};
+use crate::AppState;
 use axum::{response::IntoResponse, Json};
 use stormchaser_model::schema_gen::generate_dsl_schema;
 
@@ -33,8 +33,20 @@ pub async fn get_schema() -> impl IntoResponse {
 )]
 pub async fn parse_git(
     axum::extract::State(state): axum::extract::State<AppState>,
-    AuthClaims(_claims): AuthClaims,
+    caller: crate::authz::Caller,
     Json(payload): Json<crate::routes::ParseGitRequest>,
+) -> Result<String, axum::http::StatusCode> {
+    read_workflow_from_git(&state, &caller, &payload).await
+}
+
+/// Reads a workflow file from the repository of a Git connection, as `caller`.
+///
+/// The caller must be allowed to use the connection: this returns a file's contents, and
+/// whoever may read one path of a repository through it may read them all.
+pub async fn read_workflow_from_git(
+    state: &AppState,
+    caller: &crate::authz::Caller,
+    payload: &crate::routes::ParseGitRequest,
 ) -> Result<String, axum::http::StatusCode> {
     let mut tx = state
         .pool
@@ -53,11 +65,14 @@ pub async fn parse_git(
             .map_err(|_| axum::http::StatusCode::NOT_FOUND)?
             .ok_or(axum::http::StatusCode::NOT_FOUND)?
     };
+    drop(tx);
 
     if conn.connection_type != stormchaser_model::connections::ConnectionType::Git {
         tracing::error!("Connection {} is not a Git connection", payload.connection);
         return Err(axum::http::StatusCode::BAD_REQUEST);
     }
+
+    crate::authz::authorize_connection_use(state, caller, conn.id.into_inner()).await?;
 
     let repo_url = conn
         .config
