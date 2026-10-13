@@ -563,19 +563,37 @@ async fn test_stream_run_logs() {
         .await
         .unwrap();
 
+    // The run does not exist, so with a log backend there is nothing to stream
     let expected_status = if var("LOKI_URL").is_ok() {
-        StatusCode::OK
+        StatusCode::NOT_FOUND
     } else {
         StatusCode::NOT_IMPLEMENTED
     };
 
     assert_eq!(response.status(), expected_status);
-    if expected_status == StatusCode::OK {
-        assert_eq!(
-            response.headers().get("content-type").unwrap(),
-            "text/event-stream"
-        );
-    }
+}
+
+#[tokio::test]
+async fn test_stream_run_status_of_an_unknown_run_is_not_found() {
+    let app = match setup_app().await {
+        Some(a) => a,
+        None => return,
+    };
+
+    let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/runs/{}/status/stream", Uuid::new_v4()))
+                .header(AUTHORIZATION, format!("Bearer {}", get_token()))
+                .extension(ConnectInfo(addr))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
