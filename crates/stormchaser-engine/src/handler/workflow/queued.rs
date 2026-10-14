@@ -218,6 +218,8 @@ pub async fn handle_workflow_queued(
 
     // Evaluate dynamic queries
     let mut query_results = serde_json::Map::new();
+    // Secrets fetched for query parameters, recorded with the run's own below
+    let mut query_secrets = Vec::new();
     for query in &parsed_workflow.queries {
         let hcl_ctx = crate::hcl_eval::create_context(
             inputs.clone(),
@@ -228,7 +230,11 @@ pub async fn handle_workflow_queued(
             None,
         );
         let mut resolved_params = serde_json::to_value(&query.params)?;
-        if let Err(e) = crate::hcl_eval::resolve_expressions(&mut resolved_params, &hcl_ctx, true) {
+        let (resolved, fetched) = crate::hcl_eval::capturing_secrets(|| {
+            crate::hcl_eval::resolve_expressions(&mut resolved_params, &hcl_ctx, true)
+        });
+        query_secrets.extend(fetched);
+        if let Err(e) = resolved {
             let err_msg = format!(
                 "Failed to evaluate parameters for query {}: {}",
                 query.name, e
@@ -323,7 +329,7 @@ pub async fn handle_workflow_queued(
     let sops_role_arn: Option<String> =
         serde_json::from_value(payload["sops_role_arn"].clone()).ok();
 
-    let (secrets, sensitive_values) = crate::handler::workflow::sops::decrypt_sops_secrets(
+    let (secrets, mut sensitive_values) = crate::handler::workflow::sops::decrypt_sops_secrets(
         &repo_path,
         sops_file.as_deref(),
         sops_role_arn.as_deref(),
@@ -333,6 +339,11 @@ pub async fn handle_workflow_queued(
         error!("Failed to decrypt SOPS secrets for run {}: {:?}", run_id, e);
         (serde_json::json!({}), vec![])
     });
+
+    sensitive_values.extend(query_secrets);
+    sensitive_values.extend(crate::hcl_eval::take_alias_secrets(run_id));
+    sensitive_values.sort();
+    sensitive_values.dedup();
 
     let mut tx = pool.begin().await?;
 

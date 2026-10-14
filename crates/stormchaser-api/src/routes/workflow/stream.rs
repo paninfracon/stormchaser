@@ -88,6 +88,18 @@ pub async fn stream_workflow_runs_api(
                             }
                         }
 
+                        // Withheld rather than sent unscrubbed if the secrets cannot be read
+                        let Ok(error) = crate::redact::RunRedactor::scrub_run_error(
+                            &pool,
+                            run.id,
+                            run.error.take(),
+                        )
+                        .await
+                        else {
+                            continue;
+                        };
+                        run.error = error;
+
                         let data = serde_json::to_string(&run).unwrap_or_default();
                         let event = Event::default().event("workflow_run").data(data);
                         if tx.send(Ok(event)).await.is_err() {

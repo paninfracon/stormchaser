@@ -348,6 +348,9 @@ impl RunRedactor {
         }
 
         needles.retain(|needle| needle.len() >= MIN_SECRET_LEN && needle != MASK);
+        // A step can print a secret encoded as easily as plain
+        let encoded: Vec<String> = needles.iter().flat_map(|n| encoded_forms(n)).collect();
+        needles.extend(encoded);
         needles.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
         needles.dedup();
         Self { needles }
@@ -379,6 +382,18 @@ impl RunRedactor {
             }
             None => Self::default(),
         })
+    }
+
+    /// Scrubs a run's error message, loading the run's secrets only when there is one.
+    pub async fn scrub_run_error(
+        pool: &sqlx::PgPool,
+        run_id: stormchaser_model::RunId,
+        error: Option<String>,
+    ) -> Result<Option<String>, sqlx::Error> {
+        match error {
+            Some(error) => Ok(Some(Self::load(pool, run_id).await?.text(&error))),
+            None => Ok(None),
+        }
     }
 
     /// Replaces every known secret in `text`.
@@ -433,6 +448,53 @@ impl RunRedactor {
         }
         output
     }
+}
+
+/// Encoded fragments shorter than this are not scrubbed: they are short enough to turn
+/// up by chance in unrelated text.
+const MIN_ENCODED_LEN: usize = 8;
+
+/// The ways a secret commonly reaches output other than as itself: base64 (standard and
+/// URL-safe, including as part of a longer encoded string such as an HTTP Basic
+/// credential), percent-encoding, JSON string escaping and hex.
+fn encoded_forms(secret: &str) -> Vec<String> {
+    use base64::Engine;
+    let bytes = secret.as_bytes();
+    let mut forms = Vec::new();
+
+    for engine in [
+        &base64::engine::general_purpose::STANDARD,
+        &base64::engine::general_purpose::URL_SAFE,
+    ] {
+        // Encoded on its own, the whole encoding (padding aside) is the secret's
+        forms.push(engine.encode(bytes).trim_end_matches('=').to_string());
+        // Inside a longer string the secret starts at one of three offsets within a
+        // 3-byte group; only the characters that come from the secret's bits alone are
+        // the same whatever surrounds it
+        for offset in 1..3 {
+            let mut shifted = vec![0u8; offset];
+            shifted.extend_from_slice(bytes);
+            let encoded = engine.encode(&shifted);
+            let first = (8 * offset).div_ceil(6);
+            let last = (8 * shifted.len()) / 6;
+            if last > first {
+                forms.push(encoded[first..last].to_string());
+            }
+        }
+        // The tail is shared by all three alignments only up to the last whole group
+        let whole = (8 * bytes.len()) / 6;
+        forms.push(engine.encode(bytes)[..whole].to_string());
+    }
+
+    forms.push(urlencoding::encode(secret).into_owned());
+    forms.push(secret.replace(' ', "+"));
+    if let Ok(json) = serde_json::to_string(secret) {
+        forms.push(json[1..json.len() - 1].to_string());
+    }
+    forms.push(hex::encode(bytes));
+
+    forms.retain(|form| form.len() >= MIN_ENCODED_LEN && form != secret);
+    forms
 }
 
 /// Collects every string and number in a JSON value as text.
@@ -666,5 +728,54 @@ mod tests {
             is_sensitive: true,
         });
         assert_eq!(output.value, MASK);
+    }
+
+    #[test]
+    fn encoded_secrets_are_scrubbed_too() {
+        use base64::Engine;
+        let secret = "hunter2-correct-horse";
+        let redactor = RunRedactor::new(vec![secret.to_string()], &json!({}), &json!({}), None);
+        let b64 = base64::engine::general_purpose::STANDARD;
+
+        for (label, text) in [
+            ("base64", b64.encode(secret)),
+            (
+                "url-safe base64",
+                base64::engine::general_purpose::URL_SAFE.encode(secret),
+            ),
+            (
+                "percent",
+                urlencoding::encode(&format!("{secret} x")).into_owned(),
+            ),
+            ("hex", hex::encode(secret)),
+        ] {
+            let out = redactor.text(&format!("value: {text}"));
+            assert!(out.contains(MASK), "{label}: {out}");
+        }
+
+        // Part of a longer encoding, at each alignment: an HTTP Basic credential
+        for user in ["a", "ab", "abc"] {
+            let basic = b64.encode(format!("{user}:{secret}"));
+            let out = redactor.text(&format!("Authorization: Basic {basic}"));
+            assert!(out.contains(MASK), "user {user:?}: {out}");
+            assert!(!out.contains(&basic), "user {user:?}: {out}");
+        }
+
+        // JSON-escaped
+        let quoted = RunRedactor::new(
+            vec!["pa\"ss\nword".to_string()],
+            &json!({}),
+            &json!({}),
+            None,
+        );
+        let out = quoted.text(r#"{"password":"pa\"ss\nword"}"#);
+        assert!(out.contains(MASK), "{out}");
+    }
+
+    #[test]
+    fn short_secrets_do_not_mask_their_encodings_everywhere() {
+        // "abcd" encodes to 8 characters at most; only exact forms are kept
+        let redactor = RunRedactor::new(vec!["abcd".to_string()], &json!({}), &json!({}), None);
+        assert_eq!(redactor.text("YWJj is not it"), "YWJj is not it");
     }
 }

@@ -66,6 +66,8 @@ pub async fn handle_workflow_direct(
 
     // 1.6 Schema Validation and Default Value Hydration
     let mut query_results = serde_json::Map::new();
+    // Secrets fetched for query parameters, recorded with the run below
+    let mut query_secrets = Vec::new();
     for query in &parsed_workflow.queries {
         let hcl_ctx = crate::hcl_eval::create_context(
             inputs.clone(),
@@ -76,7 +78,11 @@ pub async fn handle_workflow_direct(
             None,
         );
         let mut resolved_params = serde_json::to_value(&query.params)?;
-        if let Err(e) = crate::hcl_eval::resolve_expressions(&mut resolved_params, &hcl_ctx, true) {
+        let (resolved, fetched) = crate::hcl_eval::capturing_secrets(|| {
+            crate::hcl_eval::resolve_expressions(&mut resolved_params, &hcl_ctx, true)
+        });
+        query_secrets.extend(fetched);
+        if let Err(e) = resolved {
             let err_msg = format!(
                 "Failed to evaluate parameters for query {}: {}",
                 query.name, e
@@ -217,6 +223,8 @@ pub async fn handle_workflow_direct(
         &timeout,
     )
     .await?;
+    query_secrets.extend(crate::hcl_eval::take_alias_secrets(run_id));
+    crate::db::add_sensitive_values(&mut *tx, run_id, &query_secrets).await?;
 
     // 4. Emit event for transition to StartPending
     let event = WorkflowStartPendingEvent {

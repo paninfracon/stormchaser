@@ -153,6 +153,8 @@ pub async fn dispatch_step_instance(
                 )
             })?;
 
+        // The runner pulls with it; a step that gets hold of it must not see it echoed
+        crate::db::add_sensitive_values(&pool, run_id, std::slice::from_ref(&password)).await?;
         registry_auth = Some(serde_json::json!({
             "username": username,
             "password": password,

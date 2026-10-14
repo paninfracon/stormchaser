@@ -81,6 +81,23 @@ async fn build_git_container_spec(
             );
         }
 
+        // The checkout runs in the step's container, which can print them; the API masks
+        // them wherever they turn up
+        if let Some(run_id) = run_id {
+            let credentials: Vec<String> = conn
+                .encrypted_credentials
+                .iter()
+                .cloned()
+                .chain(
+                    conn.config
+                        .get("ssh_key")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string),
+                )
+                .collect();
+            crate::db::add_sensitive_values(pool, run_id, &credentials).await?;
+        }
+
         if let Some(creds) = &conn.encrypted_credentials {
             if let Some(username) = conn.config.get("username").and_then(|v| v.as_str()) {
                 env_vars.push(dsl::EnvVar {

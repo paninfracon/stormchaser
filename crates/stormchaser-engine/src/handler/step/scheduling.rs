@@ -61,8 +61,17 @@ pub async fn schedule_step(
         }
     }
 
+    // Secrets fetched while this step's expressions are evaluated, recorded for the run
+    // so that the API masks them wherever they turn up
+    let mut fetched_secrets = crate::hcl_eval::take_alias_secrets(run_id);
+
     if let Some(condition_expr) = &step_dsl.condition {
-        match crate::hcl_eval::evaluate_raw_expr(condition_expr, hcl_ctx) {
+        let (condition, fetched) = crate::hcl_eval::capturing_secrets(|| {
+            crate::hcl_eval::evaluate_raw_expr(condition_expr, hcl_ctx)
+        });
+        fetched_secrets.extend(fetched);
+        crate::db::add_sensitive_values(&mut *executor, run_id, &fetched_secrets).await?;
+        match condition {
             Ok(Value::Bool(true)) => {}
             Ok(Value::Bool(false)) => {
                 crate::db::insert_step_instance(
@@ -83,7 +92,12 @@ pub async fn schedule_step(
     }
 
     if let Some(iterate_expr) = &step_dsl.iterate {
-        let items = match crate::hcl_eval::evaluate_raw_expr(iterate_expr, hcl_ctx) {
+        let (items, fetched) = crate::hcl_eval::capturing_secrets(|| {
+            crate::hcl_eval::evaluate_raw_expr(iterate_expr, hcl_ctx)
+        });
+        fetched_secrets.extend(fetched);
+        crate::db::add_sensitive_values(&mut *executor, run_id, &fetched_secrets).await?;
+        let items = match items {
             Ok(Value::Array(arr)) => arr,
             Ok(_) => return Err(anyhow::anyhow!("Iterate must evaluate to an array")),
             Err(e) => return Err(e),
@@ -104,8 +118,12 @@ pub async fn schedule_step(
         )
         .await?;
     } else {
-        let _ = crate::hcl_eval::resolve_step_spec(&resolved_type, &mut resolved_spec, hcl_ctx);
-        let _ = crate::hcl_eval::resolve_expressions(&mut resolved_params, hcl_ctx, true);
+        let ((), fetched) = crate::hcl_eval::capturing_secrets(|| {
+            let _ = crate::hcl_eval::resolve_step_spec(&resolved_type, &mut resolved_spec, hcl_ctx);
+            let _ = crate::hcl_eval::resolve_expressions(&mut resolved_params, hcl_ctx, true);
+        });
+        fetched_secrets.extend(fetched);
+        crate::db::add_sensitive_values(&mut *executor, run_id, &fetched_secrets).await?;
 
         // A Terraform approval is an approval from the moment it exists. Left as its own
         // type it would start as pending and be handed to a runner, which could then
@@ -231,15 +249,22 @@ async fn schedule_iterated_steps(
         iteration_ctx.declare_var(iter_var_name, crate::hcl_eval::json_to_hcl(item));
 
         let mut resolved_spec_iter = resolved_spec.clone();
-        let _ = crate::hcl_eval::resolve_step_spec(
-            resolved_type,
-            &mut resolved_spec_iter,
-            &iteration_ctx,
-        );
-
         let mut resolved_params_iter = resolved_params.clone();
-        let _ =
-            crate::hcl_eval::resolve_expressions(&mut resolved_params_iter, &iteration_ctx, true);
+        let ((), fetched) = crate::hcl_eval::capturing_secrets(|| {
+            let _ = crate::hcl_eval::resolve_step_spec(
+                resolved_type,
+                &mut resolved_spec_iter,
+                &iteration_ctx,
+            );
+            let _ = crate::hcl_eval::resolve_expressions(
+                &mut resolved_params_iter,
+                &iteration_ctx,
+                true,
+            );
+        });
+        let mut fetched_secrets = crate::hcl_eval::take_alias_secrets(run_id);
+        fetched_secrets.extend(fetched);
+        crate::db::add_sensitive_values(&mut *executor, run_id, &fetched_secrets).await?;
 
         let mut resolved_type = resolved_type.to_string();
         crate::handler::step::intrinsic::terraform::mutate_if_terraform_approval(

@@ -78,7 +78,12 @@ pub(crate) async fn resolve_storage_provision(
                 None,
                 None,
             );
-            if crate::hcl_eval::resolve_expressions(&mut val, &hcl_ctx, true).is_ok() {
+            let (resolved, mut fetched) = crate::hcl_eval::capturing_secrets(|| {
+                crate::hcl_eval::resolve_expressions(&mut val, &hcl_ctx, true)
+            });
+            fetched.extend(crate::hcl_eval::take_alias_secrets(run_id));
+            crate::db::add_sensitive_values(pool, run_id, &fetched).await?;
+            if resolved.is_ok() {
                 prov_clone.url = match val {
                     Value::String(s) => Some(s),
                     other => Some(other.to_string()),

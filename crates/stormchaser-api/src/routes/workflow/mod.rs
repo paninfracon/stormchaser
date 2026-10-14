@@ -210,8 +210,15 @@ pub async fn list_workflow_runs(
     // Filtered after paging, so a page can come back shorter than `limit`
     let mut filter = authz::ReadFilter::new(&state, &caller, Kind::Run);
     let mut readable = Vec::with_capacity(runs.len());
-    for run in runs {
+    for mut run in runs {
         if filter.can_read(Some(&run.initiating_user)).await? {
+            // A run's error can quote its secrets, as on the run's own page
+            run.error = crate::redact::RunRedactor::scrub_run_error(&state.pool, run.id, run.error)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to load redaction data for {}: {:?}", run.id, e);
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
             readable.push(run);
         }
     }

@@ -92,6 +92,8 @@ pub(crate) async fn inject_connection_env_vars(
                 });
             }
             if let Some(creds) = &conn.encrypted_credentials {
+                // The step can print it; the API masks it wherever it turns up
+                crate::db::add_sensitive_values(pool, run_id, std::slice::from_ref(creds)).await?;
                 envs.push(dsl::EnvVar {
                     name: format!("{}PASSWORD", prefix),
                     value: creds.to_string(),

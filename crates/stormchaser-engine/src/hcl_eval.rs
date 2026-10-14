@@ -19,6 +19,56 @@ pub fn set_secrets_backend(backend: SharedSecretBackend) {
     *lock = Some(backend);
 }
 
+thread_local! {
+    /// Values `secret()` returned while [`capturing_secrets`] runs on this thread.
+    static RESOLVED_SECRETS: std::cell::RefCell<Option<Vec<String>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Secrets fetched while workflow aliases were evaluated, by run, until the run's next
+/// step is scheduled and records them.
+static ALIAS_SECRETS: Lazy<parking_lot::Mutex<std::collections::HashMap<RunId, Vec<String>>>> =
+    Lazy::new(Default::default);
+
+fn record_resolved_secret(value: &str) {
+    RESOLVED_SECRETS.with(|cell| {
+        if let Some(values) = cell.borrow_mut().as_mut() {
+            values.push(value.to_string());
+        }
+    });
+}
+
+/// Runs `work` and returns, with its result, every value `secret()` fetched meanwhile.
+///
+/// A run's secrets are masked in what the API returns only if the run records them.
+/// Values in its SOPS file are recorded when it starts; a value fetched from Vault with
+/// `secret()` is only known once an expression asks for it, so callers that evaluate a
+/// run's expressions record what this returns (`db::runs::add_sensitive_values`).
+/// Evaluation can switch stacks (`hcl_guard`) but stays on this thread.
+pub fn capturing_secrets<T>(work: impl FnOnce() -> T) -> (T, Vec<String>) {
+    let outer = RESOLVED_SECRETS.with(|cell| cell.borrow_mut().replace(Vec::new()));
+    let result = work();
+    let mut captured = RESOLVED_SECRETS.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        let captured = slot.take().unwrap_or_default();
+        *slot = outer;
+        captured
+    });
+    // A capture nested in another is seen by the outer one too
+    RESOLVED_SECRETS.with(|cell| {
+        if let Some(values) = cell.borrow_mut().as_mut() {
+            values.extend(captured.iter().cloned());
+        }
+    });
+    captured.dedup();
+    (result, captured)
+}
+
+/// Takes the secrets fetched for `run_id` while its aliases were evaluated.
+pub fn take_alias_secrets(run_id: RunId) -> Vec<String> {
+    ALIAS_SECRETS.lock().remove(&run_id).unwrap_or_default()
+}
+
 fn secret_lookup(args: hcl::eval::FuncArgs) -> Result<HclValue, String> {
     if args.len() != 1 {
         return Err("secret() expects exactly 1 argument".to_string());
@@ -59,7 +109,10 @@ fn secret_lookup(args: hcl::eval::FuncArgs) -> Result<HclValue, String> {
         };
 
         match val {
-            Ok(val) => Ok(HclValue::String(val)),
+            Ok(val) => {
+                record_resolved_secret(&val);
+                Ok(HclValue::String(val))
+            }
             Err(e) => Err(format!(
                 "Secret lookup failed for {}: {:?}",
                 path_and_key_str, e
@@ -91,10 +144,27 @@ pub fn create_context(
     ctx.declare_func("secret", FuncDef::new(secret_lookup, [ParamType::Any]));
     crate::stdlib::register_stdlib(&mut ctx);
 
+    let ((), alias_secrets) = capturing_secrets(|| apply_aliases(&mut ctx, workflow, step));
+    if !alias_secrets.is_empty() {
+        ALIAS_SECRETS
+            .lock()
+            .entry(run_id)
+            .or_default()
+            .extend(alias_secrets);
+    }
+
+    ctx
+}
+
+fn apply_aliases(
+    ctx: &mut HclContext<'static>,
+    workflow: Option<&stormchaser_dsl::ast::Workflow>,
+    step: Option<&stormchaser_dsl::ast::Step>,
+) {
     // Apply workflow aliases
     if let Some(wf) = workflow {
         for (alias, expr_str) in &wf.aliases {
-            let val = match evaluate_string(expr_str, &ctx) {
+            let val = match evaluate_string(expr_str, ctx) {
                 Ok(Some(v)) => v,
                 Ok(None) => Value::String(expr_str.clone()),
                 Err(e) => {
@@ -109,7 +179,7 @@ pub fn create_context(
     // Apply step aliases
     if let Some(st) = step {
         for (alias, expr_str) in &st.aliases {
-            let val = match evaluate_string(expr_str, &ctx) {
+            let val = match evaluate_string(expr_str, ctx) {
                 Ok(Some(v)) => v,
                 Ok(None) => Value::String(expr_str.clone()),
                 Err(e) => {
@@ -120,8 +190,6 @@ pub fn create_context(
             ctx.declare_var(alias.clone(), json_to_hcl(val));
         }
     }
-
-    ctx
 }
 
 /// The fields of a step's spec that the engine renders as Jinja templates when the step
@@ -285,6 +353,49 @@ mod tests {
 
             // The backend holds it, but the operator has not listed the path
             assert!(evaluate_raw_expr("secret(\"infra/root#token\")", &ctx).is_err());
+
+            // What secret() fetches is reported to whoever is capturing, nested or not,
+            // and to no one otherwise
+            let (value, fetched) = capturing_secrets(|| {
+                let (inner, nested) = capturing_secrets(|| {
+                    evaluate_string("db=${secret(\"kv/db#password\")}", &ctx).unwrap()
+                });
+                assert_eq!(nested, vec!["secret-password".to_string()]);
+                inner
+            });
+            assert_eq!(value, Some(serde_json::json!("db=secret-password")));
+            assert_eq!(fetched, vec!["secret-password".to_string()]);
+            let (_, outside) = capturing_secrets(|| ());
+            assert!(outside.is_empty());
+
+            // Through a workflow alias: kept for the run until its next step records it
+            let run_id = RunId::new_v4();
+            let workflow: stormchaser_dsl::ast::Workflow =
+                serde_json::from_value(serde_json::json!({
+                    "dsl_version": "v1",
+                    "name": "w",
+                "steps": [],
+                "handlers": [],
+                "outputs": [],
+                "inputs": [],
+                "storage": [],
+                "libraries": [],
+                    "aliases": { "db": "${secret(\"kv/db#password\")}" },
+                }))
+                .expect("a minimal workflow");
+            let _ = create_context(
+                serde_json::json!({}),
+                run_id,
+                serde_json::json!({}),
+                serde_json::json!({}),
+                Some(&workflow),
+                None,
+            );
+            assert_eq!(
+                take_alias_secrets(run_id),
+                vec!["secret-password".to_string()]
+            );
+            assert!(take_alias_secrets(run_id).is_empty());
         });
     }
 
