@@ -39,7 +39,10 @@ async fn test_artifact_persistence_on_completion() {
     )
     .bind(connection_id)
     .bind(&backend_name)
-    .bind(json!({"bucket": "test-bucket", "endpoint": "http://localhost:9000"}))
+    .bind(json!({
+        "bucket": "test-bucket", "endpoint": "http://localhost:9000",
+        "access_key": "test", "secret_key": "test"
+    }))
     .execute(&pool)
     .await
     .unwrap();

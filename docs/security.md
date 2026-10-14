@@ -609,7 +609,10 @@ someone else. The engine only sends those to the server they were issued for:
   function must be listed in `STORMCHASER_AWS_ALLOWED_LAMBDA_FUNCTIONS` (Helm:
   `global.aws.allowedLambdaFunctions`). Both are comma-separated, a trailing
   `*` matches a prefix, and both are empty by default, which refuses every
-  role and every function. Scope the engine's own IAM policy as well: these
+  role and every function. Only the default storage backend, which only an
+  admin chooses, may sign with the engine's own identity; any other S3
+  connection needs `access_key` and `secret_key` or a listed role, or the
+  steps that use it fail. Scope the engine's own IAM policy as well: these
   lists do not limit SES sending or `aws_cloudcontrol` queries made without a
   role.
 
