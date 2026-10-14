@@ -88,8 +88,12 @@ authenticate with the credentials above.
   `orchestration-engine-global`, `orchestration-engine-shard-<n>` (one per
   engine shard), `orchestration-engine-legacy-run`,
   `orchestration-engine-legacy-runner`, `orchestration-engine-legacy-step`,
-  `docker-runner`, `k8s-runner`, and one ephemeral consumer per running runner
-  named `runner-<type>-<runner id>`.
+  `runner-container-tasks` (`RunContainer` tasks, shared by Docker and Kubernetes
+  runners so that each task goes to one runner), `runner-k8s-job-tasks`
+  (`RunK8sJob` tasks), and one ephemeral consumer per running runner named
+  `runner-<type>-<runner id>`. Earlier releases used `docker-runner` and
+  `k8s-runner`, which nothing reads any more; remove them with
+  `nats consumer rm stormchaser docker-runner` and `nats consumer rm stormchaser k8s-runner`.
 - A key-value bucket for API rate limiting (`api_rate_limit_buckets`), created by the API.
 
 ## Dedicated or shared NATS

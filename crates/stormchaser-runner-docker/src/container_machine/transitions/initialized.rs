@@ -71,12 +71,12 @@ impl DockerContainerMachine<state::Initialized> {
             == Some("shared");
 
         let container_name = if is_shared {
-            format!("storm-shared-{}", &self.metadata.run_id.to_string()[..8])
+            format!("storm-shared-{}", self.metadata.run_id)
         } else {
             format!(
                 "storm-{}-{}",
                 self.metadata.step_dsl.name.to_lowercase().replace('_', "-"),
-                &self.metadata.step_id.to_string()[..8]
+                self.metadata.step_id
             )
         };
 
@@ -224,7 +224,7 @@ impl DockerContainerMachine<state::Initialized> {
 
     async fn unpark_storage(&self, params: UnparkParams<'_>) -> Result<()> {
         let volume_name = params.source_name;
-        let agent_image = "stormchaser-agent:v1";
+        let agent_image = crate::container_machine::agent_image();
         let unpark_container_name = format!("unpark-{}", Uuid::new_v4());
 
         let mut cmd = vec![
@@ -484,7 +484,7 @@ impl DockerContainerMachine<state::Initialized> {
             let volume_name = format!(
                 "sfs-{}-{}",
                 mount.name.to_lowercase().replace('_', "-"),
-                &self.metadata.run_id.to_string()[..8]
+                self.metadata.run_id
             );
 
             info!("Ensuring Docker volume exists: {}", volume_name);
@@ -761,7 +761,7 @@ mod tests {
 
         let source = mount.source.as_ref().unwrap();
         assert!(source.starts_with("sfs-workspace-"));
-        assert!(source.contains(&run_id.to_string()[..8]));
+        assert!(source.contains(&run_id.to_string()));
 
         // Cleanup
         for vol in volumes_to_cleanup {

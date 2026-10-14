@@ -35,6 +35,9 @@ config:
     # Most processes and threads a step's container may have.
     pidsLimit: 4096
   rustLog: "stormchaser_runner_docker=info"
+  # Image of the agent container beside each step. Empty means `stormchaser-agent:v1`,
+  # the tag a local build gives it; in production name a digest-pinned reference.
+  agentImage: ""
   # Permit steps that set `privileged = true`. Such a step is root on the node.
   allowPrivileged: false
 

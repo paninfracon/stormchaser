@@ -133,3 +133,13 @@ impl DockerContainerMachine<state::Initialized> {
         }
     }
 }
+
+/// The image of the agent container that parks storage and publishes artifacts beside
+/// a step: `STORMCHASER_AGENT_IMAGE`, or `stormchaser-agent:v1`, the tag the local
+/// build gives it. Set it to a digest-pinned reference in production.
+pub fn agent_image() -> String {
+    std::env::var("STORMCHASER_AGENT_IMAGE")
+        .ok()
+        .filter(|image| !image.is_empty())
+        .unwrap_or_else(|| "stormchaser-agent:v1".to_string())
+}

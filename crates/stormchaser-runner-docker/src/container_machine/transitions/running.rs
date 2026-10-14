@@ -209,7 +209,7 @@ impl DockerContainerMachine<state::Running> {
         let mut hashes_out = None;
         let mut reports_out = None;
 
-        let agent_image = "stormchaser-agent:v1";
+        let agent_image = crate::container_machine::agent_image();
         let park_container_name = format!("park-{}", Uuid::new_v4());
 
         let sfs_host_path = std::env::var("STORMCHASER_SFS_HOST_PATH").ok();
@@ -599,7 +599,7 @@ mod tests {
                     ..Default::default()
                 }),
                 ContainerCreateBody {
-                    image: Some("stormchaser-agent:v1".to_string()),
+                    image: Some(crate::container_machine::agent_image()),
                     entrypoint: Some(vec!["/bin/sh".to_string(), "-c".to_string()]),
                     cmd: Some(vec![format!(
                         "stat -c %a {p} && cat {p}",

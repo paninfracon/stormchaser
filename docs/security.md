@@ -209,6 +209,9 @@ Stormchaser follows a strict **Fail-Closed** security philosophy regarding OPA:
 | `STORMCHASER_CA_CERT` | CLI and TUI (`--ca-cert`): a PEM file of CA certificates to trust as well as the system's. Unset by default. | Lets them verify an API whose certificate a private CA signed, instead of turning verification off. |
 | `STORMCHASER_API_DOCS` | API: serve Swagger UI and the OpenAPI document without authentication. Default `false`. | Describes every route to anyone who can reach the listener. |
 | `STORMCHASER_CRON_IMAGE` | API: image of Kubernetes and Ofelia cron triggers. Default is a `curl` image pinned by digest. | It runs with the trigger token. |
+| `STORMCHASER_GIT_IMAGE` | Engine: image `GitCheckout` steps run in. Default is `alpine/git` pinned by digest. | It holds the Git connection's credentials. |
+| `STORMCHASER_TERRAFORM_IMAGE` | Engine: image Terraform steps run in. Default is `hashicorp/terraform` pinned by digest. | It may hold an assumed AWS role's credentials. |
+| `STORMCHASER_AGENT_IMAGE` | Runners: image of the agent container beside each step. Docker runner default: `stormchaser-agent:v1`; Kubernetes chart: `global.agent.image`. Pin it by digest in production. | It parks storage and publishes artifacts with the step's credentials. |
 | `STORMCHASER_CRON_CA_FILE` | API: CA file that Kubernetes cron triggers trust when calling `SYSTEM_URL`. Unset by default. | Lets triggers verify an API that serves TLS from a private CA. |
 | `TLS_CA_CERT_PATH` | Path to the CA certificate file. | Trust root for mTLS. |
 | `TLS_CERT_PATH` | Path to the component's client certificate. | Component identity for mTLS. |

@@ -271,18 +271,13 @@ pub async fn run_runner(config: Config) -> Result<()> {
         .await
         .context("Failed to get runner-specific consumer messages")?;
 
-    info!("Creating durable consumer for docker-runner...");
-    let consumer = stream
-        .get_or_create_consumer(
-            "docker-runner",
-            async_nats::jetstream::consumer::pull::Config {
-                durable_name: Some("docker-runner".to_string()),
-                filter_subject: "stormchaser.v1.*.step.scheduled.runcontainer".to_string(),
-                ..Default::default()
-            },
-        )
-        .await
-        .context("Failed to create JetStream consumer")?;
+    use stormchaser_model::runner::{CONTAINER_TASKS_CONSUMER, CONTAINER_TASKS_SUBJECT};
+    let consumer = stormchaser_model::runner::task_consumer(
+        &stream,
+        CONTAINER_TASKS_CONSUMER,
+        CONTAINER_TASKS_SUBJECT,
+    )
+    .await?;
 
     let mut task_messages = consumer
         .messages()
@@ -293,8 +288,8 @@ pub async fn run_runner(config: Config) -> Result<()> {
     let mut cancel_messages = stormchaser_model::run_cancel::subscribe(&stream).await?;
 
     info!(
-        "Listening for tasks on {} and JetStream subject stormchaser.v1.*.step.scheduled.runcontainer",
-        nats_subject
+        "Listening for tasks on {} and {} (consumer {})",
+        nats_subject, CONTAINER_TASKS_SUBJECT, CONTAINER_TASKS_CONSUMER
     );
 
     // 6. Main event loop

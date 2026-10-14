@@ -5,6 +5,24 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 
 use super::*;
 
+/// The name of a step's Job: `storm-`, as much of the step's name as fits, and the
+/// step's full id. Kubernetes limits Job names to 63 characters; the id is what keeps
+/// them apart, so it is never shortened.
+pub fn job_name(step_name: &str, step_id: uuid::Uuid) -> String {
+    let readable: String = step_name
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .take(20)
+        .collect();
+    let readable = readable.trim_matches('-');
+    if readable.is_empty() {
+        format!("storm-{step_id}")
+    } else {
+        format!("storm-{readable}-{step_id}")
+    }
+}
+
 pub fn do_build_job_spec(
     job_name: &str,
     metadata: &JobMetadata,
@@ -141,4 +159,23 @@ pub fn do_build_job_spec(
         ..Default::default()
     };
     Ok((job, secrets))
+}
+
+#[cfg(test)]
+mod job_name_tests {
+    use super::job_name;
+
+    #[test]
+    fn job_names_carry_the_whole_step_id_and_fit_kubernetes_limits() {
+        let id = uuid::Uuid::new_v4();
+        assert_eq!(job_name("Build_App", id), format!("storm-build-app-{id}"));
+        let long = job_name(&"x".repeat(200), id);
+        assert!(long.len() <= 63, "{long}");
+        assert!(long.ends_with(&id.to_string()));
+        assert_eq!(job_name("__", id), format!("storm-{id}"));
+        // Two steps whose ids share a prefix still get different Jobs
+        let a = uuid::Uuid::parse_str("12345678-0000-4000-8000-000000000001").unwrap();
+        let b = uuid::Uuid::parse_str("12345678-0000-4000-8000-000000000002").unwrap();
+        assert_ne!(job_name("s", a), job_name("s", b));
+    }
 }

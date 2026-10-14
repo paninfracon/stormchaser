@@ -31,6 +31,19 @@ pub async fn mutate(
 /// `--upload-pack=...` is a (bad) ref rather than an option.
 const CHECKOUT_SCRIPT: &str = r#"mkdir -p -- "$STORMCHASER_GIT_DEST" && cd -- "$STORMCHASER_GIT_DEST" && git init && git remote add -- origin "$STORMCHASER_GIT_REPO" && { [ "$#" -eq 0 ] || git sparse-checkout set -- "$@"; } && git fetch --depth "$STORMCHASER_GIT_DEPTH" --filter=blob:none -- origin "$STORMCHASER_GIT_REF" && git checkout FETCH_HEAD"#;
 
+/// The image GitCheckout steps run in, pinned by digest so that what holds a Git
+/// connection's credentials does not change under a moving tag.
+/// `STORMCHASER_GIT_IMAGE` replaces it.
+const DEFAULT_GIT_IMAGE: &str =
+    "alpine/git:v2.54.0@sha256:ce84fd6a057b4dc5cf5009da2dd832f1c6d096c1984bf50496cf3c256402264d";
+
+fn git_image() -> String {
+    std::env::var("STORMCHASER_GIT_IMAGE")
+        .ok()
+        .filter(|image| !image.is_empty())
+        .unwrap_or_else(|| DEFAULT_GIT_IMAGE.to_string())
+}
+
 async fn build_git_container_spec(
     git: &dsl::GitCheckoutSpec,
     pool: Option<&PgPool>,
@@ -126,7 +139,7 @@ async fn build_git_container_spec(
     command.extend(git.sparse_checkout.iter().flatten().cloned());
 
     Ok(dsl::CommonContainerSpec {
-        image: "alpine/git:latest".to_string(),
+        image: git_image(),
         registry_connection: None,
         connections: None,
         command: Some(command),
@@ -165,7 +178,7 @@ mod tests {
         mutate(&mut step_type, &mut spec, None, None).await.unwrap();
 
         assert_eq!(step_type, "RunContainer");
-        assert_eq!(spec["image"], "alpine/git:latest");
+        assert_eq!(spec["image"], DEFAULT_GIT_IMAGE);
         let command = spec["command"].as_array().unwrap();
         assert_eq!(command.len(), 4);
         assert_eq!(command[0], "sh");

@@ -252,30 +252,30 @@ pub async fn run_runner(config: Config) -> Result<()> {
         .await
         .context("Failed to get runner-specific consumer messages")?;
 
-    info!("Creating durable consumer for k8s-runner...");
-    let consumer = stream
-        .get_or_create_consumer(
-            "k8s-runner",
-            async_nats::jetstream::consumer::pull::Config {
-                durable_name: Some("k8s-runner".to_string()),
-                filter_subject: "stormchaser.v1.*.step.scheduled.>".to_string(),
-                ..Default::default()
-            },
-        )
-        .await
-        .context("Failed to create JetStream consumer")?;
-
-    let mut task_messages = consumer
+    use stormchaser_model::runner::{
+        task_consumer, CONTAINER_TASKS_CONSUMER, CONTAINER_TASKS_SUBJECT, K8S_JOB_TASKS_CONSUMER,
+        K8S_JOB_TASKS_SUBJECT,
+    };
+    // Container tasks come from the consumer Docker runners share, so each goes to one
+    // runner; Kubernetes jobs only this kind of runner can run.
+    let container_tasks = task_consumer(&stream, CONTAINER_TASKS_CONSUMER, CONTAINER_TASKS_SUBJECT)
+        .await?
         .messages()
         .await
-        .context("Failed to get consumer messages")?;
+        .context("Failed to get container task messages")?;
+    let k8s_job_tasks = task_consumer(&stream, K8S_JOB_TASKS_CONSUMER, K8S_JOB_TASKS_SUBJECT)
+        .await?
+        .messages()
+        .await
+        .context("Failed to get Kubernetes job task messages")?;
+    let mut task_messages = futures::stream::select(container_tasks, k8s_job_tasks);
 
     // Cancellations of runs, which every runner reads for itself
     let mut cancel_messages = stormchaser_model::run_cancel::subscribe(&stream).await?;
 
     info!(
-        "Listening for tasks on {} and JetStream subject stormchaser.v1.*.step.scheduled.>",
-        nats_subject
+        "Listening for tasks on {}, {} and {}",
+        nats_subject, CONTAINER_TASKS_SUBJECT, K8S_JOB_TASKS_SUBJECT
     );
 
     // 6. Main event loop with signal handling

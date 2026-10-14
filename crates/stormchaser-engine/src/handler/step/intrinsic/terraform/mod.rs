@@ -51,6 +51,18 @@ async fn assume_aws_role(
     }
 }
 
+/// The image Terraform steps run in, pinned by digest so that what may hold an assumed
+/// role's credentials does not change under a moving tag.
+/// `STORMCHASER_TERRAFORM_IMAGE` replaces it.
+const DEFAULT_TERRAFORM_IMAGE: &str = "hashicorp/terraform:1.16.6@sha256:bfffc1ded5fbf0a17beaaf22eb4793980abdb19d0761ff6a3a0efb2ab4d9b316";
+
+fn terraform_image() -> String {
+    std::env::var("STORMCHASER_TERRAFORM_IMAGE")
+        .ok()
+        .filter(|image| !image.is_empty())
+        .unwrap_or_else(|| DEFAULT_TERRAFORM_IMAGE.to_string())
+}
+
 /// The step's script. The workspace, backend settings and plan file reach it as
 /// environment variables (see [`terraform_env`]), never as part of its text: they can
 /// come from a run's inputs, and the container may hold an assumed role's credentials.
@@ -252,7 +264,7 @@ async fn mutate_terraform_spec(
     let container_spec = CommonContainerSpec {
         registry_connection: None,
         connections: None,
-        image: "hashicorp/terraform:latest".to_string(),
+        image: terraform_image(),
         command: Some(vec!["sh".to_string(), "-c".to_string(), script]),
         args: None,
         env: if envs.is_empty() { None } else { Some(envs) },

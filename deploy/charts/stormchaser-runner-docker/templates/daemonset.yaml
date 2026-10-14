@@ -72,6 +72,10 @@ spec:
               value: {{ .Values.config.rustLog | quote }}
             - name: STORMCHASER_ALLOW_PRIVILEGED
               value: {{ .Values.config.allowPrivileged | quote }}
+            {{- with .Values.config.agentImage }}
+            - name: STORMCHASER_AGENT_IMAGE
+              value: {{ . | quote }}
+            {{- end }}
             - name: DOCKER_HOST
               value: "unix:///var/run/docker.sock"
           volumeMounts:

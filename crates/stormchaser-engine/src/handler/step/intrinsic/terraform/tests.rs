@@ -63,7 +63,7 @@ async fn test_terraform_plan_mutates_to_run_container() {
 
     assert_eq!(step_type, "RunContainer");
     let image = spec.get("image").and_then(|v| v.as_str()).unwrap();
-    assert_eq!(image, "hashicorp/terraform:latest");
+    assert_eq!(image, DEFAULT_TERRAFORM_IMAGE);
 
     let command = spec.get("command").and_then(|v| v.as_array()).unwrap();
     assert_eq!(command[0], "sh");

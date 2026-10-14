@@ -54,6 +54,41 @@ pub struct StepDefinition {
 /// but the engine's may publish to it, so a runner or the API cannot stop someone's run.
 pub const CANCEL_SUBJECT: &str = "stormchaser.v1.runner.cancel";
 
+/// The durable consumer every runner pulls `RunContainer` tasks from, Docker and
+/// Kubernetes alike. One consumer shared by all of them hands each task to one runner.
+/// A consumer per kind of runner would give every kind its own copy, and the step
+/// would run once on each.
+pub const CONTAINER_TASKS_CONSUMER: &str = "runner-container-tasks";
+/// The tasks [`CONTAINER_TASKS_CONSUMER`] holds.
+pub const CONTAINER_TASKS_SUBJECT: &str = "stormchaser.v1.*.step.scheduled.runcontainer";
+/// The durable consumer Kubernetes runners pull `RunK8sJob` tasks from.
+pub const K8S_JOB_TASKS_CONSUMER: &str = "runner-k8s-job-tasks";
+/// The tasks [`K8S_JOB_TASKS_CONSUMER`] holds.
+pub const K8S_JOB_TASKS_SUBJECT: &str = "stormchaser.v1.*.step.scheduled.runk8sjob";
+
+/// Binds to the shared durable consumer `name`, filtered to `subject`, creating it if
+/// no runner has yet.
+pub async fn task_consumer(
+    stream: &async_nats::jetstream::stream::Stream,
+    name: &str,
+    subject: &str,
+) -> anyhow::Result<
+    async_nats::jetstream::consumer::Consumer<async_nats::jetstream::consumer::pull::Config>,
+> {
+    use anyhow::Context;
+    stream
+        .get_or_create_consumer(
+            name,
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some(name.to_string()),
+                filter_subject: subject.to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .with_context(|| format!("Failed to create the JetStream consumer {name}"))
+}
+
 /// Chooses the id a runner registers under.
 ///
 /// An id the operator sets (`RUNNER_ID`) always wins. Otherwise the id is built from the

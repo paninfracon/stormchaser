@@ -180,8 +180,9 @@ See [Workflow DSL](workflow_dsl.md) for details on specifying cron schedules in 
     architecture. It ensures that no events or step-tasks are lost even if a
     controller or runner restarts. Task scheduled events are stored in the
     `stormchaser` stream.
-* **Durable Consumers:** Runners use durable pull consumers (e.g.,
-    `docker-runner`, `k8s-runner`) to retrieve tasks. This allows the NATS
+* **Durable Consumers:** Runners use durable pull consumers to retrieve tasks:
+    `runner-container-tasks`, which Docker and Kubernetes runners share so that
+    each `RunContainer` task is run once, and `runner-k8s-job-tasks`. This allows the NATS
     server to track which messages have been delivered and acknowledged,
     enabling automatic redelivery if a runner fails during a task.
 * **Task Queues:** Used to distribute workflow steps to the appropriate
