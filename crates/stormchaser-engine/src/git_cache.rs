@@ -58,6 +58,16 @@ fn is_commit_id(rev: &str) -> bool {
 /// Comma-separated URL schemes repositories may be cloned over. Defaults to `https,ssh`.
 pub const GIT_ALLOWED_SCHEMES_ENV: &str = "STORMCHASER_GIT_ALLOWED_SCHEMES";
 
+/// The URL schemes repositories may be cloned over, from `STORMCHASER_GIT_ALLOWED_SCHEMES`.
+pub fn allowed_git_schemes() -> Vec<String> {
+    std::env::var(GIT_ALLOWED_SCHEMES_ENV)
+        .unwrap_or_else(|_| "https,ssh".into())
+        .split(',')
+        .map(|scheme| scheme.trim().to_ascii_lowercase())
+        .filter(|scheme| !scheme.is_empty())
+        .collect()
+}
+
 /// Rejects repository URLs that are local paths or use a transport other than the
 /// allowed ones.
 ///
@@ -65,8 +75,7 @@ pub const GIT_ALLOWED_SCHEMES_ENV: &str = "STORMCHASER_GIT_ALLOWED_SCHEMES";
 /// and bare paths would let them clone other tenants' cached checkouts or any repository
 /// on the host, and `ext::` style transports run commands.
 pub fn validate_repo_url(repo_url: &str) -> Result<()> {
-    let allowed = std::env::var(GIT_ALLOWED_SCHEMES_ENV).unwrap_or_else(|_| "https,ssh".into());
-    let allowed: Vec<&str> = allowed.split(',').map(str::trim).collect();
+    let allowed = allowed_git_schemes();
 
     let scheme = match repo_url.split_once("://") {
         Some((scheme, _)) => scheme.to_ascii_lowercase(),
@@ -83,7 +92,7 @@ pub fn validate_repo_url(repo_url: &str) -> Result<()> {
         }
     };
 
-    if !allowed.contains(&scheme.as_str()) {
+    if !allowed.contains(&scheme) {
         anyhow::bail!(
             "Repository URL scheme '{}' is not allowed (allowed: {})",
             scheme,
