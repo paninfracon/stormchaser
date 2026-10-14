@@ -272,6 +272,10 @@ pub async fn run_hydration_loop(
     extract_queries(&queries, &mut tasks);
 
     let mut join_set = tokio::task::JoinSet::new();
+    // A workflow can declare any number of queries; only so many run at once
+    let running = std::sync::Arc::new(tokio::sync::Semaphore::new(
+        crate::limits::MAX_CONCURRENT_QUERIES,
+    ));
 
     let mut tasks_to_run = Vec::new();
     for (idx, task) in tasks.iter_mut().enumerate() {
@@ -339,8 +343,11 @@ pub async fn run_hydration_loop(
         let query_type = task.query_type.clone();
         let params_clone = resolved_params.clone();
         let user = initiating_user.clone();
+        let running = running.clone();
 
         join_set.spawn(async move {
+            // The semaphore is never closed
+            let _permit = running.acquire_owned().await.ok();
             let res =
                 execute_query(&query_type, &params_clone, state_for_query.as_ref(), &user).await;
             (idx, res)

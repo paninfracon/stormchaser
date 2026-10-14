@@ -1,4 +1,5 @@
 use crate::hydration::run_hydration_loop;
+use crate::limits::{hydration_slots, Slot};
 use crate::models::{HydrateDirectRequest, HydrateSchemaRequest};
 use axum::{
     extract::State,
@@ -25,6 +26,8 @@ pub async fn hydrate_schema(
     State(state): State<AppState>,
     Json(payload): Json<HydrateSchemaRequest>,
 ) -> Result<Response, StatusCode> {
+    // Taken before the repository is read, which is work too
+    let slot = take_slot(&caller)?;
     let source = stormchaser_api::routes::ParseGitRequest {
         connection: payload.connection,
         workflow_path: payload.workflow_path,
@@ -32,7 +35,7 @@ pub async fn hydrate_schema(
     };
     let dsl =
         stormchaser_api::routes::schema::read_workflow_from_git(&state, &caller, &source).await?;
-    hydrate(&dsl, payload.inputs, state, &caller)
+    hydrate(dsl, payload.inputs, state, &caller, slot).await
 }
 
 /// Hydrates the input form of a workflow the caller supplies as text.
@@ -44,23 +47,44 @@ pub async fn hydrate_schema_direct(
     if payload.dsl.len() > MAX_DIRECT_DSL_BYTES {
         return Err(StatusCode::PAYLOAD_TOO_LARGE);
     }
-    hydrate(&payload.dsl, payload.inputs, state, &caller)
+    let slot = take_slot(&caller)?;
+    hydrate(payload.dsl, payload.inputs, state, &caller, slot).await
 }
 
-/// Parses `dsl` and streams the hydration of its input form.
-fn hydrate(
-    dsl: &str,
+/// A place for one more hydration by `caller`, or 429 if they or the service are busy.
+fn take_slot(caller: &Caller) -> Result<Slot, StatusCode> {
+    hydration_slots()
+        .try_acquire(&caller.owner_key())
+        .ok_or_else(|| {
+            tracing::warn!(
+                "Refusing a hydration for {}: too many in flight",
+                caller.owner_key()
+            );
+            StatusCode::TOO_MANY_REQUESTS
+        })
+}
+
+/// Parses `dsl` and streams the hydration of its input form. `slot` is held until the
+/// hydration ends.
+async fn hydrate(
+    dsl: String,
     inputs: Value,
     state: AppState,
     caller: &Caller,
+    slot: Slot,
 ) -> Result<Response, StatusCode> {
-    let workflow = stormchaser_dsl::StormchaserParser.parse(dsl).map_err(|e| {
-        tracing::warn!(
-            "Refusing to hydrate a workflow that does not parse: {:#}",
-            e
-        );
-        StatusCode::BAD_REQUEST
-    })?;
+    // Parsing is CPU work; keep it off the threads that serve requests
+    let workflow =
+        tokio::task::spawn_blocking(move || stormchaser_dsl::StormchaserParser.parse(&dsl))
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .map_err(|e| {
+                tracing::warn!(
+                    "Refusing to hydrate a workflow that does not parse: {:#}",
+                    e
+                );
+                StatusCode::BAD_REQUEST
+            })?;
     let schema = stormchaser_dsl::form::inputs_form_schema(&workflow)
         .unwrap_or_else(|| serde_json::json!({ "type": "object", "properties": {} }));
     let queries = workflow.queries;
@@ -72,6 +96,7 @@ fn hydrate(
     let (tx, rx) = tokio::sync::mpsc::channel(100);
     tokio::spawn(async move {
         run_hydration_loop(schema, inputs, queries, Some(state), user, tx).await;
+        drop(slot);
     });
 
     let stream = tokio_stream::wrappers::ReceiverStream::new(rx).map(|event| {
