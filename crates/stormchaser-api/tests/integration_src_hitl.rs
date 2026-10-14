@@ -268,6 +268,30 @@ async fn test_reject_step_success() {
 }
 
 #[tokio::test]
+async fn a_wait_step_cannot_be_approved() {
+    let state = mock_state().await;
+    let run_id = RunId::new_v4();
+    let step_id = StepInstanceId::new_v4();
+
+    sqlx::query("INSERT INTO workflow_runs (id, workflow_name, initiating_user, repo_url, workflow_path, git_ref, status, fencing_token) VALUES ($1, 'wf', 'user', 'url', 'path', 'ref', 'running'::run_status, 1)").bind(run_id).execute(&state.pool).await.unwrap();
+    sqlx::query("INSERT INTO step_instances (id, run_id, step_name, step_type, status, created_at) VALUES ($1, $2, 'step', 'Wait', 'waiting_for_event'::step_status, now())").bind(step_id).bind(run_id).execute(&state.pool).await.unwrap();
+
+    let response = approve_step(
+        State(state),
+        AuthClaims(Claims {
+            sub: "test-user-123".to_string(),
+            email: Some("test-user-123@paninfracon.net".to_string()),
+            exp: 0,
+        }),
+        axum::http::HeaderMap::new(),
+        Path((run_id, step_id)),
+        Json(json!({"approved": true})),
+    )
+    .await;
+    assert_eq!(response.into_response().status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn test_correlate_event_success() {
     let state = mock_state().await;
     let run_id = RunId::new_v4();

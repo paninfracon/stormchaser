@@ -264,3 +264,39 @@ approval_denied if {
 	separation_of_duties
 	input.initiating_user in approver_ids
 }
+
+# A step that names its approvers (users, by email or subject, or groups) may be
+# decided only by one of them, or by an admin. An approval made through an emailed
+# link with no single approver is not checked here: the link is signed, and was sent
+# only to the step's approvers.
+step_approvers := approvers if {
+	approvers := object.get(object.get(input.step_ast, "spec", {}), "approvers", [])
+	is_array(approvers)
+} else := []
+
+approver_listed if {
+	some id in approver_ids
+	id in step_approvers
+}
+
+approver_listed if {
+	some group in token_groups
+	group in step_approvers
+}
+
+approver_is_admin if {
+	some id in approver_ids
+	id in admins
+}
+
+approver_is_admin if {
+	some group in token_groups
+	group in admin_groups
+}
+
+approval_denied if {
+	count(step_approvers) > 0
+	count(approver_ids) > 0
+	not approver_listed
+	not approver_is_admin
+}

@@ -356,6 +356,13 @@ pub(crate) async fn verify_step_for_approval(
             (StatusCode::BAD_REQUEST, "Step is not waiting for approval").into_response(),
         ));
     }
+    // `Wait` steps also wait for an event, but are not decided by a person: they end on
+    // their timer or on a correlated event, and approving one would cut either short
+    if !["approval", "terraformapproval"].contains(&step.step_type.to_ascii_lowercase().as_str()) {
+        return Err(Box::new(
+            (StatusCode::BAD_REQUEST, "Step is not an approval").into_response(),
+        ));
+    }
 
     Ok(step)
 }

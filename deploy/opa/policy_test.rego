@@ -164,6 +164,36 @@ test_separation_of_duties_stops_the_initiator_approving if {
 	allow with input as approval(bob) with data.stormchaser_settings as sod
 }
 
+approval_listing(approvers, approver) := object.union(
+	approval(approver),
+	{"step_ast": {"name": "approve", "spec": {"approvers": approvers}}},
+)
+
+test_only_a_listed_approver_may_decide_a_step_that_names_them if {
+	allow with input as approval_listing(["bob@example.com"], bob)
+	allow with input as approval_listing(["bob-id"], bob)
+	not allow with input as approval_listing(["bob@example.com"], alice)
+
+	# An empty list names no one, so anyone may decide
+	allow with input as approval_listing([], alice)
+}
+
+test_a_listed_group_or_an_admin_may_approve if {
+	by_group := object.union(
+		approval_listing(["release-managers"], alice),
+		{"token": token_with_groups(["release-managers"])},
+	)
+	allow with input as by_group
+
+	root := {"sub": "root-id", "email": "root@example.com"}
+	allow with input as approval_listing(["bob@example.com"], root)
+		with data.stormchaser_settings as with_admins
+}
+
+test_a_link_sent_to_several_approvers_is_not_refused_for_naming_no_one if {
+	allow with input as approval_listing(["a@example.com", "b@example.com"], null)
+}
+
 # --- Authors and run-only users -------------------------------------------------------
 
 with_authors := {
