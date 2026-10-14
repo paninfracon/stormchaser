@@ -104,7 +104,7 @@ workflow "example_workflow" {
 - **First-Class Security**: First-class SOPS support for secrets, integrated
   with Vault and AWS Secrets Manager.
 - **Cron Workflows**: Periodic scheduling via external engines (Kubernetes
-  CronJobs, Ofelia).
+  CronJobs, or any scheduler that can call the trigger URL).
 - **[MCP Server](docs/mcp-server.md)**: Native Model Context Protocol (MCP) server for exposing the API to AI agents (enabled by default but can be disabled via Cargo features, and ships with a restrictive Open Policy Agent authorization policy).
 
 ### 📊 Feature Comparison Matrix

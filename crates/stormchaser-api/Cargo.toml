@@ -26,7 +26,6 @@ rustls = { version = "0.23.46", features = ["ring"] }
 axum = { workspace = true }
 kube = { version = "4", features = ["runtime", "derive", "config"] }
 k8s-openapi = { version = "0.28", features = ["v1_32", "schemars"] }
-bollard = "0.21"
 reqwest = { workspace = true }
 reqwest-middleware = { workspace = true }
 reqwest-retry = { workspace = true }

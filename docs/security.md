@@ -166,8 +166,10 @@ CronJob, its Jobs or its pods. The trigger image is pinned by digest
 capabilities and a read-only root filesystem, and is given no service account
 token. The API's service account needs `create` and `delete` on `cronjobs`
 (`batch`) and `create` on `secrets` in its own namespace; it needs no permission
-to read Secrets. With `CRON_ENGINE=ofelia` (the Docker quickstart) the token is
-in a container label, which anyone who can use the Docker socket can read.
+to read Secrets; the Helm chart creates that Role and points `SYSTEM_URL` at the
+API's Service. With `CRON_ENGINE=none` (the Docker quickstart) schedules are
+stored and each token is shown once, for a scheduler of your own to call
+`POST /api/v1/cron-trigger/<id>` with. Keep it where you keep other credentials.
 
 ### External Endpoint mTLS
 
@@ -208,7 +210,7 @@ Stormchaser follows a strict **Fail-Closed** security philosophy regarding OPA:
 | `STORMCHASER_DB_SSL` | API, query service and engine: `true` insists on `verify-full`; `false` uses the `sslmode` in `DATABASE_URL`, or none. Unset, the URL's `sslmode` is used if it names one, and `verify-full` otherwise. | Without a verified connection, nothing proves the service reached its own database. |
 | `STORMCHASER_CA_CERT` | CLI and TUI (`--ca-cert`): a PEM file of CA certificates to trust as well as the system's. Unset by default. | Lets them verify an API whose certificate a private CA signed, instead of turning verification off. |
 | `STORMCHASER_API_DOCS` | API: serve Swagger UI and the OpenAPI document without authentication. Default `false`. | Describes every route to anyone who can reach the listener. |
-| `STORMCHASER_CRON_IMAGE` | API: image of Kubernetes and Ofelia cron triggers. Default is a `curl` image pinned by digest. | It runs with the trigger token. |
+| `STORMCHASER_CRON_IMAGE` | API: image of Kubernetes cron triggers. Default is a `curl` image pinned by digest. | It runs with the trigger token. |
 | `STORMCHASER_GIT_IMAGE` | Engine: image `GitCheckout` steps run in. Default is `alpine/git` pinned by digest. | It holds the Git connection's credentials. |
 | `STORMCHASER_TERRAFORM_IMAGE` | Engine: image Terraform steps run in. Default is `hashicorp/terraform` pinned by digest. | It may hold an assumed AWS role's credentials. |
 | `STORMCHASER_AGENT_IMAGE` | Runners: image of the agent container beside each step. Docker runner default: `stormchaser-agent:v1`; Kubernetes chart: `global.agent.image`. Pin it by digest in production. | It parks storage and publishes artifacts with the step's credentials. |

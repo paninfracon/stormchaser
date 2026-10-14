@@ -244,6 +244,10 @@ services:
       # trust tests/certs. Do not copy the TLS settings below into a real deployment.
       STORMCHASER_DB_SSL: 'false'
       STORMCHASER_LISTEN_TLS: 'false'
+      # Cron schedules are stored, with a token shown once when each is created; fire
+      # them from a scheduler of your own: curl -X POST -H "Authorization: Bearer <token>"
+      # http://localhost:3000/api/v1/cron-trigger/<id>
+      CRON_ENGINE: none
       NATS_URL: nats://nats:4222
       NATS_USER: stormchaser-api
       NATS_PASSWORD: '${STORMCHASER_NATS_API_PASSWORD?Error: STORMCHASER_NATS_API_PASSWORD is not set}'

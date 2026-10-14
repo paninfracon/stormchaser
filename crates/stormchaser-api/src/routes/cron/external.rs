@@ -9,90 +9,28 @@ use kube::{
     api::{DeleteParams, PostParams},
     Api, Client,
 };
-use std::collections::HashMap;
 use std::env;
 use stormchaser_model::CronWorkflowId;
 
-async fn register_ofelia_cron(
-    id: CronWorkflowId,
-    name: &str,
-    cronspec: &str,
-    secret_token: &str,
-) -> Result<Option<String>, StatusCode> {
-    use bollard::models::ContainerCreateBody;
-    use bollard::query_parameters::CreateContainerOptions;
-    use bollard::Docker;
-
-    let docker = Docker::connect_with_local_defaults().map_err(|e| {
-        tracing::error!("Failed to connect to Docker: {:?}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    let system_url = env::var("SYSTEM_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
-    let trigger_url = format!("{}/api/v1/cron-trigger/{}", system_url, id);
-    let container_name = format!("stormchaser-cron-{}", id);
-
-    let mut labels = HashMap::new();
-    labels.insert("ofelia.enabled".to_string(), "true".to_string());
-    labels.insert(
-        format!("ofelia.job-run.{}.schedule", name),
-        cronspec.to_string(),
-    );
-    labels.insert(format!("ofelia.job-run.{}.image", name), cron_image());
-    labels.insert(
-        format!("ofelia.job-run.{}.command", name),
-        format!(
-            "-X POST -H \"Authorization: Bearer {}\" {}",
-            secret_token, trigger_url
-        ),
-    );
-
-    let config = ContainerCreateBody {
-        image: Some(cron_image()),
-        labels: Some(labels),
-        entrypoint: Some(vec!["/bin/true".to_string()]),
-        ..Default::default()
-    };
-
-    docker
-        .create_container(
-            Some(CreateContainerOptions {
-                name: Some(container_name.clone()),
-                ..Default::default()
-            }),
-            config,
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!("Failed to create Ofelia cron container: {:?}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-
-    Ok(Some(container_name))
-}
-
-async fn unregister_ofelia_cron(container_name: &str) -> Result<(), StatusCode> {
-    use bollard::query_parameters::RemoveContainerOptions;
-    use bollard::Docker;
-
-    let docker =
-        Docker::connect_with_local_defaults().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    docker
-        .remove_container(
-            container_name,
-            Some(RemoveContainerOptions {
-                force: true,
-                ..Default::default()
-            }),
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!("Failed to remove Ofelia cron container: {:?}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-
-    Ok(())
+/// Where cron schedules are registered (`CRON_ENGINE`): `kubernetes`, which creates
+/// a CronJob per schedule, or `none`, which only stores the schedule and its token
+/// for a scheduler of the operator's own to call the trigger URL with.
+///
+/// `ofelia` was accepted until this release, but Ofelia only reads `job-run` jobs from
+/// its own container, so the labels it was given were never scheduled; they only kept
+/// the trigger token where anything that lists containers could read it.
+fn cron_engine() -> Result<String, StatusCode> {
+    let engine = env::var("CRON_ENGINE").unwrap_or_else(|_| "kubernetes".to_string());
+    match engine.as_str() {
+        "kubernetes" | "none" => Ok(engine),
+        other => {
+            tracing::error!(
+                "Unsupported CRON_ENGINE {:?}: use `kubernetes`, or `none` and a scheduler of your own",
+                other
+            );
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
 }
 
 pub(crate) async fn register_external_cron(
@@ -101,23 +39,12 @@ pub(crate) async fn register_external_cron(
     cronspec: &str,
     secret_token: &str,
 ) -> Result<Option<String>, StatusCode> {
-    let engine = env::var("CRON_ENGINE").unwrap_or_else(|_| "kubernetes".to_string());
-
-    if engine == "none" {
+    if cron_engine()? == "none" {
         tracing::info!(
             "Cron engine set to 'none', skipping external registration for {}",
             id
         );
         return Ok(None);
-    }
-
-    if engine == "ofelia" {
-        return register_ofelia_cron(id, name, cronspec, secret_token).await;
-    }
-
-    if engine != "kubernetes" {
-        tracing::error!("Unsupported CRON_ENGINE: {}", engine);
-        return Err(StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     let client = Client::try_default().await.map_err(|e| {
@@ -327,18 +254,8 @@ fn trigger_secret(job_name: &str, owner: &CronJob, token: &str, ca_pem: Option<&
 }
 
 pub(crate) async fn unregister_external_cron(external_job_id: &str) -> Result<(), StatusCode> {
-    let engine = env::var("CRON_ENGINE").unwrap_or_else(|_| "kubernetes".to_string());
-
-    if engine == "none" {
+    if cron_engine()? == "none" {
         return Ok(());
-    }
-
-    if engine == "ofelia" {
-        return unregister_ofelia_cron(external_job_id).await;
-    }
-
-    if engine != "kubernetes" {
-        return Err(StatusCode::INTERNAL_SERVER_ERROR);
     }
     let client = Client::try_default()
         .await

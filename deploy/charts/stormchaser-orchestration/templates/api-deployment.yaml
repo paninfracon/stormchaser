@@ -17,6 +17,11 @@ spec:
         {{- include "stormchaser-orchestration.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: api
     spec:
+      serviceAccountName: {{ .Values.api.serviceAccount.name | default (printf "%s-api" (include "stormchaser-orchestration.fullname" .)) }}
+      {{- if ne .Values.api.cron.engine "kubernetes" }}
+      # Only cron registration talks to the Kubernetes API
+      automountServiceAccountToken: false
+      {{- end }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
@@ -122,6 +127,14 @@ spec:
             # Cron triggers call the API, and must trust its certificate
             - name: STORMCHASER_CRON_CA_FILE
               value: {{ .Values.global.tls.caCertPath | quote }}
+            {{- end }}
+            - name: CRON_ENGINE
+              value: {{ .Values.api.cron.engine | quote }}
+            {{- if eq .Values.api.cron.engine "kubernetes" }}
+            # Where cron triggers call the API: its own Service, by a name its
+            # certificate carries
+            - name: SYSTEM_URL
+              value: "{{ include "stormchaser-orchestration.internalScheme" . }}://{{ include "stormchaser-orchestration.fullname" . }}-api.{{ .Release.Namespace }}.svc:{{ .Values.api.service.port }}"
             {{- end }}
             - name: STORMCHASER_API_DOCS
               value: {{ .Values.api.docs | quote }}

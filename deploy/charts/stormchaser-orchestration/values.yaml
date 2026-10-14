@@ -100,6 +100,16 @@ api:
     tag: ""
   replicaCount: 1
   rustLog: "stormchaser_api=info"
+  # Cron workflows: `kubernetes` creates a CronJob per schedule in the release's
+  # namespace, which calls the API's trigger URL; `none` only stores the schedule and
+  # shows its token once, for a scheduler of your own.
+  cron:
+    engine: kubernetes
+  # The API's ServiceAccount. With the kubernetes cron engine it is given a Role that
+  # allows creating and deleting CronJobs and creating Secrets, in this namespace only.
+  serviceAccount:
+    create: true
+    name: ""
   # Serve Swagger UI and the OpenAPI document, without authentication, at
   # /swagger-ui and /api-docs/openapi.json.
   docs: false

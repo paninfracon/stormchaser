@@ -82,8 +82,7 @@ Scheduled execution is handled by registering workflows with an **external cron 
 * **Security**: Each cron schedule is assigned a unique `secret_token`. The external engine is configured to hit a secured webhook endpoint (`POST /api/v1/cron-trigger/:id`) using an `Authorization: Bearer` header containing this token.
 * **Pluggable Engines** (Configured via `CRON_ENGINE`):
   * **Kubernetes**: Automatically creates a `CronJob` resource in the cluster that uses `curl` to trigger the API.
-  * **Ofelia**: Creates a dummy Docker container with `ofelia.*` labels. Ofelia (running as a separate container) detects these labels and schedules a `job-run` to trigger the API.
-  * **None**: The system stores the schedule and token, but registration is left to the user.
+  * **None**: The system stores the schedule and shows its token once; a scheduler of the operator's own (cron, a systemd timer, a CI schedule) calls the trigger URL. The Docker quickstart uses this.
 * **Identity**: Runs triggered by cron are initiated by the system identity `system:cron`.
 
 See [Workflow DSL](workflow_dsl.md) for details on specifying cron schedules in `.storm` files.
