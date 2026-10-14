@@ -430,6 +430,24 @@ that a `RunK8sJob` step names (GPUs, ephemeral storage) are passed through as
 written; use a `ResourceQuota` and `LimitRange` on the step namespace for
 those, and as a second line of defence for the rest.
 
+### Private step images on Kubernetes
+
+The Kubernetes runner sets `imagePullPolicy: Always` on a step's own container.
+With Kubernetes' default for a tagged image, `IfNotPresent`, a node starts an
+image it already holds without asking the registry, so a step with no
+credentials for a private image could run it once another user's run had pulled
+it onto the same node, and read whatever the image contains. `Always` makes the
+kubelet check with the registry, using the step's own pull secret, each time;
+layers already on the node are not downloaded again. The Docker runner always
+pulls, so it is not affected.
+
+If step images are preloaded onto nodes rather than pulled, set
+`STORMCHASER_STEP_IMAGE_PULL_POLICY` (Helm: `config.stepImagePullPolicy`) to
+`IfNotPresent` or `Never`. That reopens the gap above, unless the kubelet
+re-checks credentials for cached images itself (the
+`KubeletEnsureSecretPulledImages` feature, KEP-2535, where your Kubernetes
+version offers it).
+
 ### When a run ends early
 
 A run that fails or is aborted while steps are still on runners no longer leaves

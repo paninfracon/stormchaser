@@ -78,6 +78,8 @@ spec:
               value: {{ .Values.config.stepLimits.maxTimeout | quote }}
             - name: STORMCHASER_STEP_MAX_PARALLELISM
               value: {{ .Values.config.stepLimits.maxParallelism | quote }}
+            - name: STORMCHASER_STEP_IMAGE_PULL_POLICY
+              value: {{ .Values.config.stepImagePullPolicy | default "Always" | quote }}
             - name: RUST_LOG
               value: {{ .Values.config.rustLog | quote }}
             - name: STORMCHASER_STEP_NAMESPACE

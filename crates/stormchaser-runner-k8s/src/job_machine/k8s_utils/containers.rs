@@ -16,6 +16,33 @@ pub(crate) fn uses_in_step_agent(agent_present: bool, metadata: &JobMetadata) ->
 /// it downloads from.
 const FETCH_URL_ENV: &str = "STORMCHASER_FETCH_URL";
 
+/// Pull policy for the image a step names: `Always` (the default), `IfNotPresent` or
+/// `Never`.
+pub const STEP_IMAGE_PULL_POLICY_ENV: &str = "STORMCHASER_STEP_IMAGE_PULL_POLICY";
+
+/// The pull policy for a step's own image.
+///
+/// With `IfNotPresent` (Kubernetes' default for a tag other than `latest`) a node starts
+/// an image it already holds without asking the registry, so a step without credentials
+/// for a private image could run it once another user's run had pulled it onto the same
+/// node. `Always` makes the kubelet check with the registry, using this step's own pull
+/// secrets, every time; layers already on the node are not downloaded again. An operator
+/// who preloads step images onto nodes can choose `IfNotPresent` or `Never`.
+pub(crate) fn step_image_pull_policy(configured: Option<&str>) -> String {
+    match configured.map(str::trim) {
+        None | Some("") | Some("Always") => "Always".to_string(),
+        Some(policy @ ("IfNotPresent" | "Never")) => policy.to_string(),
+        Some(other) => {
+            tracing::warn!(
+                "Ignoring {}={:?}: expected Always, IfNotPresent or Never",
+                STEP_IMAGE_PULL_POLICY_ENV,
+                other
+            );
+            "Always".to_string()
+        }
+    }
+}
+
 /// Builds the pod's containers (the step's own first, then the agent sidecar if there is
 /// storage to park) and its init containers.
 pub(crate) fn build_k8s_containers(
@@ -135,11 +162,9 @@ pub(crate) fn build_k8s_containers(
     let container = Container {
         name: WORKER_CONTAINER.to_string(),
         image: Some(final_image.clone()),
-        image_pull_policy: if final_image.contains("stormchaser-agent") {
-            Some("IfNotPresent".to_string())
-        } else {
-            None
-        },
+        image_pull_policy: Some(step_image_pull_policy(
+            std::env::var(STEP_IMAGE_PULL_POLICY_ENV).ok().as_deref(),
+        )),
         command: final_command,
         args: final_args,
         env: Some(k8s_env),
@@ -275,7 +300,16 @@ pub(crate) fn wrap_main_command(
 
 #[cfg(test)]
 mod tests {
-    use super::step_security_context;
+    use super::{step_image_pull_policy, step_security_context};
+
+    #[test]
+    fn a_step_image_is_checked_with_the_registry_unless_the_operator_says_otherwise() {
+        assert_eq!(step_image_pull_policy(None), "Always");
+        assert_eq!(step_image_pull_policy(Some("")), "Always");
+        assert_eq!(step_image_pull_policy(Some("IfNotPresent")), "IfNotPresent");
+        assert_eq!(step_image_pull_policy(Some("Never")), "Never");
+        assert_eq!(step_image_pull_policy(Some("sometimes")), "Always");
+    }
 
     #[test]
     fn steps_cannot_gain_privileges_or_forge_packets() {

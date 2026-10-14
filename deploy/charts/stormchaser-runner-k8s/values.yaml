@@ -90,6 +90,11 @@ config:
     maxTimeout: "24h"
     # Most pods one step's Job may run at once, or ask to complete.
     maxParallelism: 10
+  # Pull policy for the image a step names. `Always` makes the node check with the
+  # registry, with the step's own credentials, before every run (cached layers are
+  # reused), so a step cannot start a private image that another user's run left on the
+  # node. Use `IfNotPresent` or `Never` only if step images are preloaded onto nodes.
+  stepImagePullPolicy: Always
   # If empty, the runner uses "k8s-<pod name>", which survives a restart of the runner
   # container. Ids must be unique among running runners.
   runnerId: ""
