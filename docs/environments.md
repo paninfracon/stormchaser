@@ -180,6 +180,12 @@ and the Runners in isolated worker clusters).
   database administrator needs to provide. NATS must require authentication, give runners a separate
   restricted user, use TLS, and be unreachable from workflow step pods; see
   [NATS: Quickstart and Production](nats.md) for the exact requirements.
+- A log backend of your own (Loki, or Elasticsearch). The bundled Loki,
+  Tempo, Prometheus and Grafana are for the quickstart. Step logs hold
+  whatever a workflow prints, so the backend must require authentication,
+  be unreachable from workflow step pods, and keep logs no longer than your
+  retention policy allows; point `LOKI_URL` (or the Elasticsearch settings) at
+  it.
 
 ### Step 1: Provision the Namespace and Secrets
 
