@@ -91,6 +91,7 @@ pub async fn fetch_workflow_runs(
 pub async fn fetch_workflow_run_detail(
     id: String,
 ) -> Result<crate::models::WorkflowRunFullDetail, ServerFnError> {
+    let id = super::parse_id(&id)?;
     let cookie = require_auth().await?;
     let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
 
@@ -124,6 +125,7 @@ pub async fn fetch_step_logs(
     step_id: String,
     limit: Option<usize>,
 ) -> Result<Vec<String>, ServerFnError> {
+    let (run_id, step_id) = (super::parse_id(&run_id)?, super::parse_id(&step_id)?);
     let cookie = require_auth().await?;
     let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
 
@@ -166,7 +168,9 @@ pub async fn approve_step(
     let client = super::http_client();
     let url = format!(
         "{}/api/v1/runs/{}/steps/{}/approve",
-        api_url, run_id, step_name
+        api_url,
+        super::parse_id(&run_id)?,
+        super::path_segment(&step_name)?
     );
 
     let res = client
@@ -195,7 +199,9 @@ pub async fn reject_step(run_id: String, step_name: String) -> Result<(), Server
     let client = super::http_client();
     let url = format!(
         "{}/api/v1/runs/{}/steps/{}/reject",
-        api_url, run_id, step_name
+        api_url,
+        super::parse_id(&run_id)?,
+        super::path_segment(&step_name)?
     );
 
     let res = client
@@ -217,6 +223,7 @@ pub async fn reject_step(run_id: String, step_name: String) -> Result<(), Server
 
 #[server(input = Json, output = Json)]
 pub async fn delete_workflow_run(run_id: String) -> Result<(), ServerFnError> {
+    let run_id = super::parse_id(&run_id)?;
     let cookie = require_auth().await?;
     let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
 

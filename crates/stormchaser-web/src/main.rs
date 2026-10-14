@@ -324,7 +324,7 @@ async fn proxy_runs_stream_handler(
 
 #[cfg(feature = "ssr")]
 async fn proxy_run_status_stream_handler(
-    axum::extract::Path(id): axum::extract::Path<String>,
+    axum::extract::Path(id): axum::extract::Path<uuid::Uuid>,
     headers: axum::http::HeaderMap,
 ) -> impl axum::response::IntoResponse {
     use axum::body::Body;
@@ -375,7 +375,7 @@ async fn proxy_run_status_stream_handler(
 
 #[cfg(feature = "ssr")]
 async fn proxy_step_logs_stream_handler(
-    axum::extract::Path((run_id, step_id)): axum::extract::Path<(String, String)>,
+    axum::extract::Path((run_id, step_id)): axum::extract::Path<(uuid::Uuid, uuid::Uuid)>,
     headers: axum::http::HeaderMap,
 ) -> impl axum::response::IntoResponse {
     use axum::body::Body;

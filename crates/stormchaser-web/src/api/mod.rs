@@ -94,6 +94,28 @@ fn is_valid_grafana_url(url: &str) -> bool {
     })
 }
 
+/// Reads an object id passed to a server function. Ids are UUIDs; anything else is
+/// refused rather than written into an API path, where `../` or `?` would send the
+/// user's token to a different endpoint than the one the function calls.
+#[cfg(feature = "ssr")]
+pub(crate) fn parse_id(id: &str) -> Result<uuid::Uuid, leptos::prelude::ServerFnError> {
+    uuid::Uuid::parse_str(id)
+        .map_err(|_| leptos::prelude::ServerFnError::new(format!("Not a valid id: {id:?}")))
+}
+
+/// A name (a step's, say) as one segment of an API path: percent-encoded, so that `/`,
+/// `?` and `#` stay inside it, and refused if empty, `.` or `..`, which would leave the
+/// segment or climb out of it.
+#[cfg(feature = "ssr")]
+pub(crate) fn path_segment(name: &str) -> Result<String, leptos::prelude::ServerFnError> {
+    if name.is_empty() || name == "." || name == ".." {
+        return Err(leptos::prelude::ServerFnError::new(format!(
+            "Not a valid name: {name:?}"
+        )));
+    }
+    Ok(urlencoding::encode(name).into_owned())
+}
+
 #[cfg(feature = "ssr")]
 pub(crate) fn http_client() -> reqwest::Client {
     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
@@ -184,5 +206,37 @@ mod tests {
         std::env::remove_var("GRAFANA_URL");
         let result = get_grafana_url().await.unwrap();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn only_uuids_are_accepted_as_ids() {
+        let id = "0b9a4f9e-7c1e-4c55-9f1a-2a1e3c4d5e6f";
+        assert_eq!(parse_id(id).unwrap().to_string(), id);
+        for hostile in [
+            "",
+            "../../admin",
+            "x?all=true",
+            "abc/def",
+            "%2e%2e",
+            "1 OR 1",
+        ] {
+            assert!(parse_id(hostile).is_err(), "{hostile}");
+        }
+    }
+
+    #[test]
+    fn a_name_stays_within_its_path_segment() {
+        assert_eq!(path_segment("deploy-prod_1").unwrap(), "deploy-prod_1");
+        assert_eq!(path_segment("a/../b?c#d").unwrap(), "a%2F..%2Fb%3Fc%23d");
+        for hostile in ["", ".", ".."] {
+            assert!(path_segment(hostile).is_err(), "{hostile:?}");
+        }
+        // Joined into a URL, it never changes the path in front of it
+        let url = Url::parse(&format!(
+            "https://api/api/v1/runs/x/steps/{}/approve",
+            path_segment("../../../admin").unwrap()
+        ))
+        .unwrap();
+        assert!(url.path().starts_with("/api/v1/runs/x/steps/"), "{url}");
     }
 }
