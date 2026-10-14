@@ -29,15 +29,23 @@ impl DockerContainerMachine<state::Running> {
         let mounts = self.state.mounts.clone();
 
         let mut exit_code = None;
+        // How long the step may run: its own timeout within the runner's limits, or the
+        // runner's default. Nothing upstream enforces it; the runner does, here.
+        let timeout = stormchaser_model::dsl::limits::StepLimits::from_env()
+            .timeout(self.metadata.step_dsl.timeout.as_deref())
+            .unwrap_or_else(|_| stormchaser_model::dsl::limits::StepLimits::default().max_timeout);
+        let mut timed_out = false;
 
         if let Some(exec_id) = &self.state.exec_id {
-            // Poll for exec completion. Use a 24-hour deadline as a safety guard against
-            // an exec that never terminates; any per-step timeout is enforced upstream.
-            let deadline =
-                tokio::time::Instant::now() + tokio::time::Duration::from_secs(24 * 3600);
+            // Poll for exec completion
+            let deadline = tokio::time::Instant::now() + timeout;
             loop {
                 if tokio::time::Instant::now() > deadline {
+                    // The container is shared with other steps and an exec cannot be
+                    // killed through the Docker API, so the step is reported as failed
+                    // and its process is left to the container's own lifetime.
                     error!("Timed out waiting for exec {} to complete", exec_id);
+                    timed_out = true;
                     break;
                 }
                 match self.docker.inspect_exec(exec_id).await {
@@ -62,7 +70,23 @@ impl DockerContainerMachine<state::Running> {
                 }),
             );
 
-            exit_code = if let Some(wait_result) = wait_stream.next().await {
+            let waited = match tokio::time::timeout(timeout, wait_stream.next()).await {
+                Ok(waited) => waited,
+                Err(_) => {
+                    error!(
+                        "Container {} ran longer than {}; stopping it",
+                        container_name,
+                        humantime::format_duration(timeout)
+                    );
+                    timed_out = true;
+                    // SIGTERM, then SIGKILL after Docker's grace period
+                    if let Err(e) = self.docker.stop_container(&container_name, None).await {
+                        error!("Failed to stop container {}: {:?}", container_name, e);
+                    }
+                    None
+                }
+            };
+            exit_code = if let Some(wait_result) = waited {
                 match wait_result {
                     Ok(response) => Some(response.status_code),
                     Err(bollard::errors::Error::DockerContainerWaitError { error: _, code }) => {
@@ -125,7 +149,14 @@ impl DockerContainerMachine<state::Running> {
                 .await;
         }
 
-        let result = if exit_code == Some(0) {
+        let result = if timed_out {
+            let error_msg = format!(
+                "Step timed out after {}",
+                humantime::format_duration(timeout)
+            );
+            error!("Container {} failed: {}", container_name, error_msg);
+            ContainerState::Failed(error_msg, metrics)
+        } else if exit_code == Some(0) {
             info!("Container {} completed successfully", container_name);
             ContainerState::Succeeded(metrics)
         } else {
@@ -728,5 +759,68 @@ mod tests {
         );
         // Should omit put_url because host bind mounts do not park their state
         assert_eq!(urls.get("put_url"), None);
+    }
+
+    /// Runs a real container that would sleep for five minutes, with a two-second
+    /// timeout, and checks that the runner stops it and says why.
+    #[tokio::test]
+    async fn a_container_that_outlives_its_timeout_is_stopped() {
+        let Ok(docker) = Docker::connect_with_local_defaults() else {
+            return;
+        };
+        if docker.ping().await.is_err() {
+            return;
+        }
+        let step_dsl: Step = serde_json::from_value(serde_json::json!({
+            "name": "outlives-timeout",
+            "type": "RunContainer",
+            "params": {},
+            "spec": { "image": "alpine:3", "command": ["sleep", "300"] },
+            "timeout": "2s",
+            "aggregation": [],
+            "next": [],
+            "outputs": [],
+            "reports": []
+        }))
+        .unwrap();
+        let metadata = ContainerMetadata {
+            run_id: Uuid::new_v4(),
+            step_id: Uuid::new_v4(),
+            runner_id: "test_runner".to_string(),
+            fencing_token: 0,
+            step_dsl,
+            received_at: chrono::Utc::now(),
+            encryption_key: None,
+            loki_url: None,
+            storage: None,
+            test_report_urls: None,
+            registry_auth: None,
+        };
+
+        let started = std::time::Instant::now();
+        let machine = DockerContainerMachine::new(docker.clone(), metadata, None);
+        let crate::container_machine::StartResult::Running(running) =
+            machine.start().await.unwrap()
+        else {
+            panic!("the container did not start");
+        };
+        let container_name = running.state.container_name.clone();
+        let finished = running.wait().await.unwrap();
+
+        match finished.state.result {
+            ContainerState::Failed(reason, _) => {
+                assert!(reason.contains("timed out after 2s"), "{reason}")
+            }
+            ContainerState::Succeeded(_) => {
+                panic!("a step that timed out was reported as a success")
+            }
+        }
+        // Far sooner than the five minutes the command asked for
+        assert!(started.elapsed() < std::time::Duration::from_secs(120));
+        // And nothing of it is left running
+        assert!(docker
+            .inspect_container(&container_name, None)
+            .await
+            .is_err());
     }
 }

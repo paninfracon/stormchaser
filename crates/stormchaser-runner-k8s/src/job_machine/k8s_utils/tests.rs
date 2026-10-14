@@ -760,3 +760,91 @@ fn the_step_secret_is_owned_by_its_job() {
         vec!["t-1"]
     );
 }
+
+fn worker_resources(
+    job: &k8s_openapi::api::batch::v1::Job,
+) -> k8s_openapi::api::core::v1::ResourceRequirements {
+    job.spec
+        .as_ref()
+        .unwrap()
+        .template
+        .spec
+        .as_ref()
+        .unwrap()
+        .containers[0]
+        .resources
+        .clone()
+        .unwrap()
+}
+
+#[test]
+fn a_step_that_asks_for_nothing_is_still_bounded() {
+    let metadata = k8s_job_metadata(serde_json::json!({ "image": "alpine:latest" }));
+    let (job, _secrets) = do_build_job_spec("limits-1", &metadata, None, None).unwrap();
+
+    let resources = worker_resources(&job);
+    let limits = resources.limits.unwrap();
+    assert_eq!(limits["cpu"].0, "1");
+    assert_eq!(limits["memory"].0, "2Gi");
+    assert_eq!(resources.requests.unwrap()["memory"].0, "2Gi");
+    // And it cannot run for ever
+    assert_eq!(job.spec.unwrap().active_deadline_seconds, Some(24 * 3600));
+}
+
+#[test]
+fn a_steps_own_request_and_timeout_are_kept_within_the_limits() {
+    let mut metadata = k8s_job_metadata(serde_json::json!({
+        "image": "alpine:latest",
+        "resources": {
+            "requests": { "cpu": "250m", "memory": "256Mi" },
+            "limits": { "cpu": "2", "memory": "4Gi" }
+        },
+        "active_deadline_seconds": 600
+    }));
+    metadata.step_dsl.timeout = Some("30m".to_string());
+    let (job, _secrets) = do_build_job_spec("limits-2", &metadata, None, None).unwrap();
+
+    let resources = worker_resources(&job);
+    assert_eq!(resources.limits.as_ref().unwrap()["cpu"].0, "2");
+    assert_eq!(resources.limits.as_ref().unwrap()["memory"].0, "4Gi");
+    assert_eq!(resources.requests.as_ref().unwrap()["cpu"].0, "250m");
+    assert_eq!(resources.requests.as_ref().unwrap()["memory"].0, "256Mi");
+    // The shorter of the step's timeout and the deadline it set on the Job
+    assert_eq!(job.spec.unwrap().active_deadline_seconds, Some(600));
+
+    metadata.step_dsl.spec["active_deadline_seconds"] = serde_json::json!(86400);
+    let (job, _secrets) = do_build_job_spec("limits-2", &metadata, None, None).unwrap();
+    assert_eq!(job.spec.unwrap().active_deadline_seconds, Some(1800));
+}
+
+#[test]
+fn a_step_that_asks_for_more_than_the_runner_allows_is_refused() {
+    for (spec, timeout, expected) in [
+        (
+            serde_json::json!({ "image": "a", "resources": { "limits": { "memory": "64Gi" } } }),
+            None,
+            "memory",
+        ),
+        (
+            serde_json::json!({ "image": "a", "resources": { "requests": { "cpu": "64" } } }),
+            None,
+            "CPU",
+        ),
+        (
+            serde_json::json!({ "image": "a", "parallelism": 500 }),
+            None,
+            "parallelism",
+        ),
+        (
+            serde_json::json!({ "image": "a", "completions": 500 }),
+            None,
+            "completions",
+        ),
+        (serde_json::json!({ "image": "a" }), Some("30d"), "timeout"),
+    ] {
+        let mut metadata = k8s_job_metadata(spec);
+        metadata.step_dsl.timeout = timeout.map(str::to_string);
+        let err = do_build_job_spec("limits-3", &metadata, None, None).unwrap_err();
+        assert!(err.to_string().contains(expected), "{expected}: {err}");
+    }
+}

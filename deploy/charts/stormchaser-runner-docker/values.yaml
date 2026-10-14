@@ -22,6 +22,18 @@ config:
   # keeps the definition with its environment and parameter values removed.
   stateEncryptionSecret: ""
   stateEncryptionSecretKey: "key"
+  # What any one step may use, whatever its workflow asks for. A step that asks for
+  # more is refused; one that asks for nothing gets the defaults.
+  stepLimits:
+    defaultCpu: "1"
+    defaultMemory: "2Gi"
+    maxCpu: "8"
+    maxMemory: "16Gi"
+    # A step with no `timeout` of its own is stopped after this long.
+    defaultTimeout: "24h"
+    maxTimeout: "24h"
+    # Most processes and threads a step's container may have.
+    pidsLimit: 4096
   rustLog: "stormchaser_runner_docker=info"
   # Permit steps that set `privileged = true`. Such a step is root on the node.
   allowPrivileged: false

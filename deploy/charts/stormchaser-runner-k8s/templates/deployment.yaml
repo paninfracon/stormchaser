@@ -64,6 +64,20 @@ spec:
                   name: {{ . }}
                   key: {{ $.Values.config.stateEncryptionSecretKey }}
             {{- end }}
+            - name: STORMCHASER_STEP_DEFAULT_CPU
+              value: {{ .Values.config.stepLimits.defaultCpu | quote }}
+            - name: STORMCHASER_STEP_DEFAULT_MEMORY
+              value: {{ .Values.config.stepLimits.defaultMemory | quote }}
+            - name: STORMCHASER_STEP_MAX_CPU
+              value: {{ .Values.config.stepLimits.maxCpu | quote }}
+            - name: STORMCHASER_STEP_MAX_MEMORY
+              value: {{ .Values.config.stepLimits.maxMemory | quote }}
+            - name: STORMCHASER_STEP_DEFAULT_TIMEOUT
+              value: {{ .Values.config.stepLimits.defaultTimeout | quote }}
+            - name: STORMCHASER_STEP_MAX_TIMEOUT
+              value: {{ .Values.config.stepLimits.maxTimeout | quote }}
+            - name: STORMCHASER_STEP_MAX_PARALLELISM
+              value: {{ .Values.config.stepLimits.maxParallelism | quote }}
             - name: RUST_LOG
               value: {{ .Values.config.rustLog | quote }}
             - name: STORMCHASER_STEP_NAMESPACE

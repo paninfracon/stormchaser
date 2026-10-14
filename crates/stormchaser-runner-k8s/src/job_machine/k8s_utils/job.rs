@@ -11,8 +11,21 @@ pub fn do_build_job_spec(
     agent_image: Option<String>,
     sfs_pvc_name: Option<String>,
 ) -> Result<(Job, StepSecret)> {
-    let step_spec = parse_step_spec(metadata)?;
+    let mut step_spec = parse_step_spec(metadata)?;
     let mut secrets = StepSecret::new(job_name);
+
+    // What the runner allows any one step, whatever its workflow asks for
+    let limits = stormchaser_model::dsl::limits::StepLimits::from_env();
+    step_spec.resources = apply_step_limits(step_spec.resources, &limits)?;
+    limits.check_parallelism(step_spec.parallelism, step_spec.completions)?;
+    let timeout = limits.timeout(metadata.step_dsl.timeout.as_deref())?;
+    // A deadline the step set on the Job itself stands if it is the shorter
+    let active_deadline = step_spec
+        .active_deadline
+        .filter(|seconds| *seconds > 0)
+        .map_or(timeout.as_secs() as i64, |seconds| {
+            seconds.min(timeout.as_secs() as i64)
+        });
     StepPolicy::from_env().check(&step_spec)?;
 
     // Helper containers mount the step's volumes at the paths the step chose
@@ -119,7 +132,8 @@ pub fn do_build_job_spec(
             })),
             completions: Some(step_spec.completions.unwrap_or(1)),
             parallelism: Some(step_spec.parallelism.unwrap_or(1)),
-            active_deadline_seconds: step_spec.active_deadline,
+            // Kubernetes ends the Job, and its pods, when this runs out
+            active_deadline_seconds: Some(active_deadline.max(1)),
             ttl_seconds_after_finished: Some(step_spec.ttl_seconds_after_finished.unwrap_or(3600)),
             suspend,
             ..Default::default()

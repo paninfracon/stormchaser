@@ -247,3 +247,56 @@ async fn fetch_json(url: &str) -> serde_json::Value {
         .unwrap();
     serde_json::from_slice(&output.stdout).unwrap()
 }
+
+#[tokio::test]
+#[ignore = "needs a Kubernetes cluster"]
+async fn a_step_that_outlives_its_timeout_is_ended_by_the_cluster() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let client = kube::Client::try_default().await.unwrap();
+
+    let mut metadata = metadata(
+        "outlives-timeout",
+        json!({ "image": "alpine:3", "command": ["sleep", "300"] }),
+    );
+    metadata.step_dsl.timeout = Some("5s".to_string());
+
+    let started = std::time::Instant::now();
+    let StartResult::Running(machine) = K8sJobMachine::new(client.clone(), metadata)
+        .start()
+        .await
+        .unwrap()
+    else {
+        panic!("the Job did not start");
+    };
+    let job_name = machine.state.job_name.clone();
+
+    // The limits the runner applied are on the Job, and the cluster accepted them
+    let jobs: Api<Job> = Api::namespaced(client.clone(), &namespace());
+    let job = jobs.get(&job_name).await.unwrap();
+    let spec = job.spec.as_ref().unwrap();
+    assert_eq!(spec.active_deadline_seconds, Some(5));
+    let limits = spec.template.spec.as_ref().unwrap().containers[0]
+        .resources
+        .as_ref()
+        .unwrap()
+        .limits
+        .as_ref()
+        .unwrap();
+    assert_eq!(limits["memory"].0, "2Gi");
+    assert_eq!(limits["cpu"].0, "1");
+
+    match machine.wait().await.unwrap() {
+        JobState::Failed(reason, _) => {
+            assert!(
+                reason.to_lowercase().contains("deadline"),
+                "the failure does not say why: {reason}"
+            )
+        }
+        JobState::Succeeded(_) => panic!("a step that timed out was reported as a success"),
+    }
+    assert!(started.elapsed() < Duration::from_secs(120));
+
+    jobs.delete(&job_name, &delete_in_background())
+        .await
+        .unwrap();
+}

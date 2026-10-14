@@ -252,6 +252,36 @@ away from the control plane:
 `scripts/setup.sh` relaxes the network isolation and the privileged setting for
 local development; see [NATS: Quickstart and Production](nats.md).
 
+### What one step may use
+
+A step's CPU, memory, run time and parallelism come from its workflow. Each
+runner holds them to limits the operator sets, so that one workflow cannot
+starve a shared host or namespace. A step that asks for more than the maximum is
+refused before anything is started; a step that asks for nothing gets the
+default, not everything there is.
+
+| Limit | Default | Setting (Helm: `config.stepLimits.*`) |
+| :--- | :--- | :--- |
+| CPU for a step that asks for none | `1` | `STORMCHASER_STEP_DEFAULT_CPU` |
+| Memory for a step that asks for none | `2Gi` | `STORMCHASER_STEP_DEFAULT_MEMORY` |
+| Most CPU a step may ask for | `8` | `STORMCHASER_STEP_MAX_CPU` |
+| Most memory a step may ask for | `16Gi` | `STORMCHASER_STEP_MAX_MEMORY` |
+| Run time of a step with no `timeout` | `24h` | `STORMCHASER_STEP_DEFAULT_TIMEOUT` |
+| Longest `timeout` a step may set | `24h` | `STORMCHASER_STEP_MAX_TIMEOUT` |
+| Processes in a step's container (Docker) | 4096 | `STORMCHASER_STEP_PIDS_LIMIT` |
+| Pods one step's Job may run or complete (Kubernetes) | 10 | `STORMCHASER_STEP_MAX_PARALLELISM` |
+
+A step's `timeout` is enforced by the runner. On Kubernetes it becomes the Job's
+`activeDeadlineSeconds` (or the step's own, if that is shorter), and Kubernetes
+ends the Job and its pods when it runs out. On Docker the runner stops the
+container. Either way the step fails with a message saying it timed out. On
+Docker, memory is limited with no swap on top. A step that runs with `exec` in
+a container shared with other steps is reported as timed out but its process
+cannot be killed through the Docker API. Resources other than CPU and memory
+that a `RunK8sJob` step names (GPUs, ephemeral storage) are passed through as
+written; use a `ResourceQuota` and `LimitRange` on the step namespace for
+those, and as a second line of defence for the rest.
+
 ### Where a step's secrets are on a runner
 
 A step's environment carries the secrets its workflow resolved and the

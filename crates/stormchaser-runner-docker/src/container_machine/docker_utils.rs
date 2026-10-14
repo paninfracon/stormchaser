@@ -159,6 +159,13 @@ impl<S> DockerContainerMachine<S> {
             log_config,
             loki_url
         );
+        // What the runner allows any one step, whatever its workflow asks for. A step
+        // that asks for nothing gets the defaults, not the whole host.
+        let limits = stormchaser_model::dsl::limits::StepLimits::from_env();
+        let resources = limits.resources(spec.cpu.as_deref(), spec.memory.as_deref())?;
+        // Refused here, before anything is started, if the step's timeout is out of range
+        limits.timeout(self.metadata.step_dsl.timeout.as_deref())?;
+
         Ok(ContainerCreateBody {
             image: Some(final_image),
             cmd: final_args,
@@ -166,11 +173,13 @@ impl<S> DockerContainerMachine<S> {
             env: Some(env),
             labels: Some(labels),
             host_config: Some(HostConfig {
-                cpu_quota: spec.cpu.as_ref().and_then(|c| self.parse_cpu_to_quota(c)),
-                memory: spec
-                    .memory
-                    .as_ref()
-                    .and_then(|m| self.parse_memory_to_bytes(m)),
+                // Quota against Docker's default period of 100 ms
+                cpu_quota: Some(resources.cpu_millis as i64 * 100),
+                memory: Some(resources.memory_bytes as i64),
+                // No swap on top of the memory limit
+                memory_swap: Some(resources.memory_bytes as i64),
+                // Bounds a fork bomb to the container
+                pids_limit: Some(limits.pids_limit),
                 privileged: spec.privileged,
                 mounts: Some(mounts),
                 network_mode,
@@ -290,6 +299,70 @@ mod tests {
             .build_container_config(&spec, vec![], None, &[], "test-container", None)
             .unwrap();
         assert_eq!(config.image, Some("alpine:latest".into()));
+    }
+
+    fn container_spec(cpu: Option<&str>, memory: Option<&str>) -> CommonContainerSpec {
+        CommonContainerSpec {
+            image: "alpine:latest".into(),
+            registry_connection: None,
+            connections: None,
+            command: Some(vec!["true".into()]),
+            args: None,
+            env: None,
+            cpu: cpu.map(str::to_string),
+            memory: memory.map(str::to_string),
+            privileged: None,
+            storage_mounts: None,
+        }
+    }
+
+    #[test]
+    fn a_step_that_asks_for_nothing_is_still_bounded() {
+        let machine = get_dummy_machine();
+        let config = machine
+            .build_container_config(&container_spec(None, None), vec![], None, &[], "c", None)
+            .unwrap();
+        let host = config.host_config.unwrap();
+        // One CPU, 2 GiB with no swap on top, and a ceiling on processes
+        assert_eq!(host.cpu_quota, Some(100_000));
+        assert_eq!(host.memory, Some(2 * 1024 * 1024 * 1024));
+        assert_eq!(host.memory_swap, host.memory);
+        assert_eq!(host.pids_limit, Some(4096));
+    }
+
+    #[test]
+    fn a_steps_own_request_is_kept_within_the_limits_and_refused_beyond_them() {
+        let machine = get_dummy_machine();
+        let config = machine
+            .build_container_config(
+                &container_spec(Some("500m"), Some("512Mi")),
+                vec![],
+                None,
+                &[],
+                "c",
+                None,
+            )
+            .unwrap();
+        let host = config.host_config.unwrap();
+        assert_eq!(host.cpu_quota, Some(50_000));
+        assert_eq!(host.memory, Some(512 * 1024 * 1024));
+
+        for (cpu, memory) in [
+            (Some("64"), None),
+            (None, Some("64Gi")),
+            (Some("lots"), None),
+        ] {
+            assert!(machine
+                .build_container_config(&container_spec(cpu, memory), vec![], None, &[], "c", None)
+                .is_err());
+        }
+
+        let mut slow = get_dummy_machine();
+        slow.metadata.step_dsl.timeout = Some("30d".into());
+        let err = slow
+            .build_container_config(&container_spec(None, None), vec![], None, &[], "c", None)
+            .unwrap_err();
+        assert!(err.to_string().contains("timeout"), "{err}");
     }
 
     #[test]

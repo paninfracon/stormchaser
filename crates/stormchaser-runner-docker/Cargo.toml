@@ -9,6 +9,7 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
+humantime = "2.1"
 stormchaser-model = { workspace = true }
 tokio = { workspace = true }
 futures = { workspace = true }
