@@ -161,6 +161,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Runners may no longer create the engine's own consumers again, which would have changed what the engine receives.
 
   **Upgrade impact:** upgrade the engine and the runners together (signatures changed form); a NATS server you configure yourself needs the per-user inbox permissions in `docs/nats.md`, and a component logging in with a credentials file or a token needs `NATS_INBOX_PREFIX` set to the prefix its user may read.
+- The SSRF guard could be bypassed with a trailing dot in the host name (`http://internal.example./`): it checked and pinned the name without the dot, while the HTTP client looked the pin up with it, missed, and resolved the name again when it connected, so a name that resolved differently the second time (DNS rebinding) reached internal addresses. The request now goes to exactly the name that was checked. The guarded client also ignores `HTTP_PROXY`/`HTTPS_PROXY`, since a proxy resolves the name again itself. **Upgrade impact:** outbound HTTP from the engine (webhooks, REST API steps, Slack and Teams, registry tokens, WASM modules) and the API's connection tests no longer go through a proxy set in the environment.
 - Removed `h2` 0.3 (RUSTSEC-2026-0258) by building the AWS SDK without its legacy HTTP client.
 - Removed the unmaintained `unsafe-libyaml` (RUSTSEC-2024-0449) by replacing `serde_yaml`.
 

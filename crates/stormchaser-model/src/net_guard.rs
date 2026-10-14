@@ -121,7 +121,7 @@ pub async fn validate_url_with(
     raw_url: &str,
     allowed_hosts: &[String],
 ) -> Result<ValidatedUrl, String> {
-    let url = Url::parse(raw_url).map_err(|e| format!("Invalid URL: {}", e))?;
+    let mut url = Url::parse(raw_url).map_err(|e| format!("Invalid URL: {}", e))?;
 
     match url.scheme() {
         "http" | "https" => {}
@@ -150,6 +150,17 @@ pub async fn validate_url_with(
     };
 
     check_resolved(&display_host, &resolved, allowed_hosts)?;
+
+    // The client is pinned to the addresses checked for `domain`, and looks the pin up by
+    // the URL's host. A host written with a trailing dot (`metadata.example.`) would miss
+    // the pin, which is keyed without it, and be resolved again at connect time, so the
+    // URL is given the exact name that was checked.
+    if let Some(domain) = &domain {
+        if url.host_str() != Some(domain.as_str()) {
+            url.set_host(Some(domain))
+                .map_err(|e| format!("Invalid host '{}': {}", domain, e))?;
+        }
+    }
 
     Ok(ValidatedUrl {
         url,
@@ -237,7 +248,9 @@ pub async fn validate_host_with(
 ///
 /// The client connects only to the addresses that were validated, which closes the
 /// DNS-rebinding window between the check and the connection, and it does not follow
-/// redirects, since a 30x to an internal host would otherwise bypass the check.
+/// redirects, since a 30x to an internal host would otherwise bypass the check. It
+/// ignores `HTTP_PROXY` and the like: a proxy resolves the name again itself, so the
+/// pinned addresses would not be the ones connected to.
 pub async fn guarded_client(raw_url: &str) -> Result<(reqwest::Client, Url)> {
     let validated = validate_url_safe(raw_url)
         .await
@@ -245,7 +258,8 @@ pub async fn guarded_client(raw_url: &str) -> Result<(reqwest::Client, Url)> {
 
     let mut builder = reqwest::Client::builder()
         .timeout(DEFAULT_TIMEOUT)
-        .redirect(reqwest::redirect::Policy::none());
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy();
     if let Some(domain) = &validated.domain {
         builder = builder.resolve_to_addrs(domain, &validated.addrs);
     }
@@ -397,7 +411,21 @@ mod tests {
         assert_eq!(validated.addrs, vec!["127.0.0.1:9000".parse().unwrap()]);
         assert!(validated.domain.is_none());
 
+        // A trailing dot is checked, pinned and requested as the same name, so the pin
+        // cannot be missed and the name resolved again when the client connects
+        let allowed = vec!["localhost".to_string()];
+        let validated = validate_url_with("http://LocalHost.:9000/x?y=1", &allowed)
+            .await
+            .unwrap();
+        assert_eq!(validated.domain.as_deref(), Some("localhost"));
+        assert_eq!(validated.url.host_str(), Some("localhost"));
+        assert_eq!(validated.url.as_str(), "http://localhost:9000/x?y=1");
+        assert!(validate_url_with("http://localhost.:9000/", &[])
+            .await
+            .is_err());
+
         // Being allow-listed does not widen the permitted schemes.
+        let allowed = vec!["127.0.0.1".to_string()];
         assert!(validate_url_with("ftp://127.0.0.1/", &allowed)
             .await
             .is_err());
