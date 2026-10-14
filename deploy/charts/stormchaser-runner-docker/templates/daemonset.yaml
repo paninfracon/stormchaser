@@ -14,21 +14,26 @@ spec:
         {{- include "stormchaser-runner-docker.selectorLabels" . | nindent 8 }}
     spec:
       automountServiceAccountToken: false
-      {{- with .Values.dockerSocketGroup }}
       securityContext:
+        {{- with .Values.dockerSocketGroup }}
         runAsNonRoot: true
         runAsUser: 65532
         runAsGroup: 65532
         supplementalGroups:
           - {{ . }}
-      {{- end }}
+        {{- else }}
+        # The image's own user is unprivileged; without the socket's group only root
+        # can use the socket
+        runAsUser: 0
+        runAsGroup: 0
+        {{- end }}
       containers:
         - name: runner
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default (printf "v%s" .Chart.AppVersion) }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
             - name: BINARY

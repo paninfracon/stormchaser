@@ -1,4 +1,4 @@
-use crate::container_machine::{state, DockerContainerMachine, StartResult};
+use crate::container_machine::{state, DockerContainerMachine, StartResult, AGENT_USER};
 use anyhow::{Context, Result};
 use bollard::models::ContainerCreateBody;
 use bollard::models::VolumeCreateRequest;
@@ -245,6 +245,9 @@ impl DockerContainerMachine<state::Initialized> {
 
         let config = ContainerCreateBody {
             image: Some(agent_image.to_string()),
+            // Root, whatever the image says: it writes into the step's volume, whose
+            // files belong to whoever the step ran as.
+            user: Some(AGENT_USER.to_string()),
             cmd: Some(cmd),
             host_config: Some(HostConfig {
                 mounts: Some(vec![Mount {

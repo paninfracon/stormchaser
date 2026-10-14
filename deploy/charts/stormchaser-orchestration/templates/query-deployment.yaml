@@ -17,9 +17,13 @@ spec:
         {{- include "stormchaser-orchestration.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: query
     spec:
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: query
-          image: "{{ .Values.query.image.repository }}:{{ .Values.query.image.tag | default .Chart.AppVersion }}"
+          image: "{{ .Values.query.image.repository }}:{{ .Values.query.image.tag | default (printf "v%s" .Chart.AppVersion) }}"
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
           imagePullPolicy: {{ .Values.query.image.pullPolicy }}
           env:
             - name: BINARY

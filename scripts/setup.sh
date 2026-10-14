@@ -278,6 +278,7 @@ if [ "$MODE" == "hybrid" ]; then
     HOST_IP=$(ip -4 addr show docker0 | grep -Po 'inet \K[\d.]+' || hostname -I | awk '{print $1}')
     echo -e "${BLUE}>>> Importing Runner image to MicroK8s...${NC}"
     docker save stormchaser-runner-k8s:v1 | microk8s images import -
+    docker save stormchaser-agent:v1 | microk8s images import -
 
     echo -e "${BLUE}>>> Deploying K8s Runner via Helm...${NC}"
     mkdir -p "$REPO_ROOT/.tmp"
@@ -308,6 +309,10 @@ if [ "$MODE" == "hybrid" ]; then
       --set config.natsUrl="nats://$HOST_IP:${PORT_NATS}" \
       --set config.rustLog="stormchaser_runner_k8s=debug" \
       --set config.allowPrivileged="$STORMCHASER_ALLOW_PRIVILEGED" \
+      --set image.tag=v1 \
+      --set image.pullPolicy=Never \
+      --set global.agent.image.tag=v1 \
+      --set global.agent.image.pullPolicy=Never \
       --wait
 elif [ "$MODE" == "microk8s" ]; then
     NAMESPACE="stormchaser"
@@ -359,7 +364,7 @@ elif [ "$MODE" == "microk8s" ]; then
         rm -f charts/stormchaser-*.tgz
         helm dependency update
 
-        helm upgrade --install stormchaser .           --namespace "$NAMESPACE"           --create-namespace           --set "global.oidc.existingSecret=stormchaser-oidc-client"           --set "stormchaser-orchestration.api.image.repository=stormchaser-api"           --set "stormchaser-orchestration.api.image.tag=latest"           --set "stormchaser-orchestration.api.image.pullPolicy=Never"           --set "stormchaser-orchestration.query.image.repository=stormchaser-query"           --set "stormchaser-orchestration.query.image.tag=v2"           --set "stormchaser-orchestration.query.image.pullPolicy=Never"           --set "stormchaser-orchestration.engine.image.repository=stormchaser-engine"           --set "stormchaser-orchestration.engine.image.tag=latest"           --set "stormchaser-orchestration.engine.image.pullPolicy=Never"           --set "stormchaser-runner-k8s.image.repository=stormchaser-runner-k8s"           --set "stormchaser-runner-k8s.image.tag=latest"           --set "stormchaser-runner-k8s.image.pullPolicy=Never"           --set "stormchaser-runner-k8s.config.allowPrivileged=$STORMCHASER_ALLOW_PRIVILEGED"           --set "stormchaser-runner-k8s.networkPolicy.enabled=$STORMCHASER_ISOLATE_STEPS"           --set "global.agent.image.repository=stormchaser-agent"           --set "global.agent.image.tag=latest"           --set "global.agent.image.pullPolicy=Never"
+        helm upgrade --install stormchaser .           --namespace "$NAMESPACE"           --create-namespace           --set "global.oidc.existingSecret=stormchaser-oidc-client"           --set "stormchaser-orchestration.api.image.repository=stormchaser-api"           --set "stormchaser-orchestration.api.image.tag=latest"           --set "stormchaser-orchestration.api.image.pullPolicy=Never"           --set "stormchaser-orchestration.query.image.repository=stormchaser-query"           --set "stormchaser-orchestration.query.image.tag=latest"           --set "stormchaser-orchestration.query.image.pullPolicy=Never"           --set "stormchaser-orchestration.web.image.repository=stormchaser-web"           --set "stormchaser-orchestration.web.image.tag=latest"           --set "stormchaser-orchestration.web.image.pullPolicy=Never"           --set "stormchaser-orchestration.engine.image.repository=stormchaser-engine"           --set "stormchaser-orchestration.engine.image.tag=latest"           --set "stormchaser-orchestration.engine.image.pullPolicy=Never"           --set "stormchaser-runner-k8s.image.repository=stormchaser-runner-k8s"           --set "stormchaser-runner-k8s.image.tag=latest"           --set "stormchaser-runner-k8s.image.pullPolicy=Never"           --set "stormchaser-runner-k8s.config.allowPrivileged=$STORMCHASER_ALLOW_PRIVILEGED"           --set "stormchaser-runner-k8s.networkPolicy.enabled=$STORMCHASER_ISOLATE_STEPS"           --set "global.agent.image.repository=stormchaser-agent"           --set "global.agent.image.tag=latest"           --set "global.agent.image.pullPolicy=Never"
     )
 
     echo -e "${BLUE}>>> Deploying Dex Identity Provider...${NC}"

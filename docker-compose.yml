@@ -302,6 +302,11 @@ services:
       args:
         BINARY: stormchaser-runner-docker
     profiles: ["docker"]
+    # The image runs as an unprivileged user; only root (or the socket's group) can use
+    # the Docker socket. No capabilities are needed for that.
+    user: "0:0"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     environment:
       NATS_URL: nats://nats:4222
       NATS_USER: stormchaser-runner

@@ -1,4 +1,6 @@
-use crate::container_machine::{state, ContainerMetrics, ContainerState, DockerContainerMachine};
+use crate::container_machine::{
+    state, ContainerMetrics, ContainerState, DockerContainerMachine, AGENT_USER,
+};
 use anyhow::Result;
 use bollard::models::ContainerCreateBody;
 use bollard::models::HostConfig;
@@ -259,6 +261,8 @@ impl DockerContainerMachine<state::Running> {
 
         let agent_config = ContainerCreateBody {
             image: Some(agent_image.to_string()),
+            // Root, whatever the image says: it reads every file the step left behind
+            user: Some(AGENT_USER.to_string()),
             cmd: Some(agent_args),
             entrypoint: Some(vec!["/usr/local/bin/stormchaser-agent".to_string()]),
             host_config: Some(HostConfig {

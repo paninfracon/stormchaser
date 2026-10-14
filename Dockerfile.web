@@ -45,4 +45,9 @@ ENV LEPTOS_OUTPUT_NAME="stormchaser-web"
 ENV LEPTOS_SITE_ROOT="/app/site"
 ENV LEPTOS_SITE_ADDR="0.0.0.0:3000"
 
+# The web tier runs as an unprivileged user
+RUN groupadd --system --gid 65532 stormchaser && \
+    useradd --system --uid 65532 --gid 65532 --no-create-home --home-dir /nonexistent stormchaser
+USER 65532:65532
+
 CMD ["/usr/local/bin/stormchaser-web"]

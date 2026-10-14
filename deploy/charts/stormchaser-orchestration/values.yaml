@@ -4,7 +4,8 @@ global:
   image:
     repository: stormchaser
     pullPolicy: IfNotPresent
-    tag: "latest"
+    # Empty means the release this chart belongs to (v<appVersion>)
+    tag: ""
   database:
     url: "postgres://stormchaser:stormchaser@postgres:5432/stormchaser"
     existingSecret: ""
@@ -74,11 +75,29 @@ global:
     # Set to false only where a mesh or the network itself protects pod traffic.
     listen: true
 
+# The API, query service, web tier and engine run as an unprivileged user with no
+# capabilities. fsGroup makes the engine's git cache volume writable by that user,
+# including one an earlier release filled as root.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
 api:
   image:
     repository: stormchaser-api
     pullPolicy: IfNotPresent
-    tag: "latest"
+    # Empty means the release this chart belongs to (v<appVersion>)
+    tag: ""
   replicaCount: 1
   rustLog: "stormchaser_api=info"
   # Serve Swagger UI and the OpenAPI document, without authentication, at
@@ -140,7 +159,8 @@ query:
   image:
     repository: stormchaser-query
     pullPolicy: IfNotPresent
-    tag: "latest"
+    # Empty means the release this chart belongs to (v<appVersion>)
+    tag: ""
   replicaCount: 1
   rustLog: "stormchaser_query=info"
   service:
@@ -156,7 +176,8 @@ web:
   image:
     repository: stormchaser-web
     pullPolicy: IfNotPresent
-    tag: "latest"
+    # Empty means the release this chart belongs to (v<appVersion>)
+    tag: ""
   replicaCount: 1
   rustLog: "stormchaser_web=info"
   externalApiUrl: "http://localhost:3000"
@@ -180,7 +201,8 @@ engine:
   image:
     repository: stormchaser-engine
     pullPolicy: IfNotPresent
-    tag: "latest"
+    # Empty means the release this chart belongs to (v<appVersion>)
+    tag: ""
   replicaCount: 1
   rustLog: "stormchaser_engine=info"
   gitCacheDir: "/tmp/stormchaser/git-cache"

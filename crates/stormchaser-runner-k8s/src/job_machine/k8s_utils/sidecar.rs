@@ -213,10 +213,19 @@ pub(crate) fn build_agent_sidecar(
             ])),
             ..Default::default()
         }),
-        security_context: Some(SecurityContext {
-            allow_privilege_escalation: Some(false),
-            ..Default::default()
-        }),
+        security_context: Some(agent_security_context()),
+        ..Default::default()
+    }
+}
+
+/// How containers from the agent image run. The image's own user is unprivileged; the
+/// agent reads and writes files a step created as any user, so it runs as root, but
+/// cannot gain more than that.
+pub(crate) fn agent_security_context() -> SecurityContext {
+    SecurityContext {
+        run_as_user: Some(0),
+        run_as_group: Some(0),
+        allow_privilege_escalation: Some(false),
         ..Default::default()
     }
 }

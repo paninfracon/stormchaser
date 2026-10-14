@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
 
 # Install oras CLI (matching existing Dockerfile)
 RUN curl -LO "https://github.com/oras-project/oras/releases/download/v1.2.0/oras_1.2.0_linux_amd64.tar.gz" && \
+    echo "5b3f1cbb86d869eee68120b9b45b9be983f3738442f87ee5f06b00edd0bab336  oras_1.2.0_linux_amd64.tar.gz" | sha256sum -c - && \
     mkdir -p oras-install/ && \
     tar -zxf oras_1.2.0_linux_amd64.tar.gz -C oras-install/ && \
     mv oras-install/oras /usr/local/bin/ && \
@@ -35,6 +36,15 @@ ENV LEPTOS_SITE_ADDR="0.0.0.0:3000"
 
 # Copy migrations (needed by both API and Engine)
 COPY migrations /app/migrations
+
+# Services run as an unprivileged user. The engine's git cache is created owned by it,
+# so a fresh volume mounted there is writable. The Docker runner (which needs the
+# Docker socket) and the agent (which writes into steps' volumes) are run as root by
+# what starts them.
+RUN groupadd --system --gid 65532 stormchaser && \
+    useradd --system --uid 65532 --gid 65532 --no-create-home --home-dir /nonexistent stormchaser && \
+    mkdir -p /tmp/stormchaser/git-cache && chown -R 65532:65532 /tmp/stormchaser
+USER 65532:65532
 
 # Run the binary
 CMD ["/bin/sh", "-c", "/usr/local/bin/${BINARY_NAME}"]

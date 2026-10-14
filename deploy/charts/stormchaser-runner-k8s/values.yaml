@@ -4,9 +4,9 @@ replicaCount: 1
 
 image:
   repository: stormchaser-runner-k8s
-  pullPolicy: Never
-  # Overrides the image tag whose default is the chart appVersion.
-  tag: "v1"
+  pullPolicy: IfNotPresent
+  # Empty means the release this chart belongs to (v<appVersion>)
+  tag: ""
 
 imagePullSecrets: []
 nameOverride: ""
@@ -142,5 +142,7 @@ global:
   agent:
     image:
       repository: stormchaser-agent
-      tag: latest
-      pullPolicy: Never
+      # Empty means the release this chart belongs to (v<appVersion>). The agent runs
+      # beside every step, so in production name it by digest.
+      tag: ""
+      pullPolicy: IfNotPresent

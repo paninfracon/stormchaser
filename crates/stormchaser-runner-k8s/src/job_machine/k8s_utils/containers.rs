@@ -37,6 +37,7 @@ pub(crate) fn build_k8s_containers(
             image: Some(agent_img.clone()),
             image_pull_policy: if agent_img.contains("stormchaser-agent") { Some("IfNotPresent".to_string()) } else { None },
             command: Some(vec!["/bin/sh".to_string(), "-c".to_string(), "cp /usr/local/bin/stormchaser-agent /stormchaser/agent/stormchaser-agent && chmod +x /stormchaser/agent/stormchaser-agent".to_string()]),
+            security_context: Some(agent_security_context()),
             volume_mounts: Some(vec![VolumeMount {
                 name: "storm-agent".to_string(),
                 mount_path: "/stormchaser/agent".to_string(),
@@ -60,6 +61,7 @@ pub(crate) fn build_k8s_containers(
                         init_containers.push(Container {
                             name: normalize_resource_name(&mount.name, "unpark"),
                             image: Some(agent_image.clone().unwrap_or_else(|| "alpine:latest".to_string())),
+                            security_context: Some(agent_security_context()),
                             image_pull_policy: agent_image.as_ref().and_then(|img| if img.contains("stormchaser-agent") { Some("IfNotPresent".to_string()) } else { None }),
                             command: Some(vec!["/bin/sh".to_string()]),
                             // The presigned URL is read from the step's Secret, not
@@ -97,6 +99,7 @@ pub(crate) fn build_k8s_containers(
                             init_containers.push(Container {
                                 name: format!("{}-{}", normalize_resource_name(&mount.name, "prov"), prov_idx),
                                 image: Some(agent_image.clone().unwrap_or_else(|| "alpine:latest".to_string())),
+                            security_context: Some(agent_security_context()),
                             image_pull_policy: agent_image.as_ref().and_then(|img| if img.contains("stormchaser-agent") { Some("IfNotPresent".to_string()) } else { None }),
                                 command: Some(vec!["/bin/sh".to_string()]),
                                 args: Some(vec![

@@ -32,7 +32,7 @@ spec:
         - name: {{ .Chart.Name }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default (printf "v%s" .Chart.AppVersion) }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
             - name: NATS_URL
@@ -91,7 +91,7 @@ spec:
             - name: STORMCHASER_ALLOW_PRIVILEGED
               value: {{ .Values.config.allowPrivileged | quote }}
             - name: STORMCHASER_AGENT_IMAGE
-              value: "{{ .Values.global.agent.image.repository }}:{{ .Values.global.agent.image.tag }}"
+              value: "{{ .Values.global.agent.image.repository }}:{{ .Values.global.agent.image.tag | default (printf "v%s" .Chart.AppVersion) }}"
           ports:
             - name: http
               containerPort: 8080

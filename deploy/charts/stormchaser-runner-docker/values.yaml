@@ -1,7 +1,8 @@
 image:
-  repository: stormchaser
+  repository: stormchaser-runner-docker
   pullPolicy: IfNotPresent
-  tag: "latest"
+  # Empty means the release this chart belongs to (v<appVersion>)
+  tag: ""
 
 nameOverride: ""
 fullnameOverride: ""

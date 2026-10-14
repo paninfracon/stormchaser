@@ -143,3 +143,7 @@ pub fn agent_image() -> String {
         .filter(|image| !image.is_empty())
         .unwrap_or_else(|| "stormchaser-agent:v1".to_string())
 }
+
+/// The user agent containers run as. The image runs as an unprivileged user by
+/// default; the agent reads and writes files a step created as any user.
+pub const AGENT_USER: &str = "0:0";
