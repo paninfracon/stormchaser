@@ -19,7 +19,6 @@ pub async fn handle_approval_notification(
     {
         use lettre::message::header::ContentType;
         use lettre::{Message, Transport};
-        use minijinja::Environment;
         use tracing::info;
 
         let spec: stormchaser_model::dsl::EmailSpec = serde_json::from_value(spec)?;
@@ -58,9 +57,7 @@ pub async fn handle_approval_notification(
         });
 
         // 3. Render Body
-        let env = Environment::new();
-        let rendered_body = env
-            .render_str(&spec.body, minijinja::value::Serde(template_ctx))
+        let rendered_body = crate::templating::render_str(&spec.body, &template_ctx)
             .map_err(|e| anyhow::anyhow!("Failed to render approval email body: {:?}", e))?;
 
         // 4. Build Email

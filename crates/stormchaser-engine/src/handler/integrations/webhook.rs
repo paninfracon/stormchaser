@@ -56,11 +56,9 @@ fn render_webhook_body(
     spec: &dsl::WebhookInvokeSpec,
     template_ctx: &Value,
 ) -> Result<Option<String>> {
-    use minijinja::Environment;
     if let Some(body_tmpl) = &spec.body {
-        let env = Environment::new();
         Ok(Some(
-            env.render_str(body_tmpl, minijinja::value::Serde(template_ctx))
+            crate::templating::render_str(body_tmpl, template_ctx)
                 .map_err(|e| anyhow::anyhow!("Failed to render webhook body: {:?}", e))?,
         ))
     } else {

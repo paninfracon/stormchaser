@@ -231,11 +231,9 @@ fn apply_http_connection(
 }
 
 fn render_request_body(spec: &RestApiSpec, template_ctx: &Value) -> Result<Option<String>> {
-    use minijinja::Environment;
     if let Some(body_tmpl) = &spec.body {
-        let env = Environment::new();
         Ok(Some(
-            env.render_str(body_tmpl, minijinja::value::Serde(template_ctx))
+            crate::templating::render_str(body_tmpl, template_ctx)
                 .map_err(|e| anyhow::anyhow!("Failed to render request body: {:?}", e))?,
         ))
     } else {

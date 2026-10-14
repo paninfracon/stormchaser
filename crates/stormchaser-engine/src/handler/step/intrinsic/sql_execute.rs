@@ -119,12 +119,8 @@ async fn handle_sql_execute(
         "run": { "id": run_id.to_string() }
     });
 
-    let query = {
-        use minijinja::Environment;
-        let env = Environment::new();
-        env.render_str(&spec.query, minijinja::value::Serde(&template_ctx))
-            .map_err(|e| anyhow::anyhow!("Failed to render SQL query template: {:?}", e))?
-    };
+    let query = crate::templating::render_str(&spec.query, &template_ctx)
+        .map_err(|e| anyhow::anyhow!("Failed to render SQL query template: {:?}", e))?;
 
     let rows_affected = match conn.connection_type {
         stormchaser_model::connections::ConnectionType::Postgres => {

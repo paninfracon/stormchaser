@@ -44,6 +44,8 @@ pub mod stdlib;
 pub mod step_machine;
 /// OpenTelemetry tracing and metrics initialization.
 pub mod telemetry;
+/// Rendering of workflow authors' Jinja templates, within fuel and output limits.
+pub mod templating;
 /// WebAssembly module execution utilities.
 pub mod wasm;
 /// State machine for full workflow runs.

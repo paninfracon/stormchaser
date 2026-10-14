@@ -61,9 +61,7 @@ pub async fn handle_email_send(
     });
 
     // 3. Render Body
-    let env = minijinja::Environment::new();
-    let rendered_body = env
-        .render_str(&spec.body, minijinja::value::Serde(template_ctx))
+    let rendered_body = crate::templating::render_str(&spec.body, &template_ctx)
         .map_err(|e| anyhow::anyhow!("Failed to render email body: {:?}", e))?;
 
     let is_html = spec.html.unwrap_or(false);

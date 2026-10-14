@@ -114,7 +114,6 @@ fn render_test_report_body(
     spec: &dsl::TestReportEmailSpec,
     template_ctx: &Value,
 ) -> Result<String> {
-    use minijinja::Environment;
     let default_template = r#"
     <html>
     <head>
@@ -176,8 +175,7 @@ fn render_test_report_body(
     "#;
 
     let template_str = spec.template.as_deref().unwrap_or(default_template);
-    let env = Environment::new();
-    env.render_str(template_str, minijinja::value::Serde(template_ctx))
+    crate::templating::render_str(template_str, template_ctx)
         .map_err(|e| anyhow::anyhow!("Failed to render test report email body: {:?}", e))
 }
 
