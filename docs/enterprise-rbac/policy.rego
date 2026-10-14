@@ -116,6 +116,12 @@ has_api_permission if {
 	user_has_role("admin")
 }
 
+# Anyone may ask who their own token identifies (the web UI checks a session this way)
+has_api_permission if {
+	input.method == "GET"
+	input.path == "/api/v1/auth/session"
+}
+
 # Developers can view and start runs
 has_api_permission if {
 	user_has_role("developer")

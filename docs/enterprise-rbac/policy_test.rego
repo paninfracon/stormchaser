@@ -166,3 +166,20 @@ test_only_an_admin_may_choose_the_default_storage_backend if {
 		with data.role_mappings as mock_data.role_mappings
 		with data.allowed_email_domains as mock_data.allowed_email_domains
 }
+
+test_anyone_in_the_domain_may_check_their_session if {
+	allow with input as {
+		"method": "GET",
+		"path": "/api/v1/auth/session",
+		"token": mock_token("dev@paninfracon.net", ["Okta-Engineering"]),
+	}
+		with data.role_mappings as mock_data.role_mappings
+		with data.allowed_email_domains as mock_data.allowed_email_domains
+	not allow with input as {
+		"method": "GET",
+		"path": "/api/v1/auth/session",
+		"token": mock_token("dev@example.com", ["Okta-Engineering"]),
+	}
+		with data.role_mappings as mock_data.role_mappings
+		with data.allowed_email_domains as mock_data.allowed_email_domains
+}

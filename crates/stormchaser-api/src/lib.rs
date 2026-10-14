@@ -72,6 +72,7 @@ pub use routes::*;
 #[openapi(
     paths(
         routes::auth::login,
+        routes::auth::session,
         routes::auth::exchange_token,
         routes::auth::refresh_token,
         routes::workflow::enqueue_workflow,
@@ -112,7 +113,7 @@ pub use routes::*;
     ),
     components(
         schemas(
-            AuthExchangeRequest, AuthExchangeResponse, AuthRefreshRequest,
+            AuthExchangeRequest, AuthExchangeResponse, AuthRefreshRequest, SessionResponse,
             EnqueueRequest, EnqueueResponse, RunOverrides,
             ListRunsQuery, WorkflowRunDetail,
             WorkflowRunFullDetail, StepDetail,
@@ -266,6 +267,7 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/connections/test", post(test_connection))
         .route("/schema/parse-git", post(routes::schema::parse_git))
+        .route("/auth/session", get(session))
         // Runs after the two below: who may act on the object the path names.
         .layer(middleware::from_fn_with_state(
             state.clone(),

@@ -92,6 +92,7 @@ fn protected_routes() -> Vec<(Method, String)> {
         (Method::DELETE, format!("/api/v1/connections/{id}")),
         (Method::POST, "/api/v1/connections/test".into()),
         (Method::POST, "/api/v1/schema/parse-git".into()),
+        (Method::GET, "/api/v1/auth/session".into()),
     ]
 }
 
@@ -219,4 +220,39 @@ async fn policy_sees_the_full_request_path() {
 
     let seen = authorizer.seen.lock().unwrap().clone();
     assert_eq!(seen, vec![("GET".to_string(), path)]);
+}
+
+/// The session endpoint answers a valid token with who it identifies.
+#[tokio::test]
+async fn a_valid_token_has_a_session() {
+    let claims = stormchaser_model::auth::Claims {
+        sub: "session-user".to_string(),
+        email: Some("session-user@paninfracon.net".to_string()),
+        exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
+    };
+    let token = jsonwebtoken::encode(
+        &jsonwebtoken::Header::default(),
+        &claims,
+        &jsonwebtoken::EncodingKey::from_secret(stormchaser_api::JWT_SECRET),
+    )
+    .unwrap();
+    let router = app(mock_state().await);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/auth/session")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(body["sub"], "session-user");
+    assert_eq!(body["email"], "session-user@paninfracon.net");
 }

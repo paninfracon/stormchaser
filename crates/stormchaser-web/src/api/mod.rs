@@ -52,6 +52,28 @@ pub(crate) async fn require_auth() -> Result<String, ServerFnError> {
     }
 }
 
+/// The session token, once the API has confirmed it is valid.
+///
+/// [`require_auth`] only finds the cookie; calls that the API makes are checked there.
+/// Work the web tier does itself, such as parsing a workflow, must not be done for
+/// whoever sends a cookie with any value in it.
+#[cfg(feature = "ssr")]
+pub(crate) async fn require_session() -> Result<String, ServerFnError> {
+    let token = require_auth().await?;
+    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+    let res = http_client()
+        .get(format!("{}/api/v1/auth/session", api_url))
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
+        .send()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+    if res.status().is_success() {
+        Ok(token)
+    } else {
+        Err(ServerFnError::new("Unauthorized: No active session"))
+    }
+}
+
 #[server(input = Json, output = Json)]
 pub async fn check_auth() -> Result<bool, ServerFnError> {
     let _ = require_auth().await?;

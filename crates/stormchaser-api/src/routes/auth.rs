@@ -1,6 +1,6 @@
-use super::{AuthExchangeRequest, AuthExchangeResponse, AuthRefreshRequest};
+use super::{AuthExchangeRequest, AuthExchangeResponse, AuthRefreshRequest, SessionResponse};
 use crate::auth;
-use crate::{AppState, Claims};
+use crate::{AppState, AuthClaims, Claims};
 use axum::{
     extract::{Query, State},
     http::StatusCode,
@@ -25,6 +25,27 @@ pub struct LoginQuery {
     pub state: Option<String>,
     /// Optional PKCE challenge (S256) from a client that keeps the verifier.
     pub code_challenge: Option<String>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/auth/session",
+    responses(
+        (status = 200, description = "The token is valid", body = SessionResponse),
+        (status = 401, description = "No valid token")
+    ),
+    security(
+        ("bearer_auth" = [])
+    ),
+    tag = "stormchaser"
+)]
+/// Who the bearer token identifies. A cheap way for a client holding a token to check
+/// that it is still valid.
+pub async fn session(AuthClaims(claims): AuthClaims) -> Json<SessionResponse> {
+    Json(SessionResponse {
+        sub: claims.sub,
+        email: claims.email,
+    })
 }
 
 #[utoipa::path(

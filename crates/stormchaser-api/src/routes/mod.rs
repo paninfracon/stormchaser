@@ -61,6 +61,15 @@ pub struct AuthRefreshRequest {
     pub refresh_token: String,
 }
 
+#[derive(Debug, Serialize, ToSchema)]
+/// Who a valid token identifies.
+pub struct SessionResponse {
+    /// The token's subject.
+    pub sub: String,
+    /// The token's email, if it has one.
+    pub email: Option<String>,
+}
+
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct ParseGitRequest {
     /// The connection (ID or name) to the repository.

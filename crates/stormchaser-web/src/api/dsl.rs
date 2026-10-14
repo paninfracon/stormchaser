@@ -144,9 +144,13 @@ pub struct ParseDslResult {
 pub async fn parse_dsl(dsl: String) -> Result<ParseDslResult, ServerFnError> {
     #[cfg(feature = "ssr")]
     {
-        let _cookie = require_auth().await?;
+        super::require_session().await?;
         use stormchaser_dsl::StormchaserParser;
-        match StormchaserParser.parse(&dsl) {
+        // Parsing is CPU work; keep it off the threads that serve requests
+        let parsed = tokio::task::spawn_blocking(move || StormchaserParser.parse(&dsl))
+            .await
+            .map_err(|e| ServerFnError::new(e.to_string()))?;
+        match parsed {
             Ok(workflow) => {
                 let initial_inputs = serde_json::json!({});
                 let queries_val = serde_json::to_value(&workflow.queries).ok();

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `GET /api/v1/auth/session` returns the subject and email of the caller's token, a cheap check that a token is valid.
+
 - Webhooks have a third source type, `signed`, which verifies deliveries the [Standard Webhooks](https://www.standardwebhooks.com/) way: an HMAC-SHA256 signature over the message id, a timestamp and the body (`webhook-id`, `webhook-timestamp`, `webhook-signature`). The secret never travels with the delivery, and a delivery more than five minutes old is refused. See `docs/security.md`.
 
 - `SqlExecute` takes `params`, values for the statement's `$1`, `$2`, ... placeholders, bound by the database rather than written into the SQL. See `docs/steps/SqlExecute.md`.
@@ -178,6 +180,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The API's run stream (`GET /runs/stream`) ends when its client disconnects, even when the client may read none of the runs it would carry.
 - Only an admin may make a connection the default storage backend (`is_default_sfs`), when creating or changing it, once any admin is configured. The default receives the files, artifacts and test reports of every run that names no backend, so a user who made their own connection the default could read and replace other users' data. The policy asks this as a new action, `make_default`; custom policies that let owners do anything to their connections should refuse it to non-admins.
 - An S3 connection with neither keys nor a role no longer has the engine sign its storage and artifact URLs with the engine's own AWS identity, unless it is the default storage backend. Any user could otherwise name any bucket the engine's role can write and have their steps upload into it. **Upgrade impact:** a non-default S3 connection that relied on the engine's IRSA or instance role needs keys, or a role listed in `STORMCHASER_AWS_ALLOWED_ROLE_ARNS`.
+- The web UI parses a workflow (`parse_dsl`) only for a session the API accepts, on a blocking thread. Before, any `auth_token` cookie, whatever its value, was enough to have the web tier parse up to 1 MiB of HCL on a request-serving thread.
 - Removed `h2` 0.3 (RUSTSEC-2026-0258) by building the AWS SDK without its legacy HTTP client.
 - Removed the unmaintained `unsafe-libyaml` (RUSTSEC-2024-0449) by replacing `serde_yaml`.
 
