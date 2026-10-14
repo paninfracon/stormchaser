@@ -173,6 +173,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The umbrella chart's bundled sub-chart archives are rebuilt, so it ships the current OPA policy.
 - The API refuses an identity provider's token that names an email without `"email_verified": true`, at login, refresh and on direct use. Owners, admins and approvers are recorded by email, so an unverified address could be used to act as its real owner. **Upgrade impact:** with a provider that omits the claim (some do, and only issue verified addresses), set `STORMCHASER_OIDC_REQUIRE_EMAIL_VERIFIED=false`.
 - CI and the release workflow run `cargo deny check`, so a release no longer builds with a dependency that has a known advisory. Tagged releases sign the Linux archives (a `.sigstore.json` bundle each) and the images with cosign, keyless; see `docs/release-howto.md` to verify them.
+- `POST /runs` checks that the caller may use the Git connection it names, as cron workflows, event rules and `parse-git` already did. Under the shipped policy everyone may use every connection, so this changes nothing there.
 - Removed `h2` 0.3 (RUSTSEC-2026-0258) by building the AWS SDK without its legacy HTTP client.
 - Removed the unmaintained `unsafe-libyaml` (RUSTSEC-2024-0449) by replacing `serde_yaml`.
 

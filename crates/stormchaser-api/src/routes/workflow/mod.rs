@@ -36,15 +36,15 @@ pub use stream::*;
     ),
     tag = "stormchaser"
 )]
-#[tracing::instrument(skip(state, claims, payload), fields(run_id = tracing::field::Empty, initiating_user = tracing::field::Empty))]
+#[tracing::instrument(skip(state, caller, payload), fields(run_id = tracing::field::Empty, initiating_user = tracing::field::Empty))]
 /// Enqueue workflow.
 pub async fn enqueue_workflow(
-    AuthClaims(claims): AuthClaims,
+    caller: Caller,
     State(state): State<AppState>,
     Json(payload): Json<EnqueueRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let run_id = RunId::new_v4();
-    let user_id = claims.email.clone().unwrap_or(claims.sub.clone());
+    let user_id = caller.owner_key();
 
     let span = tracing::Span::current();
     span.record("run_id", tracing::field::display(run_id));
@@ -75,6 +75,8 @@ pub async fn enqueue_workflow(
         tracing::error!("Connection {} is not a Git connection", payload.connection);
         return Err(StatusCode::BAD_REQUEST);
     }
+
+    authz::authorize_connection_use(&state, &caller, conn.id.into_inner()).await?;
 
     let repo_url = conn
         .config

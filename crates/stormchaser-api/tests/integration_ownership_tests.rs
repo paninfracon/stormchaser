@@ -35,6 +35,15 @@ impl Drop for ContainerGuard {
 
 /// Starts OPA with the shipped policy and API lock-down, and `settings` as its data.
 async fn start_opa(settings: Value) -> (ContainerGuard, tempfile::TempDir, String) {
+    start_opa_with(None, settings).await
+}
+
+/// Starts OPA as [`start_opa`] does, with `policy` in place of the shipped
+/// `policy.rego` when given.
+async fn start_opa_with(
+    policy: Option<&str>,
+    settings: Value,
+) -> (ContainerGuard, tempfile::TempDir, String) {
     let port = TcpListener::bind("127.0.0.1:0")
         .unwrap()
         .local_addr()
@@ -55,6 +64,13 @@ async fn start_opa(settings: Value) -> (ContainerGuard, tempfile::TempDir, Strin
         json!({ "stormchaser_settings": settings }).to_string(),
     )
     .unwrap();
+    let policy_file = match policy {
+        Some(policy) => {
+            std::fs::write(settings_dir.path().join("policy.rego"), policy).unwrap();
+            "/etc/opa-settings/policy.rego"
+        }
+        None => "/etc/opa/policy.rego",
+    };
     // The OPA image runs as a non-root user
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(settings_dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -71,7 +87,7 @@ async fn start_opa(settings: Value) -> (ContainerGuard, tempfile::TempDir, Strin
         .args(["run", "--server", "--addr", "0.0.0.0:8181"])
         .arg("--authorization=basic")
         .args([
-            "/etc/opa/policy.rego",
+            policy_file,
             "/etc/opa/authz.rego",
             "/etc/opa-settings/settings.json",
         ])
@@ -528,4 +544,100 @@ async fn a_report_is_only_served_under_its_own_run() {
         .execute(&pool)
         .await
         .unwrap();
+}
+
+/// Allows everything except using a connection someone else owns.
+const OWNER_ONLY_USE_POLICY: &str = r#"
+package stormchaser
+
+import rego.v1
+
+default allow := false
+
+allow if not input.action
+
+allow if {
+	input.action
+	input.action != "use"
+}
+
+allow if {
+	input.action == "use"
+	input.resource.owner == input.subject.email
+}
+"#;
+
+#[tokio::test]
+async fn starting_a_run_needs_use_of_its_git_connection() {
+    let tag = Uuid::new_v4().simple().to_string();
+    let alice_email = format!("alice-{tag}@example.com");
+    let bob_email = format!("bob-{tag}@example.com");
+    let (alice, bob) = (bearer(&alice_email), bearer(&bob_email));
+
+    let (_opa, _settings, opa_url) = start_opa_with(Some(OWNER_ONLY_USE_POLICY), json!({})).await;
+    let state = state_with_policy(opa_url).await;
+    let pool = state.pool.clone();
+    let router = app(state);
+
+    let repo_name = format!("repo-{tag}");
+    let (status, created) = call(
+        &router,
+        Method::POST,
+        "/api/v1/connections",
+        &alice,
+        Some(json!({
+            "name": repo_name, "connection_type": "git",
+            "config": {"repo_url": "https://git.example.com/repo.git"}, "is_default_sfs": false
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let repo = created["id"].as_str().unwrap().to_string();
+
+    let enqueue = |connection: &str| {
+        json!({
+            "workflow_name": format!("w-{tag}"), "connection": connection,
+            "workflow_path": "w.storm", "git_ref": "main", "inputs": {}
+        })
+    };
+    for connection in [&repo, &repo_name] {
+        assert_eq!(
+            call(
+                &router,
+                Method::POST,
+                "/api/v1/runs",
+                &bob,
+                Some(enqueue(connection))
+            )
+            .await
+            .0,
+            StatusCode::FORBIDDEN,
+            "bob started a run from alice's connection {connection}"
+        );
+    }
+    let (status, started) = call(
+        &router,
+        Method::POST,
+        "/api/v1/runs",
+        &alice,
+        Some(enqueue(&repo)),
+    )
+    .await;
+    assert!(status.is_success(), "{status}: {started}");
+
+    sqlx::query("DELETE FROM workflow_runs WHERE workflow_name = $1")
+        .bind(format!("w-{tag}"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(call(
+        &router,
+        Method::DELETE,
+        &format!("/api/v1/connections/{repo}"),
+        &alice,
+        None
+    )
+    .await
+    .0
+    .is_success());
 }
