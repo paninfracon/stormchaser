@@ -788,6 +788,19 @@ workflow "Example" {
 * `inputs.replica_count > 5 && env_name == 'prod'` (where 'env_name' is an alias for 'inputs.environment')
 * `has(inputs.optional_flag) && inputs.optional_flag == true`
 
+#### 5.2.1 `${...}` inside Jinja templates
+
+Some fields are MiniJinja templates, rendered when the step runs: the `query` of
+`SqlExecute`, the `template` of `JinjaRender` and `TestReportEmail`, the `body` of
+`RestApi`, `WebhookInvoke` and `EmailSend`, and the `notify.body` of `Approval` and
+`TerraformApproval`. A `${...}` in one of them is still evaluated first, but its value
+goes into the template as text: an input holding `{{ ... }}` or `{% ... %}` is printed
+as written, not run as template code. To work with a value in Jinja itself, refer to it
+there (`{{ inputs.name }}`) rather than splicing it in.
+
+Splicing a value into a `SqlExecute` query puts it in the SQL. Pass values in `params`
+instead; see [SqlExecute](steps/SqlExecute.md).
+
 #### 5.3 Stormchaser Standard Library (HCL)
 
 Stormchaser provides a set of built-in functions extending HCL to handle common workflow tasks.

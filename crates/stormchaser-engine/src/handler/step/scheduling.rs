@@ -104,7 +104,7 @@ pub async fn schedule_step(
         )
         .await?;
     } else {
-        let _ = crate::hcl_eval::resolve_expressions(&mut resolved_spec, hcl_ctx, true);
+        let _ = crate::hcl_eval::resolve_step_spec(&resolved_type, &mut resolved_spec, hcl_ctx);
         let _ = crate::hcl_eval::resolve_expressions(&mut resolved_params, hcl_ctx, true);
 
         // A Terraform approval is an approval from the moment it exists. Left as its own
@@ -231,7 +231,11 @@ async fn schedule_iterated_steps(
         iteration_ctx.declare_var(iter_var_name, crate::hcl_eval::json_to_hcl(item));
 
         let mut resolved_spec_iter = resolved_spec.clone();
-        let _ = crate::hcl_eval::resolve_expressions(&mut resolved_spec_iter, &iteration_ctx, true);
+        let _ = crate::hcl_eval::resolve_step_spec(
+            resolved_type,
+            &mut resolved_spec_iter,
+            &iteration_ctx,
+        );
 
         let mut resolved_params_iter = resolved_params.clone();
         let _ =

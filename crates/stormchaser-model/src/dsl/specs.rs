@@ -200,8 +200,15 @@ pub struct LambdaInvokeSpec {
 pub struct SqlExecuteSpec {
     /// The database connection name.
     pub connection: String,
-    /// The SQL query to execute.
+    /// The SQL query to execute. Values from inputs or other steps belong in `params`,
+    /// not in the query text.
     pub query: String,
+    /// Values for the query's `$1`, `$2`, ... placeholders, sent to the database apart
+    /// from the query, so they are never read as SQL. Strings are sent as `text`,
+    /// whole numbers as `bigint`, other numbers as `double precision`, booleans as
+    /// `boolean`, and lists and objects as `jsonb`; cast in the query where a column
+    /// needs another type (`$1::int`).
+    pub params: Option<Vec<Value>>,
 }
 
 /// Specification for checking out a Git repository.

@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Webhooks have a third source type, `signed`, which verifies deliveries the [Standard Webhooks](https://www.standardwebhooks.com/) way: an HMAC-SHA256 signature over the message id, a timestamp and the body (`webhook-id`, `webhook-timestamp`, `webhook-signature`). The secret never travels with the delivery, and a delivery more than five minutes old is refused. See `docs/security.md`.
 
+- `SqlExecute` takes `params`, values for the statement's `$1`, `$2`, ... placeholders, bound by the database rather than written into the SQL. See `docs/steps/SqlExecute.md`.
+
 ### Changed
 
 - Upgraded all dependencies to their latest releases, including Axum 0.8, Leptos 0.8, SQLx 0.9, reqwest 0.13, kube 4, schemars 1, MiniJinja 3 and jaq 3.
@@ -132,6 +134,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The API, the query service and the engine log a warning at start when their database connection is not verified TLS.
 - A Kubernetes cron trigger's token is kept in a Secret owned by its CronJob and read from a mounted file, instead of sitting in the CronJob's arguments where anyone who can read workloads could see it. The trigger image is pinned by digest (it was `curlimages/curl:latest`; `STORMCHASER_CRON_IMAGE` replaces it), and the trigger pod runs non-root with no capabilities and no service account token.
 - Runners hold every step to CPU and memory limits set by the operator. A step that names none gets 1 CPU and 2 GiB instead of no limit at all; one that asks for more than 8 CPUs or 16 GiB is refused (`STORMCHASER_STEP_DEFAULT_*`, `STORMCHASER_STEP_MAX_*`; Helm: `config.stepLimits`). The Docker runner also disables swap for step containers and limits them to 4096 processes; the Kubernetes runner refuses a Job with more than 10 parallel pods or completions.
+- **A value spliced into a Jinja template was run as template code.** In fields the engine renders with MiniJinja (`SqlExecute` `query`, `JinjaRender` and `TestReportEmail` `template`, the `body` of `RestApi`, `WebhookInvoke` and `EmailSend`, an approval's `notify.body`), a `${...}` was evaluated and then rendered again, so an input holding `{{ ... }}` or `{% ... %}` ran in the second pass, with the run's inputs and step outputs to hand. A value spliced in with `${...}` is now printed as written. **Upgrade impact:** a workflow that built Jinja code from an input or a step's output must refer to the value in Jinja (`{{ inputs.name }}`) instead. Values for a `SqlExecute` statement belong in its new `params`, which the database binds; spliced into `query`, they are still SQL.
 - Removed `h2` 0.3 (RUSTSEC-2026-0258) by building the AWS SDK without its legacy HTTP client.
 - Removed the unmaintained `unsafe-libyaml` (RUSTSEC-2024-0449) by replacing `serde_yaml`.
 

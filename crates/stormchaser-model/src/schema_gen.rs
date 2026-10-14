@@ -415,6 +415,10 @@ mod tests {
             properties.contains_key("query"),
             "SqlExecuteSpec schema should include the query property"
         );
+        assert!(
+            properties.contains_key("params"),
+            "SqlExecuteSpec schema should include the params property"
+        );
     }
 
     #[test]

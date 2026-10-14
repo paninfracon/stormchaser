@@ -124,6 +124,129 @@ pub fn create_context(
     ctx
 }
 
+/// The fields of a step's spec that the engine renders as Jinja templates when the step
+/// runs, as JSON pointers into the spec.
+fn jinja_template_fields(step_type: &str) -> &'static [&'static str] {
+    match step_type {
+        "SqlExecute" => &["/query"],
+        "JinjaRender" | "TestReportEmail" => &["/template"],
+        "RestApi" | "WebhookInvoke" | "EmailSend" => &["/body"],
+        "Approval" | "TerraformApproval" => &["/notify/body"],
+        _ => &[],
+    }
+}
+
+/// Resolves the `${...}` expressions in a step's spec.
+///
+/// A field the step later renders as a Jinja template gets each interpolated value
+/// written as a Jinja string literal, so that rendering prints it as the text it is.
+/// Spliced in as is, an input holding `{{ ... }}` or `{% ... %}` would be run as
+/// template code in that second pass. Those fields are left out of the plain pass,
+/// which would otherwise evaluate a `${...}` an interpolated value contains.
+pub fn resolve_step_spec(step_type: &str, spec: &mut Value, ctx: &HclContext) -> Result<()> {
+    let mut templates = Vec::new();
+    for field in jinja_template_fields(step_type) {
+        for pointer in [field.to_string(), format!("/spec{field}")] {
+            if let Some(slot) = spec.pointer_mut(&pointer) {
+                if let Value::String(text) = slot.take() {
+                    templates.push((pointer, text));
+                }
+            }
+        }
+    }
+
+    let result = resolve_expressions(spec, ctx, true);
+
+    for (pointer, text) in templates {
+        let resolved = resolve_jinja_template(&text, ctx).unwrap_or(text);
+        if let Some(slot) = spec.pointer_mut(&pointer) {
+            *slot = Value::String(resolved);
+        }
+    }
+    result
+}
+
+const JINJA_LITERAL_FUNC: &str = "stormchaser_jinja_literal";
+
+/// Evaluates the `${...}` and `%{...}` sequences of a Jinja template, writing each
+/// interpolated value as a Jinja string literal. A template with neither is returned
+/// unchanged.
+pub fn resolve_jinja_template(text: &str, ctx: &HclContext) -> Result<String> {
+    use hcl::eval::Evaluate;
+    if !text.contains("${") && !text.contains("%{") {
+        return Ok(text.to_string());
+    }
+    stormchaser_model::hcl_guard::guarded(text, stormchaser_model::hcl_guard::expr_limit(), || {
+        let mut template: hcl::Template = text
+            .parse()
+            .map_err(|e| anyhow::anyhow!("Failed to parse HCL template: {:?}", e))?;
+        wrap_interpolations(&mut template);
+        let mut ctx = ctx.clone();
+        ctx.declare_func(
+            JINJA_LITERAL_FUNC,
+            FuncDef::new(
+                |args: hcl::eval::FuncArgs| {
+                    let text = match &args[0] {
+                        HclValue::String(s) => s.clone(),
+                        other => other.to_string(),
+                    };
+                    Ok(HclValue::String(jinja_string_literal(&text)))
+                },
+                [ParamType::Any],
+            ),
+        );
+        template
+            .evaluate(&ctx)
+            .map_err(|e| anyhow::anyhow!("Failed to evaluate HCL template: {:?}", e))
+    })
+}
+
+/// Routes every interpolation of a template, including those inside `%{if}` and
+/// `%{for}`, through [`JINJA_LITERAL_FUNC`].
+fn wrap_interpolations(template: &mut hcl::Template) {
+    use hcl::template::{Directive, Element};
+    for element in template.elements_mut() {
+        match element {
+            Element::Literal(_) => {}
+            Element::Interpolation(interpolation) => {
+                let expr = std::mem::replace(&mut interpolation.expr, hcl::Expression::Null);
+                interpolation.expr = hcl::expr::FuncCall::builder(JINJA_LITERAL_FUNC)
+                    .arg(expr)
+                    .build()
+                    .into();
+            }
+            Element::Directive(directive) => match &mut **directive {
+                Directive::If(directive) => {
+                    wrap_interpolations(&mut directive.true_template);
+                    if let Some(false_template) = &mut directive.false_template {
+                        wrap_interpolations(false_template);
+                    }
+                }
+                Directive::For(directive) => wrap_interpolations(&mut directive.template),
+            },
+        }
+    }
+}
+
+/// `text` as a Jinja expression that renders as exactly `text`.
+fn jinja_string_literal(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 8);
+    out.push_str("{{ \"");
+    for c in text.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push_str("\" }}");
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,5 +286,111 @@ mod tests {
             // The backend holds it, but the operator has not listed the path
             assert!(evaluate_raw_expr("secret(\"infra/root#token\")", &ctx).is_err());
         });
+    }
+
+    fn render(template: &str, ctx: &Value) -> String {
+        minijinja::Environment::new()
+            .render_str(template, minijinja::value::Serde(ctx))
+            .unwrap()
+    }
+
+    fn context_with(inputs: Value) -> HclContext<'static> {
+        create_context(
+            inputs,
+            RunId::new_v4(),
+            serde_json::json!({}),
+            serde_json::json!({}),
+            None,
+            None,
+        )
+    }
+
+    #[test]
+    fn any_text_survives_a_jinja_string_literal() {
+        for text in [
+            "",
+            "plain",
+            "{{ inputs.secret }}",
+            "{% for x in range(99999999) %}x{% endfor %}",
+            "{# comment #}",
+            "\" }}{{ inputs.secret }}{{ \"",
+            "back\\slash \\\" \\n",
+            "{% raw %}{% endraw %}",
+            "line\nbreak\r\ttab\u{7}bell",
+            "unicode ✓ 🚨 \u{2028}",
+        ] {
+            assert_eq!(
+                render(&jinja_string_literal(text), &serde_json::json!({})),
+                text
+            );
+        }
+    }
+
+    #[test]
+    fn an_input_is_spliced_into_a_template_as_text_not_as_template_code() {
+        let ctx = context_with(serde_json::json!({
+            "name": "{{ inputs.token }}{% for x in [1,2] %}!{% endfor %}",
+            "items": ["a", "{{ run.id }}"],
+            "token": "should-not-appear",
+        }));
+        let jinja_ctx = serde_json::json!({ "inputs": { "token": "should-not-appear" }, "run": { "id": "r1" } });
+
+        let resolved =
+            resolve_jinja_template("Hello ${inputs.name} from {{ run.id }}", &ctx).unwrap();
+        assert_eq!(
+            render(&resolved, &jinja_ctx),
+            "Hello {{ inputs.token }}{% for x in [1,2] %}!{% endfor %} from r1"
+        );
+
+        // Inside a directive as well
+        let resolved =
+            resolve_jinja_template("%{ for i in inputs.items }[${i}]%{ endfor }", &ctx).unwrap();
+        assert_eq!(render(&resolved, &jinja_ctx), "[a][{{ run.id }}]");
+
+        // Numbers and booleans as HCL would write them; text with no expressions as is
+        let resolved = resolve_jinja_template("${1 + 1} ${true}", &ctx).unwrap();
+        assert_eq!(render(&resolved, &jinja_ctx), "2 true");
+        assert_eq!(
+            resolve_jinja_template("{{ run.id }}", &ctx).unwrap(),
+            "{{ run.id }}"
+        );
+    }
+
+    #[test]
+    fn only_template_fields_are_resolved_for_jinja_and_no_value_is_evaluated_twice() {
+        let ctx = context_with(serde_json::json!({
+            "query": "x' OR {{ 1 }}",
+            "nested": "${inputs.other}",
+            "other": "leaked",
+        }));
+        let mut spec = serde_json::json!({
+            "connection": "db-${inputs.other}",
+            "query": "SELECT '${inputs.query}', '${inputs.nested}'",
+        });
+        resolve_step_spec("SqlExecute", &mut spec, &ctx).unwrap();
+        assert_eq!(spec["connection"], "db-leaked");
+        assert_eq!(
+            render(spec["query"].as_str().unwrap(), &serde_json::json!({})),
+            "SELECT 'x' OR {{ 1 }}', '${inputs.other}'"
+        );
+
+        // The same field under a nested `spec`, and a step type with no templates
+        let mut spec = serde_json::json!({ "spec": { "body": "${inputs.query}" } });
+        resolve_step_spec("WebhookInvoke", &mut spec, &ctx).unwrap();
+        assert_eq!(spec["spec"]["body"], "{{ \"x' OR {{ 1 }}\" }}");
+        let mut spec = serde_json::json!({ "body": "${inputs.query}" });
+        resolve_step_spec("RunContainer", &mut spec, &ctx).unwrap();
+        assert_eq!(spec["body"], "x' OR {{ 1 }}");
+
+        let mut spec = serde_json::json!({ "notify": { "body": "${inputs.query}", "subject": "${inputs.other}" } });
+        resolve_step_spec("Approval", &mut spec, &ctx).unwrap();
+        assert_eq!(spec["notify"]["subject"], "leaked");
+        assert_eq!(
+            render(
+                spec["notify"]["body"].as_str().unwrap(),
+                &serde_json::json!({})
+            ),
+            "x' OR {{ 1 }}"
+        );
     }
 }
