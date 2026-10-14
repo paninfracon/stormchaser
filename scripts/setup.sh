@@ -404,15 +404,24 @@ if command -v python3 >/dev/null 2>&1 && [ -f "$REPO_ROOT/scripts/generate_dev_t
             # For microk8s, we need the dynamically generated password and cluster-internal DNS
             echo -e "${BLUE}>>> Registering cluster MinIO backend for SFS...${NC}"
             MINIO_PASSWORD=$(microk8s kubectl get secret -n stormchaser stormchaser-minio -o jsonpath='{.data.root-password}' | base64 -d)
+            # The API serves TLS with the certificate the chart generated, which names
+            # the API's Service rather than its cluster IP: reach the IP by that name
+            # and trust the chart's CA.
+            API_SERVICE="stormchaser-stormchaser-orchestration-api.stormchaser.svc"
             API_IP=$(microk8s kubectl get svc -n stormchaser stormchaser-stormchaser-orchestration-api -o jsonpath='{.spec.clusterIP}')
-            API_URL="http://${API_IP}:${PORT_API}"
+            API_URL="https://${API_SERVICE}:${PORT_API}"
+            API_CA="$(mktemp)"
+            trap 'rm -f "$API_CA"' EXIT
+            microk8s kubectl get secret -n stormchaser stormchaser-tls-certs \
+                -o jsonpath='{.data.ca\.crt}' | base64 -d > "$API_CA"
+            api_curl() { curl --cacert "$API_CA" --resolve "${API_SERVICE}:${PORT_API}:${API_IP}" "$@"; }
 
             # Wait for API to be ready
             echo -e "${BLUE}>>> Waiting for API to become ready at ${API_URL}...${NC}"
             API_READY=false
             for _ in {1..30}; do
-                if curl -s -o /dev/null -w "%{http_code}" "$API_URL/api/health" | grep -q "200" || \
-                   curl -s -o /dev/null -w "%{http_code}" "$API_URL/healthz" | grep -q "200"; then
+                if api_curl -s -o /dev/null -w "%{http_code}" "$API_URL/api/health" | grep -q "200" || \
+                   api_curl -s -o /dev/null -w "%{http_code}" "$API_URL/healthz" | grep -q "200"; then
                     API_READY=true
                     break
                 fi
@@ -423,7 +432,7 @@ if command -v python3 >/dev/null 2>&1 && [ -f "$REPO_ROOT/scripts/generate_dev_t
                 exit 1
             fi
 
-            curl -s -X POST "$API_URL/api/v1/connections" \
+            api_curl -s -X POST "$API_URL/api/v1/connections" \
               -H "Authorization: Bearer $STORMCHASER_TOKEN" \
               -H "Content-Type: application/json" \
               -d '{
@@ -451,7 +460,11 @@ else
 fi
 
 echo -e "${GREEN}>>> Stormchaser is UP ($MODE mode)!${NC}"
-echo -e "${BLUE}API:${NC} http://localhost:${PORT_API}"
+if [[ "$MODE" == "microk8s" ]]; then
+    echo -e "${BLUE}API:${NC} HTTPS, with the chart's CA; source scripts/k8s-api-access.sh to reach it"
+else
+    echo -e "${BLUE}API:${NC} http://localhost:${PORT_API}"
+fi
 if [[ -f "$REPO_ROOT/.tmp/kubeconfig" ]]; then
     echo -e "${BLUE}Kubeconfig:${NC} .tmp/kubeconfig"
 fi

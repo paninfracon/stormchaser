@@ -54,6 +54,16 @@ port forwarding.
     svc/stormchaser-stormchaser-orchestration-api 3000:3000
   ```
 
+  The API serves HTTPS with a certificate from the CA the chart generated. Save
+  that CA and pass it to the CLI or TUI with `--ca-cert` (or
+  `STORMCHASER_CA_CERT`), or to curl with `--cacert`:
+
+  ```bash
+  kubectl get secret stormchaser-tls-certs -n stormchaser \
+    -o jsonpath='{.data.ca\.crt}' | base64 -d > stormchaser-ca.crt
+  stormchaser --url https://localhost:3000 --ca-cert stormchaser-ca.crt login
+  ```
+
 - **Dex (Authentication)**: Access the OIDC provider.
 
   ```bash
