@@ -1,3 +1,6 @@
+import base64
+import hashlib
+import secrets
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -30,7 +33,13 @@ def get_token():
             pass
         return "password"
 
-    auth_url = f"http://{host_dex}:{port_dex}/dex/auth?client_id=stormchaser-cli&redirect_uri=http://localhost:8080/callback&response_type=code&scope=openid+profile+email"
+    # The API redeems a code only with the PKCE verifier its login was started with
+    code_verifier = secrets.token_urlsafe(48)
+    code_challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(code_verifier.encode('ascii')).digest()
+    ).decode('ascii').rstrip('=')
+
+    auth_url = f"http://{host_dex}:{port_dex}/dex/auth?client_id=stormchaser-cli&redirect_uri=http://localhost:8080/callback&response_type=code&scope=openid+profile+email&code_challenge={code_challenge}&code_challenge_method=S256"
     req1 = urllib.request.Request(auth_url)
     try:
         resp1 = urllib.request.urlopen(req1)
@@ -71,7 +80,8 @@ def get_token():
 
             api_data = json.dumps({
                 'sso_token': code,
-                'callback_url': 'http://localhost:8080/callback'
+                'callback_url': 'http://localhost:8080/callback',
+                'code_verifier': code_verifier
             }).encode('utf-8')
             api_req = urllib.request.Request(f"http://{host_api}:{port_api}/api/v1/auth/exchange", data=api_data, method='POST')
             api_req.add_header('Content-Type', 'application/json')
@@ -88,7 +98,8 @@ def get_token():
 
                 api_data = json.dumps({
                     'sso_token': code,
-                    'callback_url': 'http://localhost:8080/callback'
+                    'callback_url': 'http://localhost:8080/callback',
+                    'code_verifier': code_verifier
                 }).encode('utf-8')
                 api_req = urllib.request.Request(f"http://{host_api}:{port_api}/api/v1/auth/exchange", data=api_data, method='POST')
                 api_req.add_header('Content-Type', 'application/json')

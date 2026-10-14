@@ -6,8 +6,17 @@ use serde_json::Value;
 
 #[derive(Subcommand)]
 pub enum AuthCommands {
-    /// Exchange an SSO token for a Stormchaser JWT
-    Exchange { sso_token: String },
+    /// Exchange an authorization code for a Stormchaser JWT
+    Exchange {
+        /// The authorization code the identity provider returned
+        sso_token: String,
+        /// The redirect URI the code was issued for
+        #[arg(long)]
+        callback_url: String,
+        /// The PKCE verifier whose challenge the login was started with
+        #[arg(long)]
+        code_verifier: String,
+    },
     /// Manage multi-environment authentication profiles
     Profiles {
         #[command(subcommand)]
@@ -21,10 +30,18 @@ pub async fn handle(
     command: AuthCommands,
 ) -> Result<()> {
     match command {
-        AuthCommands::Exchange { sso_token } => {
+        AuthCommands::Exchange {
+            sso_token,
+            callback_url,
+            code_verifier,
+        } => {
             let res = http_client
                 .post(format!("{}/api/v1/auth/exchange", url))
-                .json(&json!({ "sso_token": sso_token }))
+                .json(&json!({
+                    "sso_token": sso_token,
+                    "callback_url": callback_url,
+                    "code_verifier": code_verifier,
+                }))
                 .send()
                 .await?;
             handle_response(res).await?;
@@ -116,7 +133,7 @@ pub async fn handle_login(
 mod tests {
     use super::*;
     use reqwest_middleware::ClientBuilder;
-    use wiremock::matchers::{method, path};
+    use wiremock::matchers::{body_json, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
@@ -124,6 +141,11 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/api/v1/auth/exchange"))
+            .and(body_json(json!({
+                "sso_token": "test_sso",
+                "callback_url": "http://localhost:8080/callback",
+                "code_verifier": "verifier",
+            })))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"access_token": "test"})))
             .mount(&server)
             .await;
@@ -131,6 +153,8 @@ mod tests {
         let client = ClientBuilder::new(reqwest::Client::new()).build();
         let cmd = AuthCommands::Exchange {
             sso_token: "test_sso".to_string(),
+            callback_url: "http://localhost:8080/callback".to_string(),
+            code_verifier: "verifier".to_string(),
         };
 
         let result = handle(&server.uri(), &client, cmd).await;

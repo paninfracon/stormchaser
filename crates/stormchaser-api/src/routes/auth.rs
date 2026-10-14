@@ -16,6 +16,31 @@ use reqwest::Client;
 use serde::Deserialize;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// `STORMCHASER_OIDC_REQUIRE_PKCE`: `true` (the default) refuses a login without a PKCE
+/// `code_challenge`, and a code exchange without its `code_verifier`.
+///
+/// The exchange endpoint needs no token and adds the client secret itself, so without
+/// PKCE an authorization code is as good as the user's tokens to whoever sees it first,
+/// for instance in a proxy's access log of the callback URL. With a challenge on every
+/// login, the identity provider redeems a code only with the verifier the client kept.
+pub const REQUIRE_PKCE_ENV: &str = "STORMCHASER_OIDC_REQUIRE_PKCE";
+
+fn pkce_required() -> bool {
+    !matches!(
+        std::env::var(REQUIRE_PKCE_ENV).as_deref(),
+        Ok("false") | Ok("FALSE") | Ok("0")
+    )
+}
+
+/// Whether `value` is a PKCE verifier or S256 challenge in form: 43 to 128 characters
+/// from the unreserved set (RFC 7636 section 4.1).
+fn is_pkce_value(value: &str) -> bool {
+    (43..=128).contains(&value.len())
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~'))
+}
+
 #[derive(Debug, Deserialize)]
 /// Loginquery.
 pub struct LoginQuery {
@@ -57,7 +82,8 @@ pub async fn session(AuthClaims(claims): AuthClaims) -> Json<SessionResponse> {
         ("code_challenge" = Option<String>, Query, description = "PKCE S256 challenge; send the verifier with the code")
     ),
     responses(
-        (status = 303, description = "Redirect to OIDC provider")
+        (status = 303, description = "Redirect to OIDC provider"),
+        (status = 400, description = "No PKCE code_challenge, or one not in form")
     ),
     tag = "stormchaser"
 )]
@@ -70,6 +96,18 @@ pub async fn login(
         .oidc_config
         .as_ref()
         .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    match query.code_challenge.as_deref() {
+        Some(challenge) if !is_pkce_value(challenge) => return Err(StatusCode::BAD_REQUEST),
+        None if pkce_required() => {
+            tracing::warn!(
+                "Refusing a login without a PKCE code_challenge ({}=false allows it)",
+                REQUIRE_PKCE_ENV
+            );
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        _ => {}
+    }
 
     let mut auth_url = format!(
         "{}/auth?client_id={}&redirect_uri={}&response_type=code&scope=openid+profile+email+offline_access",
@@ -103,6 +141,7 @@ struct TokenResponse {
     request_body = AuthExchangeRequest,
     responses(
         (status = 200, description = "Token exchanged successfully", body = AuthExchangeResponse),
+        (status = 400, description = "No PKCE code_verifier, or one not in form"),
         (status = 401, description = "Unauthorized")
     ),
     tag = "stormchaser"
@@ -116,6 +155,18 @@ pub async fn exchange_token(
         .oidc_config
         .as_ref()
         .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    match payload.code_verifier.as_deref() {
+        Some(verifier) if !is_pkce_value(verifier) => return Err(StatusCode::BAD_REQUEST),
+        None if pkce_required() => {
+            tracing::warn!(
+                "Refusing a code exchange without a PKCE code_verifier ({}=false allows it)",
+                REQUIRE_PKCE_ENV
+            );
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        _ => {}
+    }
 
     // 1. Exchange code for tokens
     let client = Client::new();

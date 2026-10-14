@@ -63,6 +63,10 @@ fn get_test_keys() -> &'static (String, serde_json::Value) {
     })
 }
 
+/// The PKCE pair from RFC 7636, appendix B.
+const VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+const CHALLENGE: &str = "E9Melhoa2OwvFrEMTJguCQaoeQAv9TJsDjsKm-hbmAg";
+
 #[derive(Serialize)]
 struct IdTokenClaims {
     sub: String,
@@ -147,7 +151,7 @@ async fn test_auth_login_redirect() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/api/v1/auth/login?callback_url=http%3A%2F%2Flocalhost%3A3000%2Fcallback")
+                .uri(format!("/api/v1/auth/login?callback_url=http%3A%2F%2Flocalhost%3A3000%2Fcallback&code_challenge={CHALLENGE}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -167,6 +171,50 @@ async fn test_auth_login_redirect() {
 }
 
 #[tokio::test]
+async fn login_and_exchange_need_pkce() {
+    let mock_server = MockServer::start().await;
+    let app = setup_app(mock_server.uri()).await.unwrap();
+
+    for uri in [
+        "/api/v1/auth/login?callback_url=http%3A%2F%2Flocalhost%3A3000%2Fcallback".to_string(),
+        "/api/v1/auth/login?callback_url=http%3A%2F%2Flocalhost%3A3000%2Fcallback&code_challenge=short".to_string(),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(Request::builder().uri(&uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{uri}");
+    }
+
+    // Refused before the identity provider is asked, so a code that leaked cannot be
+    // redeemed by someone without its verifier
+    for verifier in [None, Some("short")] {
+        let mut body = json!({
+            "sso_token": "leaked-code",
+            "callback_url": "http://localhost:3000/callback"
+        });
+        if let Some(verifier) = verifier {
+            body["code_verifier"] = json!(verifier);
+        }
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/auth/exchange")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{verifier:?}");
+    }
+    assert!(mock_server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn test_auth_login_redirect_with_state() {
     let mock_server = MockServer::start().await;
     let app = setup_app(mock_server.uri()).await.unwrap();
@@ -174,7 +222,7 @@ async fn test_auth_login_redirect_with_state() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/api/v1/auth/login?callback_url=http%3A%2F%2Flocalhost%3A3000%2Fcallback&state=test-state-123")
+                .uri(format!("/api/v1/auth/login?callback_url=http%3A%2F%2Flocalhost%3A3000%2Fcallback&state=test-state-123&code_challenge={CHALLENGE}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -224,7 +272,8 @@ async fn an_unverified_email_is_not_exchanged_for_a_token() {
                 .body(Body::from(
                     json!({
                         "sso_token": "dummy-auth-code",
-                        "callback_url": "http://localhost:3000/callback"
+                        "callback_url": "http://localhost:3000/callback",
+                        "code_verifier": VERIFIER
                     })
                     .to_string(),
                 ))
@@ -272,7 +321,8 @@ async fn test_auth_exchange_success() {
                 .body(Body::from(
                     json!({
                         "sso_token": "dummy-auth-code",
-                        "callback_url": "http://localhost:3000/callback"
+                        "callback_url": "http://localhost:3000/callback",
+                        "code_verifier": VERIFIER
                     })
                     .to_string(),
                 ))
@@ -322,7 +372,8 @@ async fn test_auth_exchange_failure() {
                 .body(Body::from(
                     json!({
                         "sso_token": "invalid-auth-code",
-                        "callback_url": "http://localhost:3000/callback"
+                        "callback_url": "http://localhost:3000/callback",
+                        "code_verifier": VERIFIER
                     })
                     .to_string(),
                 ))
@@ -440,7 +491,8 @@ async fn test_auth_exchange_network_error() {
                 .body(Body::from(
                     json!({
                         "sso_token": "dummy-auth-code",
-                        "callback_url": "http://localhost:3000/callback"
+                        "callback_url": "http://localhost:3000/callback",
+                        "code_verifier": VERIFIER
                     })
                     .to_string(),
                 ))
@@ -472,7 +524,8 @@ async fn test_auth_exchange_invalid_json() {
                 .body(Body::from(
                     json!({
                         "sso_token": "dummy-auth-code",
-                        "callback_url": "http://localhost:3000/callback"
+                        "callback_url": "http://localhost:3000/callback",
+                        "code_verifier": VERIFIER
                     })
                     .to_string(),
                 ))
@@ -506,7 +559,8 @@ async fn test_auth_exchange_invalid_id_token_header() {
                 .body(Body::from(
                     json!({
                         "sso_token": "dummy-auth-code",
-                        "callback_url": "http://localhost:3000/callback"
+                        "callback_url": "http://localhost:3000/callback",
+                        "code_verifier": VERIFIER
                     })
                     .to_string(),
                 ))
@@ -554,7 +608,8 @@ async fn test_auth_exchange_no_kid() {
                 .body(Body::from(
                     json!({
                         "sso_token": "dummy-auth-code",
-                        "callback_url": "http://localhost:3000/callback"
+                        "callback_url": "http://localhost:3000/callback",
+                        "code_verifier": VERIFIER
                     })
                     .to_string(),
                 ))
@@ -598,7 +653,8 @@ async fn test_auth_exchange_kid_not_found() {
                 .body(Body::from(
                     json!({
                         "sso_token": "dummy-auth-code",
-                        "callback_url": "http://localhost:3000/callback"
+                        "callback_url": "http://localhost:3000/callback",
+                        "code_verifier": VERIFIER
                     })
                     .to_string(),
                 ))
@@ -646,7 +702,8 @@ async fn test_auth_exchange_invalid_jwk() {
                 .body(Body::from(
                     json!({
                         "sso_token": "dummy-auth-code",
-                        "callback_url": "http://localhost:3000/callback"
+                        "callback_url": "http://localhost:3000/callback",
+                        "code_verifier": VERIFIER
                     })
                     .to_string(),
                 ))
@@ -703,7 +760,8 @@ async fn test_auth_exchange_invalid_signature() {
                 .body(Body::from(
                     json!({
                         "sso_token": "dummy-auth-code",
-                        "callback_url": "http://localhost:3000/callback"
+                        "callback_url": "http://localhost:3000/callback",
+                        "code_verifier": VERIFIER
                     })
                     .to_string(),
                 ))

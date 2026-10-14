@@ -87,23 +87,34 @@ async fn auth_login_handler() -> impl axum::response::IntoResponse {
     let web_url = std::env::var("WEB_URL").unwrap_or_else(|_| "http://127.0.0.1:3001".to_string());
     let callback = urlencoding::encode(&format!("{}/auth/callback", web_url)).into_owned();
 
-    let state = uuid::Uuid::new_v4().to_string();
+    // The verifier stays in this browser's cookie, so a code seen on its way back (in a
+    // proxy's access log, say) cannot be redeemed without it
+    let attempt = stormchaser_model::login_flow::LoginAttempt::new();
     let state_cookie = format!(
         "oauth_state={}; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=300",
-        state
+        attempt.state
+    );
+    let verifier_cookie = format!(
+        "oauth_verifier={}; Path=/auth/callback; HttpOnly; SameSite=Lax; Secure; Max-Age=300",
+        attempt.code_verifier
     );
 
     let redirect_url = format!(
-        "{}/api/v1/auth/login?callback_url={}&state={}",
+        "{}/api/v1/auth/login?callback_url={}&state={}&code_challenge={}",
         external_api_url,
         callback,
-        urlencoding::encode(&state)
+        urlencoding::encode(&attempt.state),
+        attempt.code_challenge()
     );
 
     let mut headers = axum::http::HeaderMap::new();
     headers.insert(
         header::SET_COOKIE,
         header::HeaderValue::from_str(&state_cookie).unwrap(),
+    );
+    headers.append(
+        header::SET_COOKIE,
+        header::HeaderValue::from_str(&verifier_cookie).unwrap(),
     );
     headers.insert(
         header::LOCATION,
@@ -203,11 +214,13 @@ async fn auth_callback_handler(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
     let mut oauth_state_cookie = None;
+    let mut code_verifier = None;
     for part in cookie_str.split(';') {
         let part = part.trim();
         if let Some(state_val) = part.strip_prefix("oauth_state=") {
             oauth_state_cookie = Some(state_val);
-            break;
+        } else if let Some(verifier) = part.strip_prefix("oauth_verifier=") {
+            code_verifier = Some(verifier);
         }
     }
 
@@ -229,7 +242,8 @@ async fn auth_callback_handler(
             .post(format!("{}/api/v1/auth/exchange", api_url))
             .json(&serde_json::json!({
                 "sso_token": code,
-                "callback_url": format!("{}/auth/callback", web_url)
+                "callback_url": format!("{}/auth/callback", web_url),
+                "code_verifier": code_verifier,
             }))
             .send()
             .await
@@ -250,6 +264,11 @@ async fn auth_callback_handler(
                         headers_res.append(
                             header::SET_COOKIE,
                             header::HeaderValue::from_static(clear_state_cookie),
+                        );
+                        let clear_verifier_cookie = "oauth_verifier=; Path=/auth/callback; HttpOnly; SameSite=Lax; Secure; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
+                        headers_res.append(
+                            header::SET_COOKIE,
+                            header::HeaderValue::from_static(clear_verifier_cookie),
                         );
                         headers_res.insert(header::LOCATION, header::HeaderValue::from_static("/"));
                         return (axum::http::StatusCode::SEE_OTHER, headers_res).into_response();

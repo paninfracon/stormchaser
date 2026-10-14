@@ -20,9 +20,10 @@ Access to the Stormchaser API is secured using **JSON Web Tokens (JWT)**. All pr
 To facilitate integration with external Identity Providers (IdPs), Stormchaser provides a token exchange endpoint:
 
 * **Endpoint**: `POST /api/v1/auth/exchange`
-* **Mechanism**: A user provides a short-lived SSO token (OIDC `id_token`) from a trusted provider. Stormchaser validates this token's signature cryptographically against the Identity Provider's JSON Web Key Set (JWKS) and issues a signed Stormchaser JWT for subsequent API calls.
+* **Mechanism**: A client sends the authorization code the provider returned, with the redirect URI and the PKCE `code_verifier` of its login. The API redeems the code with the provider (adding the client secret itself), receives an OIDC `id_token`, validates this token's signature cryptographically against the Identity Provider's JSON Web Key Set (JWKS) and issues a signed Stormchaser JWT for subsequent API calls.
 * **Dynamic JWKS Fetching**: Stormchaser actively fetches and caches public keys from the IdP. If an incoming token specifies a Key ID (`kid`) that is not in the local cache, Stormchaser will proactively reach out to the IdP to fetch the latest keys. This ensures zero downtime during regular key rotations by the IdP (such as Dex).
 * **User Identity**: The user's identity (ID or Email) is extracted from the SSO claims and embedded in the `sub` field of the resulting JWT.
+* **PKCE**: `GET /api/v1/auth/login` refuses a login without an S256 `code_challenge`, and the exchange refuses a request without a `code_verifier`. The exchange needs no token and adds the client secret, so without PKCE an authorization code would be worth the user's tokens to whoever saw it first, for example in a proxy's access log of the web UI's callback URL. The web UI keeps its verifier in an HttpOnly cookie; the CLI and TUI keep theirs in memory. `STORMCHASER_OIDC_REQUIRE_PKCE=false` accepts logins and exchanges without it, for clients that cannot send one.
 
 ## 2. Authorization (Open Policy Agent)
 
