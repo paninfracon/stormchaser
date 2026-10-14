@@ -21,17 +21,64 @@ const MAX_REPORT_UNPACKED_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_REPORT_FILES: usize = 1000;
 /// Most report text the engine accepts inline in a single step event.
 const MAX_INLINE_REPORT_BYTES: usize = 4 * 1024 * 1024;
+/// Most entries of any kind (files, directories, links, tar extensions) the engine reads
+/// from one report archive.
+const MAX_REPORT_ENTRIES: usize = 10 * MAX_REPORT_FILES;
+/// Most bytes the engine decompresses from one report archive, counting tar headers and
+/// extension records as well as file contents: the file budget, and room for the headers
+/// and padding of the most entries allowed.
+const MAX_REPORT_STREAM_BYTES: u64 = MAX_REPORT_UNPACKED_BYTES + 16 * 1024 * 1024;
+
+/// A reader that fails once more than its budget has been read through it.
+///
+/// The `tar` crate reads a GNU long-name or PAX extension record whole, into memory,
+/// before it yields the entry it belongs to, so a limit applied to the entries cannot
+/// stop a record of gigabytes. Counting every byte that comes out of the decompressor
+/// does.
+struct CappedReader<R> {
+    inner: R,
+    remaining: u64,
+}
+
+impl<R: Read> Read for CappedReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.remaining == 0 {
+            // At the budget: fine if the stream ends here, not if there is more
+            let mut probe = [0u8; 1];
+            return match self.inner.read(&mut probe)? {
+                0 => Ok(0),
+                _ => Err(std::io::Error::other(format!(
+                    "archive unpacks to more than {} bytes",
+                    MAX_REPORT_STREAM_BYTES
+                ))),
+            };
+        }
+        let len = buf
+            .len()
+            .min(self.remaining.min(usize::MAX as u64) as usize);
+        let read = self.inner.read(&mut buf[..len])?;
+        self.remaining -= read as u64;
+        Ok(read)
+    }
+}
 
 /// Unpacks a gzipped tar of report files, refusing to expand past the limits above.
 ///
 /// The archive was uploaded by the step, so its size, compression ratio and entry count
-/// are whatever the workflow author wants them to be.
+/// are whatever the workflow author wants them to be. CPU-bound: call it off the async
+/// workers.
 fn unpack_report_archive(data: &[u8]) -> Result<Vec<String>> {
-    let mut archive = Archive::new(GzDecoder::new(data));
+    let mut archive = Archive::new(CappedReader {
+        inner: GzDecoder::new(data),
+        remaining: MAX_REPORT_STREAM_BYTES,
+    });
     let mut contents = Vec::new();
     let mut remaining = MAX_REPORT_UNPACKED_BYTES;
 
-    for entry in archive.entries()? {
+    for (index, entry) in archive.entries()?.enumerate() {
+        if index >= MAX_REPORT_ENTRIES {
+            anyhow::bail!("archive holds more than {} entries", MAX_REPORT_ENTRIES);
+        }
         let entry = entry?;
         if !entry.header().entry_type().is_file() {
             continue;
@@ -113,7 +160,11 @@ async fn process_claim_report(
             return Ok(());
         }
     };
-    let raw_contents = match unpack_report_archive(&data) {
+    let hash = hex::encode(Sha256::digest(&data));
+    let unpacked = tokio::task::spawn_blocking(move || unpack_report_archive(&data))
+        .await
+        .context("the report unpacking task failed")?;
+    let raw_contents = match unpacked {
         Ok(contents) => contents,
         Err(e) => {
             tracing::warn!(
@@ -125,7 +176,6 @@ async fn process_claim_report(
             return Ok(());
         }
     };
-    let hash = hex::encode(Sha256::digest(&data));
 
     let mut summaries = Vec::new();
     let mut test_cases = Vec::new();
@@ -530,6 +580,57 @@ mod tests {
         let files: Vec<(&str, &[u8])> = files.iter().map(|(n, c)| (n.as_str(), *c)).collect();
         let err = unpack_report_archive(&archive(&files)).unwrap_err();
         assert!(err.to_string().contains("more than"), "{err}");
+    }
+
+    /// A gzipped tar that starts with a GNU long-name record of `size` zero bytes, written
+    /// in chunks so the test itself never holds it.
+    fn long_name_bomb(size: u64) -> Vec<u8> {
+        use std::io::Write;
+        let mut gz = GzEncoder::new(Vec::new(), Compression::fast());
+        let mut header = tar::Header::new_gnu();
+        header.set_path("././@LongLink").unwrap();
+        header.set_entry_type(tar::EntryType::GNULongName);
+        header.set_size(size);
+        header.set_cksum();
+        gz.write_all(header.as_bytes()).unwrap();
+        let chunk = vec![0u8; 1024 * 1024];
+        let mut left = size;
+        while left > 0 {
+            let n = left.min(chunk.len() as u64) as usize;
+            gz.write_all(&chunk[..n]).unwrap();
+            left -= n as u64;
+        }
+        gz.finish().unwrap()
+    }
+
+    #[test]
+    fn refuses_a_tar_extension_record_bigger_than_the_budget() {
+        // Well within the download limit, and far beyond what may be unpacked
+        let data = long_name_bomb(MAX_REPORT_STREAM_BYTES * 4);
+        assert!(data.len() < MAX_REPORT_ARCHIVE_BYTES);
+        let err = unpack_report_archive(&data).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("unpacks to more than"),
+            "{err:#}"
+        );
+    }
+
+    #[test]
+    fn refuses_an_archive_with_too_many_entries_of_any_kind() {
+        let mut builder = tar::Builder::new(GzEncoder::new(Vec::new(), Compression::fast()));
+        for i in 0..=MAX_REPORT_ENTRIES {
+            let mut header = tar::Header::new_gnu();
+            header.set_entry_type(tar::EntryType::Directory);
+            header.set_size(0);
+            header.set_mode(0o755);
+            header.set_cksum();
+            builder
+                .append_data(&mut header, format!("d{i}/"), std::io::empty())
+                .unwrap();
+        }
+        let data = builder.into_inner().unwrap().finish().unwrap();
+        let err = unpack_report_archive(&data).unwrap_err();
+        assert!(err.to_string().contains("entries"), "{err}");
     }
 
     #[test]
