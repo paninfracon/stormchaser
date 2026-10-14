@@ -150,6 +150,9 @@ pub async fn run_runner(config: Config) -> Result<()> {
     let k8s_job_schema = stormchaser_model::schema_gen::draft07_schema_for::<dsl::K8sJobSpec>();
     let k8s_job_schema_json = serde_json::to_value(k8s_job_schema)?;
 
+    // A key of this runner's own, which signs everything it reports from here on
+    stormchaser_model::runner_auth::obtain_session(&nats_client, &runner_id).await?;
+
     let registration_payload = RunnerRegisterEvent {
         runner_id: runner_id.clone(),
         runner_type: "k8s".to_string(),
@@ -182,7 +185,9 @@ pub async fn run_runner(config: Config) -> Result<()> {
         .time(chrono::Utc::now())
         .data(
             stormchaser_model::APPLICATION_JSON,
-            serde_json::to_value(registration_payload).unwrap(),
+            stormchaser_model::runner_auth::sign_if_runner(
+                serde_json::to_value(registration_payload).unwrap(),
+            ),
         )
         .build()
         .context("Failed to build CloudEvent")?;
@@ -228,7 +233,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
     let stream = js
         .get_or_create_stream(async_nats::jetstream::stream::Config {
             name: "stormchaser".to_string(),
-            subjects: vec!["stormchaser.>".to_string()],
+            subjects: vec![stormchaser_model::nats::STREAM_SUBJECTS.to_string()],
             // Only applies if this runner creates the stream; the engine sets it otherwise
             max_age: stormchaser_model::nats::stream_max_age(),
             ..Default::default()

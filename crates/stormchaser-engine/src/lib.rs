@@ -33,6 +33,8 @@ pub mod query;
 /// Short-lived registry credentials for artifact pushes.
 pub mod registry_token;
 pub mod resource_utils;
+/// Issues runners their keys and checks what they sign.
+pub mod runner_auth;
 /// S3 backend storage implementation.
 pub mod s3;
 /// Secrets management interfaces and backends.

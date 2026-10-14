@@ -105,7 +105,7 @@ async fn handle_orphaned_container(
         })
         .unwrap();
         let query_ce_payload = match build_cloudevent_payload(
-            "stormchaser.v1.step.query",
+            stormchaser_model::nats::STEP_QUERY_SUBJECT,
             EventSource::System,
             query_data,
         ) {
@@ -117,7 +117,10 @@ async fn handle_orphaned_container(
         };
 
         match nats
-            .request("stormchaser.v1.step.query", query_ce_payload)
+            .request(
+                stormchaser_model::nats::STEP_QUERY_SUBJECT,
+                query_ce_payload,
+            )
             .await
         {
             Ok(reply) => {

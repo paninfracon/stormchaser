@@ -242,6 +242,8 @@ pub fn build_cloudevent_and_headers(
     schema_version: Option<SchemaVersion>,
     schema_id: Option<SchemaId>,
 ) -> Result<(String, HeaderMap)> {
+    // A runner signs what it reports, once the engine has given it a key
+    let data = crate::runner_auth::sign_if_runner(data);
     let mut builder = EventBuilderV10::new()
         .id(EventId::new_v4().into_inner().to_string())
         .ty(event_type.as_str())
@@ -270,7 +272,16 @@ pub fn build_cloudevent_and_headers(
 
 /// The subject runners ask the engine on for the registry credentials of a step's
 /// artifact pushes.
-pub const ARTIFACT_AUTH_SUBJECT: &str = "stormchaser.v1.step.artifact_auth";
+pub const ARTIFACT_AUTH_SUBJECT: &str = "stormchaser.rpc.step.artifact_auth";
+
+/// Where a runner asks whether a step it found is still wanted.
+pub const STEP_QUERY_SUBJECT: &str = "stormchaser.rpc.step.query";
+
+/// The subjects the `stormchaser` stream captures. Request-reply subjects
+/// (`stormchaser.rpc.>`) must stay outside it: the stream acknowledges every message it
+/// stores to the message's reply subject, so a request it captured would be answered
+/// by that acknowledgement instead of by the engine.
+pub const STREAM_SUBJECTS: &str = "stormchaser.v1.>";
 
 /// Where a runner puts the registry credentials inside its parking helper, and the agent
 /// reads them. Step volumes can never be mounted over this path.
@@ -294,7 +305,9 @@ pub async fn request_artifact_auth(
         .time(chrono::Utc::now())
         .data(
             crate::APPLICATION_JSON,
-            serde_json::json!({ "run_id": run_id, "step_id": step_id, "runner_id": runner_id }),
+            crate::runner_auth::sign_if_runner(
+                serde_json::json!({ "run_id": run_id, "step_id": step_id, "runner_id": runner_id }),
+            ),
         )
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to build CloudEvent: {}", e))?;

@@ -11,7 +11,7 @@ pub async fn init_jetstream(nats_client: &async_nats::Client) -> Result<jetstrea
     let mut stream = js
         .get_or_create_stream(Config {
             name: STREAM_NAME.to_string(),
-            subjects: vec!["stormchaser.v1.>".to_string()],
+            subjects: vec![stormchaser_model::nats::STREAM_SUBJECTS.to_string()],
             max_age,
             ..Default::default()
         })
@@ -31,6 +31,29 @@ pub async fn init_jetstream(nats_client: &async_nats::Client) -> Result<jetstrea
             Err(e) => tracing::warn!(
                 "Could not set a maximum message age on the '{}' stream; task messages are kept until erased: {:?}",
                 STREAM_NAME,
+                e
+            ),
+        }
+    }
+
+    // A runner of an earlier version that created the stream had it capture
+    // `stormchaser.>`, request-reply subjects included, which answers every request
+    // with the stream's acknowledgement
+    let config = stream.info().await?.config.clone();
+    if config.subjects != [stormchaser_model::nats::STREAM_SUBJECTS] {
+        let mut narrowed = config.clone();
+        narrowed.subjects = vec![stormchaser_model::nats::STREAM_SUBJECTS.to_string()];
+        match js.update_stream(&narrowed).await {
+            Ok(_) => tracing::info!(
+                "The '{}' stream now captures only {} (it captured {:?})",
+                STREAM_NAME,
+                stormchaser_model::nats::STREAM_SUBJECTS,
+                config.subjects
+            ),
+            Err(e) => tracing::warn!(
+                "Could not narrow the '{}' stream to {}; requests to the engine on subjects it captures will fail: {:?}",
+                STREAM_NAME,
+                stormchaser_model::nats::STREAM_SUBJECTS,
                 e
             ),
         }

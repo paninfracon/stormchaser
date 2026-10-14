@@ -265,26 +265,55 @@ async fn registry_credentials_go_only_to_the_runner_that_has_the_step() {
     insert_runner(&pool, &holder, 0.0).await;
     let (run_id, step_id) = insert_step_on(&pool, &holder).await;
 
-    for asking in [json!("some-other-runner"), json!(null)] {
+    // Unsigned: refused before anything else, whoever it names
+    for asking in [json!(holder), json!("some-other-runner"), json!(null)] {
         let err = artifact_push_auth(
             &json!({"run_id": run_id, "step_id": step_id, "runner_id": asking}),
             &pool,
         )
         .await
         .unwrap_err();
-        assert!(
-            err.to_string().contains("assigned to another runner"),
-            "{asking}: {err}"
-        );
+        assert!(err.to_string().contains("no key"), "{asking}: {err}");
     }
+
+    let signed_by = |runner: &str, key: &[u8; 32]| {
+        stormchaser_model::runner_auth::sign_payload(
+            json!({"run_id": run_id, "step_id": step_id, "runner_id": runner}),
+            key,
+        )
+    };
+    let other = format!("other-{}", uuid::Uuid::new_v4());
+    stormchaser_engine::db::store_runner_session(&pool, &holder, &[1u8; 32])
+        .await
+        .unwrap();
+    stormchaser_engine::db::store_runner_session(&pool, &other, &[2u8; 32])
+        .await
+        .unwrap();
+
+    // Another runner, signing as itself, is not the one that has the step
+    let err = artifact_push_auth(&signed_by(&other, &[2u8; 32]), &pool)
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("assigned to another runner"),
+        "{err}"
+    );
+    // Nor can it sign in the holder's name
+    let err = artifact_push_auth(&signed_by(&holder, &[2u8; 32]), &pool)
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("not signed by runner"), "{err}");
+
     // The holder is answered. This step has no artifacts, so there is nothing in it.
-    let config = artifact_push_auth(
-        &json!({"run_id": run_id, "step_id": step_id, "runner_id": holder}),
-        &pool,
-    )
-    .await
-    .unwrap();
+    let config = artifact_push_auth(&signed_by(&holder, &[1u8; 32]), &pool)
+        .await
+        .unwrap();
     assert_eq!(config, json!({ "auths": {} }));
 
+    sqlx::query("DELETE FROM runner_sessions WHERE runner_id = ANY($1)")
+        .bind(vec![holder.clone(), other.clone()])
+        .execute(&pool)
+        .await
+        .unwrap();
     clean_up(&pool, run_id, &[&holder]).await;
 }

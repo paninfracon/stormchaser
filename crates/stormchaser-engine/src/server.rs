@@ -117,10 +117,12 @@ pub async fn setup_nats_consumers(
     }
 
     let (query_tx, query_rx) = tokio::sync::mpsc::channel(1000);
+    // Request-reply subjects, outside the stream so that the engine's answer, not the
+    // stream's acknowledgement, is what the requester gets
     for subject in [
-        "stormchaser.v1.*.step.query",
-        "stormchaser.v1.step.query",
+        stormchaser_model::nats::STEP_QUERY_SUBJECT,
         handler::step::events::artifact_auth::ARTIFACT_AUTH_SUBJECT,
+        stormchaser_model::runner_auth::SESSION_SUBJECT,
     ] {
         let mut query_subscriber = nats_client
             .queue_subscribe(subject.to_string(), "engine-query-group".into())
@@ -182,6 +184,22 @@ fn process_query_message(
     pool: sqlx::PgPool,
     nats_client: async_nats::Client,
 ) {
+    if message.subject.as_str() == stormchaser_model::runner_auth::SESSION_SUBJECT {
+        let reply = message.reply.clone().map(|r| r.to_string());
+        tokio::spawn(async move {
+            if let Err(e) = crate::runner_auth::handle_session_request(
+                &message.payload,
+                pool,
+                nats_client,
+                reply,
+            )
+            .await
+            {
+                tracing::error!("Failed to answer a runner's key request: {:?}", e);
+            }
+        });
+        return;
+    }
     let ce: cloudevents::Event = match serde_json::from_slice(&message.payload) {
         Ok(e) => e,
         Err(e) => {

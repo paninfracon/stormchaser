@@ -81,9 +81,13 @@ authenticate with the credentials above.
 ## What Stormchaser needs from NATS
 
 - JetStream enabled.
-- One stream, `stormchaser`, capturing `stormchaser.>`. The engine creates it
-  if it does not exist; you can create it yourself (with the replica count you
-  want) before first start.
+- One stream, `stormchaser`, capturing `stormchaser.v1.>` and nothing wider.
+  The engine creates it if it does not exist; you can create it yourself (with
+  the replica count you want) before first start. Requests to the engine
+  (`stormchaser.rpc.>`) must stay outside it: the stream acknowledges what it
+  stores to the message's reply subject, so a request it captured would get that
+  acknowledgement instead of the engine's answer. The engine narrows a stream
+  that captures `stormchaser.>`, as earlier runners created it.
 - Durable pull consumers, created by the components that use them:
   `orchestration-engine-global`, `orchestration-engine-shard-<n>` (one per
   engine shard), `orchestration-engine-legacy-run`,
@@ -227,8 +231,9 @@ publish allow:
   stormchaser.v1.*.step.failed
   stormchaser.v1.step.unpacking_sfs
   stormchaser.v1.step.packing_sfs
-  stormchaser.v1.step.query
-  stormchaser.v1.step.artifact_auth
+  stormchaser.rpc.step.query
+  stormchaser.rpc.step.artifact_auth
+  stormchaser.rpc.runner.session
   $JS.API.STREAM.INFO.stormchaser
   $JS.API.STREAM.CREATE.stormchaser
   $JS.API.CONSUMER.INFO.stormchaser.*

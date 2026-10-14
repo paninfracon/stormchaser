@@ -214,6 +214,7 @@ Stormchaser follows a strict **Fail-Closed** security philosophy regarding OPA:
 | `STORMCHASER_GIT_IMAGE` | Engine: image `GitCheckout` steps run in. Default is `alpine/git` pinned by digest. | It holds the Git connection's credentials. |
 | `STORMCHASER_TERRAFORM_IMAGE` | Engine: image Terraform steps run in. Default is `hashicorp/terraform` pinned by digest. | It may hold an assumed AWS role's credentials. |
 | `STORMCHASER_AGENT_IMAGE` | Runners: image of the agent container beside each step. Docker runner default: `stormchaser-agent:v1`; Kubernetes chart: `global.agent.image`. Pin it by digest in production. | It parks storage and publishes artifacts with the step's credentials. |
+| `STORMCHASER_RUNNER_SIGNATURES` | Engine: `required` (default) or `optional`, which accepts unsigned reports from runners that have no key, for a rolling upgrade. | `optional` lets any holder of the runner credential report for such a runner. |
 | `STORMCHASER_CRON_CA_FILE` | API: CA file that Kubernetes cron triggers trust when calling `SYSTEM_URL`. Unset by default. | Lets triggers verify an API that serves TLS from a private CA. |
 | `TLS_CA_CERT_PATH` | Path to the CA certificate file. | Trust root for mTLS. |
 | `TLS_CERT_PATH` | Path to the component's client certificate. | Component identity for mTLS. |
@@ -271,6 +272,7 @@ are stored:
 | `connections` | `config`, `encrypted_credentials`, `client_key` | Credentials for storage, registries, databases, Git and HTTP APIs. Despite its name, `encrypted_credentials` is stored exactly as supplied |
 | `webhooks` | `secret_token`, `client_key` | Webhook signing secrets and mTLS client keys |
 | `cron_workflows` | `secret_token` | Trigger tokens for scheduled workflows |
+| `runner_sessions` | `session_key` | The key the engine issued each runner, which the runner signs its reports with |
 
 The API masks these values in its responses (see the relevant endpoints), but
 that is independent of how they are stored.
@@ -323,6 +325,31 @@ away from the control plane:
 
 `scripts/setup.sh` relaxes the network isolation and the privileged setting for
 local development; see [NATS: Quickstart and Production](nats.md).
+
+### Runner identity
+
+Every runner connects to NATS with the same credential, so a message cannot show by
+its sender which runner it comes from. Each runner therefore asks the engine for a
+key of its own when it starts (`stormchaser.rpc.runner.session`). The engine sends
+the key sealed to a one-off public key the runner made for the request, so another
+holder of the runner credential who sees the reply cannot read it, and keeps it in
+`runner_sessions`. The runner signs everything it reports with it: registration,
+heartbeats, going offline, a step's progress, result and failure, and its requests
+for artifact push tokens. The engine ignores such a message unless it is signed, less
+than five minutes ago, with the key of the runner it names.
+
+* The engine will not issue a key for an id whose runner is still sending
+  heartbeats. A runner that restarts without saying it is going offline waits up to
+  30 seconds before it can register again.
+* The engine and the API still finish steps they run themselves (approvals, waits,
+  built-in steps) without a runner's signature; those need the step's completion
+  token instead.
+* What this does not stop: a holder of the runner credential can still pull tasks
+  from the shared queues, which carry the step's resolved secrets, and can take the
+  id of a runner that has stopped.
+* Runners must be upgraded with the engine. While older runners are still running,
+  `STORMCHASER_RUNNER_SIGNATURES=optional` on the engine accepts unsigned reports from
+  runners that have no key; signed reports are always checked.
 
 ### The runners' own pods
 
@@ -463,8 +490,8 @@ to the helper alone: written into the helper container's filesystem on Docker, i
 a Secret only the sidecar mounts on Kubernetes (deleted with the step's Job).
 
 * The step's own container holds no upload URLs and no registry credentials.
-* Any runner credential can ask for the token of any step that is currently
-  running, so the token's narrow scope and short life are the limit there.
+* Only the runner that has the step gets the token: the request must be signed
+  with that runner's key (see [Runner identity](#runner-identity)).
 * The token's lifetime is the registry's (often five minutes). A push that
   outlasts it fails; raise the token lifetime at the registry for large artifacts.
 * A registry that cannot issue per-repository tokens gets no credentials unless

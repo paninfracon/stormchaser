@@ -272,6 +272,15 @@ pub async fn handle_message(
         };
     let subject = normalized_subject.as_str();
 
+    // What a runner reports must be signed with the key the engine issued it
+    if let Some(sender) = crate::runner_auth::sender_of(subject) {
+        if let Some(reason) = crate::runner_auth::refusal(&pool, sender, &payload).await {
+            tracing::warn!("Ignoring {}: {}", subject, reason);
+            let _ = message.double_ack().await;
+            return;
+        }
+    }
+
     if subject.starts_with("stormchaser.v1.run.") {
         handle_run_events(
             subject,

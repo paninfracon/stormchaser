@@ -104,6 +104,45 @@ async fn insert_run(pool: &PgPool, registry: &MockServer, status: &str) -> (Uuid
     (run_id, step_id)
 }
 
+/// `payload` as a runner sends it: naming a runner the engine issued a key to, and
+/// signed with that key.
+async fn signed(pool: &PgPool, mut payload: serde_json::Value) -> serde_json::Value {
+    let runner_id = format!("test-runner-{}", Uuid::new_v4());
+    let key = [42u8; 32];
+    stormchaser_engine::db::store_runner_session(pool, &runner_id, &key)
+        .await
+        .unwrap();
+    payload["runner_id"] = json!(runner_id);
+    stormchaser_model::runner_auth::sign_payload(payload, &key)
+}
+
+#[tokio::test]
+async fn only_a_runner_signing_with_its_own_key_gets_a_token() {
+    let pool = pool().await;
+    let registry =
+        mock_registry(|uri| format!(r#"Bearer realm="{uri}/token",service="mock-registry""#)).await;
+    let (run_id, step_id) = insert_run(&pool, &registry, "running").await;
+
+    // Unsigned, as anyone with the runner credential could send it
+    let err = artifact_push_auth(
+        &json!({"run_id": run_id, "step_id": step_id, "runner_id": "someone"}),
+        &pool,
+    )
+    .await
+    .unwrap_err();
+    assert!(err.to_string().contains("no key"), "{err}");
+
+    // Signed, but not with the key of the runner it names
+    let mut forged = signed(&pool, json!({"run_id": run_id, "step_id": step_id})).await;
+    let victim = format!("test-runner-{}", Uuid::new_v4());
+    stormchaser_engine::db::store_runner_session(&pool, &victim, &[7u8; 32])
+        .await
+        .unwrap();
+    forged["runner_id"] = json!(victim);
+    let err = artifact_push_auth(&forged, &pool).await.unwrap_err();
+    assert!(err.to_string().contains("not signed by runner"), "{err}");
+}
+
 #[tokio::test]
 async fn a_running_step_gets_a_token_for_its_own_repository_and_never_the_password() {
     let pool = pool().await;
@@ -125,9 +164,12 @@ async fn a_running_step_gets_a_token_for_its_own_repository_and_never_the_passwo
         .mount(&registry)
         .await;
 
-    let config = artifact_push_auth(&json!({"run_id": run_id, "step_id": step_id}), &pool)
-        .await
-        .unwrap();
+    let config = artifact_push_auth(
+        &signed(&pool, json!({"run_id": run_id, "step_id": step_id})).await,
+        &pool,
+    )
+    .await
+    .unwrap();
 
     let host = registry.uri().trim_start_matches("http://").to_string();
     assert_eq!(config["auths"][&host]["registrytoken"], "scoped-token");
@@ -141,11 +183,12 @@ async fn credentials_are_refused_for_a_step_that_is_not_with_a_runner() {
 
     // Finished
     let (run_id, step_id) = insert_run(&pool, &registry, "succeeded").await;
-    assert!(
-        artifact_push_auth(&json!({"run_id": run_id, "step_id": step_id}), &pool)
-            .await
-            .is_err()
-    );
+    assert!(artifact_push_auth(
+        &signed(&pool, json!({"run_id": run_id, "step_id": step_id})).await,
+        &pool
+    )
+    .await
+    .is_err());
 
     // Running, but named with another run
     let (_, step_id) = insert_run(&pool, &registry, "running").await;
@@ -163,11 +206,12 @@ async fn credentials_are_refused_for_a_step_that_is_not_with_a_runner() {
         .execute(&pool)
         .await
         .unwrap();
-    assert!(
-        artifact_push_auth(&json!({"run_id": run_id, "step_id": step_id}), &pool)
-            .await
-            .is_err()
-    );
+    assert!(artifact_push_auth(
+        &signed(&pool, json!({"run_id": run_id, "step_id": step_id})).await,
+        &pool
+    )
+    .await
+    .is_err());
 
     // Unknown step
     assert!(
@@ -183,9 +227,12 @@ async fn a_registry_without_token_auth_gets_nothing_by_default() {
     let registry = mock_registry(|_| r#"Basic realm="Registry""#.to_string()).await;
     let (run_id, step_id) = insert_run(&pool, &registry, "running").await;
 
-    let err = artifact_push_auth(&json!({"run_id": run_id, "step_id": step_id}), &pool)
-        .await
-        .unwrap_err();
+    let err = artifact_push_auth(
+        &signed(&pool, json!({"run_id": run_id, "step_id": step_id})).await,
+        &pool,
+    )
+    .await
+    .unwrap_err();
     assert!(
         err.to_string().contains("does not issue scoped tokens"),
         "{err}"

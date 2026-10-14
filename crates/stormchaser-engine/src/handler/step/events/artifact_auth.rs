@@ -79,7 +79,12 @@ pub async fn artifact_push_auth(payload: &Value, pool: &PgPool) -> Result<Value>
         bail!("step {} is not running on a runner", step_id);
     }
     // The token lets its holder push to the run's repositories, so it goes only to the
-    // runner that has the step
+    // runner that has the step, which proves it is that runner by signing the request
+    if let Some(reason) =
+        crate::runner_auth::refusal(pool, crate::runner_auth::Sender::Runner, payload).await
+    {
+        bail!("{}", reason);
+    }
     if let Some(assigned) = instance.runner_id.as_deref() {
         if payload["runner_id"].as_str() != Some(assigned) {
             bail!(

@@ -49,6 +49,10 @@ pub mod registry;
 pub mod run_cancel;
 /// Execution runner definitions and status models.
 pub mod runner;
+
+/// Runner identity: per-runner keys issued by the engine, and signed runner messages.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod runner_auth;
 /// Schema cache for OCI schemas.
 pub mod schema_cache;
 /// Schema generation functions.

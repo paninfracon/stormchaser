@@ -68,6 +68,7 @@ pub const K8S_JOB_TASKS_SUBJECT: &str = "stormchaser.v1.*.step.scheduled.runk8sj
 
 /// Binds to the shared durable consumer `name`, filtered to `subject`, creating it if
 /// no runner has yet.
+#[cfg(not(target_arch = "wasm32"))]
 pub async fn task_consumer(
     stream: &async_nats::jetstream::stream::Stream,
     name: &str,
