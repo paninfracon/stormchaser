@@ -27,7 +27,22 @@ pub struct TlsConfig {
 pub struct TlsReloader {
     client_config: Arc<ArcSwap<ClientConfig>>,
     server_config: Arc<ArcSwap<ServerConfig>>,
+    listener_config: Arc<ServerConfig>,
     _watcher: RecommendedWatcher,
+}
+
+/// Hands out whichever certificate was last read from disk, so one listener
+/// configuration keeps working across certificate renewals.
+#[derive(Debug)]
+struct CurrentCertificate(Arc<ArcSwap<rustls::sign::CertifiedKey>>);
+
+impl rustls::server::ResolvesServerCert for CurrentCertificate {
+    fn resolve(
+        &self,
+        _client_hello: rustls::server::ClientHello<'_>,
+    ) -> Option<Arc<rustls::sign::CertifiedKey>> {
+        Some(self.0.load_full())
+    }
 }
 
 impl TlsReloader {
@@ -40,6 +55,13 @@ impl TlsReloader {
 
         let client_config = Arc::new(ArcSwap::from_pointee(Self::load_client_config(&config)?));
         let server_config = Arc::new(ArcSwap::from_pointee(Self::load_server_config(&config)?));
+
+        let listener_certificate =
+            Arc::new(ArcSwap::from_pointee(Self::load_certified_key(&config)?));
+        let mut listener_config = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_cert_resolver(Arc::new(CurrentCertificate(listener_certificate.clone())));
+        listener_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
 
         let client_config_clone = client_config.clone();
         let server_config_clone = server_config.clone();
@@ -57,6 +79,11 @@ impl TlsReloader {
                         match Self::load_server_config(&config_clone) {
                             Ok(new_config) => server_config_clone.store(Arc::new(new_config)),
                             Err(e) => error!("Failed to reload TLS server config: {:?}", e),
+                        }
+                        // A half-written pair fails to load and the old one stays in use
+                        match Self::load_certified_key(&config_clone) {
+                            Ok(new_key) => listener_certificate.store(Arc::new(new_key)),
+                            Err(e) => error!("Failed to reload the listener certificate: {:?}", e),
                         }
                     }
                 }
@@ -76,8 +103,30 @@ impl TlsReloader {
         Ok(Self {
             client_config,
             server_config,
+            listener_config: Arc::new(listener_config),
             _watcher: watcher,
         })
+    }
+
+    /// Returns the configuration for a listener that users and their tools connect to.
+    ///
+    /// It presents the same certificate as [`Self::server_config`] but asks for no
+    /// client certificate: browsers, the CLI and the web tier identify themselves with
+    /// a bearer token, not a certificate. The certificate follows the files on disk.
+    pub fn listener_config(&self) -> Arc<ServerConfig> {
+        self.listener_config.clone()
+    }
+
+    fn load_certified_key(config: &TlsConfig) -> Result<rustls::sign::CertifiedKey> {
+        let certs = load_certs(&config.cert_path)?;
+        let key = load_key(&config.key_path)?;
+        let key = rustls::crypto::ring::sign::any_supported_type(&key)
+            .context("unsupported private key type")?;
+        let certified = rustls::sign::CertifiedKey::new(certs, key);
+        certified
+            .keys_match()
+            .context("the certificate and private key do not belong together")?;
+        Ok(certified)
     }
 
     /// Returns an atomically updated `Arc<ClientConfig>`.
@@ -312,5 +361,49 @@ mod tests {
         let reloader = TlsReloader::new(config).await.unwrap();
         let _client_cfg = reloader.client_config();
         let _server_cfg = reloader.server_config();
+    }
+
+    fn write_pair(dir: &Path, cert: &str, key: &str) -> TlsConfig {
+        let cert_path = dir.join("tls.crt");
+        let key_path = dir.join("tls.key");
+        std::fs::write(&cert_path, cert).unwrap();
+        std::fs::write(&key_path, key).unwrap();
+        let ca_path = dir.join("ca.crt");
+        std::fs::write(&ca_path, TEST_CA).unwrap();
+        TlsConfig {
+            ca_cert_path: Some(ca_path),
+            cert_path,
+            key_path,
+            server_name: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn the_listener_offers_http2_and_follows_the_certificate_on_disk() {
+        init_test();
+        let dir = tempdir().unwrap();
+        let config = write_pair(dir.path(), TEST_CERT, TEST_KEY);
+        let reloader = TlsReloader::new(config.clone()).await.unwrap();
+        assert_eq!(
+            reloader.listener_config().alpn_protocols,
+            vec![b"h2".to_vec(), b"http/1.1".to_vec()]
+        );
+        // Rewriting the pair is picked up without a new configuration being handed out
+        let before = Arc::as_ptr(&reloader.listener_config());
+        std::fs::write(&config.cert_path, TEST_CERT).unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert_eq!(before, Arc::as_ptr(&reloader.listener_config()));
+    }
+
+    #[test]
+    fn a_key_that_is_not_the_certificates_is_refused() {
+        init_test();
+        let dir = tempdir().unwrap();
+        // The CA's key does not belong to the server certificate
+        let ca_key = include_str!("../../../tests/certs/ca.key");
+        let config = write_pair(dir.path(), TEST_CERT, ca_key);
+        assert!(TlsReloader::load_certified_key(&config).is_err());
+        let config = write_pair(dir.path(), TEST_CERT, TEST_KEY);
+        assert!(TlsReloader::load_certified_key(&config).is_ok());
     }
 }

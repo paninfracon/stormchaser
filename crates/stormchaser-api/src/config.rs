@@ -16,6 +16,8 @@ pub struct Config {
     pub tls_server_name: Option<String>,
     /// The db ssl.
     pub db_ssl: bool,
+    /// Whether the HTTP listener serves TLS itself.
+    pub listen_tls: bool,
     /// The nats url.
     pub nats_url: String,
     /// The opa url.
@@ -58,6 +60,7 @@ impl Config {
         let mut tls_key_path = PathBuf::from("/etc/engine/certs/tls.key");
         let mut tls_server_name = None;
         let mut db_ssl = false;
+        let mut listen_tls = false;
         let mut nats_url = "nats://localhost:4222".to_string();
         let mut opa_url = None;
         let mut opa_wasm_path = None;
@@ -80,6 +83,7 @@ impl Config {
                 "TLS_KEY_PATH" => tls_key_path = PathBuf::from(v.as_ref()),
                 "TLS_SERVER_NAME" => tls_server_name = Some(v.as_ref().to_string()),
                 "STORMCHASER_DB_SSL" => db_ssl = v.as_ref() == "true",
+                "STORMCHASER_LISTEN_TLS" => listen_tls = v.as_ref() == "true",
                 "NATS_URL" => nats_url = v.as_ref().to_string(),
                 "OPA_URL" => {
                     let val = v.as_ref().to_string();
@@ -117,6 +121,7 @@ impl Config {
             tls_key_path,
             tls_server_name,
             db_ssl,
+            listen_tls,
             nats_url,
             opa_url,
             opa_wasm_path,

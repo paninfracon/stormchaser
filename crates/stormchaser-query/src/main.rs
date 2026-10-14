@@ -33,6 +33,7 @@ async fn run() -> anyhow::Result<()> {
 
     // Uses the exact same state builder as stormchaser-api to guarantee TLS, DB, NATS,
     // OIDC, and OPA configuration parity.
+    let tls = stormchaser_api::listener::tls_from_config(&config).await?;
     let state = build_app_state(config).await?;
 
     let app = Router::new()
@@ -49,9 +50,13 @@ async fn run() -> anyhow::Result<()> {
     let port = env::var("PORT").unwrap_or_else(|_| "3001".to_string());
     let addr: SocketAddr = format!("0.0.0.0:{}", port).parse()?;
 
-    tracing::info!("Stormchaser Query Microservice listening on {}", addr);
+    tracing::info!(
+        "Stormchaser Query Microservice listening on {} ({})",
+        addr,
+        if tls.is_some() { "https" } else { "http" }
+    );
     let listener = TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    stormchaser_api::listener::serve(listener, app, tls, std::future::pending()).await?;
 
     Ok(())
 }

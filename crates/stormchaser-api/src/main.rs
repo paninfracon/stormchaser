@@ -32,6 +32,7 @@ async fn main() -> anyhow::Result<()> {
 
 /// Run server.
 pub async fn run_server(config: Config) -> anyhow::Result<()> {
+    let tls = stormchaser_api::listener::tls_from_config(&config).await?;
     let state = build_app_state(config).await?;
 
     tracing::info!("Running database migrations...");
@@ -40,15 +41,14 @@ pub async fn run_server(config: Config) -> anyhow::Result<()> {
     let app = app(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
-    tracing::info!("listening on {}", addr);
+    tracing::info!(
+        "listening on {} ({})",
+        addr,
+        if tls.is_some() { "https" } else { "http" }
+    );
     let listener = TcpListener::bind(addr).await?;
 
-    axum::serve(
-        listener,
-        app.into_make_service_with_connect_info::<SocketAddr>(),
-    )
-    .with_graceful_shutdown(shutdown_signal())
-    .await?;
+    stormchaser_api::listener::serve(listener, app, tls, shutdown_signal()).await?;
 
     shutdown_telemetry();
     Ok(())

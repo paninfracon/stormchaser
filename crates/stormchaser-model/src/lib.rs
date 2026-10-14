@@ -16,6 +16,9 @@ pub mod connections;
 /// Cron scheduling definitions.
 pub mod cron;
 /// Domain-Specific Language (DSL) abstract syntax tree and types.
+#[cfg(not(target_arch = "wasm32"))]
+/// How services connect to PostgreSQL over TLS.
+pub mod db_tls;
 pub mod dsl;
 /// System event and correlation models.
 pub mod event;

@@ -3,7 +3,6 @@ use crate::config::Config;
 use crate::AppState;
 use anyhow::Context;
 use async_nats::connect_with_options;
-use sqlx::postgres;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::ConnectOptions;
 use std::collections::HashMap;
@@ -27,18 +26,20 @@ pub async fn build_app_state(config: Config) -> anyhow::Result<AppState> {
 
     let tls_reloader = Arc::new(TlsReloader::new(tls_config).await?);
 
-    let mut db_options: postgres::PgConnectOptions = config.database_url.parse()?;
-    if config.db_ssl {
-        if let Some(ca) = &config.tls_ca_cert_path {
-            db_options = db_options
-                .ssl_mode(postgres::PgSslMode::VerifyFull)
-                .ssl_root_cert(ca.to_string_lossy().to_string());
-        }
-        db_options = db_options
-            .ssl_client_cert(config.tls_cert_path.clone())
-            .ssl_client_key(config.tls_key_path.clone());
-    } else {
-        db_options = db_options.ssl_mode(postgres::PgSslMode::Disable);
+    let mut db_options = stormchaser_model::db_tls::connect_options(
+        &config.database_url,
+        &stormchaser_model::db_tls::DbTls {
+            requested: config.db_ssl,
+            ca: config.tls_ca_cert_path.as_deref(),
+            cert: &config.tls_cert_path,
+            key: &config.tls_key_path,
+        },
+    )?;
+    if !stormchaser_model::db_tls::is_verified(&db_options) {
+        tracing::warn!(
+            "The database connection is not verified TLS. Set STORMCHASER_DB_SSL=true \
+             unless the database is reached over a network nothing else can use"
+        );
     }
 
     db_options = db_options

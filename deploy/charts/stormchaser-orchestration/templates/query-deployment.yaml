@@ -93,6 +93,10 @@ spec:
             - name: TLS_KEY_PATH
               value: {{ .Values.global.tls.keyPath | quote }}
             {{- end }}
+            {{- if (and .Values.global.tls.enabled .Values.global.tls.listen) }}
+            - name: STORMCHASER_LISTEN_TLS
+              value: "true"
+            {{- end }}
           ports:
             - name: http
               containerPort: 3001
@@ -101,10 +105,16 @@ spec:
             httpGet:
               path: /healthz
               port: http
+              {{- if (and .Values.global.tls.enabled .Values.global.tls.listen) }}
+              scheme: HTTPS
+              {{- end }}
           readinessProbe:
             httpGet:
               path: /healthz
               port: http
+              {{- if (and .Values.global.tls.enabled .Values.global.tls.listen) }}
+              scheme: HTTPS
+              {{- end }}
           resources:
             {{- toYaml .Values.query.resources | nindent 12 }}
           volumeMounts:

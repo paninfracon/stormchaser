@@ -112,6 +112,15 @@ spec:
             - name: TLS_KEY_PATH
               value: {{ .Values.global.tls.keyPath | quote }}
             {{- end }}
+            {{- if (and .Values.global.tls.enabled .Values.global.tls.listen) }}
+            - name: STORMCHASER_LISTEN_TLS
+              value: "true"
+            # Cron triggers call the API, and must trust its certificate
+            - name: STORMCHASER_CRON_CA_FILE
+              value: {{ .Values.global.tls.caCertPath | quote }}
+            {{- end }}
+            - name: STORMCHASER_API_DOCS
+              value: {{ .Values.api.docs | quote }}
           ports:
             - name: http
               containerPort: 3000
@@ -120,10 +129,16 @@ spec:
             httpGet:
               path: /healthz
               port: http
+              {{- if (and .Values.global.tls.enabled .Values.global.tls.listen) }}
+              scheme: HTTPS
+              {{- end }}
           readinessProbe:
             httpGet:
               path: /healthz
               port: http
+              {{- if (and .Values.global.tls.enabled .Values.global.tls.listen) }}
+              scheme: HTTPS
+              {{- end }}
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}
           volumeMounts:

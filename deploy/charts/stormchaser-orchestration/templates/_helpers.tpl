@@ -49,3 +49,10 @@ Selector labels
 app.kubernetes.io/name: {{ include "stormchaser-orchestration.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
+
+{{/*
+The scheme the web tier uses to reach the API and the query service.
+*/}}
+{{- define "stormchaser-orchestration.internalScheme" -}}
+{{- if and .Values.global.tls.enabled .Values.global.tls.listen -}}https{{- else -}}http{{- end -}}
+{{- end }}

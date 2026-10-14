@@ -45,7 +45,9 @@ async fn main() {
 #[cfg(feature = "ssr")]
 fn http_client() -> reqwest::Client {
     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-    CLIENT.get_or_init(reqwest::Client::new).clone()
+    CLIENT
+        .get_or_init(stormchaser_web::api::build_http_client)
+        .clone()
 }
 
 #[cfg(feature = "ssr")]

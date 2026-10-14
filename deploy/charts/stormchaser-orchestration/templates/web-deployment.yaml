@@ -23,9 +23,9 @@ spec:
           imagePullPolicy: {{ .Values.web.image.pullPolicy }}
           env:
             - name: API_URL
-              value: "http://{{ include "stormchaser-orchestration.fullname" . }}-api:{{ .Values.api.service.port }}"
+              value: "{{ include "stormchaser-orchestration.internalScheme" . }}://{{ include "stormchaser-orchestration.fullname" . }}-api:{{ .Values.api.service.port }}"
             - name: QUERY_URL
-              value: "http://{{ include "stormchaser-orchestration.fullname" . }}-query:{{ .Values.query.service.port }}"
+              value: "{{ include "stormchaser-orchestration.internalScheme" . }}://{{ include "stormchaser-orchestration.fullname" . }}-query:{{ .Values.query.service.port }}"
             - name: EXTERNAL_API_URL
               value: {{ .Values.web.externalApiUrl | quote }}
             - name: WEB_URL
@@ -34,9 +34,28 @@ spec:
               value: {{ .Values.web.rustLog | quote }}
             - name: GRAFANA_URL
               value: {{ .Values.global.grafana.url | quote }}
+            {{- if (and .Values.global.tls.enabled .Values.global.tls.listen) }}
+            # The CA that signed the API's and the query service's certificate
+            - name: TLS_CA_CERT_PATH
+              value: {{ .Values.global.tls.caCertPath | quote }}
+            {{- end }}
           ports:
             - name: http
               containerPort: 3000
               protocol: TCP
           resources:
             {{- toYaml .Values.web.resources | nindent 12 }}
+          {{- if (and .Values.global.tls.enabled .Values.global.tls.listen) }}
+          volumeMounts:
+            - name: ca
+              mountPath: {{ dir .Values.global.tls.caCertPath }}
+              readOnly: true
+      volumes:
+        # Only the CA certificate: the web tier has no use for the services' key
+        - name: ca
+          secret:
+            secretName: {{ .Values.global.tls.existingSecret }}
+            items:
+              - key: {{ base .Values.global.tls.caCertPath }}
+                path: {{ base .Values.global.tls.caCertPath }}
+          {{- end }}

@@ -97,7 +97,29 @@ fn is_valid_grafana_url(url: &str) -> bool {
 #[cfg(feature = "ssr")]
 pub(crate) fn http_client() -> reqwest::Client {
     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-    CLIENT.get_or_init(reqwest::Client::new).clone()
+    CLIENT.get_or_init(build_http_client).clone()
+}
+
+/// Builds the client the web tier calls the API and the query service with.
+///
+/// Those services may serve TLS with a certificate from the deployment's own CA
+/// (`TLS_CA_CERT_PATH`). It is trusted in addition to the system's certificate
+/// authorities, not instead of them. A CA file that is named but cannot be used stops
+/// the service: carrying on without it would only fail later, on every request.
+#[cfg(feature = "ssr")]
+pub fn build_http_client() -> reqwest::Client {
+    let mut builder = reqwest::Client::builder();
+    if let Some(path) = std::env::var("TLS_CA_CERT_PATH")
+        .ok()
+        .filter(|path| !path.is_empty())
+    {
+        let pem = std::fs::read(&path)
+            .unwrap_or_else(|e| panic!("cannot read TLS_CA_CERT_PATH {path}: {e}"));
+        let certs = reqwest::Certificate::from_pem_bundle(&pem)
+            .unwrap_or_else(|e| panic!("TLS_CA_CERT_PATH {path} is not a PEM bundle: {e}"));
+        builder = builder.tls_certs_merge(certs);
+    }
+    builder.build().expect("failed to build the HTTP client")
 }
 
 #[cfg(test)]

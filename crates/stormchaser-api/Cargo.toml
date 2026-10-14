@@ -52,6 +52,9 @@ aes-gcm = { workspace = true }
 aead = { workspace = true }
 jsonwebtoken = { workspace = true }
 tower = { workspace = true }
+hyper = { version = "1", features = ["http1", "http2", "server"] }
+hyper-util = { version = "0.1", features = ["server-auto", "server-graceful", "tokio", "service"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
 once_cell = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }

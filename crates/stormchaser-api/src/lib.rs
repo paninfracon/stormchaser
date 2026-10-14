@@ -11,6 +11,8 @@ pub mod config;
 pub mod db;
 /// Human-in-the-loop module
 pub mod hitl;
+/// The HTTP listener, with or without TLS.
+pub mod listener;
 /// API routes module
 pub mod routes;
 /// Setup module
@@ -174,6 +176,11 @@ pub struct AppState {
     pub mcp_allowed_hosts: Vec<String>,
 }
 
+/// Whether Swagger UI and the OpenAPI document are served (`STORMCHASER_API_DOCS=true`).
+pub fn api_docs_enabled() -> bool {
+    std::env::var("STORMCHASER_API_DOCS").is_ok_and(|value| value.eq_ignore_ascii_case("true"))
+}
+
 /// A request URI as it may be written to logs and traces.
 ///
 /// An approval link's token is a credential that sits in the path, so it is left out.
@@ -324,12 +331,18 @@ pub fn app(state: AppState) -> Router {
             },
         ));
 
-    Router::new()
-        .merge(
+    // The interactive API documentation is served without a token, so it is only there
+    // when asked for: it describes every route to anyone who can reach the listener,
+    // and its bundled UI is code that need not be exposed in production.
+    let mut root = Router::new();
+    if api_docs_enabled() {
+        root = root.merge(
             utoipa_swagger_ui::SwaggerUi::new("/swagger-ui")
                 .url("/api-docs/openapi.json", ApiDoc::openapi()),
-        )
-        .route("/", get(|| async { "Stormchaser API" }))
+        );
+    }
+
+    root.route("/", get(|| async { "Stormchaser API" }))
         .route("/healthz", get(|| async { "OK" }))
         .route("/api/health", get(|| async { "OK" }))
         .nest("/api/v1", api_v1)

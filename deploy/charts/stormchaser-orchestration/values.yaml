@@ -63,6 +63,14 @@ global:
     certPath: "/etc/stormchaser/certs/tls.crt"
     keyPath: "/etc/stormchaser/certs/tls.key"
     existingSecret: "stormchaser-tls-certs"
+    # When true, the API and the query service serve HTTPS themselves with the
+    # certificate above, and the web tier calls them over HTTPS and trusts the CA
+    # above. The certificate must name the two Services
+    # (<release>-stormchaser-orchestration-api and -query, or whatever the chart's
+    # fullname gives). An ingress in front of the API must then talk HTTPS to its
+    # backend (for ingress-nginx: nginx.ingress.kubernetes.io/backend-protocol: HTTPS).
+    # Leave false only where a mesh or the network itself protects pod traffic.
+    listen: false
 
 api:
   image:
@@ -71,6 +79,9 @@ api:
     tag: "latest"
   replicaCount: 1
   rustLog: "stormchaser_api=info"
+  # Serve Swagger UI and the OpenAPI document, without authentication, at
+  # /swagger-ui and /api-docs/openapi.json.
+  docs: false
   # Each client gets a bucket of rateLimitBurstSize requests that refills at
   # rateLimitPerSecond.
   rateLimitPerSecond: 5
