@@ -8,6 +8,9 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+/// Bound on the run ids one stream remembers as unreadable.
+const MAX_UNREADABLE_RUNS: usize = 10_000;
+
 #[utoipa::path(
     get,
     path = "/api/v1/runs/stream",
@@ -56,8 +59,19 @@ pub async fn stream_workflow_runs_api(
             }
         };
         let mut subscriber = futures::stream::select(legacy_subscriber, sharded_subscriber);
+        // Runs this caller may not read, so their later events cost no database query
+        let mut unreadable = std::collections::HashSet::new();
 
-        while let Some(msg) = subscriber.next().await {
+        loop {
+            // A caller who may read none of the events never sends, so the client's
+            // disconnect must end the task here rather than at a failed send
+            let msg = tokio::select! {
+                _ = tx.closed() => break,
+                msg = subscriber.next() => match msg {
+                    Some(msg) => msg,
+                    None => break,
+                },
+            };
             let ce: cloudevents::Event = match serde_json::from_slice(&msg.payload) {
                 Ok(e) => e,
                 Err(_) => continue,
@@ -70,6 +84,9 @@ pub async fn stream_workflow_runs_api(
 
             if let Some(run_id_str) = payload.get("run_id").and_then(|id| id.as_str()) {
                 if let Ok(run_id) = Uuid::parse_str(run_id_str) {
+                    if unreadable.contains(&run_id) {
+                        continue;
+                    }
                     // Fetch full detail for the run
                     let detail =
                         db::get_workflow_run_detail(&pool, stormchaser_model::RunId::new(run_id))
@@ -77,8 +94,16 @@ pub async fn stream_workflow_runs_api(
                             .unwrap_or(None);
 
                     if let Some(mut run) = detail {
-                        if !matches!(filter.can_read(Some(&run.initiating_user)).await, Ok(true)) {
-                            continue;
+                        match filter.can_read(Some(&run.initiating_user)).await {
+                            Ok(true) => {}
+                            Ok(false) => {
+                                if unreadable.len() >= MAX_UNREADABLE_RUNS {
+                                    unreadable.clear();
+                                }
+                                unreadable.insert(run_id);
+                                continue;
+                            }
+                            Err(_) => continue,
                         }
                         if let Some(status_str) = payload.get("status").and_then(|s| s.as_str()) {
                             if let Ok(status) = serde_json::from_value(serde_json::Value::String(
