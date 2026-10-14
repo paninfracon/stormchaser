@@ -37,6 +37,32 @@ Before cutting a new release tag, ensure the following steps are meticulously fo
     * Integration Tests: `./scripts/test-integration.sh`
     * Test Coverage: `./scripts/coverage.sh` (Verify coverage has not significantly degraded).
 
+## 1.5. Dependency Check and Signatures
+
+The release workflow runs `cargo deny check` before building and stops on any
+advisory, banned crate, licence or source problem. `Cargo.lock` is not committed,
+so this checks exactly the versions the release resolves; the same check runs on
+every pull request (`Check Dependencies` in CI).
+
+Tagged releases are signed with cosign, keyless, through GitHub's OIDC identity:
+each Linux archive has a `.sigstore.json` bundle beside it on the release, and each
+image is signed by digest. To verify:
+
+```bash
+cosign verify-blob --bundle stormchaser-api-x86_64-unknown-linux-gnu.tar.gz.sigstore.json \
+  --certificate-identity-regexp '^https://github.com/paninfracon/stormchaser/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  stormchaser-api-x86_64-unknown-linux-gnu.tar.gz
+
+cosign verify ghcr.io/paninfracon/stormchaser-stormchaser-api:<tag> \
+  --certificate-identity-regexp '^https://github.com/paninfracon/stormchaser/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+The macOS and Windows CLI archives are built and uploaded by
+`taiki-e/upload-rust-binary-action` and are not signed yet. A manual release (below)
+is not signed either.
+
 ## 2. Docker and Vergen Configuration
 
 Stormchaser uses `vergen` to embed Git information into the compiled binaries. When building via Docker, ensure that the `.dockerignore` file allows `vergen` to access the `.git` directory without bloating the build context.

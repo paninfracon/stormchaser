@@ -27,6 +27,21 @@ jobs:
     - name: Run cargo fmt
       run: cargo fmt --all -- --check
 
+  deny:
+    name: Check Dependencies
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      with:
+        persist-credentials: false
+    - name: Install cargo-deny
+      uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+      with:
+        tool: cargo-deny@0.19.4
+    # Cargo.lock is not committed, so this resolves the versions a build would get now
+    - name: Check advisories, bans, licenses and sources
+      run: cargo deny check
+
   clippy:
     name: Run Clippy
     runs-on: ubuntu-latest
