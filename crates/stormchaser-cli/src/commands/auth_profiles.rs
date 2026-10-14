@@ -27,8 +27,13 @@ pub enum ProfilesCommands {
         name: String,
         #[arg(long)]
         url: String,
-        #[arg(long)]
+        /// The token. Prefer --token-stdin: other users on the host can read a
+        /// command's arguments, and the shell keeps them in its history.
+        #[arg(long, conflicts_with = "token_stdin")]
         token: Option<String>,
+        /// Read the token from the first line of standard input.
+        #[arg(long)]
+        token_stdin: bool,
     },
     /// Switch the active profile
     Switch { name: String },
@@ -36,6 +41,19 @@ pub enum ProfilesCommands {
     Remove { name: String },
     /// Show the current active profile
     Current,
+}
+
+/// Reads a token from the first line of `input`.
+fn read_token(mut input: impl std::io::BufRead) -> Result<String> {
+    let mut line = String::new();
+    input
+        .read_line(&mut line)
+        .context("Could not read the token from standard input")?;
+    let token = line.trim();
+    if token.is_empty() {
+        anyhow::bail!("No token on standard input");
+    }
+    Ok(token.to_string())
 }
 
 fn config_path() -> Result<PathBuf> {
@@ -173,7 +191,17 @@ pub async fn handle(command: ProfilesCommands) -> Result<()> {
                 }
             }
         }
-        ProfilesCommands::Add { name, url, token } => {
+        ProfilesCommands::Add {
+            name,
+            url,
+            token,
+            token_stdin,
+        } => {
+            let token = if token_stdin {
+                Some(read_token(std::io::stdin().lock())?)
+            } else {
+                token
+            };
             let mut config = load_profiles()?;
             config.profiles.insert(
                 name.clone(),
@@ -234,6 +262,14 @@ pub async fn handle(command: ProfilesCommands) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_token_is_read_from_the_first_line_of_input() {
+        assert_eq!(read_token(&b"tok-en\nrest"[..]).unwrap(), "tok-en");
+        assert_eq!(read_token(&b"  tok \r\n"[..]).unwrap(), "tok");
+        assert!(read_token(&b"\n"[..]).is_err());
+        assert!(read_token(&b""[..]).is_err());
+    }
 
     fn profile(url: &str) -> Profile {
         Profile {

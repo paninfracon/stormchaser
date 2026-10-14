@@ -30,7 +30,9 @@ struct Cli {
     )]
     query_url: String,
 
-    #[arg(short, long, env = "STORMCHASER_TOKEN")]
+    /// The authentication token for the API. Prefer the STORMCHASER_TOKEN environment
+    /// variable: other users on the host can read a command's arguments.
+    #[arg(short, long, env = "STORMCHASER_TOKEN", hide_env_values = true)]
     token: Option<String>,
 
     /// A PEM file of CA certificates to trust as well as the system's, for an API
