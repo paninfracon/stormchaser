@@ -170,17 +170,19 @@ pub async fn exchange_token(
         }
     };
 
-    let token_data = match decode::<Claims>(&token_res.id_token, &decoding_key, &validation) {
-        Ok(d) => d,
-        Err(e) => {
-            tracing::error!("Failed to validate id_token: {:?}", e);
-            return Err(StatusCode::UNAUTHORIZED);
-        }
-    };
+    let token_data =
+        match decode::<auth::IdpClaims>(&token_res.id_token, &decoding_key, &validation) {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::error!("Failed to validate id_token: {:?}", e);
+                return Err(StatusCode::UNAUTHORIZED);
+            }
+        };
+    let identity = token_data.claims.into_claims()?;
 
     // 3. Generate Stormchaser Access Token
-    let user_id = token_data.claims.sub;
-    let email = token_data.claims.email;
+    let user_id = identity.sub;
+    let email = identity.email;
 
     let expires_in = 3600;
     let expiration = SystemTime::now()
@@ -300,14 +302,15 @@ pub async fn refresh_token(
         StatusCode::UNAUTHORIZED
     })?;
 
-    let token_data =
-        decode::<Claims>(&token_res.id_token, &decoding_key, &validation).map_err(|e| {
+    let token_data = decode::<auth::IdpClaims>(&token_res.id_token, &decoding_key, &validation)
+        .map_err(|e| {
             tracing::error!("Failed to validate id_token: {:?}", e);
             StatusCode::UNAUTHORIZED
         })?;
+    let identity = token_data.claims.into_claims()?;
 
-    let user_id = token_data.claims.sub;
-    let email = token_data.claims.email;
+    let user_id = identity.sub;
+    let email = identity.email;
     let expires_in = 3600;
     let expiration = SystemTime::now()
         .duration_since(UNIX_EPOCH)

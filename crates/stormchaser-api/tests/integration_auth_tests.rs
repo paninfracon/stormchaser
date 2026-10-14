@@ -67,18 +67,24 @@ fn get_test_keys() -> &'static (String, serde_json::Value) {
 struct IdTokenClaims {
     sub: String,
     email: Option<String>,
+    email_verified: Option<bool>,
     exp: usize,
     aud: String,
     iss: String,
 }
 
 fn create_id_token(issuer: &str, client_id: &str) -> String {
+    create_id_token_verified(issuer, client_id, Some(true))
+}
+
+fn create_id_token_verified(issuer: &str, client_id: &str, verified: Option<bool>) -> String {
     let mut header = Header::new(Algorithm::RS256);
     header.kid = Some("test-kid".to_string());
 
     let claims = IdTokenClaims {
         sub: "test-user-id".to_string(),
         email: Some("test@paninfracon.net".to_string()),
+        email_verified: verified,
         exp: (Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
         aud: client_id.to_string(),
         iss: issuer.to_string(),
@@ -184,6 +190,49 @@ async fn test_auth_login_redirect_with_state() {
         .unwrap();
     assert!(location.starts_with(&format!("{}/auth?", mock_server.uri())));
     assert!(location.contains("state=test-state-123"));
+}
+
+#[tokio::test]
+async fn an_unverified_email_is_not_exchanged_for_a_token() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/.well-known/jwks.json"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "keys": [get_test_keys().1.clone()]
+        })))
+        .mount(&mock_server)
+        .await;
+    let id_token = create_id_token_verified(&mock_server.uri(), "test-client", Some(false));
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id_token": id_token,
+            "refresh_token": "dummy-refresh-token"
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let app = setup_app(mock_server.uri()).await.unwrap();
+    let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/exchange")
+                .header("Content-Type", stormchaser_model::APPLICATION_JSON)
+                .extension(ConnectInfo(addr))
+                .body(Body::from(
+                    json!({
+                        "sso_token": "dummy-auth-code",
+                        "callback_url": "http://localhost:3000/callback"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -476,6 +525,7 @@ async fn test_auth_exchange_no_kid() {
     let claims = IdTokenClaims {
         sub: "test".to_string(),
         email: None,
+        email_verified: None,
         exp: (Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
         aud: "test-client".to_string(),
         iss: mock_server.uri().to_string(),
@@ -624,6 +674,7 @@ async fn test_auth_exchange_invalid_signature() {
     let claims = IdTokenClaims {
         sub: "test".to_string(),
         email: None,
+        email_verified: None,
         exp: (Utc::now() - chrono::Duration::hours(1)).timestamp() as usize,
         aud: "test-client".to_string(),
         iss: mock_server.uri().to_string(),
@@ -791,6 +842,7 @@ async fn test_auth_refresh_no_kid() {
     let claims = IdTokenClaims {
         sub: "test".to_string(),
         email: None,
+        email_verified: None,
         exp: (Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
         aud: "test-client".to_string(),
         iss: mock_server.uri().to_string(),
@@ -934,6 +986,7 @@ async fn test_auth_refresh_invalid_signature() {
     let claims = IdTokenClaims {
         sub: "test".to_string(),
         email: None,
+        email_verified: None,
         exp: (Utc::now() - chrono::Duration::hours(1)).timestamp() as usize, // Expired
         aud: "test-client".to_string(),
         iss: mock_server.uri().to_string(),
