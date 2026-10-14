@@ -79,6 +79,13 @@ stormchaser-orchestration:
             url: http://stormchaser-tempo:3200
             isDefault: false
 
+# The Docker runner, as a DaemonSet that uses each node's Docker socket. Off: on
+# Kubernetes the K8s runner runs steps, in their own namespace and under its network
+# policy, while the Docker socket is root on the node. Turn it on only for nodes that
+# need it, and give it a step network (stormchaser-runner-docker.config.stepNetwork).
+runnerDocker:
+  enabled: false
+
 stormchaser-runner-k8s:
   enabled: true
   config:

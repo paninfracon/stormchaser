@@ -23,6 +23,13 @@ config:
   # keeps the definition with its environment and parameter values removed.
   stateEncryptionSecret: ""
   stateEncryptionSecretKey: "key"
+  # Docker network on each node that step containers join (STORMCHASER_STEP_NETWORK).
+  # It must exist on every node's Docker daemon, created for steps alone: for example
+  # `docker network create --internal stormchaser-steps` for steps with no network
+  # access, or a bridge whose egress you filter. Empty, steps join the runner's own
+  # network (the node's default bridge here), which reaches cluster and cloud metadata
+  # addresses; the runner logs a warning.
+  stepNetwork: ""
   # What any one step may use, whatever its workflow asks for. A step that asks for
   # more is refused; one that asks for nothing gets the defaults.
   stepLimits:

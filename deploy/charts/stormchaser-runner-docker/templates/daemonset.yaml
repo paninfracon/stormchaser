@@ -59,6 +59,10 @@ spec:
                   name: {{ . }}
                   key: {{ $.Values.config.stateEncryptionSecretKey }}
             {{- end }}
+            {{- with .Values.config.stepNetwork }}
+            - name: STORMCHASER_STEP_NETWORK
+              value: {{ . | quote }}
+            {{- end }}
             - name: STORMCHASER_STEP_DEFAULT_CPU
               value: {{ .Values.config.stepLimits.defaultCpu | quote }}
             - name: STORMCHASER_STEP_DEFAULT_MEMORY

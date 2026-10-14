@@ -145,12 +145,7 @@ pub(crate) fn build_k8s_containers(
         env: Some(k8s_env),
         resources: Some(step_spec.resources.clone()),
         volume_mounts: Some(container_volume_mounts),
-        security_context: step_spec.privileged.map(|p| {
-            k8s_openapi::api::core::v1::SecurityContext {
-                privileged: Some(p),
-                ..Default::default()
-            }
-        }),
+        security_context: Some(step_security_context(step_spec.privileged)),
         ..Default::default()
     };
 
@@ -168,6 +163,38 @@ pub(crate) fn build_k8s_containers(
     }
 
     (containers, init_containers)
+}
+
+/// How a step's own container runs. A privileged step (which the runner has already
+/// checked it may run) is left as it asked. Any other gets the runtime's default seccomp
+/// profile, cannot gain privileges through setuid binaries, and loses `NET_RAW`, which
+/// lets it forge packets on the pod network. It keeps the image's user and the other
+/// default capabilities, which ordinary images that run as root (package installs,
+/// `chown`) need. These fit the `baseline` Pod Security level the chart sets on the
+/// steps namespace.
+pub(crate) fn step_security_context(
+    privileged: Option<bool>,
+) -> k8s_openapi::api::core::v1::SecurityContext {
+    use k8s_openapi::api::core::v1::{Capabilities, SeccompProfile, SecurityContext};
+    if privileged == Some(true) {
+        return SecurityContext {
+            privileged: Some(true),
+            ..Default::default()
+        };
+    }
+    SecurityContext {
+        privileged: Some(false),
+        allow_privilege_escalation: Some(false),
+        capabilities: Some(Capabilities {
+            drop: Some(vec!["NET_RAW".to_string()]),
+            ..Default::default()
+        }),
+        seccomp_profile: Some(SeccompProfile {
+            type_: "RuntimeDefault".to_string(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
 }
 
 pub(crate) struct ContainerCommandInfo {
@@ -243,5 +270,29 @@ pub(crate) fn wrap_main_command(
         image: step_spec.image.clone(),
         command: Some(vec!["/bin/sh".to_string()]),
         args: Some(new_args),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::step_security_context;
+
+    #[test]
+    fn steps_cannot_gain_privileges_or_forge_packets() {
+        let context = step_security_context(None);
+        assert_eq!(context.allow_privilege_escalation, Some(false));
+        assert_eq!(context.privileged, Some(false));
+        assert_eq!(
+            context.capabilities.unwrap().drop,
+            Some(vec!["NET_RAW".to_string()])
+        );
+        assert_eq!(context.seccomp_profile.unwrap().type_, "RuntimeDefault");
+    }
+
+    #[test]
+    fn a_privileged_step_is_left_as_it_asked() {
+        let context = step_security_context(Some(true));
+        assert_eq!(context.privileged, Some(true));
+        assert!(context.allow_privilege_escalation.is_none());
     }
 }

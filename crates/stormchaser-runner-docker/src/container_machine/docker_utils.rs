@@ -181,6 +181,13 @@ impl<S> DockerContainerMachine<S> {
                 // Bounds a fork bomb to the container
                 pids_limit: Some(limits.pids_limit),
                 privileged: spec.privileged,
+                // Unless privileged (which the runner has checked it may be): no gaining
+                // privileges through setuid binaries, and no `NET_RAW`, which lets a
+                // container forge packets on the step network. Docker's default seccomp
+                // profile applies either way.
+                security_opt: (spec.privileged != Some(true))
+                    .then(|| vec!["no-new-privileges:true".to_string()]),
+                cap_drop: (spec.privileged != Some(true)).then(|| vec!["NET_RAW".to_string()]),
                 mounts: Some(mounts),
                 network_mode,
                 log_config,
@@ -363,6 +370,20 @@ mod tests {
             .build_container_config(&container_spec(None, None), vec![], None, &[], "c", None)
             .unwrap_err();
         assert!(err.to_string().contains("timeout"), "{err}");
+    }
+
+    #[test]
+    fn steps_cannot_gain_privileges_or_forge_packets() {
+        let machine = get_dummy_machine();
+        let config = machine
+            .build_container_config(&container_spec(None, None), vec![], None, &[], "c", None)
+            .unwrap();
+        let host = config.host_config.unwrap();
+        assert_eq!(
+            host.security_opt,
+            Some(vec!["no-new-privileges:true".to_string()])
+        );
+        assert_eq!(host.cap_drop, Some(vec!["NET_RAW".to_string()]));
     }
 
     #[test]

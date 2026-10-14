@@ -115,8 +115,17 @@ rbac:
   # may not share a namespace with the runner or the control plane. The runner
   # refuses to start otherwise.
   targetNamespace: ""
-  # Create that namespace as part of this release. Set to false if it already exists.
+  # Create that namespace as part of this release. Set to false if it already exists,
+  # and give it the Pod Security labels below yourself.
   createTargetNamespace: true
+  # Pod Security Admission levels for the step namespace. `baseline` refuses pods that
+  # are privileged, share the node's network, PID or IPC namespaces, mount host paths or
+  # add capabilities, whatever creates them; `restricted` is reported as a warning. With
+  # config.allowPrivileged the enforced level is `privileged`, since such steps could not
+  # start otherwise.
+  stepPodSecurity:
+    enforce: baseline
+    warn: restricted
 
 # Network isolation for the step namespace. Requires a CNI that enforces NetworkPolicy.
 networkPolicy:

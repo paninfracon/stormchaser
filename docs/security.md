@@ -316,10 +316,18 @@ away from the control plane:
   runner's own. The chart applies a NetworkPolicy there that blocks cluster-internal
   addresses and the cloud metadata endpoint, step pods get no API token, and
   ServiceAccounts, Secrets and ConfigMaps are only attachable when the operator
-  allow-lists them.
+  allow-lists them. The chart labels the namespace with Pod Security `baseline`
+  (enforced) and `restricted` (warned), so not even a holder of the runner's
+  credentials can start a privileged or host-mounting pod there (`privileged` is
+  enforced instead when `config.allowPrivileged` is set). A step's container runs
+  with the runtime's default seccomp profile, no privilege escalation and without
+  `NET_RAW`.
 * **Docker Runner:** steps join the network named by `STORMCHASER_STEP_NETWORK`
-  instead of the runner's own. The runner still needs the Docker socket and is
-  therefore root on its host; use dedicated hosts.
+  instead of the runner's own, run with `no-new-privileges` and without `NET_RAW`.
+  The runner still needs the Docker socket and is therefore root on its host; use
+  dedicated hosts. The umbrella chart does not deploy it unless
+  `runnerDocker.enabled` is set; its chart takes the step network as
+  `config.stepNetwork`, which must exist on every node.
 * **Privileged steps** are refused unless the runner is started with
   `STORMCHASER_ALLOW_PRIVILEGED=true`.
 
