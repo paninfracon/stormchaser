@@ -35,11 +35,38 @@ async fn main() {
         .layer(axum::middleware::from_fn(security_headers))
         .with_state(leptos_options);
 
+    let tls = listener_tls().await.unwrap_or_else(|e| panic!("{e:#}"));
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
-    println!("listening on http://{}", addr);
-    axum::serve(listener, app.into_make_service())
+    println!(
+        "listening on {}://{}",
+        if tls.is_some() { "https" } else { "http" },
+        addr
+    );
+    stormchaser_tls::listener::serve(listener, app, tls, std::future::pending())
         .await
         .unwrap();
+}
+
+/// Loads the listener's certificate unless `STORMCHASER_LISTEN_TLS=false`.
+#[cfg(feature = "ssr")]
+async fn listener_tls() -> anyhow::Result<Option<std::sync::Arc<stormchaser_tls::TlsReloader>>> {
+    use std::env::var;
+    use stormchaser_tls::listener::{listen_tls_setting, tls_for_listener, LISTEN_TLS_VAR};
+    let listen_tls = listen_tls_setting(var(LISTEN_TLS_VAR).ok().as_deref())?;
+    tls_for_listener(
+        listen_tls,
+        stormchaser_tls::TlsConfig {
+            ca_cert_path: var("TLS_CA_CERT_PATH").ok().map(Into::into),
+            cert_path: var("TLS_CERT_PATH")
+                .unwrap_or_else(|_| "/etc/engine/certs/tls.crt".to_string())
+                .into(),
+            key_path: var("TLS_KEY_PATH")
+                .unwrap_or_else(|_| "/etc/engine/certs/tls.key".to_string())
+                .into(),
+            server_name: None,
+        },
+    )
+    .await
 }
 
 #[cfg(feature = "ssr")]

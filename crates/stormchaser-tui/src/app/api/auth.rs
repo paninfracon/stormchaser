@@ -20,7 +20,7 @@ async fn handle_oauth_callback(
     };
     drop(listener);
 
-    let client = reqwest::Client::new();
+    let client = crate::http::client();
     match client
         .post(format!("{}/api/v1/auth/exchange", url))
         .json(&serde_json::json!({
@@ -153,7 +153,7 @@ impl<'a> App<'a> {
 }
 
 async fn simulate_browser_login(login_url: &str, email: &str, password: &str) -> Result<()> {
-    let client_no_redirect = reqwest::Client::builder()
+    let client_no_redirect = crate::http::builder()
         .cookie_store(true)
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
@@ -175,7 +175,7 @@ async fn simulate_browser_login(login_url: &str, email: &str, password: &str) ->
         }
     }
 
-    let client = reqwest::Client::builder().cookie_store(true).build()?;
+    let client = crate::http::builder().cookie_store(true).build()?;
 
     let res1 = client.get(&dex_auth_url).send().await?;
     let url1 = res1.url().clone();

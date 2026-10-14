@@ -33,18 +33,18 @@ fn url(host: &str) -> String {
 
 /// Whether a connection made the way a service would make it succeeds, and whether it
 /// ended up encrypted.
-async fn connect(url: &str, requested: bool, ca: Option<&Path>) -> Result<bool, sqlx::Error> {
+async fn connect(url: &str, setting: Option<bool>, ca: Option<&Path>) -> Result<bool, sqlx::Error> {
     let options = connect_options(
         url,
         &DbTls {
-            requested,
+            setting,
             ca,
             cert: Path::new("/nonexistent/tls.crt"),
             key: Path::new("/nonexistent/tls.key"),
         },
     )
     .unwrap();
-    assert_eq!(is_verified(&options), requested);
+    assert_eq!(is_verified(&options), setting != Some(false));
     let mut connection = options.connect().await?;
     let (encrypted,): (bool,) =
         sqlx::query_as("SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()")
@@ -55,34 +55,38 @@ async fn connect(url: &str, requested: bool, ca: Option<&Path>) -> Result<bool, 
 
 #[tokio::test]
 #[ignore = "needs a PostgreSQL server with TLS"]
-async fn asking_for_tls_connects_only_to_a_database_it_can_verify() {
+async fn by_default_only_a_database_that_can_be_verified_is_accepted() {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let ca = certs().join("ca.crt");
 
-    // The right CA and a name the certificate carries: connected, and encrypted
-    assert!(connect(&url("localhost"), true, Some(&ca)).await.unwrap());
+    // The right CA and a name the certificate carries: connected, and encrypted,
+    // whether TLS is left at its default or asked for
+    assert!(connect(&url("localhost"), None, Some(&ca)).await.unwrap());
+    assert!(connect(&url("localhost"), Some(true), Some(&ca))
+        .await
+        .unwrap());
 
     // No CA configured: the certificate is from no public authority, so the
     // connection is refused. This used to fall back to an unverified one.
-    assert!(connect(&url("localhost"), true, None).await.is_err());
+    assert!(connect(&url("localhost"), None, None).await.is_err());
 
     // The right CA but a name the certificate does not carry
-    assert!(connect(&url("127.0.0.2"), true, Some(&ca)).await.is_err());
+    assert!(connect(&url("127.0.0.2"), None, Some(&ca)).await.is_err());
 
     // A CA that did not sign the certificate (the server's own, here)
     let wrong_ca = certs().join("tls.crt");
-    assert!(connect(&url("localhost"), true, Some(&wrong_ca))
+    assert!(connect(&url("localhost"), None, Some(&wrong_ca))
         .await
         .is_err());
 }
 
 #[tokio::test]
 #[ignore = "needs a PostgreSQL server with TLS"]
-async fn without_the_setting_the_url_decides() {
+async fn a_deployment_can_choose_its_own_mode() {
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    // No mode in the URL: in clear, as before
-    assert!(!connect(&url("localhost"), false, None).await.unwrap());
+    // Switched off, with no mode in the URL: in clear
+    assert!(!connect(&url("localhost"), Some(false), None).await.unwrap());
 
     // A URL that asks for verification is no longer downgraded to no TLS
     let strict = format!(
@@ -93,7 +97,7 @@ async fn without_the_setting_the_url_decides() {
     let options = connect_options(
         &strict,
         &DbTls {
-            requested: false,
+            setting: None,
             ca: None,
             cert: Path::new("/nonexistent/tls.crt"),
             key: Path::new("/nonexistent/tls.key"),

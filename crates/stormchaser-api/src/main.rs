@@ -104,7 +104,11 @@ mod tests {
         let config = Config::from_env(env).unwrap();
         assert_eq!(config.database_url, "postgres://user:pass@localhost/db");
         assert_eq!(config.tls_server_name.as_deref(), Some("example.com"));
-        assert!(config.db_ssl);
+        assert_eq!(config.db_ssl, Some(true));
+        assert!(
+            config.listen_tls,
+            "the listener serves TLS unless told not to"
+        );
         assert_eq!(config.nats_url, "nats://localhost:4222");
         assert_eq!(config.loki_url.as_deref(), Some("http://loki:3100"));
         assert_eq!(

@@ -14,9 +14,11 @@ pub struct Config {
     pub tls_key_path: PathBuf,
     /// The tls server name.
     pub tls_server_name: Option<String>,
-    /// The db ssl.
-    pub db_ssl: bool,
-    /// Whether the HTTP listener serves TLS itself.
+    /// `STORMCHASER_DB_SSL`, if set. Unset, the database connection is verified TLS
+    /// unless `DATABASE_URL` names an `sslmode` of its own.
+    pub db_ssl: Option<bool>,
+    /// Whether the HTTP listener serves TLS itself: yes unless
+    /// `STORMCHASER_LISTEN_TLS=false`.
     pub listen_tls: bool,
     /// The nats url.
     pub nats_url: String,
@@ -59,8 +61,8 @@ impl Config {
         let mut tls_cert_path = PathBuf::from("/etc/engine/certs/tls.crt");
         let mut tls_key_path = PathBuf::from("/etc/engine/certs/tls.key");
         let mut tls_server_name = None;
-        let mut db_ssl = false;
-        let mut listen_tls = false;
+        let mut db_ssl = None;
+        let mut listen_tls = None;
         let mut nats_url = "nats://localhost:4222".to_string();
         let mut opa_url = None;
         let mut opa_wasm_path = None;
@@ -82,8 +84,13 @@ impl Config {
                 "TLS_CERT_PATH" => tls_cert_path = PathBuf::from(v.as_ref()),
                 "TLS_KEY_PATH" => tls_key_path = PathBuf::from(v.as_ref()),
                 "TLS_SERVER_NAME" => tls_server_name = Some(v.as_ref().to_string()),
-                "STORMCHASER_DB_SSL" => db_ssl = v.as_ref() == "true",
-                "STORMCHASER_LISTEN_TLS" => listen_tls = v.as_ref() == "true",
+                "STORMCHASER_DB_SSL" => {
+                    db_ssl = Some(stormchaser_tls::parse_switch(
+                        "STORMCHASER_DB_SSL",
+                        v.as_ref(),
+                    )?)
+                }
+                "STORMCHASER_LISTEN_TLS" => listen_tls = Some(v.as_ref().to_string()),
                 "NATS_URL" => nats_url = v.as_ref().to_string(),
                 "OPA_URL" => {
                     let val = v.as_ref().to_string();
@@ -121,7 +128,7 @@ impl Config {
             tls_key_path,
             tls_server_name,
             db_ssl,
-            listen_tls,
+            listen_tls: stormchaser_tls::listener::listen_tls_setting(listen_tls.as_deref())?,
             nats_url,
             opa_url,
             opa_wasm_path,

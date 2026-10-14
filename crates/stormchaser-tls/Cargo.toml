@@ -22,6 +22,15 @@ arc-swap = "1.7"
 tracing = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }
+axum = { workspace = true, optional = true }
+hyper = { version = "1", features = ["http1", "http2", "server"], optional = true }
+hyper-util = { version = "0.1", features = ["server-auto", "server-graceful", "tokio", "service"], optional = true }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"], optional = true }
+tower = { workspace = true, optional = true }
+
+[features]
+# An HTTP(S) listener for axum services
+listener = ["dep:axum", "dep:hyper", "dep:hyper-util", "dep:tokio-rustls", "dep:tower"]
 
 [dev-dependencies]
 tempfile = "3.10"

@@ -34,10 +34,17 @@ spec:
               value: {{ .Values.web.rustLog | quote }}
             - name: GRAFANA_URL
               value: {{ .Values.global.grafana.url | quote }}
-            {{- if (and .Values.global.tls.enabled .Values.global.tls.listen) }}
-            # The CA that signed the API's and the query service's certificate
+            - name: STORMCHASER_LISTEN_TLS
+              value: {{ include "stormchaser-orchestration.listenTls" . | quote }}
+            {{- if eq (include "stormchaser-orchestration.listenTls" .) "true" }}
+            # The web tier's own certificate, and the CA that signed the API's and the
+            # query service's
             - name: TLS_CA_CERT_PATH
               value: {{ .Values.global.tls.caCertPath | quote }}
+            - name: TLS_CERT_PATH
+              value: {{ .Values.global.tls.certPath | quote }}
+            - name: TLS_KEY_PATH
+              value: {{ .Values.global.tls.keyPath | quote }}
             {{- end }}
           ports:
             - name: http
@@ -45,17 +52,13 @@ spec:
               protocol: TCP
           resources:
             {{- toYaml .Values.web.resources | nindent 12 }}
-          {{- if (and .Values.global.tls.enabled .Values.global.tls.listen) }}
+          {{- if eq (include "stormchaser-orchestration.listenTls" .) "true" }}
           volumeMounts:
-            - name: ca
-              mountPath: {{ dir .Values.global.tls.caCertPath }}
+            - name: certs
+              mountPath: /etc/stormchaser/certs
               readOnly: true
       volumes:
-        # Only the CA certificate: the web tier has no use for the services' key
-        - name: ca
+        - name: certs
           secret:
             secretName: {{ .Values.global.tls.existingSecret }}
-            items:
-              - key: {{ base .Values.global.tls.caCertPath }}
-                path: {{ base .Values.global.tls.caCertPath }}
           {{- end }}

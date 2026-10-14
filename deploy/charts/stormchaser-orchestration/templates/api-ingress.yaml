@@ -5,10 +5,7 @@ metadata:
   name: {{ include "stormchaser-orchestration.fullname" . }}-api
   labels:
     {{- include "stormchaser-orchestration.labels" . | nindent 4 }}
-  {{- with .Values.api.ingress.annotations }}
-  annotations:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+  {{- include "stormchaser-orchestration.ingressAnnotations" (dict "annotations" .Values.api.ingress.annotations "root" $) | nindent 2 }}
 spec:
   {{- if .Values.api.ingress.className }}
   ingressClassName: {{ .Values.api.ingress.className }}

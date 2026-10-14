@@ -106,40 +106,49 @@ The Orchestration Engine and API support mounting certificates (e.g., from `cert
 
 * **Certificate Watching**: The `stormchaser-tls` crate uses the `notify` crate to watch for file modifications in the certificate directory. When certificates are rotated (e.g., by Vault or Let's Encrypt), the system automatically swaps the `rustls` configuration in memory.
 * **mTLS for NATS**: The API and Engine present their client certificate to NATS, and it is enforced only when the NATS server is configured with TLS and `verify: true`. The runners do not present a client certificate; they authenticate with NATS credentials. The bundled quickstart NATS has no TLS. See [NATS: Quickstart and Production](nats.md).
-* **TLS for Postgres**: With `STORMCHASER_DB_SSL=true` the API, the query service and the engine connect with `verify-full`: the database's certificate must chain to `TLS_CA_CERT_PATH` (or, with none set, to a public authority) and carry the host name in `DATABASE_URL`. The component's own certificate is offered as a client certificate if its files exist. Without the setting, an `sslmode` written in `DATABASE_URL` is used as written, and a URL that names none connects without TLS; the service logs a warning at start whenever the connection is not verified.
+* **TLS for Postgres**: The API, the query service and the engine connect with `verify-full` by default: the database's certificate must chain to `TLS_CA_CERT_PATH` (or, with none set, to a public authority) and carry the host name in `DATABASE_URL`. The component's own certificate is offered as a client certificate if its files exist. A deployment can choose otherwise: an `sslmode` written in `DATABASE_URL` is used as written, `STORMCHASER_DB_SSL=false` with no `sslmode` in the URL connects without TLS, and `STORMCHASER_DB_SSL=true` insists on `verify-full` whatever the URL says. The service logs a warning at start whenever the connection is not verified.
 * **mTLS for OPA**: Outbound requests to the OPA server can be configured to use mTLS certificates.
 
-### The API and query service listeners
+### The API, query service and web tier listeners
 
-The API (port 3000) and the query service (port 3001) are what users, the CLI,
-the web tier and cron triggers connect to, and every request to them carries a
-bearer token. They speak plain HTTP unless told otherwise, which suits a
-deployment where an ingress or a service mesh terminates TLS and the network
-behind it is trusted. Where it is not, set `STORMCHASER_LISTEN_TLS=true` (Helm:
-`global.tls.listen`) and they serve HTTPS themselves, with the certificate and
-key at `TLS_CERT_PATH` and `TLS_KEY_PATH`. The certificate is re-read when the
-files change, so renewal needs no restart.
+Browsers, the CLI, the TUI and cron triggers connect to the API (port 3000), the
+query service (port 3001) and the web tier, and the web tier calls the other two.
+Every request carries a bearer token or a session. They serve HTTPS with the certificate
+and key at `TLS_CERT_PATH` and `TLS_KEY_PATH` unless the deployment switches TLS
+off with `STORMCHASER_LISTEN_TLS=false` (Helm: `global.tls.listen=false`). A
+service that should serve TLS and cannot read its certificate refuses to start
+rather than fall back to plain HTTP, and a value other than `true` or `false` is
+refused rather than read as off. The certificate is re-read when the files
+change, so renewal needs no restart.
 
-Things to line up when turning it on:
+Switch TLS off only where an ingress or a service mesh terminates it in front of
+the services and the network behind is trusted. A service started that way logs
+a warning saying so. The docker-compose stack does it, because it is for one
+machine.
+
+What has to line up:
 
 * The certificate must name whatever clients call the service by: the Kubernetes
   Service names for calls inside the cluster, and any host name an ingress
-  forwards with.
+  forwards with. The umbrella chart generates a CA and a certificate that name
+  the Services (`tlsCerts.generate`, on by default) and keeps them across
+  upgrades. To use your own, from cert-manager for example, turn that off and
+  create the Secret named in `global.tls.existingSecret` with `ca.crt`,
+  `tls.crt` and `tls.key`.
 * These listeners do not ask for a client certificate. Callers are identified by
   their token, as before.
 * The web tier trusts `TLS_CA_CERT_PATH` in addition to the system's
-  authorities, and the Helm chart sets it and switches `API_URL` and `QUERY_URL`
-  to `https`.
-* An ingress in front of the API has to speak HTTPS to its backend (for
-  ingress-nginx, `nginx.ingress.kubernetes.io/backend-protocol: HTTPS`).
+  authorities, and the Helm chart sets it and points `API_URL` and `QUERY_URL`
+  at `https`.
+* An ingress in front has to speak HTTPS to its backend. The chart sets
+  `nginx.ingress.kubernetes.io/backend-protocol: HTTPS` on its own Ingresses;
+  other controllers need their equivalent.
 * Cron triggers on Kubernetes call `SYSTEM_URL`. If that is an `https` address
   with a certificate from a private CA, set `STORMCHASER_CRON_CA_FILE` to the CA
   file; the chart does this.
-* The CLI and TUI use the system's certificate store. Point them at an address
-  with a publicly trusted certificate, or add the CA to the store of the machine
-  they run on.
-
-A service started without the setting logs a warning saying so.
+* The CLI and TUI trust the system's certificate store, plus the CA file given
+  with `--ca-cert` (or `STORMCHASER_CA_CERT`) for a certificate from a private
+  CA.
 
 ### API documentation
 
@@ -195,8 +204,9 @@ Stormchaser follows a strict **Fail-Closed** security philosophy regarding OPA:
 | `STORMCHASER_TRUSTED_PROXIES` | API: addresses or CIDR ranges of the reverse proxies in front of it. Empty by default. | `X-Forwarded-For` is believed only from these; anything else could pick its own rate-limit bucket. |
 | `API_RATE_LIMIT_PER_SECOND`, `API_RATE_LIMIT_BURST_SIZE` | API: refill rate and size of each client's request bucket. Defaults `5` and `10`. | Bounds request floods and credential guessing per client. |
 | `JWT_SECRET` | Secret key for signing/verifying JWTs. | **Must be kept highly secure.** |
-| `STORMCHASER_LISTEN_TLS` | API and query service: serve HTTPS with `TLS_CERT_PATH` and `TLS_KEY_PATH`. Default `false`. | Without it, tokens and secrets cross the network to the pod in clear unless something else encrypts them. |
-| `STORMCHASER_DB_SSL` | API, query service and engine: connect to PostgreSQL with `verify-full`. Default `false`. | Without it, nothing proves the service reached its own database. |
+| `STORMCHASER_LISTEN_TLS` | API, query service and web tier: serve HTTPS with `TLS_CERT_PATH` and `TLS_KEY_PATH`. Default `true`; a service that cannot read its certificate does not start. | Set to `false`, tokens and secrets cross the network to the pod in clear unless something else encrypts them. |
+| `STORMCHASER_DB_SSL` | API, query service and engine: `true` insists on `verify-full`; `false` uses the `sslmode` in `DATABASE_URL`, or none. Unset, the URL's `sslmode` is used if it names one, and `verify-full` otherwise. | Without a verified connection, nothing proves the service reached its own database. |
+| `STORMCHASER_CA_CERT` | CLI and TUI (`--ca-cert`): a PEM file of CA certificates to trust as well as the system's. Unset by default. | Lets them verify an API whose certificate a private CA signed, instead of turning verification off. |
 | `STORMCHASER_API_DOCS` | API: serve Swagger UI and the OpenAPI document without authentication. Default `false`. | Describes every route to anyone who can reach the listener. |
 | `STORMCHASER_CRON_IMAGE` | API: image of Kubernetes and Ofelia cron triggers. Default is a `curl` image pinned by digest. | It runs with the trigger token. |
 | `STORMCHASER_CRON_CA_FILE` | API: CA file that Kubernetes cron triggers trust when calling `SYSTEM_URL`. Unset by default. | Lets triggers verify an API that serves TLS from a private CA. |
@@ -227,9 +237,10 @@ What the database administrator must provide:
   storage layer (LUKS/dm-crypt, an encrypted volume or storage class, or the
   encryption built into a managed PostgreSQL service) or with a PostgreSQL
   distribution that offers it.
-* **TLS for connections from Stormchaser.** Set `STORMCHASER_DB_SSL=true` and
-  `TLS_CA_CERT_PATH` on the API, engine and query service so they verify the
-  server certificate; without the CA path the connection is not verified.
+* **TLS for connections from Stormchaser.** The API, engine and query service
+  verify the server certificate by default: give them the CA that signed it in
+  `TLS_CA_CERT_PATH` unless a public authority did, and a host name in
+  `DATABASE_URL` that the certificate carries.
 * **A dedicated, least-privileged database role** for Stormchaser, and control
   over who else can query the database or restore its backups. Storage
   encryption does not protect against anyone who can connect and read tables.

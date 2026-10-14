@@ -51,8 +51,38 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+"true" when the API, the query service and the web tier serve HTTPS themselves. The
+services serve HTTPS unless told otherwise, so this is always passed to them.
+*/}}
+{{- define "stormchaser-orchestration.listenTls" -}}
+{{- if .Values.global.tls.listen -}}
+{{- if not .Values.global.tls.enabled -}}
+{{- fail "global.tls.listen needs a certificate: set global.tls.enabled=true and name its Secret in global.tls.existingSecret, or set global.tls.listen=false where something in front of the services terminates TLS and the network behind it is trusted" -}}
+{{- end -}}
+true
+{{- else -}}
+false
+{{- end -}}
+{{- end }}
+
+{{/*
 The scheme the web tier uses to reach the API and the query service.
 */}}
 {{- define "stormchaser-orchestration.internalScheme" -}}
-{{- if and .Values.global.tls.enabled .Values.global.tls.listen -}}https{{- else -}}http{{- end -}}
+{{- if eq (include "stormchaser-orchestration.listenTls" .) "true" -}}https{{- else -}}http{{- end -}}
+{{- end }}
+
+{{/*
+Ingress annotations, with the backend protocol set to HTTPS for ingress-nginx when the
+service behind it serves HTTPS. Call with (dict "annotations" ... "root" $).
+*/}}
+{{- define "stormchaser-orchestration.ingressAnnotations" -}}
+{{- $annotations := deepCopy (.annotations | default dict) -}}
+{{- if eq (include "stormchaser-orchestration.listenTls" .root) "true" -}}
+{{- $_ := set $annotations "nginx.ingress.kubernetes.io/backend-protocol" (index $annotations "nginx.ingress.kubernetes.io/backend-protocol" | default "HTTPS") -}}
+{{- end -}}
+{{- with $annotations }}
+annotations:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
 {{- end }}

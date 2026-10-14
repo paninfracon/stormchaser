@@ -150,6 +150,10 @@ services:
         BINARY: stormchaser-engine
     environment:
       DATABASE_URL: 'postgres://stormchaser:${STORMCHASER_DEV_PASSWORD?Error: STORMCHASER_DEV_PASSWORD is not set}@postgres:5432/stormchaser'
+      # This local stack runs without TLS, which every service otherwise uses by
+      # default: its PostgreSQL offers none, and the CLI would have to be told to
+      # trust tests/certs. Do not copy the TLS settings below into a real deployment.
+      STORMCHASER_DB_SSL: 'false'
       NATS_URL: nats://nats:4222
       NATS_USER: stormchaser
       NATS_PASSWORD: '${STORMCHASER_NATS_PASSWORD?Error: STORMCHASER_NATS_PASSWORD is not set}'
@@ -188,6 +192,11 @@ services:
         BINARY: stormchaser-query
     environment:
       DATABASE_URL: 'postgres://stormchaser:${STORMCHASER_DEV_PASSWORD?Error: STORMCHASER_DEV_PASSWORD is not set}@postgres:5432/stormchaser'
+      # This local stack runs without TLS, which every service otherwise uses by
+      # default: its PostgreSQL offers none, and the CLI would have to be told to
+      # trust tests/certs. Do not copy the TLS settings below into a real deployment.
+      STORMCHASER_DB_SSL: 'false'
+      STORMCHASER_LISTEN_TLS: 'false'
       NATS_URL: nats://nats:4222
       NATS_USER: stormchaser-query
       NATS_PASSWORD: '${STORMCHASER_NATS_QUERY_PASSWORD?Error: STORMCHASER_NATS_QUERY_PASSWORD is not set}'
@@ -227,6 +236,11 @@ services:
         BINARY: stormchaser-api
     environment:
       DATABASE_URL: 'postgres://stormchaser:${STORMCHASER_DEV_PASSWORD?Error: STORMCHASER_DEV_PASSWORD is not set}@postgres:5432/stormchaser'
+      # This local stack runs without TLS, which every service otherwise uses by
+      # default: its PostgreSQL offers none, and the CLI would have to be told to
+      # trust tests/certs. Do not copy the TLS settings below into a real deployment.
+      STORMCHASER_DB_SSL: 'false'
+      STORMCHASER_LISTEN_TLS: 'false'
       NATS_URL: nats://nats:4222
       NATS_USER: stormchaser-api
       NATS_PASSWORD: '${STORMCHASER_NATS_API_PASSWORD?Error: STORMCHASER_NATS_API_PASSWORD is not set}'
@@ -268,6 +282,8 @@ services:
       context: .
       dockerfile: Dockerfile.web
     environment:
+      # Plain HTTP for this local stack only; see orchestration-api
+      STORMCHASER_LISTEN_TLS: 'false'
       API_URL: http://orchestration-api:3000
       QUERY_URL: http://orchestration-query:3001
       EXTERNAL_API_URL: http://localhost:${PORT_API:-3000}

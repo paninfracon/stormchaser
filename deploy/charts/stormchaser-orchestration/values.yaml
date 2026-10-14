@@ -63,14 +63,16 @@ global:
     certPath: "/etc/stormchaser/certs/tls.crt"
     keyPath: "/etc/stormchaser/certs/tls.key"
     existingSecret: "stormchaser-tls-certs"
-    # When true, the API and the query service serve HTTPS themselves with the
-    # certificate above, and the web tier calls them over HTTPS and trusts the CA
-    # above. The certificate must name the two Services
-    # (<release>-stormchaser-orchestration-api and -query, or whatever the chart's
-    # fullname gives). An ingress in front of the API must then talk HTTPS to its
-    # backend (for ingress-nginx: nginx.ingress.kubernetes.io/backend-protocol: HTTPS).
-    # Leave false only where a mesh or the network itself protects pod traffic.
-    listen: false
+    # The API, the query service and the web tier serve HTTPS themselves with the
+    # certificate above, and the web tier calls the other two over HTTPS, trusting the
+    # CA above. The certificate must name the three Services
+    # (<release>-stormchaser-orchestration-api, -query and -web, or whatever the
+    # chart's fullname gives); the umbrella chart generates one that does.
+    # An ingress in front must talk HTTPS to its backend: the chart sets
+    # nginx.ingress.kubernetes.io/backend-protocol: HTTPS on its own Ingresses; other
+    # controllers need their equivalent.
+    # Set to false only where a mesh or the network itself protects pod traffic.
+    listen: true
 
 api:
   image:

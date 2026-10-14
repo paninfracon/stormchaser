@@ -194,11 +194,14 @@ kubectl create secret generic nats-runner \
   --from-literal=user=stormchaser-runner \
   --from-literal=password='<runner password>'
 
-# Example: Create the TLS secret for mTLS
-kubectl create secret tls stormchaser-tls-certs \
+# The services' certificate, its key, and the CA that signed it. The API, the
+# query service and the web tier serve HTTPS with it, so it must name their
+# Services (<release>-stormchaser-orchestration-api, -query and -web).
+kubectl create secret generic stormchaser-tls-certs \
   --namespace stormchaser \
-  --cert=path/to/tls.crt \
-  --key=path/to/tls.key
+  --from-file=ca.crt=path/to/ca.crt \
+  --from-file=tls.crt=path/to/tls.crt \
+  --from-file=tls.key=path/to/tls.key
 ```
 
 ### Step 2: Install the Orchestration Chart

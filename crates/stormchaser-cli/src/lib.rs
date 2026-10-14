@@ -5,7 +5,7 @@
 pub mod commands;
 pub mod utils;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use reqwest_middleware::ClientBuilder;
 use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
@@ -30,6 +30,11 @@ pub struct Cli {
     /// The authentication token for the API.
     #[arg(short, long, env = "STORMCHASER_TOKEN")]
     pub token: Option<String>,
+
+    /// A PEM file of CA certificates to trust as well as the system's, for an API
+    /// whose certificate a private CA signed.
+    #[arg(long, env = "STORMCHASER_CA_CERT")]
+    pub ca_cert: Option<PathBuf>,
 }
 
 /// Available CLI subcommands.
@@ -123,13 +128,27 @@ pub enum Commands {
     },
 }
 
+/// The HTTP client, trusting the CA certificates in `ca_cert` as well as the system's.
+pub fn http_client(ca_cert: Option<&std::path::Path>) -> Result<reqwest::Client> {
+    let mut builder = reqwest::Client::builder();
+    if let Some(path) = ca_cert {
+        let pem = std::fs::read(path)
+            .with_context(|| format!("cannot read the CA certificate {}", path.display()))?;
+        let certs = reqwest::Certificate::from_pem_bundle(&pem)
+            .with_context(|| format!("{} is not a PEM bundle", path.display()))?;
+        anyhow::ensure!(!certs.is_empty(), "{} holds no certificate", path.display());
+        builder = builder.tls_certs_merge(certs);
+    }
+    Ok(builder.build()?)
+}
+
 /// Executes the specified CLI command.
 ///
 /// This function sets up the HTTP client and dispatches the command logic
 /// to the appropriate handler based on the parsed CLI options.
 pub async fn run_cli(cli: Cli) -> Result<()> {
     let retry_policy = ExponentialBackoff::builder().build_with_max_retries(3);
-    let http_client = ClientBuilder::new(reqwest::Client::new())
+    let http_client = ClientBuilder::new(http_client(cli.ca_cert.as_deref())?)
         .with(RetryTransientMiddleware::new_with_policy(retry_policy))
         .build();
 

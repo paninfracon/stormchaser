@@ -337,9 +337,15 @@ elif [ "$MODE" == "microk8s" ]; then
         docker save "$IMAGE_NAME:latest" | microk8s images import -
     done
 
-    echo -e "${BLUE}>>> Creating namespace and TLS secrets...${NC}"
+    echo -e "${BLUE}>>> Creating namespace...${NC}"
     microk8s kubectl create namespace "$NAMESPACE" || true
-    microk8s kubectl create secret generic stormchaser-tls-certs       --namespace "$NAMESPACE"       --from-file=ca.crt="$CERT_DIR/ca.crt"       --from-file=tls.crt="$CERT_DIR/tls.crt"       --from-file=tls.key="$CERT_DIR/tls.key"       --dry-run=client -o yaml | microk8s kubectl apply -f -
+    # The chart generates the services' certificate, naming their Services. Earlier
+    # versions of this script created the Secret from tests/certs, whose certificate
+    # names none of them; remove that one so the chart can create its own.
+    if [ "$(microk8s kubectl get secret stormchaser-tls-certs --namespace "$NAMESPACE" \
+        -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}' 2>/dev/null)" != "stormchaser" ]; then
+        microk8s kubectl delete secret stormchaser-tls-certs --namespace "$NAMESPACE" --ignore-not-found
+    fi
 
     echo -e "${BLUE}>>> Storing the OIDC client secret...${NC}"
     microk8s kubectl create secret generic stormchaser-oidc-client \

@@ -29,7 +29,7 @@ pub async fn build_app_state(config: Config) -> anyhow::Result<AppState> {
     let mut db_options = stormchaser_model::db_tls::connect_options(
         &config.database_url,
         &stormchaser_model::db_tls::DbTls {
-            requested: config.db_ssl,
+            setting: config.db_ssl,
             ca: config.tls_ca_cert_path.as_deref(),
             cert: &config.tls_cert_path,
             key: &config.tls_key_path,
@@ -37,8 +37,9 @@ pub async fn build_app_state(config: Config) -> anyhow::Result<AppState> {
     )?;
     if !stormchaser_model::db_tls::is_verified(&db_options) {
         tracing::warn!(
-            "The database connection is not verified TLS. Set STORMCHASER_DB_SSL=true \
-             unless the database is reached over a network nothing else can use"
+            "The database connection is not verified TLS, because STORMCHASER_DB_SSL=false \
+             or DATABASE_URL asks for a weaker sslmode. Only do this where the database \
+             is reached over a network nothing else can use"
         );
     }
 

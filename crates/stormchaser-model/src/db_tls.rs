@@ -6,8 +6,8 @@ use std::path::Path;
 
 /// The TLS files a service was started with.
 pub struct DbTls<'a> {
-    /// `STORMCHASER_DB_SSL=true`: the operator asked for TLS to the database.
-    pub requested: bool,
+    /// `STORMCHASER_DB_SSL`, if the deployment set it.
+    pub setting: Option<bool>,
     /// The CA that signed the database's certificate, if it is not a public one.
     pub ca: Option<&'a Path>,
     /// The service's own certificate, offered to the database as a client certificate.
@@ -18,18 +18,22 @@ pub struct DbTls<'a> {
 
 /// Builds the connection options for `url`.
 ///
-/// Asking for TLS means a verified connection: the database's certificate must chain
-/// to the CA and carry the host name in the URL. It used to mean that only when a CA
-/// was configured; without one the connection fell back to `prefer`, which encrypts if
-/// the server offers it, verifies nothing, and so stops no one who can get between the
-/// service and its database.
+/// The connection is verified TLS unless the deployment says otherwise: the database's
+/// certificate must chain to the CA (or, with none configured, to a public authority)
+/// and carry the host name in the URL. `prefer`, which encrypts if the server offers
+/// it but verifies nothing, stops no one who can get between the service and its
+/// database, so it is never chosen here.
 ///
-/// Without `requested`, an `sslmode` written in the URL is respected (it was
-/// overridden with `disable` before, which silently downgraded a URL that asked for
-/// verification), and a URL that names none connects without TLS as it always has.
+/// - `STORMCHASER_DB_SSL=true`: verified, whatever the URL says.
+/// - `STORMCHASER_DB_SSL=false`: the `sslmode` written in the URL, or no TLS.
+/// - Unset: the `sslmode` written in the URL, or verified.
 pub fn connect_options(url: &str, tls: &DbTls<'_>) -> Result<PgConnectOptions> {
     let mut options: PgConnectOptions = url.parse()?;
-    if tls.requested {
+    let verify = match tls.setting {
+        Some(setting) => setting,
+        None => !url_names_ssl_mode(url),
+    };
+    if verify {
         options = options.ssl_mode(PgSslMode::VerifyFull);
         if let Some(ca) = tls.ca {
             options = options.ssl_root_cert(ca);
@@ -40,6 +44,7 @@ pub fn connect_options(url: &str, tls: &DbTls<'_>) -> Result<PgConnectOptions> {
             options = options.ssl_client_cert(tls.cert).ssl_client_key(tls.key);
         }
     } else if !url_names_ssl_mode(url) {
+        // Only reached with STORMCHASER_DB_SSL=false
         options = options.ssl_mode(PgSslMode::Disable);
     }
     Ok(options)
@@ -65,9 +70,9 @@ mod tests {
 
     const URL: &str = "postgres://user:pw@db.internal/stormchaser";
 
-    fn tls(requested: bool, ca: Option<&'static str>) -> DbTls<'static> {
+    fn tls(setting: Option<bool>, ca: Option<&'static str>) -> DbTls<'static> {
         DbTls {
-            requested,
+            setting,
             ca: ca.map(Path::new),
             cert: Path::new("/nonexistent/tls.crt"),
             key: Path::new("/nonexistent/tls.key"),
@@ -75,34 +80,49 @@ mod tests {
     }
 
     #[test]
+    fn unset_means_a_verified_connection() {
+        let options = connect_options(URL, &tls(None, None)).unwrap();
+        assert!(is_verified(&options));
+    }
+
+    #[test]
     fn asking_for_tls_always_means_a_verified_connection() {
         // With a CA, and without one (where it used to fall back to `prefer`)
         for ca in [Some("/etc/ca.crt"), None] {
-            let options = connect_options(URL, &tls(true, ca)).unwrap();
+            let options = connect_options(URL, &tls(Some(true), ca)).unwrap();
             assert!(is_verified(&options), "not verified with ca {ca:?}");
         }
         // Even if the URL asks for less
         let weaker = format!("{URL}?sslmode=prefer");
         assert!(is_verified(
-            &connect_options(&weaker, &tls(true, None)).unwrap()
+            &connect_options(&weaker, &tls(Some(true), None)).unwrap()
         ));
     }
 
     #[test]
-    fn a_url_that_asks_for_verification_is_not_downgraded() {
-        let url = format!("{URL}?sslmode=verify-full");
-        let options = connect_options(&url, &tls(false, None)).unwrap();
-        assert!(is_verified(&options));
+    fn a_mode_written_in_the_url_is_a_deployment_choice() {
+        for setting in [None, Some(false)] {
+            let url = format!("{URL}?sslmode=verify-full");
+            assert!(is_verified(
+                &connect_options(&url, &tls(setting, None)).unwrap()
+            ));
+
+            let url = format!("{URL}?sslmode=disable");
+            let options = connect_options(&url, &tls(setting, None)).unwrap();
+            assert!(matches!(options.get_ssl_mode(), PgSslMode::Disable));
+        }
     }
 
     #[test]
-    fn a_url_that_names_no_mode_connects_without_tls_as_before() {
-        let options = connect_options(URL, &tls(false, None)).unwrap();
+    fn switching_tls_off_with_no_mode_in_the_url_means_no_tls() {
+        let options = connect_options(URL, &tls(Some(false), None)).unwrap();
         assert!(matches!(options.get_ssl_mode(), PgSslMode::Disable));
         assert!(!is_verified(&options));
         // A parameter that merely contains the word is not a mode
         let url = format!("{URL}?application_name=sslmode");
-        let options = connect_options(&url, &tls(false, None)).unwrap();
+        let options = connect_options(&url, &tls(Some(false), None)).unwrap();
         assert!(matches!(options.get_ssl_mode(), PgSslMode::Disable));
+        let options = connect_options(&url, &tls(None, None)).unwrap();
+        assert!(is_verified(&options));
     }
 }

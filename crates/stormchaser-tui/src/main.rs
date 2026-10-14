@@ -33,6 +33,11 @@ struct Cli {
     #[arg(short, long, env = "STORMCHASER_TOKEN")]
     token: Option<String>,
 
+    /// A PEM file of CA certificates to trust as well as the system's, for an API
+    /// whose certificate a private CA signed
+    #[arg(long, env = "STORMCHASER_CA_CERT")]
+    ca_cert: Option<std::path::PathBuf>,
+
     #[arg(long)]
     owner: Option<String>,
 
@@ -185,6 +190,9 @@ async fn handle_app_event_key<'a>(
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+    if let Some(ca_cert) = &cli.ca_cert {
+        stormchaser_tui::http::trust_ca(ca_cert)?;
+    }
 
     // Setup terminal
     enable_raw_mode()?;

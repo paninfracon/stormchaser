@@ -33,7 +33,7 @@ impl<'a> App<'a> {
             let tx = self.status_tx.clone();
             tokio::spawn(async move {
                 if let Some(token) = token {
-                    let client = reqwest::Client::new();
+                    let client = crate::http::client();
                     if let Ok(res) = client
                         .get(format!("{}/api/v1/runs/{}", url, run_id))
                         .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))

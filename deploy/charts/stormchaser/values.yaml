@@ -13,6 +13,9 @@ stormchaser-orchestration:
   global:
     database:
       # If using the built-in postgres, this is generated dynamically via templates or overridden below.
+      # The bundled PostgreSQL has no TLS, so this switches database TLS off. Point
+      # this at an external database and set ssl to true (the orchestration chart's
+      # default) before relying on the install.
       url: "postgres://stormchaser:<CHANGE_ME_IN_PRODUCTION>@stormchaser-postgresql:5432/stormchaser?sslmode=disable"
       existingSecret: ""
       existingSecretKey: "DATABASE_URL"
@@ -107,6 +110,14 @@ postgresql:
   primary:
     persistence:
       enabled: false
+
+# Generate the Secret `stormchaser-tls-certs` (global.tls.existingSecret): a CA of its
+# own and a certificate naming the API, query, web and engine Services, which serve
+# HTTPS with it. Kept across upgrades. Set to false to supply your own, for example
+# from cert-manager. Re-issue by deleting the Secret and upgrading.
+tlsCerts:
+  generate: true
+  days: 825
 
 # Generate the Secrets `stormchaser-nats-control` (the engine), `stormchaser-nats-api`,
 # `stormchaser-nats-query` and `stormchaser-nats-runner` for the bundled NATS server.

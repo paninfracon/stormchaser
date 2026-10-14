@@ -30,8 +30,8 @@ aws --endpoint-url "http://${MINIO_IP}:9000" s3 cp "$TEMP_TAR" "s3://stormchaser
 REPO_URL="http://stormchaser-minio.stormchaser.svc.cluster.local:9000/stormchaser-sfs/dogfood/repo.tar.gz"
 
 echo -e "${BLUE}>>> Launching dogfood workflow...${NC}"
-API_IP=$(microk8s kubectl get svc -n stormchaser stormchaser-stormchaser-orchestration-api -o jsonpath='{.spec.clusterIP}')
-API_URL="http://${API_IP}:3000"
+# shellcheck source=scripts/k8s-api-access.sh
+source "$REPO_ROOT/scripts/k8s-api-access.sh"
 
 echo -e "${BLUE}>>> Registering SFS backend...${NC}"
 curl -s -X POST "$API_URL/api/v1/connections" \
