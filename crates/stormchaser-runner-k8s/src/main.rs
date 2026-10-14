@@ -1,3 +1,4 @@
+mod cancel;
 mod cluster;
 mod config;
 mod job_machine;
@@ -27,6 +28,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use stormchaser_model::dsl;
 
+use crate::cancel::handle_cancel;
 use crate::cluster::ClusterPool;
 use crate::config::Config;
 use crate::reaper::run_reaper;
@@ -268,6 +270,9 @@ pub async fn run_runner(config: Config) -> Result<()> {
         .await
         .context("Failed to get consumer messages")?;
 
+    // Cancellations of runs, which every runner reads for itself
+    let mut cancel_messages = stormchaser_model::run_cancel::subscribe(&stream).await?;
+
     info!(
         "Listening for tasks on {} and JetStream subject stormchaser.v1.*.step.scheduled.>",
         nats_subject
@@ -298,6 +303,25 @@ pub async fn run_runner(config: Config) -> Result<()> {
                     .await
                 {
                     error!("Failed to publish heartbeat: {:?}", e);
+                }
+            }
+            message = cancel_messages.next() => {
+                match message {
+                    Some(Ok(msg)) => {
+                        tokio::spawn(handle_cancel(
+                            msg,
+                            cluster_pool.clone(),
+                            step_namespace.clone(),
+                        ));
+                    }
+                    Some(Err(e)) => {
+                        error!("Run cancellation consumer error: {:?}", e);
+                        time::sleep(Duration::from_secs(1)).await;
+                    }
+                    None => {
+                        error!("Run cancellation consumer closed");
+                        break;
+                    }
                 }
             }
             message = runner_task_messages.next() => {

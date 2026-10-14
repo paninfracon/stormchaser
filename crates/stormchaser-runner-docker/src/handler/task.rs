@@ -78,6 +78,17 @@ pub async fn handle_task(
         }
     };
 
+    // The engine has ended this run. A task for it that was already queued is dropped:
+    // nothing would read its result.
+    if stormchaser_model::run_cancel::is_cancelled(run_id) {
+        term_message(
+            &msg,
+            &format!("Dropping step {step_id}: run {run_id} was cancelled"),
+        )
+        .await;
+        return;
+    }
+
     let step_dsl = match parse_step_from_nats_payload(&payload) {
         Ok(step) => step,
         Err(e) => {

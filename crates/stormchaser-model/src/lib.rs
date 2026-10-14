@@ -41,6 +41,9 @@ pub mod net_guard;
 pub mod outbox;
 /// Matching container images to registry credentials.
 pub mod registry;
+/// How runners hear that a run has ended and its steps must stop.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod run_cancel;
 /// Execution runner definitions and status models.
 pub mod runner;
 /// Schema cache for OCI schemas.

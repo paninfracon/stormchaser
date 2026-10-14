@@ -4,6 +4,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 use stormchaser_model::dsl::Step;
 
+/// Stopping the containers of a cancelled run.
+pub mod cancel;
 /// Cryptographic utilities for container state encryption.
 pub mod crypto;
 /// Docker-specific helper utilities.

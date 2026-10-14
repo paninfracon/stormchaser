@@ -249,6 +249,12 @@ subscribe allow:
   _INBOX.>
 ```
 
+`stormchaser.v1.runner.cancel` is deliberately missing from the runner's publish
+list. The engine publishes there to stop the steps of a run that has ended, and
+runners act on whatever arrives on it, so it must stay writable by the engine's
+account alone. Runners read it through a consumer of their own, which the
+`stormchaser.v1.runner.>` consumer entry already permits.
+
 If you create the stream yourself, drop `$JS.API.STREAM.CREATE.stormchaser`
 from the runner list. If you run more than one engine shard
 (`STORMCHASER_TOTAL_SHARDS`), add the two deny entries for each shard number.

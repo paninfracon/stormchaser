@@ -282,6 +282,29 @@ that a `RunK8sJob` step names (GPUs, ephemeral storage) are passed through as
 written; use a `ResourceQuota` and `LimitRange` on the step namespace for
 those, and as a second line of defence for the rest.
 
+### When a run ends early
+
+A run that fails or is aborted while steps are still on runners no longer leaves
+them running. The engine publishes a cancellation for the run, and every runner
+stops what it holds for it: the Docker runner stops and removes the run's
+containers, including a container shared by several steps, and the Kubernetes
+runner deletes the run's Jobs, which takes their pods and Secrets with them.
+Containers get ten seconds to exit before they are killed. A task for a
+cancelled run that reaches a runner late is dropped, and a runner that was down
+when the cancellation was sent reads the last hour of cancellations when it
+starts.
+
+A cancellation is trusted because of where it arrives. It is published on
+`stormchaser.v1.runner.cancel`, which the NATS permissions in
+[NATS Authentication](#10-nats-authentication) let only the engine's account
+publish to; runners can read it and neither they nor the API can write it. A
+deployment that gives every component the same NATS account has no such
+guarantee: there, anything that can publish can stop any run's steps.
+
+Cancellation is not a substitute for a step's `timeout`. A runner that stays
+down for more than an hour misses it, and the step then runs until its own
+deadline.
+
 ### Where a step's secrets are on a runner
 
 A step's environment carries the secrets its workflow resolved and the

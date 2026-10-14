@@ -300,3 +300,105 @@ async fn a_step_that_outlives_its_timeout_is_ended_by_the_cluster() {
         .await
         .unwrap();
 }
+
+#[tokio::test]
+#[ignore = "needs a Kubernetes cluster"]
+async fn cancelling_a_run_deletes_its_jobs_and_no_others() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let client = kube::Client::try_default().await.unwrap();
+    let jobs: Api<Job> = Api::namespaced(client.clone(), &namespace());
+    let secrets: Api<Secret> = Api::namespaced(client.clone(), &namespace());
+
+    let long_step = |name: &str| {
+        metadata(
+            name,
+            json!({
+                "image": "alpine:3",
+                "command": ["sleep", "300"],
+                // A step cannot take itself out of reach by naming its own run id
+                "labels": { "stormchaser-run-id": "someone-elses" },
+                "env": [{ "name": "TOKEN", "value": "s3cret" }]
+            }),
+        )
+    };
+    let cancelled = long_step("cancelled");
+    let cancelled_run = cancelled.run_id;
+    let bystander = long_step("bystander");
+    let bystander_run = bystander.run_id;
+
+    let mut machines = Vec::new();
+    for metadata in [cancelled, bystander] {
+        let StartResult::Running(machine) = K8sJobMachine::new(client.clone(), metadata)
+            .start()
+            .await
+            .unwrap()
+        else {
+            panic!("the Job did not start");
+        };
+        wait_for_pod(&client, &machine.state.job_name).await;
+        machines.push(machine);
+    }
+    let bystander_machine = machines.pop().unwrap();
+    let cancelled_machine = machines.pop().unwrap();
+    let cancelled_job = cancelled_machine.state.job_name.clone();
+    let bystander_job = bystander_machine.state.job_name.clone();
+
+    let started = std::time::Instant::now();
+    let wait = tokio::spawn(cancelled_machine.wait());
+    assert_eq!(
+        stormchaser_runner_k8s::job_machine::k8s_utils::stop_run_jobs(
+            &client,
+            &namespace(),
+            cancelled_run
+        )
+        .await,
+        1
+    );
+
+    // The step's own handler notices and reports a failure, far sooner than the five
+    // minutes the command asked for
+    let outcome = tokio::time::timeout(Duration::from_secs(120), wait)
+        .await
+        .expect("the cancelled step's handler never returned")
+        .unwrap();
+    if let Ok(JobState::Succeeded(_)) = outcome {
+        panic!("a cancelled step was reported as a success");
+    }
+    assert!(started.elapsed() < Duration::from_secs(120));
+
+    // Its Job, pods and Secret go
+    let pods: Api<Pod> = Api::namespaced(client.clone(), &namespace());
+    let mut gone = false;
+    for _ in 0..180 {
+        let job = jobs.get_opt(&cancelled_job).await.unwrap();
+        let pod_count = pods
+            .list(&ListParams::default().labels(&format!("job-name={cancelled_job}")))
+            .await
+            .unwrap()
+            .items
+            .len();
+        let secret = secrets
+            .get_opt(&step_secret_name(&cancelled_job))
+            .await
+            .unwrap();
+        if job.is_none() && pod_count == 0 && secret.is_none() {
+            gone = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    assert!(gone, "the cancelled run left a Job, pod or Secret behind");
+
+    // The other run's Job is untouched
+    assert!(jobs.get_opt(&bystander_job).await.unwrap().is_some());
+    assert_eq!(
+        stormchaser_runner_k8s::job_machine::k8s_utils::stop_run_jobs(
+            &client,
+            &namespace(),
+            bystander_run
+        )
+        .await,
+        1
+    );
+    drop(bystander_machine);
+}

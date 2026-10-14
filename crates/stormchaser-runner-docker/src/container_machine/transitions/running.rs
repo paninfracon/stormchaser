@@ -823,4 +823,98 @@ mod tests {
             .await
             .is_err());
     }
+
+    /// Starts two real containers for one run and one for another, cancels the first
+    /// run, and checks that its containers are gone, its steps are reported as failed,
+    /// and the other run is untouched.
+    #[tokio::test]
+    async fn cancelling_a_run_stops_its_containers_and_no_others() {
+        let Ok(docker) = Docker::connect_with_local_defaults() else {
+            return;
+        };
+        if docker.ping().await.is_err() {
+            return;
+        }
+        let step = |name: &str| -> Step {
+            serde_json::from_value(serde_json::json!({
+                "name": name,
+                "type": "RunContainer",
+                "params": {},
+                "spec": { "image": "alpine:3", "command": ["sleep", "300"] },
+                "aggregation": [],
+                "next": [],
+                "outputs": [],
+                "reports": []
+            }))
+            .unwrap()
+        };
+        let metadata = |run_id: Uuid, name: &str| ContainerMetadata {
+            run_id,
+            step_id: Uuid::new_v4(),
+            runner_id: "test_runner".to_string(),
+            fencing_token: 0,
+            step_dsl: step(name),
+            received_at: chrono::Utc::now(),
+            encryption_key: None,
+            loki_url: None,
+            storage: None,
+            test_report_urls: None,
+            registry_auth: None,
+        };
+        let cancelled_run = Uuid::new_v4();
+        let other_run = Uuid::new_v4();
+
+        let mut running = Vec::new();
+        for (run_id, name) in [
+            (cancelled_run, "cancel-a"),
+            (cancelled_run, "cancel-b"),
+            (other_run, "cancel-bystander"),
+        ] {
+            let machine = DockerContainerMachine::new(docker.clone(), metadata(run_id, name), None);
+            let crate::container_machine::StartResult::Running(machine) =
+                machine.start().await.unwrap()
+            else {
+                panic!("the container did not start");
+            };
+            running.push(machine);
+        }
+        let bystander = running.pop().unwrap();
+        let bystander_name = bystander.state.container_name.clone();
+
+        let started = std::time::Instant::now();
+        let waits: Vec<_> = running
+            .into_iter()
+            .map(|machine| tokio::spawn(machine.wait()))
+            .collect();
+        let stopped =
+            crate::container_machine::cancel::stop_run_containers(&docker, cancelled_run).await;
+        assert_eq!(stopped, 2);
+
+        for wait in waits {
+            // Each step's own handler notices and reports, rather than waiting out the
+            // five minutes or hanging
+            let finished = tokio::time::timeout(std::time::Duration::from_secs(60), wait)
+                .await
+                .expect("a cancelled step never finished")
+                .unwrap();
+            if let Ok(finished) = finished {
+                assert!(
+                    matches!(finished.state.result, ContainerState::Failed(..)),
+                    "a cancelled step was reported as a success"
+                );
+            }
+        }
+        assert!(started.elapsed() < std::time::Duration::from_secs(120));
+
+        // The other run's container is still running
+        let inspected = docker
+            .inspect_container(&bystander_name, None)
+            .await
+            .expect("the other run's container was removed");
+        assert_eq!(inspected.state.and_then(|state| state.running), Some(true));
+        assert_eq!(
+            crate::container_machine::cancel::stop_run_containers(&docker, other_run).await,
+            1
+        );
+    }
 }

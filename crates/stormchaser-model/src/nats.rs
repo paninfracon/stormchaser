@@ -138,6 +138,8 @@ pub enum NatsSubject {
     RunnerRegister,
     RunnerHeartbeat,
     RunnerOffline,
+    /// Engine to every runner: stop the steps of a run. Runners may read it, not publish it.
+    RunnerCancel,
     StepScheduled(String, Option<u32>),
     StepInitializing(Option<u32>),
     StepRunning(Option<u32>),
@@ -191,6 +193,7 @@ impl NatsSubject {
             NatsSubject::RunnerRegister => Cow::Borrowed("stormchaser.v1.global.runner.register"),
             NatsSubject::RunnerHeartbeat => Cow::Borrowed("stormchaser.v1.global.runner.heartbeat"),
             NatsSubject::RunnerOffline => Cow::Borrowed("stormchaser.v1.global.runner.offline"),
+            NatsSubject::RunnerCancel => Cow::Borrowed(crate::runner::CANCEL_SUBJECT),
             NatsSubject::StepScheduled(ty, shard) => Cow::Owned(format!(
                 "stormchaser.v1.{}.step.scheduled.{}",
                 get_shard_str(shard),

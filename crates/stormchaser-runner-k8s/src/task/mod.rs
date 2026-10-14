@@ -363,6 +363,16 @@ pub async fn handle_task(
         }
     };
 
+    // The engine has ended this run. A task for it that was already queued is dropped:
+    // nothing would read its result.
+    if stormchaser_model::run_cancel::is_cancelled(run_id) {
+        tracing::warn!("Dropping step {step_id}: run {run_id} was cancelled");
+        if let Err(ack_err) = msg.ack().await {
+            tracing::warn!("Failed to ack a task of a cancelled run: {:?}", ack_err);
+        }
+        return;
+    }
+
     let spec = serde_json::from_value(payload["spec"].clone()).unwrap_or(serde_json::Value::Null);
 
     let step_dsl: dsl::Step = if let Some(dsl_val) = payload.get("step_dsl") {

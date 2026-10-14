@@ -1,3 +1,4 @@
+pub mod cancel;
 pub mod containers;
 pub mod env;
 pub mod job;
@@ -9,6 +10,7 @@ pub mod secret;
 pub mod sidecar;
 pub mod volumes;
 
+pub use cancel::*;
 pub(crate) use containers::*;
 pub(crate) use env::*;
 pub(crate) use job::*;

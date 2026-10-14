@@ -38,6 +38,7 @@ rustls = { version = "0.23", features = ["ring"] }
 tokio-tungstenite = "0.30.0"
 tokio-stream = "0.1.18"
 async-nats = { workspace = true }
+time = "0.3"
 oci-distribution = { version = "0.11.0", default-features = false, features = ["rustls-tls"] }
 tar = { workspace = true }
 flate2 = { workspace = true }

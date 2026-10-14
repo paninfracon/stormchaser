@@ -240,6 +240,7 @@ impl WorkflowMachine<state::Running> {
         self.run.error = Some(error);
 
         persist_run(&mut self.run, executor).await?;
+        cancel_steps_on_runners(&self.run, "the run failed", executor).await?;
 
         Ok(WorkflowMachine {
             run: self.run,
@@ -258,12 +259,46 @@ impl WorkflowMachine<state::Running> {
         self.run.updated_at = Utc::now();
 
         persist_run(&mut self.run, executor).await?;
+        cancel_steps_on_runners(&self.run, "the run was aborted", executor).await?;
 
         Ok(WorkflowMachine {
             run: self.run,
             _state: PhantomData,
         })
     }
+}
+
+/// Queues the message that tells runners to stop a run's steps.
+///
+/// A run that ends while it is running may have steps still going on runners: the other
+/// branches of a run one step has failed, or everything in a run that timed out. Nothing
+/// will read their results, so they are stopped rather than left to use a runner until
+/// they finish. The message goes through the outbox on the connection that ends the run,
+/// and so in the same transaction wherever the caller has one.
+async fn cancel_steps_on_runners(
+    run: &WorkflowRun,
+    reason: &str,
+    executor: &mut sqlx::PgConnection,
+) -> Result<()> {
+    use stormchaser_model::events::{
+        EventSource, EventType, RunCancelEvent, RunnerEventType, SchemaVersion,
+    };
+    let event_type = EventType::Runner(RunnerEventType::Cancel);
+    crate::db::outbox::insert_outbox_event(
+        executor,
+        stormchaser_model::nats::NatsSubject::RunnerCancel,
+        event_type.clone(),
+        EventSource::Engine,
+        serde_json::to_value(RunCancelEvent {
+            run_id: run.id,
+            event_type,
+            reason: reason.to_string(),
+            timestamp: Utc::now(),
+        })?,
+        Some(SchemaVersion::new("1.0".to_string())),
+        None,
+    )
+    .await
 }
 
 #[cfg(test)]

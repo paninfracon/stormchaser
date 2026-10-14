@@ -48,6 +48,12 @@ pub struct StepDefinition {
     pub registered_at: DateTime<Utc>,
 }
 
+/// Where the engine tells runners to stop a run's steps.
+///
+/// It sits under `stormchaser.v1.runner.`, which runners may already read. No account
+/// but the engine's may publish to it, so a runner or the API cannot stop someone's run.
+pub const CANCEL_SUBJECT: &str = "stormchaser.v1.runner.cancel";
+
 /// Chooses the id a runner registers under.
 ///
 /// An id the operator sets (`RUNNER_ID`) always wins. Otherwise the id is built from the

@@ -102,6 +102,8 @@ pub enum RunnerEventType {
     Register,
     Heartbeat,
     Offline,
+    /// The engine telling runners that a run has ended and its steps must stop.
+    Cancel,
 }
 
 impl RunnerEventType {
@@ -110,6 +112,7 @@ impl RunnerEventType {
             RunnerEventType::Register => "RunnerRegisterEvent",
             RunnerEventType::Heartbeat => "RunnerHeartbeatEvent",
             RunnerEventType::Offline => "RunnerOfflineEvent",
+            RunnerEventType::Cancel => "RunCancelEvent",
         }
     }
 }
@@ -171,6 +174,7 @@ impl<'de> Deserialize<'de> for EventType {
             "RunnerRegisterEvent" => Ok(EventType::Runner(RunnerEventType::Register)),
             "RunnerHeartbeatEvent" => Ok(EventType::Runner(RunnerEventType::Heartbeat)),
             "RunnerOfflineEvent" => Ok(EventType::Runner(RunnerEventType::Offline)),
+            "RunCancelEvent" => Ok(EventType::Runner(RunnerEventType::Cancel)),
             _ => Err(serde::de::Error::custom(format!(
                 "Unknown EventType: {}",
                 s
@@ -386,6 +390,17 @@ pub struct RunnerHeartbeatEvent {
 pub struct RunnerOfflineEvent {
     pub runner_id: String,
     pub event_type: EventType,
+    pub timestamp: DateTime<Utc>,
+}
+
+/// Sent by the engine when a run ends with steps that may still be running. Every
+/// runner stops the containers or Jobs it holds for the run.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct RunCancelEvent {
+    pub run_id: RunId,
+    pub event_type: EventType,
+    /// Why the run ended, for the runner's log.
+    pub reason: String,
     pub timestamp: DateTime<Utc>,
 }
 
