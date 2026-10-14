@@ -1,4 +1,4 @@
-use crate::utils::{handle_response, require_token};
+use crate::utils::{for_stderr, for_stdout, handle_response, require_token};
 use anyhow::Result;
 
 pub async fn watch_run(
@@ -25,10 +25,10 @@ pub async fn watch_run(
         match event {
             Ok(event) => {
                 if event.event == "error" {
-                    eprintln!("Error from stream: {}", event.data);
+                    eprintln!("Error from stream: {}", for_stderr(&event.data));
                     break;
                 }
-                println!("{}: {}", event.event, event.data);
+                println!("{}: {}", for_stdout(&event.event), for_stdout(&event.data));
             }
             Err(e) => {
                 eprintln!("Stream error: {}", e);

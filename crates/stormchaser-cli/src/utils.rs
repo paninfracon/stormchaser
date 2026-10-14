@@ -33,7 +33,7 @@ pub fn strip_control(text: &str) -> std::borrow::Cow<'_, str> {
 
 /// Server text made safe for the stream it is going to: stripped when a person is
 /// reading it in a terminal, untouched when it is piped or redirected.
-fn for_stdout(text: &str) -> std::borrow::Cow<'_, str> {
+pub(crate) fn for_stdout(text: &str) -> std::borrow::Cow<'_, str> {
     use std::io::IsTerminal;
     if std::io::stdout().is_terminal() {
         strip_control(text)
@@ -42,7 +42,7 @@ fn for_stdout(text: &str) -> std::borrow::Cow<'_, str> {
     }
 }
 
-fn for_stderr(text: &str) -> std::borrow::Cow<'_, str> {
+pub(crate) fn for_stderr(text: &str) -> std::borrow::Cow<'_, str> {
     use std::io::IsTerminal;
     if std::io::stderr().is_terminal() {
         strip_control(text)
