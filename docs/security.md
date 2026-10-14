@@ -171,6 +171,19 @@ API's Service. With `CRON_ENGINE=none` (the Docker quickstart) schedules are
 stored and each token is shown once, for a scheduler of your own to call
 `POST /api/v1/cron-trigger/<id>` with. Keep it where you keep other credentials.
 
+**Known limitation: the CronJob permission reaches every Secret in the API's
+namespace.** RBAC cannot limit what a CronJob's pods mount, so whoever controls the
+API's service account (a compromise of the API pod, or of the OPA sidecar, which
+shares its token) can create a CronJob that mounts any Secret in that namespace and
+read it, including the engine's NATS password, the JWT signing key and the database
+URL, though it has no permission to read Secrets directly. Until cron jobs live in
+a namespace of their own that holds nothing else, either:
+
+* install Stormchaser into a namespace whose other Secrets you can accept the API
+  being able to read, keeping the engine's credentials elsewhere where possible; or
+* use `CRON_ENGINE=none` and fire `POST /api/v1/cron-trigger/<id>` from a scheduler
+  you run yourself, and drop the Role.
+
 ### External Endpoint mTLS
 
 For connections to 3rd-party services (e.g., S3-compatible storage, external Webhooks), Stormchaser allows storing certificates directly in the PostgreSQL database.
