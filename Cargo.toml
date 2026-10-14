@@ -58,7 +58,7 @@ hmac = "0.13"
 sha2 = "0.11"
 hex = "0.4"
 hcl-rs = { version = "0.19.7" }
-wasmtime = "49.0"
+wasmtime = "49.0.3"
 # All builtin groups except `yaml-builtins`, which depends on the deprecated serde_yaml
 # (and the unmaintained unsafe-libyaml, RUSTSEC-2024-0449).
 opa-wasm = { version = "0.3.3", default-features = false, features = [
