@@ -17,6 +17,8 @@ spec:
         {{- include "stormchaser-orchestration.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: engine
     spec:
+      # It never talks to the Kubernetes API (IRSA projects its own token)
+      automountServiceAccountToken: false
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
@@ -28,15 +30,7 @@ spec:
           env:
             - name: BINARY
               value: "stormchaser-engine"
-            - name: DATABASE_URL
-              {{- if .Values.global.database.existingSecret }}
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.global.database.existingSecret }}
-                  key: {{ .Values.global.database.existingSecretKey }}
-              {{- else }}
-              value: {{ .Values.global.database.url | quote }}
-              {{- end }}
+            {{- include "stormchaser-orchestration.databaseUrlEnv" . | nindent 12 }}
             - name: STORMCHASER_DB_SSL
               value: {{ .Values.global.database.ssl | quote }}
             - name: NATS_URL
@@ -98,7 +92,9 @@ spec:
               mountPath: /etc/stormchaser/certs
               readOnly: true
             {{- end }}
+        {{- include "stormchaser-orchestration.opaSidecar" . | nindent 8 }}
       volumes:
+        {{- include "stormchaser-orchestration.opaPolicyVolume" . | nindent 8 }}
         - name: git-cache
           {{- if .Values.engine.persistence.enabled }}
           persistentVolumeClaim:

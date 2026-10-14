@@ -17,6 +17,8 @@ spec:
         {{- include "stormchaser-orchestration.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: web
     spec:
+      # It never talks to the Kubernetes API
+      automountServiceAccountToken: false
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:

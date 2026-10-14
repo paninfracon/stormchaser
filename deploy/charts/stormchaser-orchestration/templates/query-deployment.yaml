@@ -17,6 +17,8 @@ spec:
         {{- include "stormchaser-orchestration.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: query
     spec:
+      # It never talks to the Kubernetes API
+      automountServiceAccountToken: false
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
@@ -32,15 +34,7 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            - name: DATABASE_URL
-              {{- if .Values.global.database.existingSecret }}
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.global.database.existingSecret }}
-                  key: {{ .Values.global.database.existingSecretKey }}
-              {{- else }}
-              value: {{ .Values.global.database.url | quote }}
-              {{- end }}
+            {{- include "stormchaser-orchestration.databaseUrlEnv" . | nindent 12 }}
             - name: STORMCHASER_DB_SSL
               value: {{ .Values.global.database.ssl | quote }}
             - name: NATS_URL
@@ -125,9 +119,13 @@ spec:
               mountPath: /etc/stormchaser/certs
               readOnly: true
             {{- end }}
-      {{- if .Values.global.tls.enabled }}
+        {{- include "stormchaser-orchestration.opaSidecar" . | nindent 8 }}
+      {{- if or .Values.global.tls.enabled .Values.api.opa.sidecar.enabled }}
       volumes:
+        {{- if .Values.global.tls.enabled }}
         - name: certs
           secret:
             secretName: {{ .Values.global.tls.existingSecret }}
+        {{- end }}
+        {{- include "stormchaser-orchestration.opaPolicyVolume" . | nindent 8 }}
       {{- end }}

@@ -37,15 +37,7 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            - name: DATABASE_URL
-              {{- if .Values.global.database.existingSecret }}
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.global.database.existingSecret }}
-                  key: {{ .Values.global.database.existingSecretKey }}
-              {{- else }}
-              value: {{ .Values.global.database.url | quote }}
-              {{- end }}
+            {{- include "stormchaser-orchestration.databaseUrlEnv" . | nindent 12 }}
             - name: STORMCHASER_DB_SSL
               value: {{ .Values.global.database.ssl | quote }}
             - name: NATS_URL
@@ -98,7 +90,10 @@ spec:
                   key: {{ .Values.global.oidc.existingSecretKey }}
             {{- else if .Values.global.oidc.clientSecret }}
             - name: OIDC_CLIENT_SECRET
-              value: {{ .Values.global.oidc.clientSecret | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "stormchaser-orchestration.credentialsSecret" . }}
+                  key: OIDC_CLIENT_SECRET
             {{- end }}
             - name: LOKI_URL
               value: {{ .Values.global.loki.url | quote }}
@@ -171,31 +166,7 @@ spec:
               mountPath: /etc/stormchaser/certs
               readOnly: true
             {{- end }}
-        {{- if .Values.api.opa.sidecar.enabled }}
-        - name: opa
-          image: "{{ .Values.api.opa.sidecar.image.repository }}:{{ .Values.api.opa.sidecar.image.tag }}"
-          args:
-            - "run"
-            - "--server"
-            - "--addr=0.0.0.0:8181"
-            # The engine and query service reach this port through the API Service, so it
-            # cannot be bound to loopback. authz.rego limits OPA's own API to evaluating
-            # the policy, which stops anything in the cluster from replacing it.
-            - "--authorization=basic"
-            - "/config/policy.rego"
-            - "/config/authz.rego"
-            - "/config/settings.json"
-          ports:
-            - name: http-opa
-              containerPort: 8181
-              protocol: TCP
-          volumeMounts:
-            - name: opa-policy
-              mountPath: /config
-              readOnly: true
-          resources:
-            {{- toYaml .Values.api.opa.sidecar.resources | nindent 12 }}
-        {{- end }}
+        {{- include "stormchaser-orchestration.opaSidecar" . | nindent 8 }}
       {{- if or .Values.global.tls.enabled .Values.api.opa.sidecar.enabled }}
       volumes:
         {{- if .Values.global.tls.enabled }}
@@ -203,9 +174,5 @@ spec:
           secret:
             secretName: {{ .Values.global.tls.existingSecret }}
         {{- end }}
-        {{- if .Values.api.opa.sidecar.enabled }}
-        - name: opa-policy
-          configMap:
-            name: {{ include "stormchaser-orchestration.fullname" . }}-opa-policy
-        {{- end }}
+        {{- include "stormchaser-orchestration.opaPolicyVolume" . | nindent 8 }}
       {{- end }}

@@ -387,6 +387,7 @@ kubectl create secret generic nats-runner -n stormchaser \
 
 helm install stormchaser-orchestration ./deploy/charts/stormchaser-orchestration \
   --namespace stormchaser \
+  --set global.database.existingSecret=stormchaser-db-secret \
   --set global.nats.url="tls://nats.example.internal:4222" \
   --set global.nats.authSecret=nats-control \
   --set global.nats.apiAuthSecret=nats-api \

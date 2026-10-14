@@ -7,7 +7,9 @@ global:
     # Empty means the release this chart belongs to (v<appVersion>)
     tag: ""
   database:
-    url: "postgres://stormchaser:stormchaser@postgres:5432/stormchaser"
+    # postgres://<user>:<password>@<host>:5432/<database>. Better, name a Secret holding
+    # it in existingSecret. A URL given here is kept in a Secret the chart creates.
+    url: ""
     existingSecret: ""
     existingSecretKey: "DATABASE_URL"
     ssl: true

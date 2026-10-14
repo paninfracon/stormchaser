@@ -45,6 +45,8 @@ Settings for it live in `deploy/opa/settings.json` (Helm: `api.opa.sidecar.setti
 
 OPA's own HTTP API is restricted (`deploy/opa/authz.rego`, with `--authorization=basic`) to evaluating the policy, so that nothing which can reach OPA's port can replace the policy or its data.
 
+In the Helm charts, the API, the engine and the query service each run their own OPA sidecar, listening on `127.0.0.1` only. Policy questions carry the user's bearer token, so they never leave the pod, and nothing else in the cluster can ask the policy anything.
+
 ### Tier 1: API Level (Request Authorization)
 
 The first check occurs at the API gateway before a request is processed.
@@ -207,7 +209,7 @@ Stormchaser follows a strict **Fail-Closed** security philosophy regarding OPA:
 
 | Variable | Description | Security Impact |
 | :--- | :--- | :--- |
-| `DATABASE_URL` | Connection string for Postgres. | Core data security. |
+| `DATABASE_URL` | Connection string for Postgres. Helm: name a Secret in `global.database.existingSecret`; a URL given as `global.database.url` is kept in a Secret the chart creates, never in the pod spec. The orchestration chart has no default and refuses the password `stormchaser`, its former default. | Core data security. |
 | `NATS_URL` | Connection string for NATS. | Message integrity. |
 | `NATS_CREDS_FILE`, `NATS_USER` / `NATS_PASSWORD`, `NATS_TOKEN` | NATS credentials (see [nats.md](nats.md)). | **Who may schedule and report on steps.** |
 | `NATS_CA_FILE`, `NATS_TLS_REQUIRED` | Verify the NATS server and refuse plaintext. | Protects credentials and events in transit. |

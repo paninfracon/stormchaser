@@ -36,7 +36,8 @@ stormchaser-orchestration:
     grafana:
       url: "http://stormchaser-grafana:80"
     opa:
-      url: "http://stormchaser-stormchaser-orchestration-api:8181/v1/data/stormchaser/allow"
+      # Each of the API, engine and query pods runs its own OPA sidecar on loopback
+      url: "http://127.0.0.1:8181/v1/data/stormchaser/allow"
     oidc:
       issuer: "http://dex:5556/dex"
       externalIssuer: "http://localhost:5556/dex"

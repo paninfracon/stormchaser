@@ -86,3 +86,81 @@ annotations:
   {{- toYaml . | nindent 2 }}
 {{- end }}
 {{- end }}
+
+{{/*
+The OPA sidecar. The API, the engine and the query service each run one and reach it on
+loopback, so the bearer tokens they send it with each decision never cross the network
+and nothing outside the pod can ask it anything.
+*/}}
+{{- define "stormchaser-orchestration.opaSidecar" -}}
+{{- if .Values.api.opa.sidecar.enabled }}
+- name: opa
+  image: "{{ .Values.api.opa.sidecar.image.repository }}:{{ .Values.api.opa.sidecar.image.tag }}"
+  args:
+    - "run"
+    - "--server"
+    - "--addr=127.0.0.1:8181"
+    # Limits OPA's own API to evaluating the policy, so nothing else in the pod can
+    # replace it
+    - "--authorization=basic"
+    - "/config/policy.rego"
+    - "/config/authz.rego"
+    - "/config/settings.json"
+  securityContext:
+    {{- toYaml .Values.securityContext | nindent 4 }}
+  volumeMounts:
+    - name: opa-policy
+      mountPath: /config
+      readOnly: true
+  resources:
+    {{- toYaml .Values.api.opa.sidecar.resources | nindent 4 }}
+{{- end }}
+{{- end }}
+
+{{/*
+The volume holding the policy the OPA sidecar loads.
+*/}}
+{{- define "stormchaser-orchestration.opaPolicyVolume" -}}
+{{- if .Values.api.opa.sidecar.enabled }}
+- name: opa-policy
+  configMap:
+    name: {{ include "stormchaser-orchestration.fullname" . }}-opa-policy
+{{- end }}
+{{- end }}
+
+{{/*
+The Secret holding credentials that were given as values.
+*/}}
+{{- define "stormchaser-orchestration.credentialsSecret" -}}
+{{ include "stormchaser-orchestration.fullname" . }}-credentials
+{{- end }}
+
+{{/*
+The DATABASE_URL environment variable, from the named Secret or the chart's own.
+*/}}
+{{- define "stormchaser-orchestration.databaseUrlEnv" -}}
+- name: DATABASE_URL
+  valueFrom:
+    secretKeyRef:
+      {{- if .Values.global.database.existingSecret }}
+      name: {{ .Values.global.database.existingSecret }}
+      key: {{ .Values.global.database.existingSecretKey }}
+      {{- else }}
+      name: {{ include "stormchaser-orchestration.credentialsSecret" . }}
+      key: DATABASE_URL
+      {{- end }}
+{{- end }}
+
+{{/*
+Refuses a database URL with no host, or with the password this chart once shipped as
+its default, which is public.
+*/}}
+{{- define "stormchaser-orchestration.checkDatabaseUrl" -}}
+{{- $url := .Values.global.database.url | default "" -}}
+{{- if not $url -}}
+{{- fail "global.database.url is empty: set it, or name a Secret holding it in global.database.existingSecret" -}}
+{{- end -}}
+{{- if regexMatch "^[a-z]+://[^:/@]*:stormchaser@" $url -}}
+{{- fail "global.database.url uses the password \"stormchaser\", which was this chart's public default: choose another, preferably in a Secret named by global.database.existingSecret" -}}
+{{- end -}}
+{{- end }}
