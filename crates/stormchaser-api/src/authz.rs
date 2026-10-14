@@ -237,6 +237,35 @@ pub async fn authorize_connection_use(
     authorize_action(state, caller, "use", Kind::Connection, id).await
 }
 
+/// The action of making a connection the default storage backend. Every run that names
+/// no storage backend of its own keeps its files, artifacts and test reports there, so
+/// whoever chooses it can read and replace other users' data.
+pub const MAKE_DEFAULT: &str = "make_default";
+
+/// Refuses unless `caller` may make the connection they are creating, `id`, the default
+/// storage backend. An existing connection is checked with [`authorize_action`].
+pub async fn authorize_make_default(
+    state: &AppState,
+    caller: &Caller,
+    id: Uuid,
+) -> Result<(), StatusCode> {
+    let owner = caller.owner_key();
+    if allowed(
+        state,
+        caller,
+        MAKE_DEFAULT,
+        Kind::Connection,
+        &id.to_string(),
+        Some(&owner),
+    )
+    .await?
+    {
+        Ok(())
+    } else {
+        Err(StatusCode::FORBIDDEN)
+    }
+}
+
 /// Refuses unless `caller` may do `action` to the object `id` of `kind`: 404 if it does
 /// not exist, 403 if policy says no. For objects named in a request's body, which the
 /// path-based check in [`authorize_object`] does not see.

@@ -333,6 +333,40 @@ async fn users_see_and_change_only_what_they_own() {
         StatusCode::FORBIDDEN
     );
 
+    // --- Only an admin may choose the default storage backend ----------------------
+    // (Only refusals are tested: the default is shared by every test using this database.)
+    assert_eq!(
+        call(
+            &router,
+            Method::PATCH,
+            &conn_path,
+            &alice,
+            Some(json!({"is_default_sfs": true}))
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN,
+        "alice made her connection the default storage backend"
+    );
+    let (status, _) = call(
+        &router,
+        Method::POST,
+        "/api/v1/connections",
+        &alice,
+        Some(json!({
+            "name": format!("default-{tag}"), "connection_type": "s3",
+            "config": {"bucket": "b"}, "is_default_sfs": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (_, listed) = call(&router, Method::GET, "/api/v1/connections", &alice, None).await;
+    assert!(!listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|c| c["name"] == format!("default-{tag}")));
+
     // --- A rule can only be attached to a webhook its creator may change ------------
     let (status, created) = call(
         &router,

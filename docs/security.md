@@ -35,6 +35,7 @@ The policy Stormchaser ships (`deploy/opa/policy.rego`, also packaged in the Hel
 * lets any authenticated user call any endpoint and start any workflow;
 * lets users read and change only the runs, webhooks, event rules and cron schedules they created, and lets admins do anything;
 * shares connections: everyone may see them (credentials are always masked) and every run may use them, but only the creator or an admin may change or delete one;
+* lets only admins make a connection the default storage backend (`is_default_sfs`), once any admin is configured. Every run that names no storage backend keeps its files, artifacts and test reports there, so whoever owns it could read and replace other users' data. Until an admin is configured, the connection's creator may, as with any other change;
 * leaves objects that predate ownership readable by everyone, and changeable by everyone until an admin is configured, by admins only after that.
 
 Settings for it live in `deploy/opa/settings.json` (Helm: `api.opa.sidecar.settings`): `admins` (emails or subject ids), `admin_groups` (values of the token's `groups` claim), `separation_of_duties` (when true, whoever started a run may not approve its steps) and `author_groups`.

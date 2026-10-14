@@ -37,6 +37,9 @@ pub async fn create_connection(
     Json(payload): Json<CreateStorageBackendRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let id = stormchaser_model::ConnectionId::new_v4();
+    if payload.is_default_sfs {
+        authz::authorize_make_default(&state, &caller, id.into_inner()).await?;
+    }
 
     let mut tx = state
         .pool
@@ -148,11 +151,21 @@ pub async fn get_connection(
     tag = "storage"
 )]
 pub async fn update_connection(
-    AuthClaims(_claims): AuthClaims,
+    caller: Caller,
     State(state): State<AppState>,
     Path(id): Path<ConnectionId>,
     Json(mut payload): Json<UpdateStorageBackendRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
+    if payload.is_default_sfs == Some(true) {
+        authz::authorize_action(
+            &state,
+            &caller,
+            authz::MAKE_DEFAULT,
+            Kind::Connection,
+            id.into_inner(),
+        )
+        .await?;
+    }
     // Responses mask stored secrets. A client that loads a connection, edits it and saves
     // it sends those masks back; they mean "unchanged", not a new value.
     if payload.encrypted_credentials.as_deref() == Some(crate::redact::MASK) {

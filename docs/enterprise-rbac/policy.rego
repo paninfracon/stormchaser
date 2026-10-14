@@ -181,10 +181,12 @@ has_resource_permission if {
 	user_has_role("admin")
 }
 
-# Owners may do anything to what they created (for a run: started)
+# Owners may do anything to what they created (for a run: started), except make a
+# connection the default storage backend, which receives every other user's run data
 has_resource_permission if {
 	resource_has_owner
 	input.resource.owner in subject_ids
+	input.action != "make_default"
 }
 
 # Operators may read every run, whoever started it

@@ -157,3 +157,12 @@ test_connections_are_usable_by_any_run_but_not_changeable if {
 		with data.role_mappings as mock_data.role_mappings
 		with data.allowed_email_domains as mock_data.allowed_email_domains
 }
+
+test_only_an_admin_may_choose_the_default_storage_backend if {
+	not allow with input as resource_request("make_default", "connection", "dev@paninfracon.net", "dev@paninfracon.net", ["Okta-Engineering"])
+		with data.role_mappings as mock_data.role_mappings
+		with data.allowed_email_domains as mock_data.allowed_email_domains
+	allow with input as resource_request("make_default", "connection", "dev@paninfracon.net", "admin@paninfracon.net", ["Okta-Global-Admins"])
+		with data.role_mappings as mock_data.role_mappings
+		with data.allowed_email_domains as mock_data.allowed_email_domains
+}

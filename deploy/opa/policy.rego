@@ -170,7 +170,7 @@ is_admin if {
 # resource.type is one of run, connection, webhook, event_rule, cron_workflow.
 # resource.owner is whoever created the object (for a run, whoever started it), or
 # null for objects that predate ownership and runs started by the system.
-# action is one of read, update, delete, use.
+# action is one of read, update, delete, use, make_default.
 
 allow if {
 	is_resource
@@ -205,8 +205,23 @@ owned_by_subject if {
 # Admins may do anything.
 resource_allowed if is_admin
 
-# Owners may do anything with what they own.
-resource_allowed if owned_by_subject
+# Owners may do anything with what they own, except what only admins may do.
+resource_allowed if {
+	owned_by_subject
+	not admin_only_action
+}
+
+# Making a connection the default storage backend sends every run that names no
+# backend of its own there: its files, artifacts and test reports. Whoever owns that
+# connection could read and replace other users' data, so once admins are configured
+# only they may choose it. Until then it is like any other change: the owner may.
+admin_only_action if input.action == "make_default"
+
+resource_allowed if {
+	owned_by_subject
+	admin_only_action
+	not admins_configured
+}
 
 # Objects with no owner can be read by everyone.
 resource_allowed if {

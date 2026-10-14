@@ -78,6 +78,20 @@ test_connections_are_shared_for_reading_and_use_only if {
 	not allow with input as resource("delete", "connection", "alice@example.com", bob)
 }
 
+test_only_admins_may_choose_the_default_storage_backend if {
+	not allow with input as resource("make_default", "connection", "alice@example.com", alice)
+		with data.stormchaser_settings as with_admins
+	allow with input as resource("make_default", "connection", "alice@example.com", {"sub": "r", "email": "root@example.com"})
+		with data.stormchaser_settings as with_admins
+	allow with input as resource("update", "connection", "alice@example.com", alice)
+		with data.stormchaser_settings as with_admins
+}
+
+test_anyone_may_choose_the_default_storage_backend_until_admins_exist if {
+	allow with input as resource("make_default", "connection", "alice@example.com", alice)
+	not allow with input as resource("make_default", "connection", "alice@example.com", bob)
+}
+
 test_unowned_objects_are_readable_by_everyone if {
 	allow with input as resource("read", "run", null, bob)
 	allow with input as resource("read", "run", "system", bob)

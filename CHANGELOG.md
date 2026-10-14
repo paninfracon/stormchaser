@@ -176,6 +176,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `POST /runs` checks that the caller may use the Git connection it names, as cron workflows, event rules and `parse-git` already did. Under the shipped policy everyone may use every connection, so this changes nothing there.
 - The Kubernetes runner pulls a step's image with `imagePullPolicy: Always`, so the node checks the step's own registry credentials every time. Before, a step could start a private image that another user's run had already pulled onto the node. `STORMCHASER_STEP_IMAGE_PULL_POLICY` (Helm: `config.stepImagePullPolicy`) sets another policy for nodes with preloaded images.
 - The API's run stream (`GET /runs/stream`) ends when its client disconnects, even when the client may read none of the runs it would carry.
+- Only an admin may make a connection the default storage backend (`is_default_sfs`), when creating or changing it, once any admin is configured. The default receives the files, artifacts and test reports of every run that names no backend, so a user who made their own connection the default could read and replace other users' data. The policy asks this as a new action, `make_default`; custom policies that let owners do anything to their connections should refuse it to non-admins.
 - Removed `h2` 0.3 (RUSTSEC-2026-0258) by building the AWS SDK without its legacy HTTP client.
 - Removed the unmaintained `unsafe-libyaml` (RUSTSEC-2024-0449) by replacing `serde_yaml`.
 
