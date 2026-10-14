@@ -10,14 +10,17 @@ env:
   CARGO_TERM_COLOR: always
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
+permissions:
+  contents: read
+
 jobs:
   format:
     name: Check Formatting
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
     - name: Setup Rust
-      uses: dtolnay/rust-toolchain@stable
+      uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
       with:
         components: rustfmt
 
@@ -28,7 +31,7 @@ jobs:
     name: Run Clippy
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
     - name: Maximize Disk Space
       run: |
         sudo rm -rf /usr/share/dotnet
@@ -44,14 +47,14 @@ jobs:
         sudo mkswap /swapfile-extra
         sudo swapon /swapfile-extra
     - name: Setup Rust
-      uses: dtolnay/rust-toolchain@stable
+      uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
       with:
         components: clippy
 
     - name: Generate Certificates
       run: ./scripts/generate-certs.sh
     - name: Cache dependencies
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
     - name: Run cargo clippy
       run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
@@ -64,7 +67,7 @@ jobs:
       API_RATE_LIMIT_BURST_SIZE: 1000
       API_RATE_LIMIT_PER_SECOND: 1000
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
     - name: Maximize Disk Space
       run: |
         sudo rm -rf /usr/share/dotnet
@@ -80,15 +83,15 @@ jobs:
         sudo mkswap /swapfile-extra
         sudo swapon /swapfile-extra
     - name: Setup Rust
-      uses: dtolnay/rust-toolchain@stable
+      uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
       with:
         components: clippy
         targets: wasm32-unknown-unknown
 
     - name: Cache dependencies
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
     - name: Install sqlx-cli and cargo-leptos
-      uses: taiki-e/install-action@v2
+      uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
       with:
         tool: sqlx-cli,cargo-leptos
     - name: Generate Dev Passwords
