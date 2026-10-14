@@ -433,6 +433,26 @@ that a `RunK8sJob` step names (GPUs, ephemeral storage) are passed through as
 written; use a `ResourceQuota` and `LimitRange` on the step namespace for
 those, and as a second line of defence for the rest.
 
+### What one run may give itself
+
+A workflow's `quotas` block (and, for a run started through the API, the
+`overrides.timeout` of the request) is chosen by whoever writes or starts the
+run, so the engine and API hold it to ceilings the operator sets. A run that
+asks for more gets the ceiling, and a warning is logged.
+
+| Ceiling | Default | Setting (engine; the API reads the timeout) |
+| :--- | :--- | :--- |
+| Steps of one run running at once | 50 | `STORMCHASER_RUN_MAX_CONCURRENCY` |
+| CPU one run's steps may claim together | `64` | `STORMCHASER_RUN_MAX_CPU` |
+| Memory one run's steps may claim together | `256Gi` | `STORMCHASER_RUN_MAX_MEMORY` |
+| Longest a run may last | `24h` | `STORMCHASER_RUN_MAX_TIMEOUT` |
+
+A step that names no CPU or memory counts as none against its run's CPU and
+memory quota (it still gets the runner's defaults when it runs). The number of
+such steps is bounded by the run's concurrency. There is no limit on how many
+runs one user may have at once; on a shared installation, use a
+`ResourceQuota` on the step namespace as well.
+
 ### Private step images on Kubernetes
 
 The Kubernetes runner sets `imagePullPolicy: Always` on a step's own container.

@@ -183,31 +183,41 @@ pub async fn handle_workflow_direct(
 
     let mut tx = pool.begin().await?;
 
-    let max_concurrency = parsed_workflow
-        .quotas
-        .as_ref()
-        .and_then(|q| q.max_concurrency)
-        .unwrap_or(10) as i32;
-    let max_cpu = parsed_workflow
-        .quotas
-        .as_ref()
-        .and_then(|q| q.max_cpu.clone())
-        .unwrap_or_else(|| "1".to_string());
-    let max_memory = parsed_workflow
-        .quotas
-        .as_ref()
-        .and_then(|q| q.max_memory.clone())
-        .unwrap_or_else(|| "4Gi".to_string());
+    // The workflow's author chooses these, so the operator's ceilings apply
+    let limits = crate::run_limits::RunLimits::from_env();
+    let max_concurrency = limits.concurrency(
+        parsed_workflow
+            .quotas
+            .as_ref()
+            .and_then(|q| q.max_concurrency)
+            .unwrap_or(10),
+    ) as i32;
+    let max_cpu = limits.cpu(
+        &parsed_workflow
+            .quotas
+            .as_ref()
+            .and_then(|q| q.max_cpu.clone())
+            .unwrap_or_else(|| "1".to_string()),
+    );
+    let max_memory = limits.memory(
+        &parsed_workflow
+            .quotas
+            .as_ref()
+            .and_then(|q| q.max_memory.clone())
+            .unwrap_or_else(|| "4Gi".to_string()),
+    );
     let max_storage = parsed_workflow
         .quotas
         .as_ref()
         .and_then(|q| q.max_storage.clone())
         .unwrap_or_else(|| "10Gi".to_string());
-    let timeout = parsed_workflow
-        .quotas
-        .as_ref()
-        .and_then(|q| q.timeout.clone())
-        .unwrap_or_else(|| "1h".to_string());
+    let timeout = limits.timeout(
+        &parsed_workflow
+            .quotas
+            .as_ref()
+            .and_then(|q| q.timeout.clone())
+            .unwrap_or_else(|| "1h".to_string()),
+    );
 
     crate::db::insert_full_workflow_run(
         &mut *tx,

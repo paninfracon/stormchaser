@@ -34,6 +34,8 @@ pub mod query;
 pub mod registry_token;
 pub mod resource_utils;
 /// Issues runners their keys and checks what they sign.
+/// Ceilings on the quotas a run may give itself.
+pub mod run_limits;
 pub mod runner_auth;
 /// S3 backend storage implementation.
 pub mod s3;

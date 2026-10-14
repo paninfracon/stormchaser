@@ -125,11 +125,14 @@ pub async fn enqueue_workflow(
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // 3. Create RunQuotas (always, with defaults + overrides)
-    let timeout = payload
-        .overrides
-        .as_ref()
-        .and_then(|o| o.timeout.clone())
-        .unwrap_or_else(|| "1h".to_string());
+    // Chosen by the caller, so the operator's ceiling applies
+    let timeout = stormchaser_engine::run_limits::RunLimits::from_env().timeout(
+        &payload
+            .overrides
+            .as_ref()
+            .and_then(|o| o.timeout.clone())
+            .unwrap_or_else(|| "1h".to_string()),
+    );
 
     db::insert_run_quotas(&mut tx, run_id, 10, "1", "4Gi", "10Gi", &timeout)
         .await
