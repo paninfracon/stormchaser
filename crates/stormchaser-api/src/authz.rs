@@ -234,22 +234,40 @@ pub async fn authorize_connection_use(
     caller: &Caller,
     id: Uuid,
 ) -> Result<(), StatusCode> {
+    authorize_action(state, caller, "use", Kind::Connection, id).await
+}
+
+/// Refuses unless `caller` may do `action` to the object `id` of `kind`: 404 if it does
+/// not exist, 403 if policy says no. For objects named in a request's body, which the
+/// path-based check in [`authorize_object`] does not see.
+pub async fn authorize_action(
+    state: &AppState,
+    caller: &Caller,
+    action: &str,
+    kind: Kind,
+    id: Uuid,
+) -> Result<(), StatusCode> {
     if !state.opa.is_configured() {
         return Ok(());
     }
-    let owner = owners(&state.pool, Kind::Connection, &[id])
+    let owner = owners(&state.pool, kind, &[id])
         .await
         .map_err(|e| {
-            tracing::error!("Failed to load the owner of connection {}: {:?}", id, e);
+            tracing::error!(
+                "Failed to load the owner of {} {}: {:?}",
+                kind.as_str(),
+                id,
+                e
+            );
             StatusCode::INTERNAL_SERVER_ERROR
         })?
         .remove(&id)
-        .flatten();
+        .ok_or(StatusCode::NOT_FOUND)?;
     if allowed(
         state,
         caller,
-        "use",
-        Kind::Connection,
+        action,
+        kind,
         &id.to_string(),
         owner.as_deref(),
     )

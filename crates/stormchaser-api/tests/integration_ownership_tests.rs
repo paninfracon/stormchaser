@@ -317,6 +317,65 @@ async fn users_see_and_change_only_what_they_own() {
         StatusCode::FORBIDDEN
     );
 
+    // --- A rule can only be attached to a webhook its creator may change ------------
+    let (status, created) = call(
+        &router,
+        Method::POST,
+        "/api/v1/connections",
+        &alice,
+        Some(json!({
+            "name": format!("repo-{tag}"), "connection_type": "git",
+            "config": {"repo_url": "https://git.example.com/repo.git"}, "is_default_sfs": false
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let repo = created["id"].as_str().unwrap().to_string();
+    let rule = |webhook: &str| {
+        json!({
+            "name": format!("rule-{tag}"), "webhook_id": webhook,
+            "event_type_pattern": ".*", "workflow_name": "w", "connection": repo,
+            "workflow_path": "w.storm", "git_ref": "main", "input_mappings": {}
+        })
+    };
+    assert_eq!(
+        call(
+            &router,
+            Method::POST,
+            "/api/v1/rules",
+            &bob,
+            Some(rule(&hook))
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN,
+        "bob attached a rule to alice's webhook"
+    );
+    assert_eq!(
+        call(
+            &router,
+            Method::POST,
+            "/api/v1/rules",
+            &bob,
+            Some(rule(&Uuid::new_v4().to_string()))
+        )
+        .await
+        .0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        call(
+            &router,
+            Method::POST,
+            "/api/v1/rules",
+            &alice,
+            Some(rule(&hook))
+        )
+        .await
+        .0,
+        StatusCode::CREATED
+    );
+
     // --- A run and everything under it belong to whoever started it ----------------
     let run_id = Uuid::new_v4();
     sqlx::query("INSERT INTO workflow_runs (id, workflow_name, initiating_user, status, fencing_token, repo_url, workflow_path, git_ref) VALUES ($1, 'ownership-test', $2, 'running', 1, 'http://git.local', 'workflow.storm', 'main')")

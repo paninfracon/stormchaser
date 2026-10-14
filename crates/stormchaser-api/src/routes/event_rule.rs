@@ -41,6 +41,16 @@ pub async fn create_event_rule(
             .ok_or(StatusCode::NOT_FOUND)?
     };
     authz::authorize_connection_use(&state, &caller, conn.id.into_inner()).await?;
+    // A rule decides what the webhook's deliveries start, with their payloads as inputs,
+    // so attaching one is a change to the webhook: only its owner (or an admin) may
+    authz::authorize_action(
+        &state,
+        &caller,
+        "update",
+        Kind::Webhook,
+        payload.webhook_id.into_inner(),
+    )
+    .await?;
 
     let repo_url = conn
         .config
