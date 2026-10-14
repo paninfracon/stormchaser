@@ -286,6 +286,12 @@ stormchaser-telemetry:
         - name: TEMPO_URL
           value: "stormchaser-tempo:4317"
 
+# Only pods in the release's namespace may reach the bundled Loki, which has no
+# authentication of its own. Add sources (NetworkPolicy `from` entries) that need it.
+lokiNetworkPolicy:
+  enabled: true
+  extraFrom: []
+
 loki:
   enabled: true
   monitoring:
