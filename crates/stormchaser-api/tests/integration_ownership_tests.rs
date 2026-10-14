@@ -227,6 +227,20 @@ async fn users_see_and_change_only_what_they_own() {
         call(&router, Method::GET, &hook_path, &bob, None).await.0,
         StatusCode::FORBIDDEN
     );
+    // Percent-encoding part of the id does not get round the check
+    let encoded_hook_path = format!("/api/v1/webhooks/{}", hook.replacen('-', "%2D", 1));
+    assert_eq!(
+        call(&router, Method::GET, &encoded_hook_path, &bob, None)
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        call(&router, Method::GET, &encoded_hook_path, &alice, None)
+            .await
+            .0,
+        StatusCode::OK
+    );
     assert_eq!(
         call(
             &router,

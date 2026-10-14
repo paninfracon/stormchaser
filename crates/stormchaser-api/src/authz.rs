@@ -327,10 +327,21 @@ pub async fn filter_readable<T>(
 
 /// What a request does to the object its path names, if it names one.
 ///
-/// `path` is relative to `/api/v1`. Approving or rejecting a step is left to the approval
-/// policy, which exists precisely so that someone other than the owner can do it.
+/// `path` is relative to `/api/v1` and still percent-encoded, as it is in the request URI.
+/// Each segment is decoded before it is read, the same way the `Path` extractor decodes it
+/// for the handler: otherwise `/runs/<id with %2D>` would fail to parse here and skip the
+/// check, while the handler acted on the decoded id. A segment that is not valid UTF-8
+/// decodes lossily, so it cannot parse here and the extractor rejects it too.
+///
+/// Approving or rejecting a step is left to the approval policy, which exists precisely so
+/// that someone other than the owner can do it.
 fn object_action(method: &Method, path: &str) -> Option<(Kind, Uuid, &'static str)> {
-    let mut segments = path.trim_matches('/').split('/');
+    let segments: Vec<String> = path
+        .trim_matches('/')
+        .split('/')
+        .map(|s| String::from_utf8_lossy(&urlencoding::decode_binary(s.as_bytes())).into_owned())
+        .collect();
+    let mut segments = segments.iter().map(String::as_str);
     let kind = Kind::from_path_segment(segments.next()?)?;
     let id = Uuid::parse_str(segments.next()?).ok()?;
     let rest: Vec<&str> = segments.collect();
@@ -445,6 +456,30 @@ mod tests {
         assert_eq!(
             object_action(&Method::POST, &format!("/webhooks/{id}/rotate")),
             Some((Kind::Webhook, id, "update"))
+        );
+    }
+
+    #[test]
+    fn percent_encoded_paths_are_checked_as_the_handler_sees_them() {
+        let id = Uuid::new_v4();
+        let encoded = id.to_string().replacen('-', "%2D", 1);
+        assert_eq!(
+            object_action(&Method::PATCH, &format!("/connections/{encoded}")),
+            Some((Kind::Connection, id, "update"))
+        );
+        assert_eq!(
+            object_action(&Method::GET, &format!("/%72uns/{id}")),
+            Some((Kind::Run, id, "read"))
+        );
+        // An encoded "approve" is still an approval, and an encoded "steps" is not
+        let step = Uuid::new_v4();
+        assert_eq!(
+            object_action(&Method::POST, &format!("/runs/{id}/steps/{step}/%61pprove")),
+            None
+        );
+        assert_eq!(
+            object_action(&Method::POST, &format!("/runs/{id}/st%65ps/{step}/x")),
+            Some((Kind::Run, id, "update"))
         );
     }
 
