@@ -58,7 +58,10 @@ impl Config {
                 "NATS_URL" => nats_url = v.as_ref().to_string(),
                 "RUNNER_ID" => explicit_runner_id = Some(v.as_ref().to_string()),
                 "HOSTNAME" => hostname = Some(v.as_ref().to_string()),
-                "STORMCHASER_STATE_ENCRYPTION_KEY" => encryption_key = Some(v.as_ref().to_string()),
+                // Empty, as compose passes it when no key was generated, means none
+                "STORMCHASER_STATE_ENCRYPTION_KEY" if !v.as_ref().is_empty() => {
+                    encryption_key = Some(v.as_ref().to_string())
+                }
                 "LOKI_URL" => loki_url = Some(v.as_ref().to_string()),
                 "RUST_LOG" => rust_log = v.as_ref().to_string(),
                 _ => {}

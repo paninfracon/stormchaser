@@ -180,6 +180,11 @@ for key in STORMCHASER_NATS_PASSWORD STORMCHASER_NATS_RUNNER_PASSWORD STORMCHASE
     fi
 done
 
+# The Docker runner's state key must be 32 characters
+if ! grep -q "^STORMCHASER_STATE_ENCRYPTION_KEY=" "$ENV_FILE" 2>/dev/null; then
+    echo "STORMCHASER_STATE_ENCRYPTION_KEY=$(python3 -c 'import secrets; print(secrets.token_hex(16))')" >> "$ENV_FILE"
+fi
+
 # Load .env into the current shell so subsequent steps can use the passwords
 # (handles the case where .env already existed and STORMCHASER_DEV_PASSWORD was not generated above)
 if [ -f "$ENV_FILE" ]; then
