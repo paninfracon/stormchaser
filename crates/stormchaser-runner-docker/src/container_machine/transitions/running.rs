@@ -8,15 +8,12 @@ use bollard::query_parameters::{
     CreateContainerOptions, LogsOptions, StartContainerOptions, WaitContainerOptions,
 };
 use chrono::Utc;
-use cloudevents::EventBuilder;
 use futures::StreamExt;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::time::Duration;
 use stormchaser_model::dsl::CommonContainerSpec;
 use stormchaser_model::nats::{request_artifact_auth, HELPER_REGISTRY_CONFIG_PATH};
-use stormchaser_model::step::StepStatus;
-use stormchaser_model::APPLICATION_JSON;
 use tokio::time::sleep;
 use tracing::{error, info};
 use uuid::Uuid;
@@ -275,26 +272,14 @@ impl DockerContainerMachine<state::Running> {
 
         info!("Running agent for parking/reports: {}", park_container_name);
         if let Some(nats) = &self.nats {
-            let packing_event = serde_json::json!({
-                "run_id": self.metadata.run_id,
-                "step_id": self.metadata.step_id,
-                "status": StepStatus::PackingSfs,
-                "timestamp": Utc::now(),
-            });
-            if let Ok(ce) = cloudevents::EventBuilderV10::new()
-                .id(uuid::Uuid::new_v4().to_string())
-                .ty("stormchaser.v1.step.packing_sfs")
-                .source("/stormchaser/runner")
-                .time(Utc::now())
-                .data(APPLICATION_JSON, packing_event)
-                .build()
-            {
-                if let Ok(payload_bytes) = serde_json::to_vec(&ce) {
-                    let _ = nats
-                        .publish("stormchaser.v1.step.packing_sfs", payload_bytes.into())
-                        .await;
-                }
-            }
+            let _ = stormchaser_model::nats::announce_step_storage(
+                nats,
+                self.metadata.run_id,
+                self.metadata.step_id,
+                &self.metadata.runner_id,
+                true,
+            )
+            .await;
         }
 
         self.docker

@@ -216,6 +216,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
             APPLICATION_JSON,
             stormchaser_model::runner_auth::sign_if_runner(
                 serde_json::to_value(registration_payload).unwrap(),
+                "stormchaser.v1.runner.register",
             ),
         )
         .build()

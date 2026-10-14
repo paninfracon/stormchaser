@@ -17,6 +17,11 @@ use tracing::{error, warn};
 /// `NATS_CREDS_FILE` (a `.creds` file), `NATS_USER` + `NATS_PASSWORD`, or `NATS_TOKEN`.
 /// `NATS_CA_FILE` adds a root certificate and `NATS_TLS_REQUIRED=true` refuses to talk
 /// to a server without TLS.
+///
+/// Replies (request answers, publish acknowledgements, pull-consumer deliveries) come
+/// to an inbox under [`inbox_prefix`], so the server can let each user read only its
+/// own: with every user on the shared `_INBOX.>`, any of them could read the engine's
+/// deliveries and the answers the engine sends to others.
 pub async fn apply_auth_from_env(
     mut options: async_nats::ConnectOptions,
 ) -> Result<async_nats::ConnectOptions> {
@@ -37,6 +42,8 @@ pub async fn apply_auth_from_env(
         );
     }
 
+    options = options.custom_inbox_prefix(inbox_prefix());
+
     if let Some(ca) = var("NATS_CA_FILE") {
         options = options.add_root_certificates(ca.into());
     }
@@ -45,6 +52,20 @@ pub async fn apply_auth_from_env(
     }
 
     Ok(options)
+}
+
+/// Where this process's replies arrive: `NATS_INBOX_PREFIX` if set, otherwise
+/// `_INBOX_<NATS_USER>` for a user and password login, otherwise NATS's own `_INBOX`.
+/// The server configuration lets each user subscribe to its own prefix only.
+pub fn inbox_prefix() -> String {
+    let var = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
+    if let Some(prefix) = var("NATS_INBOX_PREFIX") {
+        return prefix;
+    }
+    match var("NATS_USER") {
+        Some(user) => format!("_INBOX_{user}"),
+        None => "_INBOX".to_string(),
+    }
 }
 
 /// Connects to NATS with the credentials and TLS settings found in the environment.
@@ -234,8 +255,10 @@ impl NatsSubject {
 
 use crate::events::{EventSource, EventType, SchemaId, SchemaVersion};
 
-/// Pure function to construct a CloudEvent payload and its corresponding NATS headers.
+/// Pure function to construct a CloudEvent payload, to be published on `subject`, and
+/// its corresponding NATS headers.
 pub fn build_cloudevent_and_headers(
+    subject: &str,
     event_type: EventType,
     source: EventSource,
     data: Value,
@@ -243,7 +266,7 @@ pub fn build_cloudevent_and_headers(
     schema_id: Option<SchemaId>,
 ) -> Result<(String, HeaderMap)> {
     // A runner signs what it reports, once the engine has given it a key
-    let data = crate::runner_auth::sign_if_runner(data);
+    let data = crate::runner_auth::sign_if_runner(data, subject);
     let mut builder = EventBuilderV10::new()
         .id(EventId::new_v4().into_inner().to_string())
         .ty(event_type.as_str())
@@ -307,6 +330,7 @@ pub async fn request_artifact_auth(
             crate::APPLICATION_JSON,
             crate::runner_auth::sign_if_runner(
                 serde_json::json!({ "run_id": run_id, "step_id": step_id, "runner_id": runner_id }),
+                ARTIFACT_AUTH_SUBJECT,
             ),
         )
         .build()
@@ -324,7 +348,18 @@ pub async fn request_artifact_auth(
             answer["error"].as_str().unwrap_or("no reason given")
         );
     }
+    // Sealed with this runner's key; plain only for a runner the engine gave no key
+    if let Some(sealed) = answer["sealed_docker_config"].as_str() {
+        let context = artifact_auth_context(runner_id.unwrap_or_default(), step_id);
+        let plain = crate::runner_auth::open_from_engine(&context, sealed)?;
+        return Ok(serde_json::from_slice(&plain)?);
+    }
     Ok(answer["docker_config"].clone())
+}
+
+/// What the engine's answer to an artifact credentials request is bound to.
+pub fn artifact_auth_context(runner_id: &str, step_id: uuid::Uuid) -> String {
+    format!("{ARTIFACT_AUTH_SUBJECT}\n{runner_id}\n{step_id}")
 }
 
 /// Tells the engine that `runner_id` is now the runner executing a step.
@@ -352,6 +387,49 @@ pub async fn announce_step_running(
         EventType::Step(crate::events::StepEventType::Running),
         EventSource::System,
         serde_json::to_value(event)?,
+        Some(SchemaVersion::new("1.0".to_string())),
+        None,
+    )
+    .await
+}
+
+/// Tells the engine that `runner_id` is unpacking (`packing` false) or packing the
+/// storage of a step. Signed like every other report, so the engine can check it comes
+/// from the runner that holds the step.
+pub async fn announce_step_storage(
+    client: &async_nats::Client,
+    run_id: uuid::Uuid,
+    step_id: uuid::Uuid,
+    runner_id: &str,
+    packing: bool,
+) -> Result<()> {
+    let run_id = crate::RunId::new(run_id);
+    let shard = Some(compute_shard_id(&run_id));
+    let (subject, event_type, status) = if packing {
+        (
+            NatsSubject::StepPackingSfs(shard),
+            crate::events::StepEventType::PackingSfs,
+            crate::step::StepStatus::PackingSfs,
+        )
+    } else {
+        (
+            NatsSubject::StepUnpackingSfs(shard),
+            crate::events::StepEventType::UnpackingSfs,
+            crate::step::StepStatus::UnpackingSfs,
+        )
+    };
+    publish_cloudevent(
+        &jetstream::new(client.clone()),
+        subject,
+        EventType::Step(event_type),
+        EventSource::System,
+        serde_json::json!({
+            "run_id": run_id,
+            "step_id": step_id,
+            "runner_id": runner_id,
+            "status": status,
+            "timestamp": chrono::Utc::now(),
+        }),
         Some(SchemaVersion::new("1.0".to_string())),
         None,
     )
@@ -386,11 +464,18 @@ pub async fn publish_cloudevent_with_sequence(
     schema_version: Option<SchemaVersion>,
     schema_id: Option<SchemaId>,
 ) -> Result<Option<u64>> {
-    let (payload, headers) =
-        build_cloudevent_and_headers(event_type, source, data, schema_version, schema_id)?;
+    let subject = subject.as_str().into_owned();
+    let (payload, headers) = build_cloudevent_and_headers(
+        &subject,
+        event_type,
+        source,
+        data,
+        schema_version,
+        schema_id,
+    )?;
 
     let ack = js
-        .publish_with_headers(subject.as_str().into_owned(), headers, payload.into())
+        .publish_with_headers(subject, headers, payload.into())
         .await?;
 
     Ok(ack.await.ok().map(|ack| ack.sequence))
@@ -406,10 +491,17 @@ pub async fn publish_cloudevent(
     schema_version: Option<SchemaVersion>,
     schema_id: Option<SchemaId>,
 ) -> Result<()> {
-    let (payload, headers) =
-        build_cloudevent_and_headers(event_type, source, data, schema_version, schema_id)?;
+    let subject = subject.as_str().into_owned();
+    let (payload, headers) = build_cloudevent_and_headers(
+        &subject,
+        event_type,
+        source,
+        data,
+        schema_version,
+        schema_id,
+    )?;
 
-    js.publish_with_headers(subject.as_str().into_owned(), headers, payload.into())
+    js.publish_with_headers(subject, headers, payload.into())
         .await?;
 
     Ok(())
@@ -455,9 +547,15 @@ mod tests {
         let schema_version = Some(SchemaVersion::new("1.0".to_string()));
         let schema_id = Some(SchemaId::new("test-schema-id".to_string()));
 
-        let (payload, headers) =
-            build_cloudevent_and_headers(event_type, source, data, schema_version, schema_id)
-                .expect("Failed to build cloudevent and headers");
+        let (payload, headers) = build_cloudevent_and_headers(
+            "stormchaser.v1.global.run.queued",
+            event_type,
+            source,
+            data,
+            schema_version,
+            schema_id,
+        )
+        .expect("Failed to build cloudevent and headers");
 
         assert_eq!(
             headers.get("ce-schemaid").map(|v| v.as_str()).unwrap_or(""),

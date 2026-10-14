@@ -169,7 +169,8 @@ NATS treats a user with no `permissions` block as unrestricted, and a grant of
 the engine's must have an explicit allow list.
 
 **Engine**: publish and subscribe on `stormchaser.>`, `$JS.API.>`,
-`$JS.ACK.>` and `_INBOX.>`. It owns the stream, and it should be the only
+`$JS.ACK.>` and `_INBOX_stormchaser.>`, and publish on the other users' inboxes
+(`_INBOX_stormchaser-runner.>` and so on) to answer them. It owns the stream, and it should be the only
 identity that can publish a task (`stormchaser.v1.*.step.scheduled.>`): a task
 tells a runner which container to start, with which secrets, and the engine
 publishes one only after its policy check.
@@ -195,13 +196,13 @@ publish allow:
   $KV.api_rate_limit_buckets.>
 
 subscribe allow:
-  _INBOX.>
+  _INBOX_stormchaser-api.>
   stormchaser.v1.run.>
   stormchaser.v1.*.run.>
 ```
 
 **Query service**: it connects and does nothing else, so deny it all
-publishing and allow it to subscribe to `_INBOX.>` only.
+publishing and allow it to subscribe to `_INBOX_stormchaser-query.>` only.
 
 The API and query lists are the ones the quickstart ships and have been
 checked against a NATS 2.10 server with the configuration from both the
@@ -243,6 +244,11 @@ publish allow:
   $JS.ACK.stormchaser.>
 
 publish deny (the engine's own consumers; one shard entry per engine shard):
+  $JS.API.CONSUMER.CREATE.stormchaser.orchestration-engine-global.>
+  $JS.API.CONSUMER.CREATE.stormchaser.orchestration-engine-legacy-run.>
+  $JS.API.CONSUMER.CREATE.stormchaser.orchestration-engine-legacy-runner.>
+  $JS.API.CONSUMER.CREATE.stormchaser.orchestration-engine-legacy-step.>
+  $JS.API.CONSUMER.CREATE.stormchaser.orchestration-engine-shard-0.>
   $JS.API.CONSUMER.MSG.NEXT.stormchaser.orchestration-engine-global
   $JS.API.CONSUMER.MSG.NEXT.stormchaser.orchestration-engine-legacy-run
   $JS.API.CONSUMER.MSG.NEXT.stormchaser.orchestration-engine-legacy-runner
@@ -255,7 +261,7 @@ publish deny (the engine's own consumers; one shard entry per engine shard):
   $JS.ACK.stormchaser.orchestration-engine-shard-0.>
 
 subscribe allow:
-  _INBOX.>
+  _INBOX_stormchaser-runner.>
 ```
 
 `stormchaser.v1.runner.cancel` is deliberately missing from the runner's publish
@@ -266,7 +272,20 @@ account alone. Runners read it through a consumer of their own, which the
 
 If you create the stream yourself, drop `$JS.API.STREAM.CREATE.stormchaser`
 from the runner list. If you run more than one engine shard
-(`STORMCHASER_TOTAL_SHARDS`), add the two deny entries for each shard number.
+(`STORMCHASER_TOTAL_SHARDS`), add the three deny entries for each shard number.
+
+#### Inboxes
+
+Replies (request answers, publish acknowledgements and pull-consumer
+deliveries) arrive on an inbox subject. Every component uses an inbox prefix of
+its own, `_INBOX_<NATS_USER>` (or `NATS_INBOX_PREFIX` when set, which you need
+with a credentials file or a token, since those carry no user name), and each
+user may subscribe only to its own prefix. Do not grant `_INBOX.>`: it holds the
+engine's pull deliveries, which carry every runner's reports, and the answers
+the engine sends each runner, so any user allowed to read it could read them
+all. Runners share one user and so one prefix; the one answer that matters
+between them, a step's registry push token, is sealed with the asking runner's
+own key.
 
 Prefer NKeys or operator-mode `.creds` files to passwords: no secret crosses
 the wire. If you use passwords, store bcrypt hashes in the server

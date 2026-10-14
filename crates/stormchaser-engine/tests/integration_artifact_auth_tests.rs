@@ -113,7 +113,11 @@ async fn signed(pool: &PgPool, mut payload: serde_json::Value) -> serde_json::Va
         .await
         .unwrap();
     payload["runner_id"] = json!(runner_id);
-    stormchaser_model::runner_auth::sign_payload(payload, &key)
+    stormchaser_model::runner_auth::sign_payload(
+        payload,
+        &key,
+        stormchaser_model::nats::ARTIFACT_AUTH_SUBJECT,
+    )
 }
 
 #[tokio::test]

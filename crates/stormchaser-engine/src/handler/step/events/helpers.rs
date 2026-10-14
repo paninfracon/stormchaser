@@ -444,6 +444,29 @@ pub(crate) async fn reporter_is_assigned_runner(
     false
 }
 
+/// Whether `reporter` may move a step that is with a runner along: the runner it is
+/// assigned to, or, while none is, any runner that names itself. The router has already
+/// checked that a runner with a key signed the message.
+pub(crate) fn reporter_holds_step(
+    instance: &stormchaser_model::step::StepInstance,
+    reporter: Option<&str>,
+) -> bool {
+    let held = match (instance.runner_id.as_deref(), reporter) {
+        (Some(assigned), Some(reporter)) => assigned == reporter,
+        (None, Some(_)) => true,
+        (_, None) => false,
+    };
+    if !held {
+        tracing::warn!(
+            "Ignoring a report on step {} from runner {}: the step is with runner {}",
+            instance.id,
+            reporter.unwrap_or("<unnamed>"),
+            instance.runner_id.as_deref().unwrap_or("<none>")
+        );
+    }
+    held
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

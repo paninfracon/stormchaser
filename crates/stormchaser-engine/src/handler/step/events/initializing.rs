@@ -30,6 +30,9 @@ pub async fn handle_step_initializing(
 
     // 2. Use state machine to transition
     if instance.status == stormchaser_model::step::StepStatus::Pending {
+        if !super::helpers::reporter_holds_step(&instance, event.runner_id.as_deref()) {
+            return Ok(());
+        }
         let machine =
             crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::from_instance(
                 instance.clone(),

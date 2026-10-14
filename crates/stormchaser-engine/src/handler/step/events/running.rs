@@ -35,8 +35,24 @@ pub async fn handle_step_running(
 
     let mut conn = pool.acquire().await?;
 
-    // 2. Use state machine to transition
-    if instance.status == stormchaser_model::step::StepStatus::Initializing {
+    // 2. Use state machine to transition. Before it runs, only the runner that holds the
+    // step (or, while none does, the runner that signed this) may say it has started.
+    let starting = matches!(
+        instance.status,
+        stormchaser_model::step::StepStatus::Pending
+            | stormchaser_model::step::StepStatus::Initializing
+            | stormchaser_model::step::StepStatus::UnpackingSfs
+    );
+    if starting && !super::helpers::reporter_holds_step(&instance, event.runner_id.as_deref()) {
+        return Ok(());
+    }
+    if instance.status == stormchaser_model::step::StepStatus::UnpackingSfs {
+        let machine =
+            crate::step_machine::StepMachine::<crate::step_machine::state::UnpackingSfs>::from_instance(
+                instance.clone(),
+            );
+        let _ = machine.start_running(&mut *conn).await?;
+    } else if instance.status == stormchaser_model::step::StepStatus::Initializing {
         let machine =
             crate::step_machine::StepMachine::<crate::step_machine::state::Initializing>::from_instance(
                 instance.clone(),

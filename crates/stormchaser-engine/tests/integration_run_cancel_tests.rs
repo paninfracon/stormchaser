@@ -207,6 +207,7 @@ async fn a_runner_reads_the_cancellation_the_engine_publishes() {
 fn cancel_payload(run_id: RunId) -> Vec<u8> {
     let event_type = EventType::Runner(RunnerEventType::Cancel);
     let (payload, _) = stormchaser_model::nats::build_cloudevent_and_headers(
+        CANCEL_SUBJECT,
         event_type.clone(),
         EventSource::Engine,
         serde_json::to_value(RunCancelEvent {
@@ -238,8 +239,10 @@ fn cancel_payload(run_id: RunId) -> Vec<u8> {
 async fn only_the_engine_can_cancel_a_run() {
     let url = var("STORMCHASER_PERM_NATS_URL").expect("STORMCHASER_PERM_NATS_URL must be set");
     let connect = |user: &str, password_var: &str| {
+        // Each user may read only its own inbox prefix, as stormchaser_model::nats sets it
         let options = async_nats::ConnectOptions::new()
-            .user_and_password(user.to_string(), var(password_var).expect(password_var));
+            .user_and_password(user.to_string(), var(password_var).expect(password_var))
+            .custom_inbox_prefix(format!("_INBOX_{user}"));
         async_nats::connect_with_options(url.clone(), options)
     };
     let engine = connect("stormchaser", "NATS_CONTROL_PASSWORD")
@@ -295,4 +298,61 @@ async fn only_the_engine_can_cancel_a_run() {
         .unwrap()
         .unwrap();
     assert_eq!(run_cancel::parse(&first).unwrap().run_id, real);
+}
+
+/// Checks that each user reads only its own inbox prefix: a runner cannot read the
+/// engine's deliveries or the API's answers, while its own inbox works.
+///
+/// Ignored by default; needs the same server as [`only_the_engine_can_cancel_a_run`].
+#[tokio::test]
+#[ignore = "needs a NATS server with the per-role users"]
+async fn a_user_reads_only_its_own_inbox() {
+    let url = var("STORMCHASER_PERM_NATS_URL").expect("STORMCHASER_PERM_NATS_URL must be set");
+    let connect = |user: &str, password_var: &str| {
+        let options = async_nats::ConnectOptions::new()
+            .user_and_password(user.to_string(), var(password_var).expect(password_var))
+            .custom_inbox_prefix(format!("_INBOX_{user}"));
+        async_nats::connect_with_options(url.clone(), options)
+    };
+    let engine = connect("stormchaser", "NATS_CONTROL_PASSWORD")
+        .await
+        .unwrap();
+    let runner = connect("stormchaser-runner", "NATS_RUNNER_PASSWORD")
+        .await
+        .unwrap();
+
+    let mut own = runner
+        .subscribe("_INBOX_stormchaser-runner.probe")
+        .await
+        .unwrap();
+    let mut engines = runner.subscribe("_INBOX_stormchaser.>").await.unwrap();
+    let mut apis = runner.subscribe("_INBOX_stormchaser-api.>").await.unwrap();
+    let mut shared = runner.subscribe("_INBOX.>").await.unwrap();
+    runner.flush().await.unwrap();
+
+    for subject in [
+        "_INBOX_stormchaser.probe",
+        "_INBOX_stormchaser-api.probe",
+        "_INBOX.probe",
+        "_INBOX_stormchaser-runner.probe",
+    ] {
+        engine.publish(subject, "x".into()).await.unwrap();
+    }
+    engine.flush().await.unwrap();
+
+    tokio::time::timeout(Duration::from_secs(5), own.next())
+        .await
+        .expect("the runner did not get a message on its own inbox");
+    for (name, sub) in [
+        ("the engine's", &mut engines),
+        ("the API's", &mut apis),
+        ("the shared", &mut shared),
+    ] {
+        assert!(
+            tokio::time::timeout(Duration::from_millis(500), sub.next())
+                .await
+                .is_err(),
+            "the runner read {name} inbox"
+        );
+    }
 }

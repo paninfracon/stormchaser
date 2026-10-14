@@ -115,7 +115,8 @@ async fn test_handle_step_packing_sfs() {
     .unwrap();
 
     sqlx::query(
-        "INSERT INTO step_instances (id, run_id, step_name, step_type, status, spec, params) VALUES ($1, $2, 'test-step', 'RunContainer', 'running', '{}', '{}')"
+        // Dispatched to a runner, which holds it: no completion token
+        "INSERT INTO step_instances (id, run_id, step_name, step_type, status, spec, params, runner_id, completion_token) VALUES ($1, $2, 'test-step', 'RunContainer', 'running', '{}', '{}', 'test-runner', NULL)"
     )
     .bind(step_id)
     .bind(run_id)
@@ -126,6 +127,7 @@ async fn test_handle_step_packing_sfs() {
     let payload = json!({
         "run_id": run_id.to_string(),
         "step_id": step_id.to_string(),
+        "runner_id": "test-runner"
     });
 
     handle_step_packing_sfs(payload, pool.clone())
@@ -168,7 +170,8 @@ async fn test_handle_step_unpacking_sfs() {
     .unwrap();
 
     sqlx::query(
-        "INSERT INTO step_instances (id, run_id, step_name, step_type, status, spec, params) VALUES ($1, $2, 'test-step', 'RunContainer', 'pending', '{}', '{}')"
+        // Dispatched to the runners, not yet claimed: no completion token, no runner
+        "INSERT INTO step_instances (id, run_id, step_name, step_type, status, spec, params, completion_token) VALUES ($1, $2, 'test-step', 'RunContainer', 'pending', '{}', '{}', NULL)"
     )
     .bind(step_id)
     .bind(run_id)

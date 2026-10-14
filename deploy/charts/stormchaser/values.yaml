@@ -194,7 +194,8 @@ nats:
                   - "$KV.api_rate_limit_buckets.>"
               subscribe:
                 allow:
-                  - "_INBOX.>"
+                  # Each user reads only its own inbox prefix (_INBOX_<user>)
+                  - "_INBOX_stormchaser-api.>"
                   - "stormchaser.v1.run.>"
                   - "stormchaser.v1.*.run.>"
           # The query service: connects, and may do nothing else.
@@ -206,7 +207,7 @@ nats:
                   - ">"
               subscribe:
                 allow:
-                  - "_INBOX.>"
+                  - "_INBOX_stormchaser-query.>"
           # Runners: report on steps and consume their own task subjects only.
           # Keep in step with deploy/nats/nats-server.conf.
           - user: stormchaser-runner
@@ -235,6 +236,11 @@ nats:
                   - "$JS.ACK.stormchaser.>"
                 # The engine's own consumers. Add a shard entry per engine shard.
                 deny:
+                  - "$JS.API.CONSUMER.CREATE.stormchaser.orchestration-engine-global.>"
+                  - "$JS.API.CONSUMER.CREATE.stormchaser.orchestration-engine-legacy-run.>"
+                  - "$JS.API.CONSUMER.CREATE.stormchaser.orchestration-engine-legacy-runner.>"
+                  - "$JS.API.CONSUMER.CREATE.stormchaser.orchestration-engine-legacy-step.>"
+                  - "$JS.API.CONSUMER.CREATE.stormchaser.orchestration-engine-shard-0.>"
                   - "$JS.API.CONSUMER.MSG.NEXT.stormchaser.orchestration-engine-global"
                   - "$JS.API.CONSUMER.MSG.NEXT.stormchaser.orchestration-engine-legacy-run"
                   - "$JS.API.CONSUMER.MSG.NEXT.stormchaser.orchestration-engine-legacy-runner"
@@ -247,7 +253,7 @@ nats:
                   - "$JS.ACK.stormchaser.orchestration-engine-shard-0.>"
               subscribe:
                 allow:
-                  - "_INBOX.>"
+                  - "_INBOX_stormchaser-runner.>"
     jetstream:
       enabled: true
       fileStore:

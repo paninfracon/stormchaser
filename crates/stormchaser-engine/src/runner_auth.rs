@@ -35,9 +35,14 @@ pub fn sender_of(subject: &str) -> Option<Sender> {
     }
 }
 
-/// Checks that a message naming a runner was signed with that runner's key. Returns
-/// why it is refused, if it is.
-pub async fn refusal(pool: &PgPool, sender: Sender, payload: &Value) -> Option<String> {
+/// Checks that a message naming a runner, received on `subject`, was signed with that
+/// runner's key for that subject. Returns why it is refused, if it is.
+pub async fn refusal(
+    pool: &PgPool,
+    sender: Sender,
+    subject: &str,
+    payload: &Value,
+) -> Option<String> {
     let runner_id = payload.get("runner_id").and_then(Value::as_str);
     let key = match runner_id {
         Some(id) => match crate::db::get_runner_session_key(pool, id).await {
@@ -47,8 +52,18 @@ pub async fn refusal(pool: &PgPool, sender: Sender, payload: &Value) -> Option<S
         None => None,
     };
 
+    // The engine's own verdict that a step's runner is gone names that runner, which may
+    // still have a key, but the engine cannot sign as it. The failed-step handler checks
+    // independently that the runner really is lost before it acts on the verdict, so
+    // anyone sending it gains nothing the engine would not do anyway.
+    if sender == Sender::RunnerOrControlPlane
+        && payload.get("error").and_then(Value::as_str) == Some("lost_zombie")
+    {
+        return None;
+    }
+
     if let (Some(key), Some(id)) = (&key, runner_id) {
-        return verify_payload(payload, key)
+        return verify_payload(payload, key, subject)
             .err()
             .map(|e| format!("not signed by runner {id}: {e:#}"));
     }
@@ -103,30 +118,43 @@ async fn session_for(pool: &PgPool, request: &SessionRequest) -> SessionResponse
     if id.is_empty() || id.len() > 253 {
         return SessionResponse::refused("the runner id is empty or too long");
     }
-    match crate::db::runner_session_is_live(pool, id).await {
-        Ok(true) => {
-            tracing::warn!(
-                "Refused a key for runner {}: a runner with that id is still sending heartbeats",
-                id
-            );
-            return SessionResponse::refused(
-                "a runner with this id is still running; it must stop, or miss its heartbeats for 30 seconds, before another may take its id",
-            );
-        }
-        Ok(false) => {}
-        Err(e) => {
-            tracing::error!("Could not check runner {}: {:?}", id, e);
-            return SessionResponse::refused("the engine could not check this runner id");
-        }
+    if is_reserved_runner_id(id) {
+        tracing::warn!(
+            "Refused a key for runner {}: the id is the engine's own",
+            id
+        );
+        return SessionResponse::refused("this runner id is reserved for the engine");
     }
     let (key, response) = match issue_session(request) {
         Ok(issued) => issued,
         Err(e) => return SessionResponse::refused(&format!("{e:#}")),
     };
-    if let Err(e) = crate::db::store_runner_session(pool, id, &key).await {
-        tracing::error!("Could not store the key of runner {}: {:?}", id, e);
-        return SessionResponse::refused("the engine could not store the key");
+    match crate::db::claim_runner_session(pool, id, &key).await {
+        Ok(true) => {
+            tracing::info!("Issued a key to runner {}", id);
+            response
+        }
+        Ok(false) => {
+            tracing::warn!(
+                "Refused a key for runner {}: a runner with that id is still running, or was given a key moments ago",
+                id
+            );
+            SessionResponse::refused(
+                "a runner with this id is still running, or was given a key in the last 30 seconds; it must stop, or miss its heartbeats for 30 seconds, before another may take its id",
+            )
+        }
+        Err(e) => {
+            tracing::error!("Could not store the key of runner {}: {:?}", id, e);
+            SessionResponse::refused("the engine could not store the key")
+        }
     }
-    tracing::info!("Issued a key to runner {}", id);
-    response
+}
+
+/// The runner ids the engine names itself by when it reports on steps it runs (SQL and
+/// REST API steps). No runner may hold a key for one: the router would then demand that
+/// runner's signature on the engine's own reports, and refuse them.
+pub const RESERVED_RUNNER_IDS: &[&str] = &["intrinsic-sql", "engine-intrinsic"];
+
+pub fn is_reserved_runner_id(id: &str) -> bool {
+    RESERVED_RUNNER_IDS.contains(&id)
 }

@@ -37,7 +37,7 @@ pub const MAX_SIGNATURE_AGE_SECS: i64 = 300;
 pub const SIGNATURES_ENV: &str = "STORMCHASER_RUNNER_SIGNATURES";
 
 const KEY_INFO: &[u8] = b"stormchaser runner session v1";
-const MAC_DOMAIN: &str = "stormchaser runner message v1";
+const MAC_DOMAIN: &str = "stormchaser runner message v2";
 
 /// A runner's request for a key.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -225,22 +225,38 @@ pub fn set_session(key: [u8; 32]) {
     *SESSION.write() = Some(key);
 }
 
-/// Signs `payload` with this process's key, if it has one; otherwise leaves it alone.
-pub fn sign_if_runner(payload: Value) -> Value {
+/// Signs `payload`, to be published on `subject`, with this process's key, if it has
+/// one; otherwise leaves it alone.
+pub fn sign_if_runner(payload: Value, subject: &str) -> Value {
     match *SESSION.read() {
-        Some(key) => sign_payload(payload, &key),
+        Some(key) => sign_payload(payload, &key, subject),
         None => payload,
     }
 }
 
-/// Adds a signature over `payload` (an object) and the time.
-pub fn sign_payload(mut payload: Value, key: &[u8; 32]) -> Value {
+/// `subject` without its shard (`stormchaser.v1.<shard>.step.completed` becomes
+/// `stormchaser.v1.step.completed`), which is the form a signature covers and the form
+/// the engine routes on.
+pub fn normalize_subject(subject: &str) -> String {
+    let parts: Vec<&str> = subject.split('.').collect();
+    if parts.len() > 3 && (parts[2] == "global" || parts[2].parse::<u32>().is_ok()) {
+        format!("{}.{}.{}", parts[0], parts[1], parts[3..].join("."))
+    } else {
+        subject.to_string()
+    }
+}
+
+/// Adds a signature over `payload` (an object), the subject it is published on, and the
+/// time. The subject is covered so that a signed report cannot be published again on
+/// another subject, where it would mean something else (a step's report replayed as
+/// the runner going offline, say).
+pub fn sign_payload(mut payload: Value, key: &[u8; 32], subject: &str) -> Value {
     let Some(object) = payload.as_object_mut() else {
         return payload;
     };
     object.remove(SIGNATURE_FIELD);
     let signed_at = chrono::Utc::now().timestamp();
-    let mac = mac(key, signed_at, &Value::Object(object.clone()));
+    let mac = mac(key, subject, signed_at, &Value::Object(object.clone()));
     object.insert(
         SIGNATURE_FIELD.to_string(),
         serde_json::json!({ "signed_at": signed_at, "mac": b64().encode(mac) }),
@@ -253,8 +269,8 @@ pub fn is_signed(payload: &Value) -> bool {
     payload.get(SIGNATURE_FIELD).is_some()
 }
 
-/// Checks the signature on `payload` against `key`.
-pub fn verify_payload(payload: &Value, key: &[u8]) -> Result<()> {
+/// Checks the signature on `payload`, received on `subject`, against `key`.
+pub fn verify_payload(payload: &Value, key: &[u8], subject: &str) -> Result<()> {
     let mut object = payload
         .as_object()
         .context("the message is not an object")?
@@ -278,26 +294,86 @@ pub fn verify_payload(payload: &Value, key: &[u8]) -> Result<()> {
     let key = hmac::Key::new(hmac::HMAC_SHA256, key);
     hmac::verify(
         &key,
-        &signed_bytes(signed_at, &Value::Object(object)),
+        &signed_bytes(subject, signed_at, &Value::Object(object)),
         &given,
     )
     .map_err(|_| anyhow!("the signature does not match"))
 }
 
-fn mac(key: &[u8; 32], signed_at: i64, payload: &Value) -> Vec<u8> {
+fn mac(key: &[u8; 32], subject: &str, signed_at: i64, payload: &Value) -> Vec<u8> {
     let key = hmac::Key::new(hmac::HMAC_SHA256, key);
-    hmac::sign(&key, &signed_bytes(signed_at, payload))
+    hmac::sign(&key, &signed_bytes(subject, signed_at, payload))
         .as_ref()
         .to_vec()
 }
 
-/// What is signed: a domain label, the time, and the payload as serde_json writes it.
-/// The engine parses the text the runner wrote and writes it again, which gives the
-/// same bytes: object keys come out in the same order either way.
-fn signed_bytes(signed_at: i64, payload: &Value) -> Vec<u8> {
-    let mut bytes = format!("{MAC_DOMAIN}\n{signed_at}\n").into_bytes();
+/// What is signed: a domain label, the subject without its shard, the time, and the
+/// payload as serde_json writes it. The engine parses the text the runner wrote and
+/// writes it again, which gives the same bytes: object keys come out in the same order
+/// either way.
+fn signed_bytes(subject: &str, signed_at: i64, payload: &Value) -> Vec<u8> {
+    let subject = normalize_subject(subject);
+    let mut bytes = format!("{MAC_DOMAIN}\n{subject}\n{signed_at}\n").into_bytes();
     bytes.extend(serde_json::to_vec(payload).unwrap_or_default());
     bytes
+}
+
+const REPLY_INFO: &[u8] = b"stormchaser runner reply v1";
+
+/// The key that seals the engine's answers to a runner, derived from the runner's key
+/// so that the same bytes are never used both to sign and to encrypt.
+fn reply_key(session_key: &[u8]) -> Result<aead::LessSafeKey> {
+    let prk = hkdf::Salt::new(hkdf::HKDF_SHA256, &[]).extract(session_key);
+    let okm = prk
+        .expand(&[REPLY_INFO], &aead::CHACHA20_POLY1305)
+        .map_err(|_| anyhow!("key derivation failed"))?;
+    Ok(aead::LessSafeKey::new(aead::UnboundKey::from(okm)))
+}
+
+/// Seals `plain` for the runner whose key is `session_key`. `context` (the runner and
+/// step it is about, say) is bound to the result: it opens only with the same context.
+///
+/// Runners share one NATS user, and so one inbox prefix, so another runner can see an
+/// answer meant for this one; sealed, it cannot read it.
+pub fn seal_for_runner(session_key: &[u8], context: &str, plain: &[u8]) -> Result<String> {
+    let key = reply_key(session_key)?;
+    let mut nonce = [0u8; aead::NONCE_LEN];
+    rand::SecureRandom::fill(&rand::SystemRandom::new(), &mut nonce)
+        .map_err(|_| anyhow!("no randomness"))?;
+    let mut sealed = plain.to_vec();
+    key.seal_in_place_append_tag(
+        aead::Nonce::assume_unique_for_key(nonce),
+        aead::Aad::from(context.as_bytes()),
+        &mut sealed,
+    )
+    .map_err(|_| anyhow!("could not seal the answer"))?;
+    let mut out = nonce.to_vec();
+    out.extend_from_slice(&sealed);
+    Ok(b64().encode(out))
+}
+
+/// Opens what [`seal_for_runner`] sealed, with this process's key.
+pub fn open_from_engine(context: &str, sealed: &str) -> Result<Vec<u8>> {
+    let session_key = (*SESSION.read()).context("this process has no key to open the answer")?;
+    open_with(&session_key, context, sealed)
+}
+
+fn open_with(session_key: &[u8], context: &str, sealed: &str) -> Result<Vec<u8>> {
+    let key = reply_key(session_key)?;
+    let sealed = b64().decode(sealed).context("the answer is not base64")?;
+    if sealed.len() < aead::NONCE_LEN {
+        bail!("the answer is too short");
+    }
+    let (nonce, ciphertext) = sealed.split_at(aead::NONCE_LEN);
+    let mut buffer = ciphertext.to_vec();
+    let plain = key
+        .open_in_place(
+            aead::Nonce::try_assume_unique_for_key(nonce).map_err(|_| anyhow!("bad nonce"))?,
+            aead::Aad::from(context.as_bytes()),
+            &mut buffer,
+        )
+        .map_err(|_| anyhow!("the answer was not sealed for this runner"))?;
+    Ok(plain.to_vec())
 }
 
 /// Asks the engine for this runner's key, and signs from then on with it.
@@ -385,21 +461,63 @@ mod tests {
         let key = [7u8; 32];
         let payload =
             json!({ "runner_id": "r1", "step_id": "s", "outputs": {"b": 2, "a": [1, 2.5]} });
-        let signed = sign_payload(payload.clone(), &key);
+        let subject = "stormchaser.v1.3.step.completed";
+        let signed = sign_payload(payload.clone(), &key, subject);
 
         // Through text and back, as the engine receives it
         let received: Value = serde_json::from_str(&signed.to_string()).unwrap();
-        verify_payload(&received, &key).unwrap();
+        verify_payload(&received, &key, subject).unwrap();
+        // The engine checks the subject without its shard
+        verify_payload(&received, &key, "stormchaser.v1.step.completed").unwrap();
 
-        assert!(verify_payload(&received, &[8u8; 32]).is_err());
+        assert!(verify_payload(&received, &[8u8; 32], subject).is_err());
         let mut tampered = received.clone();
         tampered["runner_id"] = json!("r2");
-        assert!(verify_payload(&tampered, &key).is_err());
-        assert!(verify_payload(&payload, &key).is_err());
+        assert!(verify_payload(&tampered, &key, subject).is_err());
+        assert!(verify_payload(&payload, &key, subject).is_err());
 
         let mut stale = received.clone();
         stale[SIGNATURE_FIELD]["signed_at"] =
             json!(chrono::Utc::now().timestamp() - MAX_SIGNATURE_AGE_SECS - 10);
-        assert!(verify_payload(&stale, &key).is_err());
+        assert!(verify_payload(&stale, &key, subject).is_err());
+    }
+
+    #[test]
+    fn a_signed_message_does_not_verify_on_another_subject() {
+        let key = [7u8; 32];
+        let signed = sign_payload(
+            json!({ "runner_id": "r1", "run_id": "x", "step_id": "y" }),
+            &key,
+            "stormchaser.v1.0.step.running",
+        );
+        assert!(verify_payload(&signed, &key, "stormchaser.v1.global.runner.offline").is_err());
+        assert!(verify_payload(&signed, &key, "stormchaser.v1.step.completed").is_err());
+    }
+
+    #[test]
+    fn a_sealed_answer_opens_only_with_its_key_and_context() {
+        let sealed = seal_for_runner(&[3u8; 32], "r1/step", b"secret").unwrap();
+        assert_eq!(
+            open_with(&[3u8; 32], "r1/step", &sealed).unwrap(),
+            b"secret"
+        );
+        assert!(open_with(&[4u8; 32], "r1/step", &sealed).is_err());
+        assert!(open_with(&[3u8; 32], "r2/step", &sealed).is_err());
+    }
+
+    #[test]
+    fn subjects_lose_their_shard() {
+        assert_eq!(
+            normalize_subject("stormchaser.v1.12.step.completed"),
+            "stormchaser.v1.step.completed"
+        );
+        assert_eq!(
+            normalize_subject("stormchaser.v1.global.runner.offline"),
+            "stormchaser.v1.runner.offline"
+        );
+        assert_eq!(
+            normalize_subject("stormchaser.rpc.step.artifact_auth"),
+            "stormchaser.rpc.step.artifact_auth"
+        );
     }
 }

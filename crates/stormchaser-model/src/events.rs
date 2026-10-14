@@ -81,6 +81,8 @@ pub enum StepEventType {
     Failed,
     Query,
     QueryResponse,
+    UnpackingSfs,
+    PackingSfs,
 }
 
 impl StepEventType {
@@ -93,6 +95,8 @@ impl StepEventType {
             StepEventType::Failed => "StepFailedEvent",
             StepEventType::Query => "StepQueryEvent",
             StepEventType::QueryResponse => "StepQueryResponseEvent",
+            StepEventType::UnpackingSfs => "StepUnpackingSfsEvent",
+            StepEventType::PackingSfs => "StepPackingSfsEvent",
         }
     }
 }

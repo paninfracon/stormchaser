@@ -280,6 +280,7 @@ async fn registry_credentials_go_only_to_the_runner_that_has_the_step() {
         stormchaser_model::runner_auth::sign_payload(
             json!({"run_id": run_id, "step_id": step_id, "runner_id": runner}),
             key,
+            stormchaser_model::nats::ARTIFACT_AUTH_SUBJECT,
         )
     };
     let other = format!("other-{}", uuid::Uuid::new_v4());
@@ -378,4 +379,214 @@ async fn a_step_no_runner_has_claimed_takes_a_result_only_from_a_runner_with_a_k
         .await
         .unwrap();
     clean_up(&pool, run_id, &[&keyed]).await;
+}
+
+#[tokio::test]
+async fn storage_reports_move_a_step_only_for_the_runner_that_holds_it() {
+    let pool = pool().await;
+    let holder = format!("holder-{}", uuid::Uuid::new_v4());
+    let other = format!("other-{}", uuid::Uuid::new_v4());
+    insert_runner(&pool, &holder, 0.0).await;
+    insert_runner(&pool, &other, 0.0).await;
+    let (run_id, step_id) = insert_step_on(&pool, &holder).await;
+    let report = |runner: &str| json!({"run_id": run_id, "step_id": step_id, "runner_id": runner});
+
+    // Another runner cannot claim a running step by saying it is unpacking it, nor
+    // push it into packing
+    handler::handle_step_unpacking_sfs(report(&other), pool.clone())
+        .await
+        .unwrap();
+    handler::handle_step_packing_sfs(report(&other), pool.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        status_and_runner(&pool, step_id).await,
+        Some((StepStatus::Running, Some(holder.clone())))
+    );
+
+    // Nor can the holder send a running step back to unpacking
+    handler::handle_step_unpacking_sfs(report(&holder), pool.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        status_and_runner(&pool, step_id).await,
+        Some((StepStatus::Running, Some(holder.clone())))
+    );
+
+    // The holder packs it
+    handler::handle_step_packing_sfs(report(&holder), pool.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        status_and_runner(&pool, step_id).await,
+        Some((StepStatus::PackingSfs, Some(holder.clone())))
+    );
+
+    // A finished step cannot be reopened by an unpacking report
+    sqlx::query("UPDATE step_instances SET status = 'succeeded' WHERE id = $1")
+        .bind(step_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    handler::handle_step_unpacking_sfs(report(&other), pool.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        status_and_runner(&pool, step_id).await,
+        Some((StepStatus::Succeeded, Some(holder.clone())))
+    );
+
+    // A pending step is claimed by the runner that unpacks it, and then runs for it
+    sqlx::query("UPDATE step_instances SET status = 'pending', runner_id = NULL WHERE id = $1")
+        .bind(step_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    handler::handle_step_unpacking_sfs(report(&holder), pool.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        status_and_runner(&pool, step_id).await,
+        Some((StepStatus::UnpackingSfs, Some(holder.clone())))
+    );
+    handler::handle_step_running(running(run_id, step_id, &other), pool.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        status_and_runner(&pool, step_id).await,
+        Some((StepStatus::UnpackingSfs, Some(holder.clone())))
+    );
+    handler::handle_step_running(running(run_id, step_id, &holder), pool.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        status_and_runner(&pool, step_id).await,
+        Some((StepStatus::Running, Some(holder.clone())))
+    );
+
+    clean_up(&pool, run_id, &[&holder, &other]).await;
+}
+
+#[tokio::test]
+async fn a_signature_holds_only_on_the_subject_it_was_made_for() {
+    use stormchaser_engine::runner_auth::{refusal, Sender};
+    let pool = pool().await;
+    let runner = format!("signer-{}", uuid::Uuid::new_v4());
+    let key = [11u8; 32];
+    insert_runner(&pool, &runner, 0.0).await;
+    stormchaser_engine::db::store_runner_session(&pool, &runner, &key)
+        .await
+        .unwrap();
+
+    let signed = stormchaser_model::runner_auth::sign_payload(
+        json!({"run_id": RunId::new_v4(), "step_id": StepInstanceId::new_v4(), "runner_id": runner}),
+        &key,
+        "stormchaser.v1.4.step.running",
+    );
+    assert_eq!(
+        refusal(
+            &pool,
+            Sender::Runner,
+            "stormchaser.v1.step.running",
+            &signed
+        )
+        .await,
+        None
+    );
+    // The same message, published again on the subject that takes a runner offline
+    assert!(refusal(
+        &pool,
+        Sender::Runner,
+        "stormchaser.v1.runner.offline",
+        &signed
+    )
+    .await
+    .is_some());
+
+    clean_up(&pool, RunId::new_v4(), &[&runner]).await;
+}
+
+#[tokio::test]
+async fn the_engines_verdict_on_a_lost_runner_needs_no_signature() {
+    use stormchaser_engine::runner_auth::{refusal, Sender};
+    let pool = pool().await;
+    let gone = format!("gone-{}", uuid::Uuid::new_v4());
+    insert_runner(&pool, &gone, 120.0).await;
+    stormchaser_engine::db::store_runner_session(&pool, &gone, &[12u8; 32])
+        .await
+        .unwrap();
+    let (run_id, step_id) = insert_step_on(&pool, &gone).await;
+
+    let mut verdict = failed(run_id, step_id, Some(&gone));
+    verdict.error = "lost_zombie".to_string();
+    let payload = serde_json::to_value(&verdict).unwrap();
+    assert_eq!(
+        refusal(
+            &pool,
+            Sender::RunnerOrControlPlane,
+            "stormchaser.v1.step.failed",
+            &payload
+        )
+        .await,
+        None
+    );
+    // Any other unsigned failure naming that runner is still refused
+    let payload = serde_json::to_value(failed(run_id, step_id, Some(&gone))).unwrap();
+    assert!(refusal(
+        &pool,
+        Sender::RunnerOrControlPlane,
+        "stormchaser.v1.step.failed",
+        &payload
+    )
+    .await
+    .is_some());
+
+    clean_up(&pool, run_id, &[&gone]).await;
+}
+
+#[tokio::test]
+async fn a_fresh_key_cannot_be_taken_and_the_engines_ids_cannot_be_had() {
+    let pool = pool().await;
+    let id = format!("claim-{}", uuid::Uuid::new_v4());
+    assert!(
+        stormchaser_engine::db::claim_runner_session(&pool, &id, &[1u8; 32])
+            .await
+            .unwrap()
+    );
+    // Before the runner has sent a heartbeat, someone else asking for its id
+    assert!(
+        !stormchaser_engine::db::claim_runner_session(&pool, &id, &[2u8; 32])
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        stormchaser_engine::db::get_runner_session_key(&pool, &id)
+            .await
+            .unwrap(),
+        Some(vec![1u8; 32])
+    );
+    // Once the key is old and its runner silent, the id may be taken again
+    sqlx::query(
+        "UPDATE runner_sessions SET issued_at = NOW() - INTERVAL '5 minutes' WHERE runner_id = $1",
+    )
+    .bind(&id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(
+        stormchaser_engine::db::claim_runner_session(&pool, &id, &[3u8; 32])
+            .await
+            .unwrap()
+    );
+
+    for reserved in ["intrinsic-sql", "engine-intrinsic"] {
+        assert!(stormchaser_engine::runner_auth::is_reserved_runner_id(
+            reserved
+        ));
+    }
+    sqlx::query("DELETE FROM runner_sessions WHERE runner_id = $1")
+        .bind(&id)
+        .execute(&pool)
+        .await
+        .unwrap();
 }

@@ -263,18 +263,13 @@ pub async fn handle_message(
     tls_reloader: Arc<TlsReloader>,
     log_backend: Arc<Option<LogBackend>>,
 ) {
-    let parts: Vec<&str> = subject.split('.').collect();
-    let normalized_subject =
-        if parts.len() > 3 && (parts[2] == "global" || parts[2].parse::<u32>().is_ok()) {
-            format!("{}.{}.{}", parts[0], parts[1], parts[3..].join("."))
-        } else {
-            subject.to_string()
-        };
+    let normalized_subject = stormchaser_model::runner_auth::normalize_subject(subject);
     let subject = normalized_subject.as_str();
 
-    // What a runner reports must be signed with the key the engine issued it
+    // What a runner reports must be signed with the key the engine issued it, for the
+    // subject it arrived on
     if let Some(sender) = crate::runner_auth::sender_of(subject) {
-        if let Some(reason) = crate::runner_auth::refusal(&pool, sender, &payload).await {
+        if let Some(reason) = crate::runner_auth::refusal(&pool, sender, subject, &payload).await {
             tracing::warn!("Ignoring {}: {}", subject, reason);
             let _ = message.double_ack().await;
             return;

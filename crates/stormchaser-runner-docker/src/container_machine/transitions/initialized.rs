@@ -8,7 +8,6 @@ use bollard::query_parameters::{
     CreateContainerOptions, StartContainerOptions, WaitContainerOptions,
 };
 use chrono::Utc;
-use cloudevents::EventBuilder;
 use futures::StreamExt;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
@@ -16,8 +15,7 @@ use stormchaser_model::dsl::{CommonContainerSpec, StorageMount};
 use stormchaser_model::events::{EventSource, EventType, SchemaVersion, StepEventType};
 use stormchaser_model::nats::publish_cloudevent;
 use stormchaser_model::nats::NatsSubject;
-use stormchaser_model::step::StepStatus;
-use stormchaser_model::{RunId, StepInstanceId, APPLICATION_JSON};
+use stormchaser_model::{RunId, StepInstanceId};
 use tokio::{fs, time::sleep};
 use tracing::{error, info};
 use uuid::Uuid;
@@ -351,26 +349,14 @@ impl DockerContainerMachine<state::Initialized> {
             mount.name, source_name
         );
         if let Some(nats) = &self.nats {
-            let unpacking_event = serde_json::json!({
-                "run_id": self.metadata.run_id,
-                "step_id": self.metadata.step_id,
-                "status": StepStatus::UnpackingSfs,
-                "timestamp": Utc::now(),
-            });
-            if let Ok(ce) = cloudevents::EventBuilderV10::new()
-                .id(Uuid::new_v4().to_string())
-                .ty("stormchaser.v1.step.unpacking_sfs")
-                .source("/stormchaser/runner")
-                .time(Utc::now())
-                .data(APPLICATION_JSON, unpacking_event)
-                .build()
-            {
-                if let Ok(payload_bytes) = serde_json::to_vec(&ce) {
-                    let _ = nats
-                        .publish("stormchaser.v1.step.unpacking_sfs", payload_bytes.into())
-                        .await;
-                }
-            }
+            let _ = stormchaser_model::nats::announce_step_storage(
+                nats,
+                self.metadata.run_id,
+                self.metadata.step_id,
+                &self.metadata.runner_id,
+                false,
+            )
+            .await;
         }
         self.unpark_storage(UnparkParams {
             source_name,
@@ -401,26 +387,14 @@ impl DockerContainerMachine<state::Initialized> {
                     mount.name, url, dest
                 );
                 if let Some(nats) = &self.nats {
-                    let unpacking_event = serde_json::json!({
-                        "run_id": self.metadata.run_id,
-                        "step_id": self.metadata.step_id,
-                        "status": StepStatus::UnpackingSfs,
-                        "timestamp": Utc::now(),
-                    });
-                    if let Ok(ce) = cloudevents::EventBuilderV10::new()
-                        .id(Uuid::new_v4().to_string())
-                        .ty("stormchaser.v1.step.unpacking_sfs")
-                        .source("/stormchaser/runner")
-                        .time(Utc::now())
-                        .data(APPLICATION_JSON, unpacking_event)
-                        .build()
-                    {
-                        if let Ok(payload_bytes) = serde_json::to_vec(&ce) {
-                            let _ = nats
-                                .publish("stormchaser.v1.step.unpacking_sfs", payload_bytes.into())
-                                .await;
-                        }
-                    }
+                    let _ = stormchaser_model::nats::announce_step_storage(
+                        nats,
+                        self.metadata.run_id,
+                        self.metadata.step_id,
+                        &self.metadata.runner_id,
+                        false,
+                    )
+                    .await;
                 }
                 let mut full_dest = PathBuf::from(&mount.mount_path);
                 if dest != "/" && !dest.is_empty() {

@@ -336,11 +336,21 @@ holder of the runner credential who sees the reply cannot read it, and keeps it 
 `runner_sessions`. The runner signs everything it reports with it: registration,
 heartbeats, going offline, a step's progress, result and failure, and its requests
 for artifact push tokens. The engine ignores such a message unless it is signed, less
-than five minutes ago, with the key of the runner it names.
+than five minutes ago, with the key of the runner it names, for the subject it arrived
+on: a signed report published again on another subject does not verify.
 
 * The engine will not issue a key for an id whose runner is still sending
-  heartbeats. A runner that restarts without saying it is going offline waits up to
-  30 seconds before it can register again.
+  heartbeats, or that was given a key in the last 30 seconds. A runner that restarts
+  without saying it is going offline waits up to 30 seconds before it can register
+  again. `intrinsic-sql` and `engine-intrinsic`, the ids the engine reports its own
+  steps under, are never issued.
+* A report that a step has started, or is unpacking or packing its storage, moves
+  the step only from a state where that makes sense, and only for the runner that
+  holds it (before any runner does, the one that signed the report).
+* Each NATS user may read only its own inbox prefix (see `docs/nats.md`), so no
+  other user can read the engine's deliveries of runner reports or the answers it
+  sends. Runners share a user and so a prefix; the registry push token in an answer
+  is sealed with the asking runner's key.
 * The engine and the API still finish steps they run themselves (approvals, waits,
   built-in steps) without a runner's signature; those need the step's completion
   token instead.

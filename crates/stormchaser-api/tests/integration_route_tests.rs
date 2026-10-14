@@ -953,6 +953,13 @@ async fn test_run_from_git() {
         }
     }
 
+    // Steps report as a runner the engine has issued a key to: a step no runner has
+    // claimed takes a result only from such a runner
+    let runner_id = format!("test-runner-{}", uuid::Uuid::new_v4());
+    stormchaser_engine::db::store_runner_session(&pool, &runner_id, &[5u8; 32])
+        .await
+        .unwrap();
+
     // Verify the workflow completes successfully.
     let mut success = false;
     for _ in 0..60 {
@@ -987,6 +994,7 @@ async fn test_run_from_git() {
                     "step_id": step_id.to_string(),
                     "fencing_token": fencing_token,
                     "event_type": "StepCompletedEvent",
+                    "runner_id": runner_id,
                     "timestamp": Utc::now(),
                     "outputs": {}
                 }))

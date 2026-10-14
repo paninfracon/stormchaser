@@ -243,6 +243,40 @@ where
     .await
 }
 
+/// Records `session_key` as the key of `runner_id`, unless a process may still hold the
+/// id: it is live (see [`runner_session_is_live`]), or it was issued a key in the last 30
+/// seconds and may not have sent its first heartbeat yet. The check and the write are one
+/// statement, so two requests for the same id cannot both succeed. Returns whether the
+/// key was stored.
+pub async fn claim_runner_session<'a, E>(
+    executor: E,
+    runner_id: &str,
+    session_key: &[u8],
+) -> Result<bool, sqlx::Error>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
+    let claimed: Option<String> = sqlx::query_scalar(
+        r#"
+        INSERT INTO runner_sessions (runner_id, session_key, issued_at) VALUES ($1, $2, NOW())
+        ON CONFLICT (runner_id) DO UPDATE SET session_key = EXCLUDED.session_key, issued_at = NOW()
+        WHERE runner_sessions.issued_at < NOW() - INTERVAL '30 seconds'
+        AND NOT EXISTS (
+            SELECT 1 FROM runners r
+            WHERE r.id = runner_sessions.runner_id
+            AND r.status = 'online'
+            AND r.last_heartbeat_at >= NOW() - INTERVAL '30 seconds'
+        )
+        RETURNING runner_id
+        "#,
+    )
+    .bind(runner_id)
+    .bind(session_key)
+    .fetch_optional(executor)
+    .await?;
+    Ok(claimed.is_some())
+}
+
 /// Records the key issued to `runner_id`, replacing any earlier one.
 pub async fn store_runner_session<'a, E>(
     executor: E,

@@ -30,7 +30,13 @@ pub async fn handle_artifact_auth_request(
     };
 
     let response = match artifact_push_auth(&payload, &pool).await {
-        Ok(docker_config) => json!({ "ok": true, "docker_config": docker_config }),
+        Ok(docker_config) => match sealed_answer(&payload, &pool, &docker_config).await {
+            Ok(response) => response,
+            Err(e) => {
+                tracing::error!("Could not seal artifact registry credentials: {:#}", e);
+                json!({ "ok": false, "error": "the engine could not seal the credentials" })
+            }
+        },
         Err(e) => {
             tracing::warn!("Refusing artifact registry credentials: {:#}", e);
             json!({ "ok": false, "error": e.to_string() })
@@ -40,6 +46,31 @@ pub async fn handle_artifact_auth_request(
         .publish(reply, serde_json::to_vec(&response)?.into())
         .await?;
     Ok(())
+}
+
+/// The answer to a runner that was given the credentials. Runners share one NATS user,
+/// and so one inbox prefix, so the credentials are sealed with the asking runner's key.
+/// Only a runner with no key (allowed while `STORMCHASER_RUNNER_SIGNATURES=optional`)
+/// gets them in the clear.
+async fn sealed_answer(payload: &Value, pool: &PgPool, docker_config: &Value) -> Result<Value> {
+    let runner_id = payload["runner_id"].as_str().unwrap_or_default();
+    let step_id: uuid::Uuid =
+        serde_json::from_value(payload["step_id"].clone()).context("step_id")?;
+    let key = if runner_id.is_empty() {
+        None
+    } else {
+        crate::db::get_runner_session_key(pool, runner_id).await?
+    };
+    let Some(key) = key else {
+        return Ok(json!({ "ok": true, "docker_config": docker_config }));
+    };
+    let context = stormchaser_model::nats::artifact_auth_context(runner_id, step_id);
+    let sealed = stormchaser_model::runner_auth::seal_for_runner(
+        &key,
+        &context,
+        &serde_json::to_vec(docker_config)?,
+    )?;
+    Ok(json!({ "ok": true, "sealed_docker_config": sealed }))
 }
 
 /// Names of the storage volumes a step mounts, from its resolved spec.
@@ -80,8 +111,13 @@ pub async fn artifact_push_auth(payload: &Value, pool: &PgPool) -> Result<Value>
     }
     // The token lets its holder push to the run's repositories, so it goes only to the
     // runner that has the step, which proves it is that runner by signing the request
-    if let Some(reason) =
-        crate::runner_auth::refusal(pool, crate::runner_auth::Sender::Runner, payload).await
+    if let Some(reason) = crate::runner_auth::refusal(
+        pool,
+        crate::runner_auth::Sender::Runner,
+        ARTIFACT_AUTH_SUBJECT,
+        payload,
+    )
+    .await
     {
         bail!("{}", reason);
     }

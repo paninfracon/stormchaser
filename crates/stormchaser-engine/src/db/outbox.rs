@@ -27,8 +27,14 @@ where
     E: Executor<'e, Database = Postgres>,
 {
     let subject_str = subject.as_str().into_owned();
-    let (payload, headers_map) =
-        build_cloudevent_and_headers(event_type, source, data, schema_version, schema_id)?;
+    let (payload, headers_map) = build_cloudevent_and_headers(
+        &subject_str,
+        event_type,
+        source,
+        data,
+        schema_version,
+        schema_id,
+    )?;
 
     // Convert headers_map to JSON
     let mut headers_json = serde_json::Map::new();
