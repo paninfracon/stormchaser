@@ -1,5 +1,5 @@
 # Multi-stage Dockerfile for Stormchaser
-FROM rust:1.96-slim-bookworm AS builder
+FROM rust:1.96-slim-bookworm@sha256:e18a79fc84dfcfc3ab5ba72290398a644c135c97eaa881447fddc354ee4701a3 AS builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -36,7 +36,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     fi
 
 # Final runtime image
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
 
 RUN apt-get update && apt-get install -y \
     ca-certificates \
