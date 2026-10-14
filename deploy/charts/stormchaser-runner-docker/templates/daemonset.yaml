@@ -13,8 +13,21 @@ spec:
       labels:
         {{- include "stormchaser-runner-docker.selectorLabels" . | nindent 8 }}
     spec:
+      automountServiceAccountToken: false
+      {{- with .Values.dockerSocketGroup }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        supplementalGroups:
+          - {{ . }}
+      {{- end }}
       containers:
         - name: runner
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
@@ -64,10 +77,15 @@ spec:
           volumeMounts:
             - name: docker-socket
               mountPath: /var/run/docker.sock
+            - name: tmp
+              mountPath: /tmp
       volumes:
         - name: docker-socket
           hostPath:
             path: {{ .Values.dockerSocketPath }}
+            type: Socket
+        - name: tmp
+          emptyDir: {}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

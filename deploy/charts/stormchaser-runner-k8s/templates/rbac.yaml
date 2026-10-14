@@ -7,9 +7,10 @@ metadata:
   labels:
     {{- include "stormchaser-runner-k8s.labels" . | nindent 4 }}
 rules:
+  # patch: a Job that needs Secrets is created suspended and resumed once they exist.
   - apiGroups: ["batch"]
     resources: ["jobs"]
-    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+    verbs: ["create", "get", "list", "watch", "patch", "delete"]
   # patch: the runner tells a step pod's agent sidecar, through a pod annotation, that the
   # step's container has finished.
   - apiGroups: [""]
@@ -17,7 +18,7 @@ rules:
     verbs: ["get", "list", "watch", "patch"]
   - apiGroups: [""]
     resources: ["pods/log"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get"]
   # Only the per-step image pull and artifact push secrets the runner writes itself; it
   # never reads secrets.
   - apiGroups: [""]

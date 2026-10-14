@@ -319,6 +319,24 @@ away from the control plane:
 `scripts/setup.sh` relaxes the network isolation and the privileged setting for
 local development; see [NATS: Quickstart and Production](nats.md).
 
+### The runners' own pods
+
+* **Kubernetes Runner:** runs as an unprivileged user (65532) with no capabilities,
+  no privilege escalation, the runtime's default seccomp profile and a read-only
+  filesystem, with CPU and memory limits (`podSecurityContext`, `securityContext`,
+  `resources`). Its Role, in the step namespace only, allows what it does and no
+  more: create, watch, patch (to resume a suspended Job) and delete Jobs; watch and
+  annotate pods and read their logs; create and delete the per-step Secrets it
+  writes. It cannot read Secrets, start pods directly, or touch any other namespace.
+* **Docker Runner:** whatever else is restricted, the Docker socket is root on the
+  node, since it can start a container that mounts the host. A socket proxy that
+  filters API endpoints would not change that, because a container's options are in
+  the request body, so the chart ships none. The runner has no capabilities, no
+  privilege escalation, no Kubernetes API token, a read-only filesystem and
+  resource limits. It runs as root, which owns the socket, unless
+  `dockerSocketGroup` names the group that does, in which case it runs as an
+  unprivileged user in that group.
+
 ### What one step may use
 
 A step's CPU, memory, run time and parallelism come from its workflow. Each

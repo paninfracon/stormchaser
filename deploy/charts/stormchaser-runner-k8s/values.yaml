@@ -28,16 +28,21 @@ podAnnotations:
 
 podLabels: {}
 
-podSecurityContext: {}
-  # fsGroup: 2000
+# The runner only talks to NATS and the Kubernetes API, so it runs as an unprivileged
+# user with no capabilities and a read-only filesystem (with an empty /tmp).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
 
-securityContext: {}
-  # capabilities:
-  #   drop:
-  #   - ALL
-  # readOnlyRootFilesystem: true
-  # runAsNonRoot: true
-  # runAsUser: 1000
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
 
 service:
   type: ClusterIP
@@ -54,13 +59,13 @@ ingress:
           pathType: ImplementationSpecific
   tls: []
 
-resources: {}
-  # limits:
-  #   cpu: 100m
-  #   memory: 128Mi
-  # requests:
-  #   cpu: 100m
-  #   memory: 128Mi
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
 
 # Runner Configuration
 config:

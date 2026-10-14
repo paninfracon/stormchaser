@@ -39,4 +39,32 @@ config:
   allowPrivileged: false
 
 # Configure the hostPath for docker socket
+#
+# Whatever else is restricted, access to the Docker socket is root on the node: it can
+# start a container that mounts the host. A socket proxy that filters API endpoints does
+# not change that, since container options are in the request body, so this chart does
+# not ship one. Run the Docker runner only on nodes set aside for it (nodeSelector,
+# tolerations), and keep STORMCHASER_ALLOW_PRIVILEGED off.
 dockerSocketPath: "/var/run/docker.sock"
+
+# The group that owns the Docker socket on the nodes (often `docker`; `stat -c %g
+# /var/run/docker.sock`). Set, the runner runs as an unprivileged user in that group.
+# Left empty, it runs as root, which owns the socket, but with no capabilities.
+dockerSocketGroup: ""
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
