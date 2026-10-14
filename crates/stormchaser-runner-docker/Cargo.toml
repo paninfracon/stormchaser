@@ -14,7 +14,7 @@ stormchaser-model = { workspace = true }
 tokio = { workspace = true }
 futures = { workspace = true }
 async-nats = { workspace = true }
-rustls = { version = "0.23", features = ["ring"] }
+rustls = { version = "0.23.46", features = ["ring"] }
 axum = { workspace = true }
 schemars = { workspace = true }
 bollard = "0.21"

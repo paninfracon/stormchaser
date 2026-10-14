@@ -98,7 +98,7 @@ jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }
 jaq-core = "3.1"
 jaq-json = { version = "2.0", features = ["serde"] }
 jaq-std = "3.0"
-rustls = { version = "0.23", features = ["ring"] }
+rustls = { version = "0.23.46", features = ["ring"] }
 quick-xml = { version = "0.42", features = ["serialize"] }
 tar = "0.4"
 flate2 = "1.0"

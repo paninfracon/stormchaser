@@ -1,11 +1,9 @@
 use anyhow::{Context, Result};
 use arc_swap::ArcSwap;
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
+use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::{ClientConfig, RootCertStore, ServerConfig};
-use rustls_pemfile::{certs, private_key};
-use std::fs::File;
-use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::{error, info, warn};
@@ -199,19 +197,14 @@ impl TlsReloader {
 
 /// Loads one or more certificates from a PEM-encoded string.
 pub fn load_certs_from_memory(data: &str) -> Result<Vec<CertificateDer<'static>>> {
-    let mut reader = BufReader::new(data.as_bytes());
-    let certs = certs(&mut reader)
+    CertificateDer::pem_slice_iter(data.as_bytes())
         .collect::<Result<Vec<_>, _>>()
-        .context("failed to load certs from memory")?;
-    Ok(certs)
+        .context("failed to load certs from memory")
 }
 
 /// Loads a private key from a PEM-encoded string.
 pub fn load_key_from_memory(data: &str) -> Result<PrivateKeyDer<'static>> {
-    let mut reader = BufReader::new(data.as_bytes());
-    private_key(&mut reader)
-        .context("failed to load key from memory")?
-        .context("no key found in memory")
+    PrivateKeyDer::from_pem_slice(data.as_bytes()).context("failed to load key from memory")
 }
 
 /// Builds a static `ClientConfig` using in-memory PEM strings.
@@ -253,20 +246,15 @@ pub fn build_client_config(
 }
 
 fn load_certs(path: &Path) -> Result<Vec<CertificateDer<'static>>> {
-    let file = File::open(path).with_context(|| format!("failed to open cert file {:?}", path))?;
-    let mut reader = BufReader::new(file);
-    let certs = certs(&mut reader)
+    CertificateDer::pem_file_iter(path)
+        .with_context(|| format!("failed to open cert file {:?}", path))?
         .collect::<Result<Vec<_>, _>>()
-        .with_context(|| format!("failed to load certs from {:?}", path))?;
-    Ok(certs)
+        .with_context(|| format!("failed to load certs from {:?}", path))
 }
 
 fn load_key(path: &Path) -> Result<PrivateKeyDer<'static>> {
-    let file = File::open(path).with_context(|| format!("failed to open key file {:?}", path))?;
-    let mut reader = BufReader::new(file);
-    private_key(&mut reader)
-        .with_context(|| format!("failed to load key from {:?}", path))?
-        .context("no key found in file")
+    PrivateKeyDer::from_pem_file(path)
+        .with_context(|| format!("failed to load key from {:?}", path))
 }
 
 impl Default for TlsConfig {
@@ -284,6 +272,7 @@ impl Default for TlsConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs::File;
     use std::io::Write;
     use std::sync::Once;
     use tempfile::tempdir;

@@ -36,7 +36,7 @@ stormchaser-model = { workspace = true }
 stormchaser-dsl = { workspace = true }
 stormchaser-tls = { workspace = true }
 stormchaser-opa = { version = "1.5.1", path = "../stormchaser-opa" }
-rustls = { version = "0.23", features = ["ring"] }
+rustls = { version = "0.23.46", features = ["ring"] }
 tokio.workspace = true
 sqlx.workspace = true
 log = { workspace = true }
