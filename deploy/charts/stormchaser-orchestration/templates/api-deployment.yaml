@@ -69,6 +69,13 @@ spec:
                   name: {{ . }}
                   key: {{ $.Values.global.approvalLinks.existingSecretKey }}
             {{- end }}
+            {{- with .Values.global.jwt.existingSecret }}
+            - name: STORMCHASER_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: {{ $.Values.global.jwt.existingSecretKey }}
+            {{- end }}
             - name: STORMCHASER_SSRF_ALLOWED_HOSTS
               value: {{ join "," .Values.global.ssrfAllowedHosts | quote }}
             - name: STORMCHASER_AWS_ALLOWED_ROLE_ARNS

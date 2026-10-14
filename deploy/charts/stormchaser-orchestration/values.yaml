@@ -22,6 +22,12 @@ global:
     # docs/nats.md). Left empty, each falls back to authSecret.
     apiAuthSecret: ""
     queryAuthSecret: ""
+  # The key the API signs its own session tokens with (STORMCHASER_JWT_SECRET). Without
+  # it no one can log in. Name a Secret holding at least 32 random characters; the
+  # umbrella chart creates `stormchaser-jwt`.
+  jwt:
+    existingSecret: ""
+    existingSecretKey: "jwt-secret"
   # Approval emails can carry links that approve or reject a step without logging in.
   # They are sealed with a key of their own, given to both the engine and the API.
   # Leave existingSecret empty to send no links.

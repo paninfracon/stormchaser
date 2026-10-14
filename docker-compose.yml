@@ -145,6 +145,19 @@ services:
     # can be evaluated but not replaced over the network.
     command: run --server --addr 0.0.0.0:8181 --authorization=basic /etc/opa/policy.rego /etc/opa/authz.rego /etc/opa/settings.json
 
+  # The services run as an unprivileged user (65532), which cannot read a key that
+  # belongs to you on the host. This copies the certificate and key into a volume that
+  # user owns, with the key readable by it alone.
+  certs:
+    image: alpine:3.20
+    command:
+      - sh
+      - -c
+      - cp /src/ca.crt /src/tls.crt /src/tls.key /certs/ && chown 65532:65532 /certs/* && chmod 0444 /certs/*.crt && chmod 0400 /certs/tls.key
+    volumes:
+      - ${STORMCHASER_CERT_DIR:-./tests/certs}:/src:ro
+      - certs:/certs
+
   orchestration-engine:
     build:
       context: .
@@ -178,8 +191,10 @@ services:
       TLS_KEY_PATH: /etc/engine/certs/tls.key
     volumes:
       - git-cache:/tmp/stormchaser/git-cache
-      - ${STORMCHASER_CERT_DIR:-./tests/certs}:/etc/engine/certs:ro
+      - certs:/etc/engine/certs:ro
     depends_on:
+      certs:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       nats:
@@ -218,8 +233,10 @@ services:
       TLS_CERT_PATH: /etc/engine/certs/tls.crt
       TLS_KEY_PATH: /etc/engine/certs/tls.key
     volumes:
-      - ${STORMCHASER_CERT_DIR:-./tests/certs}:/etc/engine/certs:ro
+      - certs:/etc/engine/certs:ro
     depends_on:
+      certs:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       nats:
@@ -248,6 +265,8 @@ services:
       # them from a scheduler of your own: curl -X POST -H "Authorization: Bearer <token>"
       # http://localhost:3000/api/v1/cron-trigger/<id>
       CRON_ENGINE: none
+      # Signs the API's own session tokens; scripts/setup.sh generates it into .env
+      STORMCHASER_JWT_SECRET: '${STORMCHASER_JWT_SECRET?Error: STORMCHASER_JWT_SECRET is not set}'
       NATS_URL: nats://nats:4222
       NATS_USER: stormchaser-api
       NATS_PASSWORD: '${STORMCHASER_NATS_API_PASSWORD?Error: STORMCHASER_NATS_API_PASSWORD is not set}'
@@ -271,8 +290,10 @@ services:
       TLS_CERT_PATH: /etc/engine/certs/tls.crt
       TLS_KEY_PATH: /etc/engine/certs/tls.key
     volumes:
-      - ${STORMCHASER_CERT_DIR:-./tests/certs}:/etc/engine/certs:ro
+      - certs:/etc/engine/certs:ro
     depends_on:
+      certs:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       nats:
@@ -355,5 +376,6 @@ networks:
   steps:
 
 volumes:
+  certs:
   git-cache:
   postgres-data:
