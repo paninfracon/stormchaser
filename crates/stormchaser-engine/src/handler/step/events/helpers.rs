@@ -411,7 +411,25 @@ pub(crate) async fn reporter_is_assigned_runner(
         return true;
     }
     let Some(assigned) = instance.runner_id.as_deref() else {
-        // No runner has reported on it yet; the first to do so is the one that has it
+        // No runner has reported on it yet; the first to do so is the one that has it,
+        // provided it is a runner. The router has checked the signature of any runner
+        // that has a key; one with no key, or no name, could be anyone.
+        let Some(reporter) = reporter else {
+            tracing::warn!("Rejecting result for step {}: no runner named", instance.id);
+            return false;
+        };
+        let has_key = matches!(
+            crate::db::get_runner_session_key(&mut **tx, reporter).await,
+            Ok(Some(_))
+        );
+        if !has_key && stormchaser_model::runner_auth::signatures_required() {
+            tracing::warn!(
+                "Rejecting result for step {} from {}: not a runner with a key",
+                instance.id,
+                reporter
+            );
+            return false;
+        }
         return true;
     };
     if reporter == Some(assigned) {

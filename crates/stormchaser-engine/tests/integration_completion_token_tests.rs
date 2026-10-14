@@ -179,7 +179,17 @@ async fn runner_owned_step_is_reported_without_a_token() {
     );
 
     handler::step::events::handle_step_failed(
-        rejection(run_id, step_id, None),
+        {
+            // As a runner reports a step it has: unsigned here, and named, since a step
+            // takes a result only from a runner the engine issued a key to
+            let runner = format!("test-runner-{}", uuid::Uuid::new_v4());
+            stormchaser_engine::db::store_runner_session(&pool, &runner, &[5u8; 32])
+                .await
+                .unwrap();
+            let mut event = rejection(run_id, step_id, None);
+            event.runner_id = Some(runner);
+            event
+        },
         pool.clone(),
         nats_client,
         tls_reloader,

@@ -317,3 +317,65 @@ async fn registry_credentials_go_only_to_the_runner_that_has_the_step() {
         .unwrap();
     clean_up(&pool, run_id, &[&holder]).await;
 }
+
+#[tokio::test]
+async fn a_step_no_runner_has_claimed_takes_a_result_only_from_a_runner_with_a_key() {
+    let pool = pool().await;
+    let (nats, tls) = (nats().await, tls().await);
+    let keyed = format!("keyed-{}", uuid::Uuid::new_v4());
+    insert_runner(&pool, &keyed, 0.0).await;
+    stormchaser_engine::db::store_runner_session(&pool, &keyed, &[9u8; 32])
+        .await
+        .unwrap();
+    let (run_id, step_id) = insert_step_on(&pool, &keyed).await;
+    sqlx::query("UPDATE step_instances SET runner_id = NULL WHERE id = $1")
+        .bind(step_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Naming no runner, or one the engine never gave a key: anyone could send that
+    let made_up = format!("made-up-{}", uuid::Uuid::new_v4());
+    for reporter in [None, Some(made_up.as_str())] {
+        handler::step::events::handle_step_failed(
+            failed(run_id, step_id, reporter),
+            pool.clone(),
+            nats.clone(),
+            tls.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            status_and_runner(&pool, step_id).await,
+            Some((StepStatus::Running, None)),
+            "a result from {reporter:?} was accepted"
+        );
+    }
+
+    // A runner with a key (whose signature the router has checked) is taken as the one
+    // that has it
+    handler::step::events::handle_step_completed(
+        completed(run_id, step_id, Some(&keyed)),
+        pool.clone(),
+        nats,
+        Arc::new(None),
+        tls,
+    )
+    .await
+    .unwrap();
+    let live = status_and_runner(&pool, step_id).await;
+    assert!(
+        live.is_none()
+            || live
+                .as_ref()
+                .is_some_and(|(status, _)| *status == StepStatus::Succeeded),
+        "the keyed runner's result was not accepted: {live:?}"
+    );
+
+    sqlx::query("DELETE FROM runner_sessions WHERE runner_id = $1")
+        .bind(&keyed)
+        .execute(&pool)
+        .await
+        .unwrap();
+    clean_up(&pool, run_id, &[&keyed]).await;
+}

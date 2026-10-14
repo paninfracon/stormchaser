@@ -127,7 +127,8 @@ async fn test_step_lifecycle_emits_workflow_succeeded() {
         "event_type": "StepCompletedEvent",
         "fencing_token": fencing_token,
         "timestamp": Utc::now(),
-        "exit_code": 0
+        "exit_code": 0,
+        "runner_id": keyed_runner(&pool).await
     });
 
     let log_backend = Arc::new(None);
@@ -267,4 +268,14 @@ async fn test_runner_heartbeat_updates_db() {
         .unwrap();
 
     assert_eq!(status, "online");
+}
+
+/// A runner the engine has issued a key to, reporting on the test's steps as a runner
+/// would. A runner-owned step takes a result only from such a runner.
+async fn keyed_runner(pool: &sqlx::PgPool) -> String {
+    let id = format!("test-runner-{}", uuid::Uuid::new_v4());
+    stormchaser_engine::db::store_runner_session(pool, &id, &[5u8; 32])
+        .await
+        .unwrap();
+    id
 }

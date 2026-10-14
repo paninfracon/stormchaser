@@ -125,6 +125,7 @@ async fn test_artifact_persistence_on_completion() {
         "timestamp": Utc::now(),
         "status": StepStatus::Succeeded,
         "exit_code": 0,
+        "runner_id": keyed_runner(&pool).await,
         "artifacts": {
             "app-bin": {
                 "hash": "abc123hash",
@@ -265,6 +266,7 @@ async fn test_test_report_persistence_on_completion() {
         "timestamp": Utc::now(),
         "status": StepStatus::Succeeded,
         "exit_code": 0,
+        "runner_id": keyed_runner(&pool).await,
         "test_reports": {
             "unit-tests_results.xml": {
                 "name": "unit-tests",
@@ -319,4 +321,14 @@ async fn test_test_report_persistence_on_completion() {
         report.3,
         hex::encode(Sha256::digest(b"<testsuite>...</testsuite>"))
     );
+}
+
+/// A runner the engine has issued a key to, reporting on the test's steps as a runner
+/// would. A runner-owned step takes a result only from such a runner.
+async fn keyed_runner(pool: &sqlx::PgPool) -> String {
+    let id = format!("test-runner-{}", uuid::Uuid::new_v4());
+    stormchaser_engine::db::store_runner_session(pool, &id, &[5u8; 32])
+        .await
+        .unwrap();
+    id
 }
