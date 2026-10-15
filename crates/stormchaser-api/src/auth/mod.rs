@@ -7,12 +7,42 @@ use axum::{
     extract::FromRequestParts,
     http::{request::Parts, StatusCode},
 };
-use jsonwebtoken::{decode, decode_header, DecodingKey, Validation};
+use jsonwebtoken::{
+    decode, decode_header, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation,
+};
 use serde::{Deserialize, Serialize};
 pub use stormchaser_model::auth::Claims;
 
 /// Fallback JWT secret for local development
 pub const JWT_SECRET: &[u8] = b"stormchaser-secret-dev-only"; // Fallback for local dev
+
+/// The issuer of the tokens the API signs itself.
+pub const LOCAL_TOKEN_ISSUER: &str = "stormchaser";
+
+/// The audience of the tokens the API signs itself: the API.
+pub const LOCAL_TOKEN_AUDIENCE: &str = "stormchaser-api";
+
+#[derive(Serialize)]
+struct LocalTokenClaims<'a> {
+    #[serde(flatten)]
+    claims: &'a Claims,
+    iss: &'static str,
+    aud: &'static str,
+}
+
+/// Signs `claims` as an access token of the API's own, naming the API as its issuer and
+/// audience. [`authenticate`] accepts a locally signed token only with both.
+pub fn sign_local_token(claims: &Claims, secret: &[u8]) -> jsonwebtoken::errors::Result<String> {
+    encode(
+        &Header::new(Algorithm::HS256),
+        &LocalTokenClaims {
+            claims,
+            iss: LOCAL_TOKEN_ISSUER,
+            aud: LOCAL_TOKEN_AUDIENCE,
+        },
+        &EncodingKey::from_secret(secret),
+    )
+}
 
 /// Resolves the JWT secret used for signing and validating local Stormchaser tokens.
 pub fn resolve_jwt_secret() -> Result<Vec<u8>, &'static str> {
@@ -121,13 +151,11 @@ pub async fn authenticate(
         }
     }
 
-    // 2. Fallback to local secret for legacy/dev tokens
-    let mut validation = Validation {
-        validate_exp: true,
-        ..Default::default()
-    };
-    // Skip audience/issuer check for local tokens as they don't have them set usually in the current model
-    validation.required_spec_claims.remove("aud");
+    // 2. A token the API signed itself, which names the API as its issuer and audience
+    let mut validation = Validation::new(Algorithm::HS256);
+    validation.set_issuer(&[LOCAL_TOKEN_ISSUER]);
+    validation.set_audience(&[LOCAL_TOKEN_AUDIENCE]);
+    validation.set_required_spec_claims(&["exp", "iss", "aud"]);
 
     let jwt_secret = resolve_jwt_secret()
         .inspect_err(|e| tracing::error!("JWT secret configuration error: {}", e))

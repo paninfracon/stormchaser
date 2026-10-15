@@ -158,12 +158,7 @@ fn bearer(email: &str) -> String {
         exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
         groups: Vec::new(),
     };
-    let token = jsonwebtoken::encode(
-        &jsonwebtoken::Header::default(),
-        &claims,
-        &jsonwebtoken::EncodingKey::from_secret(stormchaser_api::JWT_SECRET),
-    )
-    .unwrap();
+    let token = stormchaser_api::sign_local_token(&claims, stormchaser_api::JWT_SECRET).unwrap();
     format!("Bearer {token}")
 }
 

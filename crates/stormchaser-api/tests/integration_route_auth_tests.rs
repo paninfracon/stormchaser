@@ -155,7 +155,7 @@ async fn public_routes_stay_reachable_without_a_token() {
 /// Records what the API hands to policy, and allows everything.
 #[derive(Default)]
 struct RecordingAuthorizer {
-    seen: std::sync::Mutex<Vec<(String, String)>>,
+    seen: std::sync::Mutex<Vec<serde_json::Value>>,
 }
 
 #[async_trait::async_trait]
@@ -167,7 +167,7 @@ impl stormchaser_model::auth::OpaAuthorizer for RecordingAuthorizer {
         self.seen
             .lock()
             .unwrap()
-            .push((context.method.to_string(), context.path.to_string()));
+            .push(serde_json::to_value(&context)?);
         Ok(true)
     }
     async fn check_approval(
@@ -188,21 +188,17 @@ impl stormchaser_model::auth::OpaAuthorizer for RecordingAuthorizer {
 }
 
 /// Request-level policy is shown the path the client asked for, `/api/v1` prefix
-/// included, which is what the shipped and example policies match on.
+/// included, which is what the shipped and example policies match on, and who is
+/// asking as the API verified it. It is never shown the token.
 #[tokio::test]
-async fn policy_sees_the_full_request_path() {
+async fn policy_sees_the_full_request_path_and_the_verified_caller() {
     let claims = stormchaser_model::auth::Claims {
         sub: "test-user".to_string(),
         email: Some("test-user@paninfracon.net".to_string()),
         exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
-        groups: Vec::new(),
+        groups: vec!["developers".to_string()],
     };
-    let token = jsonwebtoken::encode(
-        &jsonwebtoken::Header::default(),
-        &claims,
-        &jsonwebtoken::EncodingKey::from_secret(stormchaser_api::JWT_SECRET),
-    )
-    .unwrap();
+    let token = stormchaser_api::sign_local_token(&claims, stormchaser_api::JWT_SECRET).unwrap();
 
     let authorizer = Arc::new(RecordingAuthorizer::default());
     let mut state = mock_state().await;
@@ -220,7 +216,70 @@ async fn policy_sees_the_full_request_path() {
     .await;
 
     let seen = authorizer.seen.lock().unwrap().clone();
-    assert_eq!(seen, vec![("GET".to_string(), path)]);
+    assert_eq!(
+        seen,
+        vec![serde_json::json!({
+            "path": path,
+            "method": "GET",
+            "subject": {
+                "sub": "test-user",
+                "email": "test-user@paninfracon.net",
+                "groups": ["developers"],
+            },
+        })]
+    );
+}
+
+/// A token signed with the API's key is accepted only if it names the API as its
+/// issuer and audience, as the tokens the API issues do.
+#[tokio::test]
+async fn a_local_token_needs_the_apis_issuer_and_audience() {
+    let exp = (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize;
+    let router = app(mock_state().await);
+    let sign = |claims: serde_json::Value| {
+        jsonwebtoken::encode(
+            &jsonwebtoken::Header::default(),
+            &claims,
+            &jsonwebtoken::EncodingKey::from_secret(stormchaser_api::JWT_SECRET),
+        )
+        .unwrap()
+    };
+
+    for (claims, expected) in [
+        (
+            serde_json::json!({"sub": "u", "exp": exp, "iss": "stormchaser", "aud": "stormchaser-api"}),
+            StatusCode::OK,
+        ),
+        (
+            serde_json::json!({"sub": "u", "exp": exp}),
+            StatusCode::UNAUTHORIZED,
+        ),
+        (
+            serde_json::json!({"sub": "u", "exp": exp, "iss": "stormchaser"}),
+            StatusCode::UNAUTHORIZED,
+        ),
+        (
+            serde_json::json!({"sub": "u", "exp": exp, "iss": "elsewhere", "aud": "stormchaser-api"}),
+            StatusCode::UNAUTHORIZED,
+        ),
+        (
+            serde_json::json!({"sub": "u", "exp": exp, "iss": "stormchaser", "aud": "another-service"}),
+            StatusCode::UNAUTHORIZED,
+        ),
+    ] {
+        let token = sign(claims.clone());
+        assert_eq!(
+            status_of(
+                &router,
+                &Method::GET,
+                "/api/v1/auth/session",
+                Some(&format!("Bearer {token}"))
+            )
+            .await,
+            expected,
+            "{claims}"
+        );
+    }
 }
 
 /// The session endpoint answers a valid token with who it identifies.
@@ -232,12 +291,7 @@ async fn a_valid_token_has_a_session() {
         exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
         groups: Vec::new(),
     };
-    let token = jsonwebtoken::encode(
-        &jsonwebtoken::Header::default(),
-        &claims,
-        &jsonwebtoken::EncodingKey::from_secret(stormchaser_api::JWT_SECRET),
-    )
-    .unwrap();
+    let token = stormchaser_api::sign_local_token(&claims, stormchaser_api::JWT_SECRET).unwrap();
     let router = app(mock_state().await);
 
     let response = router

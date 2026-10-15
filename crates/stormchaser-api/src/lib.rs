@@ -24,7 +24,7 @@ pub mod telemetry;
 
 use async_nats::Client;
 use auth::opa::opa_middleware;
-pub use auth::{AuthClaims, Claims, JWT_SECRET};
+pub use auth::{sign_local_token, AuthClaims, Claims, JWT_SECRET};
 use axum::extract;
 use axum::{
     http::StatusCode,

@@ -11,7 +11,6 @@ use jsonwebtoken::decode;
 use jsonwebtoken::decode_header;
 use jsonwebtoken::DecodingKey;
 use jsonwebtoken::Validation;
-use jsonwebtoken::{encode, EncodingKey, Header};
 use reqwest::Client;
 use serde::Deserialize;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -304,12 +303,8 @@ pub async fn exchange_token(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let token = encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(jwt_secret.as_slice()),
-    )
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let token = auth::sign_local_token(&claims, &jwt_secret)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(AuthExchangeResponse {
         access_token: token,
@@ -432,12 +427,8 @@ pub async fn refresh_token(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let token = encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(jwt_secret.as_slice()),
-    )
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let token = auth::sign_local_token(&claims, &jwt_secret)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(AuthExchangeResponse {
         access_token: token,

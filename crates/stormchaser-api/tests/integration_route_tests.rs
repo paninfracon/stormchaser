@@ -5,7 +5,6 @@ use axum::{
     http::{Request, StatusCode},
 };
 use chrono::Utc;
-use jsonwebtoken::{encode, EncodingKey, Header};
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 
@@ -79,12 +78,7 @@ fn get_token() -> String {
         exp: (Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
         groups: Vec::new(),
     };
-    encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(JWT_SECRET),
-    )
-    .unwrap()
+    stormchaser_api::sign_local_token(&claims, JWT_SECRET).unwrap()
 }
 
 #[tokio::test]

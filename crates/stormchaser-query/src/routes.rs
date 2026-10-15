@@ -174,12 +174,7 @@ workflow "hydration-test" {
             exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
             groups: Vec::new(),
         };
-        jsonwebtoken::encode(
-            &jsonwebtoken::Header::default(),
-            &claims,
-            &jsonwebtoken::EncodingKey::from_secret(stormchaser_api::JWT_SECRET),
-        )
-        .unwrap()
+        stormchaser_api::sign_local_token(&claims, stormchaser_api::JWT_SECRET).unwrap()
     }
 
     async fn post_json(

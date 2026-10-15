@@ -2,7 +2,6 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use jsonwebtoken::{encode, EncodingKey, Header};
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use std::collections::HashMap;
@@ -70,12 +69,7 @@ async fn test_api_enqueue_inserts_quotas() {
         exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
         groups: Vec::new(),
     };
-    let token = encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(b"stormchaser-secret-dev-only"),
-    )
-    .unwrap();
+    let token = stormchaser_api::sign_local_token(&claims, b"stormchaser-secret-dev-only").unwrap();
 
     let run_id_marker = Uuid::new_v4();
 
