@@ -120,16 +120,20 @@ mod tests {
         }]})
     }
 
+    // wiremock hands out pooled servers, so tests that run one after another can get the
+    // same address. The refresh cooldown is kept per key set URL, so each test uses a path
+    // of its own.
+
     #[tokio::test]
     async fn unknown_key_ids_cannot_force_repeated_refreshes() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .and(path("/keys"))
+            .and(path("/unknown-kids/keys"))
             .respond_with(ResponseTemplate::new(200).set_body_json(key_set("current")))
             .expect(1)
             .mount(&server)
             .await;
-        let url = format!("{}/keys", server.uri());
+        let url = format!("{}/unknown-kids/keys", server.uri());
         let cache = tokio::sync::RwLock::new(JwksCache::new());
 
         // The first unknown key triggers the one refresh, which also finds the real key
@@ -148,11 +152,11 @@ mod tests {
     async fn a_failed_refresh_keeps_the_keys_already_cached() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .and(path("/keys"))
+            .and(path("/failed-refresh/keys"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"keys": []})))
             .mount(&server)
             .await;
-        let url = format!("{}/keys", server.uri());
+        let url = format!("{}/failed-refresh/keys", server.uri());
         let mut known = JwksCache::new();
         let jwk: jsonwebtoken::jwk::Jwk =
             serde_json::from_value(key_set("current")["keys"][0].clone()).unwrap();

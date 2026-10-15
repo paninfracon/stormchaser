@@ -176,7 +176,7 @@ impl FromRequestParts<AppState> for AuthClaims {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_jwt_secret, IdpClaims, JWT_SECRET, REQUIRE_EMAIL_VERIFIED_ENV};
+    use super::{resolve_jwt_secret, IdpClaims, REQUIRE_EMAIL_VERIFIED_ENV};
     use std::sync::{Mutex, OnceLock};
 
     fn idp(email: Option<&str>, verified: Option<bool>) -> IdpClaims {
@@ -254,6 +254,6 @@ mod tests {
             std::env::remove_var("STORMCHASER_JWT_SECRET");
         }
         let resolved = resolve_jwt_secret().expect("debug fallback should resolve");
-        assert_eq!(resolved, JWT_SECRET.to_vec());
+        assert_eq!(resolved, super::JWT_SECRET.to_vec());
     }
 }
