@@ -173,6 +173,7 @@ pub async fn use_approval_link(
             sub: only.clone(),
             email: Some(only.clone()),
             exp: 0,
+            groups: Vec::new(),
         }),
         _ => None,
     };

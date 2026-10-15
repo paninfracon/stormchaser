@@ -172,6 +172,7 @@ workflow "hydration-test" {
             sub: "hydration-tester".to_string(),
             email: Some("hydration-tester@paninfracon.net".to_string()),
             exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
+            groups: Vec::new(),
         };
         jsonwebtoken::encode(
             &jsonwebtoken::Header::default(),

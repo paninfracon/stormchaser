@@ -68,6 +68,7 @@ async fn test_api_enqueue_inserts_quotas() {
         sub: "test-user".to_string(),
         email: Some("test-user@paninfracon.net".to_string()),
         exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
+        groups: Vec::new(),
     };
     let token = encode(
         &Header::default(),

@@ -35,6 +35,10 @@ pub struct IdpClaims {
     pub email: Option<String>,
     pub email_verified: Option<bool>,
     pub exp: usize,
+    /// Present when the provider was asked for it (`STORMCHASER_OIDC_EXTRA_SCOPES`,
+    /// `groups` for Dex) and puts groups in its ID tokens.
+    #[serde(default)]
+    pub groups: Vec<String>,
 }
 
 impl IdpClaims {
@@ -62,6 +66,7 @@ impl IdpClaims {
             sub: self.sub,
             email: self.email,
             exp: self.exp,
+            groups: self.groups,
         })
     }
 }
@@ -180,6 +185,7 @@ mod tests {
             email: email.map(str::to_string),
             email_verified: verified,
             exp: 0,
+            groups: Vec::new(),
         }
     }
 

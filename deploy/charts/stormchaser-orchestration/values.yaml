@@ -59,6 +59,11 @@ global:
     issuer: "http://dex:5556/dex"
     externalIssuer: ""
     clientId: "stormchaser-cli"
+    # Scopes to ask for at login besides openid, profile, email and offline_access.
+    # Policy's admin_groups, author_groups and group approvers need the user's groups
+    # in the ID token; Dex sends them only for the `groups` scope. Leave empty for a
+    # provider that refuses scopes it does not know.
+    extraScopes: []
     # The client secret the API uses to exchange login codes. There is no default:
     # name a Secret (preferred) or set clientSecret, or browser login is unavailable.
     existingSecret: ""

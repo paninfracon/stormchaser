@@ -23,6 +23,10 @@ pub struct Claims {
     pub email: Option<String>,
     /// Expiration time as a Unix timestamp.
     pub exp: usize, // Expiration time
+    /// The groups the identity provider put the user in, as its verified ID token said
+    /// at login (or the last refresh). Policy grants admin and author rights by them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<String>,
 }
 
 /// Trait for executing Open Policy Agent (OPA) policies compiled to WebAssembly.

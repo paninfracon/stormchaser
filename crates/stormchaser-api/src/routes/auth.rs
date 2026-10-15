@@ -41,6 +41,34 @@ fn is_pkce_value(value: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~'))
 }
 
+/// `STORMCHASER_OIDC_EXTRA_SCOPES`: scopes to ask the identity provider for on top of
+/// `openid profile email offline_access`, separated by spaces or commas.
+///
+/// Dex puts a user's groups in the ID token only when asked for the `groups` scope, and
+/// the policy's `admin_groups`, `author_groups` and group approvers need them. Not every
+/// provider accepts that scope (some refuse a login that asks for a scope they do not
+/// know), so it is not asked for unless configured.
+pub const EXTRA_SCOPES_ENV: &str = "STORMCHASER_OIDC_EXTRA_SCOPES";
+
+/// The `scope` parameter of the authorization request, already form-encoded.
+fn login_scopes(extra: Option<&str>) -> String {
+    let mut scopes = vec!["openid", "profile", "email", "offline_access"];
+    for scope in extra
+        .unwrap_or_default()
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|s| !s.is_empty())
+    {
+        if !scopes.contains(&scope) {
+            scopes.push(scope);
+        }
+    }
+    scopes
+        .iter()
+        .map(|s| urlencoding::encode(s).into_owned())
+        .collect::<Vec<_>>()
+        .join("+")
+}
+
 #[derive(Debug, Deserialize)]
 /// Loginquery.
 pub struct LoginQuery {
@@ -110,10 +138,11 @@ pub async fn login(
     }
 
     let mut auth_url = format!(
-        "{}/auth?client_id={}&redirect_uri={}&response_type=code&scope=openid+profile+email+offline_access",
+        "{}/auth?client_id={}&redirect_uri={}&response_type=code&scope={}",
         oidc_config.external_issuer,
         oidc_config.client_id,
-        urlencoding::encode(&query.callback_url)
+        urlencoding::encode(&query.callback_url),
+        login_scopes(std::env::var(EXTRA_SCOPES_ENV).ok().as_deref())
     );
 
     if let Some(state) = &query.state {
@@ -253,8 +282,6 @@ pub async fn exchange_token(
     let identity = token_data.claims.into_claims()?;
 
     // 3. Generate Stormchaser Access Token
-    let user_id = identity.sub;
-    let email = identity.email;
 
     let expires_in = 3600;
     let expiration = SystemTime::now()
@@ -263,10 +290,13 @@ pub async fn exchange_token(
         .as_secs() as usize
         + expires_in;
 
+    // The policy reads groups from this token, so they are carried over from the
+    // provider's verified ID token
     let claims = Claims {
-        sub: user_id,
-        email,
+        sub: identity.sub,
+        email: identity.email,
         exp: expiration,
+        groups: identity.groups,
     };
 
     let jwt_secret = auth::resolve_jwt_secret().map_err(|e| {
@@ -381,8 +411,6 @@ pub async fn refresh_token(
         })?;
     let identity = token_data.claims.into_claims()?;
 
-    let user_id = identity.sub;
-    let email = identity.email;
     let expires_in = 3600;
     let expiration = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -390,10 +418,13 @@ pub async fn refresh_token(
         .as_secs() as usize
         + expires_in;
 
+    // The policy reads groups from this token, so they are carried over from the
+    // provider's verified ID token
     let claims = Claims {
-        sub: user_id,
-        email,
+        sub: identity.sub,
+        email: identity.email,
         exp: expiration,
+        groups: identity.groups,
     };
 
     let jwt_secret = auth::resolve_jwt_secret().map_err(|e| {
@@ -414,4 +445,24 @@ pub async fn refresh_token(
         token_type: "Bearer".to_string(),
         expires_in,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::login_scopes;
+
+    #[test]
+    fn extra_scopes_are_added_once_and_encoded() {
+        assert_eq!(login_scopes(None), "openid+profile+email+offline_access");
+        assert_eq!(
+            login_scopes(Some("")),
+            "openid+profile+email+offline_access"
+        );
+        assert_eq!(
+            login_scopes(Some("groups, email  federated:id")),
+            "openid+profile+email+offline_access+groups+federated%3Aid"
+        );
+        // Nothing can be smuggled into the rest of the query string
+        assert!(!login_scopes(Some("groups&prompt=none")).contains('&'));
+    }
 }

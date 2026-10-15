@@ -195,6 +195,7 @@ async fn policy_sees_the_full_request_path() {
         sub: "test-user".to_string(),
         email: Some("test-user@paninfracon.net".to_string()),
         exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
+        groups: Vec::new(),
     };
     let token = jsonwebtoken::encode(
         &jsonwebtoken::Header::default(),
@@ -229,6 +230,7 @@ async fn a_valid_token_has_a_session() {
         sub: "session-user".to_string(),
         email: Some("session-user@paninfracon.net".to_string()),
         exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
+        groups: Vec::new(),
     };
     let token = jsonwebtoken::encode(
         &jsonwebtoken::Header::default(),

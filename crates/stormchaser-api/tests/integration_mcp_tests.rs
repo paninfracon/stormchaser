@@ -78,6 +78,7 @@ fn get_token() -> String {
         sub: "test-user".to_string(),
         email: Some("test-user@paninfracon.net".to_string()),
         exp: (Utc::now() + Duration::hours(1)).timestamp() as usize,
+        groups: Vec::new(),
     };
     encode(
         &Header::default(),

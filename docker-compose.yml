@@ -283,6 +283,8 @@ services:
       OIDC_EXTERNAL_ISSUER: http://localhost:${PORT_DEX:-5556}/dex
       OIDC_CLIENT_ID: stormchaser-cli
       OIDC_CLIENT_SECRET: '${STORMCHASER_CLI_SECRET?Error: STORMCHASER_CLI_SECRET is not set}'
+      # Dex puts a user's groups in the ID token only when asked for them
+      STORMCHASER_OIDC_EXTRA_SCOPES: groups
       LOKI_URL: http://loki:3100
       OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4317
       OTEL_SERVICE_NAME: stormchaser-api

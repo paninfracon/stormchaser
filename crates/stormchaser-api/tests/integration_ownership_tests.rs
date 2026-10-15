@@ -156,6 +156,7 @@ fn bearer(email: &str) -> String {
         sub: format!("sub-of-{email}"),
         email: Some(email.to_string()),
         exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
+        groups: Vec::new(),
     };
     let token = jsonwebtoken::encode(
         &jsonwebtoken::Header::default(),

@@ -75,6 +75,8 @@ struct IdTokenClaims {
     exp: usize,
     aud: String,
     iss: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    groups: Vec<String>,
 }
 
 fn create_id_token(issuer: &str, client_id: &str) -> String {
@@ -92,11 +94,21 @@ fn create_id_token_verified(issuer: &str, client_id: &str, verified: Option<bool
         exp: (Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
         aud: client_id.to_string(),
         iss: issuer.to_string(),
+        groups: vec!["platform-admins".to_string(), "developers".to_string()],
     };
 
     let (pem, _) = get_test_keys();
     let key = EncodingKey::from_rsa_pem(pem.as_bytes()).unwrap();
     encode(&header, &claims, &key).unwrap()
+}
+
+/// The groups in the payload of a token Stormchaser issued.
+fn groups_in(body: &serde_json::Value) -> serde_json::Value {
+    let token = body["access_token"].as_str().unwrap();
+    let payload = token.split('.').nth(1).unwrap();
+    let claims: serde_json::Value =
+        serde_json::from_slice(&URL_SAFE_NO_PAD.decode(payload).unwrap()).unwrap();
+    claims["groups"].clone()
 }
 
 async fn setup_app(mock_server_url: String) -> Option<axum::Router> {
@@ -344,6 +356,8 @@ async fn test_auth_exchange_success() {
         "dummy-refresh-token"
     );
     assert_eq!(body.get("token_type").unwrap().as_str().unwrap(), "Bearer");
+    // The provider's groups reach the policy through the token Stormchaser issues
+    assert_eq!(groups_in(&body), json!(["platform-admins", "developers"]));
 }
 
 #[tokio::test]
@@ -443,6 +457,7 @@ async fn test_auth_refresh_success() {
         "new-dummy-refresh-token"
     );
     assert_eq!(body.get("token_type").unwrap().as_str().unwrap(), "Bearer");
+    assert_eq!(groups_in(&body), json!(["platform-admins", "developers"]));
 }
 
 #[tokio::test]
@@ -583,6 +598,7 @@ async fn test_auth_exchange_no_kid() {
         exp: (Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
         aud: "test-client".to_string(),
         iss: mock_server.uri().to_string(),
+        groups: Vec::new(),
     };
     let key = EncodingKey::from_rsa_pem(get_test_keys().0.as_bytes()).unwrap();
     let token = encode(&header, &claims, &key).unwrap();
@@ -735,6 +751,7 @@ async fn test_auth_exchange_invalid_signature() {
         exp: (Utc::now() - chrono::Duration::hours(1)).timestamp() as usize,
         aud: "test-client".to_string(),
         iss: mock_server.uri().to_string(),
+        groups: Vec::new(),
     };
     let key = EncodingKey::from_rsa_pem(get_test_keys().0.as_bytes()).unwrap();
     let token = encode(&header, &claims, &key).unwrap();
@@ -904,6 +921,7 @@ async fn test_auth_refresh_no_kid() {
         exp: (Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
         aud: "test-client".to_string(),
         iss: mock_server.uri().to_string(),
+        groups: Vec::new(),
     };
     let key = EncodingKey::from_rsa_pem(get_test_keys().0.as_bytes()).unwrap();
     let token = encode(&header, &claims, &key).unwrap();
@@ -1048,6 +1066,7 @@ async fn test_auth_refresh_invalid_signature() {
         exp: (Utc::now() - chrono::Duration::hours(1)).timestamp() as usize, // Expired
         aud: "test-client".to_string(),
         iss: mock_server.uri().to_string(),
+        groups: Vec::new(),
     };
     let key = EncodingKey::from_rsa_pem(get_test_keys().0.as_bytes()).unwrap();
     let token = encode(&header, &claims, &key).unwrap();

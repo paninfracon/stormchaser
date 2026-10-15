@@ -82,6 +82,10 @@ spec:
             {{- end }}
             - name: OIDC_CLIENT_ID
               value: {{ .Values.global.oidc.clientId | quote }}
+            {{- with .Values.global.oidc.extraScopes }}
+            - name: STORMCHASER_OIDC_EXTRA_SCOPES
+              value: {{ join " " . | quote }}
+            {{- end }}
             {{- if .Values.global.oidc.existingSecret }}
             - name: OIDC_CLIENT_SECRET
               valueFrom:

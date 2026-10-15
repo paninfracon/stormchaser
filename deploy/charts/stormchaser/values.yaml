@@ -42,6 +42,8 @@ stormchaser-orchestration:
       issuer: "http://dex:5556/dex"
       externalIssuer: "http://localhost:5556/dex"
       clientId: "stormchaser-cli"
+      # The bundled Dex sends groups only when asked; see the orchestration chart
+      extraScopes: ["groups"]
       # The client secret the API uses to exchange login codes. There is no default:
       # name a Secret (preferred) or set clientSecret, or browser login is unavailable.
       existingSecret: ""
