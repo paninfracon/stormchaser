@@ -93,6 +93,13 @@ fn apply_step_attributes(
             }
             "timeout" => step.timeout = Some(expr_to_string(attr.expr())?),
             "artifacts" => step.artifacts = Some(expr_to_string_vec(attr.expr())?),
+            // `spec = { ... }` means the same as a `spec { ... }` block
+            "spec" => match expr_to_value(attr.expr())? {
+                Value::Object(fields) => spec_map.extend(fields),
+                other => {
+                    spec_map.insert("spec".to_string(), other);
+                }
+            },
             _ => {
                 spec_map.insert(attr.key().to_string(), expr_to_value(attr.expr())?);
             }

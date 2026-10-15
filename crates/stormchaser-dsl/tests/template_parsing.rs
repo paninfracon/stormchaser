@@ -96,3 +96,42 @@ fn test_parse_terraform_pipeline() {
         .expect("Failed to parse terraform-pipeline.storm");
     assert!(!workflow.steps.is_empty());
 }
+
+#[test]
+fn test_spec_attribute_means_the_same_as_spec_block() {
+    let dsl = r#"
+        stormchaser_dsl_version = "0.1"
+        workflow "spec_forms" {
+            step_library "notify_base" {
+                type = "WebhookInvoke"
+                spec = {
+                    method = "PUT"
+                }
+            }
+
+            steps {
+                step "as_attribute" "WebhookInvoke" {
+                    spec = {
+                        url = "https://paninfracon.net/hook"
+                    }
+                }
+                step "as_block" "WebhookInvoke" {
+                    spec {
+                        url = "https://paninfracon.net/hook"
+                    }
+                }
+            }
+        }
+    "#;
+
+    let workflow = StormchaserParser::new()
+        .parse(dsl)
+        .expect("Failed to parse DSL");
+
+    assert_eq!(workflow.step_libraries[0].spec["method"], "PUT");
+    assert_eq!(workflow.steps[0].spec, workflow.steps[1].spec);
+    assert_eq!(
+        workflow.steps[0].spec,
+        serde_json::json!({ "url": "https://paninfracon.net/hook" })
+    );
+}

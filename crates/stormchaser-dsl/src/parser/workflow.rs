@@ -312,6 +312,12 @@ fn parse_step_library_block(block: &Block) -> Result<dsl::StepLibrary> {
                     allow_failure = Some(b);
                 }
             }
+            // `spec = { ... }` means the same as a `spec { ... }` block
+            "spec" => {
+                if let Value::Object(fields) = expr_to_value(attr.expr())? {
+                    spec_map.extend(fields);
+                }
+            }
             _ => {}
         }
     }
