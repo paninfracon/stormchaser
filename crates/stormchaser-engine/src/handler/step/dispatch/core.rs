@@ -198,12 +198,6 @@ pub async fn dispatch_step_instance(
         .and_then(|a| a.as_str())
     {
         if affinity_context == "shared" {
-            let backend = if step_type == "k8s_job" {
-                "k8s"
-            } else {
-                "docker"
-            };
-
             // Check whether a runner has already been established for this affinity group.
             let mut maybe_runner_id =
                 crate::db::get_affinity_runner_id(&pool, run_id, affinity_context)
@@ -235,9 +229,21 @@ pub async fn dispatch_step_instance(
                 }
             }
 
+            // The group's steps go to the runner its first step landed on, on the subject
+            // for that runner's kind: a container step can land on a Kubernetes runner too.
             if let Some(runner_id) = maybe_runner_id {
-                subject =
-                    NatsSubject::Custom(format!("stormchaser.v1.runner.{}.{}", backend, runner_id));
+                match crate::db::get_runner(&pool, &runner_id).await {
+                    Ok(Some(runner)) if matches!(runner.runner_type.as_str(), "k8s" | "docker") => {
+                        subject = NatsSubject::Custom(format!(
+                            "stormchaser.v1.runner.{}.{}",
+                            runner.runner_type, runner_id
+                        ));
+                    }
+                    _ => tracing::warn!(
+                        "Affinity runner {} for run {} is not a known runner; dispatching step {} to any runner",
+                        runner_id, run_id, step_instance_id
+                    ),
+                }
             }
         }
     }
