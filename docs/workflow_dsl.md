@@ -89,7 +89,8 @@ If the checksum is missing or mismatched, the workflow compilation will fail dur
     inputs { ... }
     outputs { ... }
 
-    // Resource Quotas: Define limits for the entire workflow execution
+    // Resource Quotas: Define limits for the entire workflow execution, held to the
+    // operator's ceilings (see docs/quotas.md)
     quotas {
         // ... (existing quotas)
     }
@@ -165,6 +166,8 @@ When the TUI or Web UI shows a run form, the Query microservice resolves these q
 
 * `POST /api/v1/schema/hydrate` takes `connection`, `workflow_path`, `git_ref` and `inputs`, and reads the workflow from that Git connection's repository. The caller must be allowed to use the connection.
 * `POST /api/v1/schema/hydrate-direct` takes `dsl` (the workflow text) and `inputs`, for direct runs. Whoever calls it is choosing the queries, so policy can refuse it to users who may run workflows but not write them (see `author_groups` in [OPA RBAC](opa-rbac.md)).
+
+A user may have 4 hydrations in flight and the service 64 in all (`STORMCHASER_QUERY_MAX_HYDRATIONS_PER_USER`, `STORMCHASER_QUERY_MAX_HYDRATIONS`); one more is refused with `429 Too Many Requests`. Each hydration runs at most 8 of its queries at once.
 
 ##### Mock Data
 

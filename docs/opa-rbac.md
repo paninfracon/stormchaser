@@ -50,7 +50,11 @@ A resource question looks like this:
 }
 ```
 
-`action` is `read`, `update`, `delete` or `use`. `resource.type` is `run`,
+`action` is `read`, `update`, `delete`, `use` or `make_default`. `make_default` is
+asked when a request makes a connection the default storage backend
+(`is_default_sfs`), which receives the files, artifacts and test reports of every
+run that names no backend of its own; grant it to admins only. The shipped policy
+does, once any admin is configured. `resource.type` is `run`,
 `connection`, `webhook`, `event_rule` or `cron_workflow`. `resource.owner` is
 `null` for objects created before ownership was recorded. `subject` is the
 identity the API verified; when the engine asks on a run's behalf, both of its

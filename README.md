@@ -183,11 +183,16 @@ pip3 install 'passlib[bcrypt]'
    step is handled internally by the script, so there is no need to run it
    separately before or after.
 
-3. **Run a test workflow:**
+3. **Log in and list runs:**
 
    ```bash
-   ./run-cli.sh run tests/hello-world.storm
+   cargo run -p stormchaser-cli -- --url http://localhost:3000 login
+   cargo run -p stormchaser-cli -- --url http://localhost:3000 runs list
    ```
+
+   `run-cli.sh` does the second with a token you have already exported as
+   `STORMCHASER_TOKEN`. Pass tokens in the environment or a profile, never as
+   an argument, where other users on the host can read them.
 
 4. **Monitor with the TUI or Web UI:**
 

@@ -79,7 +79,7 @@ The `.dockerignore` should include exactly these lines for Git:
 
 Ensure that `vergen-gitcl` is listed in `[build-dependencies]` and a `build.rs` driving `vergen_gitcl::Emitter` exists for all crates that need to embed version info (including runners and the agent).
 
-The builder stage of `Dockerfile` and `Dockerfile.web` must use a Rust image that satisfies the workspace `rust-version` (currently `rust:1.96-slim-bookworm`). Raise both together whenever `rust-version` in the root `Cargo.toml` changes.
+The builder stage of `Dockerfile` and `Dockerfile.web` must use a Rust image that satisfies the workspace `rust-version` (currently `rust:1.96-slim-bookworm`). Raise both together whenever `rust-version` in the root `Cargo.toml` changes. Base images are pinned by digest beside the tag (`rust:1.96-slim-bookworm@sha256:...`); when changing the tag, take the new digest from `docker buildx imagetools inspect <image>:<tag>`. Dependabot moves the digests as the tags are rebuilt.
 
 ## 3. Manual Release Contingency Plan
 

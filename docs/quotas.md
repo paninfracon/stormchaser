@@ -19,6 +19,27 @@ workflow "DataProcessingPipeline" {
 }
 ```
 
+A run started from workflow text (a direct run) takes its quotas from this block.
+A run queued from a repository, a webhook rule or a cron schedule gets fixed quotas:
+concurrency 10, CPU `1`, memory `4Gi`, storage `10Gi` and timeout `1h`, or the
+`overrides.timeout` of the `POST /api/v1/runs` request.
+
+### Operator ceilings
+
+Quotas are chosen by whoever writes or starts the run, so on their own they limit
+nothing. The engine (and, for the timeout override, the API) holds them to ceilings
+the operator sets. A run that asks for more gets the ceiling, and a warning is logged.
+
+| Ceiling | Default | Environment variable |
+| :--- | :--- | :--- |
+| `max_concurrency` | 50 | `STORMCHASER_RUN_MAX_CONCURRENCY` |
+| `max_cpu` | `64` | `STORMCHASER_RUN_MAX_CPU` |
+| `max_memory` | `256Gi` | `STORMCHASER_RUN_MAX_MEMORY` |
+| `timeout` | `24h` | `STORMCHASER_RUN_MAX_TIMEOUT` |
+
+What one step may use is limited separately, by each runner (see
+[What one step may use](security.md#what-one-step-may-use)).
+
 ## How Quotas Are Enforced
 
 The Stormchaser Engine enforces quotas using a central, database-backed tracking system to ensure consistency even in a distributed, multi-controller deployment.
@@ -72,5 +93,5 @@ The `max_storage` limit applies to the Shared File System (SFS). Enforcement of 
 ## Best Practices
 
 * **Always Define Quotas:** It is highly recommended to define baseline quotas for all production workflows to prevent accidental runaway processes, especially when using dynamic features like `iterate` (Map/Reduce).
-* **Step Granularity:** Be explicit about the CPU and Memory requirements of individual steps. If a step does not declare its requirements, it is assumed to require 0 CPU and 0 Memory for quota calculation purposes, which bypasses the aggregate limits and could lead to cluster resource exhaustion.
+* **Step Granularity:** Be explicit about the CPU and Memory requirements of individual steps. If a step does not declare its requirements, it counts as 0 CPU and 0 Memory against the run's quota, so only `max_concurrency` bounds how many such steps run at once. When it runs, the runner gives it its default CPU and memory (1 core and `2Gi` unless the operator changed them).
 * **Balancing Concurrency and Resources:** Use `max_concurrency` to limit API rate limits or connection pools, and use `max_cpu`/`max_memory` to limit compute resource consumption.

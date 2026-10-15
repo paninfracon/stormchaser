@@ -58,14 +58,14 @@ Run the dispatcher script:
 Use the CLI to monitor the run:
 
 ```bash
-# Get a token
-TOKEN="<your-cli-token>"
+# Get a token (in the environment, not on the command line, where other users can read it)
+export STORMCHASER_TOKEN="<your-cli-token>"
 
 # List runs to find the latest ID
-RUN_ID=$(./target/debug/stormchaser-cli --token "$TOKEN" runs list | jq -r '.[0].id')
+RUN_ID=$(./target/debug/stormchaser-cli runs list | jq -r '.[0].id')
 
 # Inspect the run details
-./target/debug/stormchaser-cli --token "$TOKEN" runs get "$RUN_ID"
+./target/debug/stormchaser-cli runs get "$RUN_ID"
 ```
 
 ## Observability & Debugging

@@ -101,7 +101,8 @@ See [Workflow DSL](workflow_dsl.md) for details on specifying cron schedules in 
   * **SFS Coordination (Parking):** When a step requiring `storage` is
         scheduled, the Controller:
 
-    1. Identifies the default SFS storage backend (S3-compatible).
+    1. Identifies the default SFS storage backend (S3-compatible), which only
+        an admin may choose.
     2. Generates short-lived **Pre-signed URLs** for both GET (unparking)
         and PUT (parking) operations.
     3. Retrieves the **Cryptographic Hash** (SHA-256) of the last parked
@@ -289,8 +290,8 @@ management system:
 1. **Quota Tracking:** The Control Plane tracks the "In-Flight Resource
     Consumption" for every active run in PostgreSQL.
 2. **Validation (Pre-Execution):** Before initiating a run, the Controller
-    verifies that the requested `quotas` comply with the organizational policy
-    stored in OPA.
+    holds the requested `quotas` to the ceilings the operator sets
+    (`STORMCHASER_RUN_MAX_*`, see [quotas.md](quotas.md)).
 3. **Active Enforcement:**
 
     * **Concurrency Limits:** The Controller uses NATS JetStream "pull
