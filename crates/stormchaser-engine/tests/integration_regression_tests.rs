@@ -337,3 +337,82 @@ async fn test_workflow_step_completion_dispatches_next_step() {
         .await
         .unwrap();
 }
+
+/// A step that asks for more CPU than its whole run may use can never be dispatched. It
+/// is reported failed, rather than left pending until the run times out.
+#[tokio::test]
+async fn test_a_step_bigger_than_its_run_quota_fails() {
+    use futures::StreamExt;
+
+    let pool = setup_db().await;
+    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
+
+    let run_id = RunId::new_v4();
+    sqlx::query("INSERT INTO workflow_runs (id, workflow_name, initiating_user, status, fencing_token, repo_url, workflow_path, git_ref) VALUES ($1, $2, 'test', 'running', $3, 'http://example.com', 'test.storm', 'main')")
+        .bind(run_id)
+        .bind(format!("test-quota-{}", run_id))
+        .bind(chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0))
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO run_quotas (run_id, max_concurrency, max_cpu, max_memory, max_storage, timeout) VALUES ($1, 10, '1', '4Gi', '10Gi', '1h')")
+        .bind(run_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let step_id = Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO step_instances (id, run_id, step_name, step_type, status, spec, params, created_at)
+        VALUES ($1, $2, 'build', 'RunContainer', 'pending', $3, $4, NOW())
+        "#,
+    )
+    .bind(step_id)
+    .bind(run_id)
+    .bind(json!({"image": "alpine", "cpu": "8", "memory": "2Gi"}))
+    .bind(json!({}))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let mut failures = nats_client
+        .subscribe("stormchaser.v1.*.step.failed")
+        .await
+        .unwrap();
+
+    handler::dispatch_pending_steps(
+        run_id,
+        pool.clone(),
+        nats_client.clone(),
+        Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
+    )
+    .await
+    .unwrap();
+
+    let error = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while let Some(msg) = failures.next().await {
+            let event: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+            if event["data"]["step_id"] == json!(step_id) {
+                return event["data"]["error"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
+            }
+        }
+        String::new()
+    })
+    .await
+    .expect("the step was not reported failed");
+    assert!(
+        error.contains("more than its run may use"),
+        "unexpected error: {error}"
+    );
+
+    sqlx::query("DELETE FROM workflow_runs WHERE id = $1")
+        .bind(run_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+}

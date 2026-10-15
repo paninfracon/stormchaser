@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::Utc;
 use sqlx::PgPool;
 use stormchaser_model::events::{
-    EventSource, EventType, SchemaVersion, StepCompletedEvent, StepEventType,
+    EventSource, EventType, SchemaVersion, StepCompletedEvent, StepEventType, StepFailedEvent,
 };
 use stormchaser_model::nats::{compute_shard_id, publish_cloudevent, NatsSubject};
 use stormchaser_model::{Connection, RunId, StepInstanceId};
@@ -74,6 +74,45 @@ pub async fn publish_step_completed_event(
         &js,
         NatsSubject::StepCompleted(Some(compute_shard_id(&run_id))),
         EventType::Step(StepEventType::Completed),
+        EventSource::System,
+        serde_json::to_value(event)?,
+        Some(SchemaVersion::new("1.0".to_string())),
+        None,
+    )
+    .await?;
+    Ok(())
+}
+
+/// Publishes a StepFailedEvent to NATS for the given step.
+pub async fn publish_step_failed_event(
+    run_id: RunId,
+    step_id: StepInstanceId,
+    fencing_token: i64,
+    error: String,
+    pool: &PgPool,
+    nats_client: async_nats::Client,
+) -> Result<()> {
+    let event = StepFailedEvent {
+        run_id,
+        step_id,
+        fencing_token,
+        completion_token: crate::db::step_completion_token(pool, step_id).await,
+        event_type: EventType::Step(StepEventType::Failed),
+        error,
+        runner_id: None,
+        exit_code: None,
+        storage_hashes: None,
+        artifacts: None,
+        test_reports: None,
+        outputs: None,
+        timestamp: Utc::now(),
+    };
+
+    let js = async_nats::jetstream::new(nats_client);
+    publish_cloudevent(
+        &js,
+        NatsSubject::StepFailed(Some(compute_shard_id(&run_id))),
+        EventType::Step(StepEventType::Failed),
         EventSource::System,
         serde_json::to_value(event)?,
         Some(SchemaVersion::new("1.0".to_string())),
