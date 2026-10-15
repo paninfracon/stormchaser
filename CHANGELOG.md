@@ -62,6 +62,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The umbrella chart's MinIO settings took effect. They were nested one level too deep (`minio.minio`), so the MinIO chart ignored all of them: its user was `admin` rather than `stormchaser`, it kept its data on a PersistentVolumeClaim instead of none, and the ephemeral-storage limits were not set. `scripts/dogfood-k8s.sh` reads the MinIO user from its Secret, as it does the password. **Upgrade impact:** on upgrade, MinIO's user becomes `stormchaser` and its PersistentVolumeClaim is no longer used, so the objects in it are no longer served. Storage connections registered with the user `admin` need it changed.
+
 - The Docker runner no longer starts the container of a run that was cancelled while its image was being pulled. The cancellation looked for the run's containers again only 5 and 30 seconds later, so a slower pull started a step nobody would read. A step now checks for cancellation after the pull, and again once its container has started.
 - The dispatch and dogfood scripts pass the NATS password, API token and secret run inputs through the environment, stdin or file descriptors instead of command lines, where other local users could read them. `scripts/get_token.py` takes `API_URL` and trusts `STORMCHASER_CA_CERT`, which fixes the Kubernetes smoke test's OIDC check against the HTTPS API.
 
