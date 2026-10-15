@@ -177,14 +177,8 @@ pub async fn use_approval_link(
         }),
         _ => None,
     };
-    if let Err((status, message)) = check_approval_opa(
-        state,
-        payload.run_id,
-        &step.step_name,
-        approver.as_ref(),
-        None,
-    )
-    .await
+    if let Err((status, message)) =
+        check_approval_opa(state, payload.run_id, &step.step_name, approver.as_ref()).await
     {
         return (status, message).into_response();
     }

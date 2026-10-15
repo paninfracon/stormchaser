@@ -237,7 +237,6 @@ async fn test_approve_step_success() {
             exp: 0,
             groups: Vec::new(),
         }),
-        axum::http::HeaderMap::new(),
         Path((run_id, step_id)),
         Json(json!({"approved": true})),
     )
@@ -262,7 +261,6 @@ async fn test_reject_step_success() {
             exp: 0,
             groups: Vec::new(),
         }),
-        axum::http::HeaderMap::new(),
         Path((run_id, step_id)),
     )
     .await;
@@ -286,7 +284,6 @@ async fn a_wait_step_cannot_be_approved() {
             exp: 0,
             groups: Vec::new(),
         }),
-        axum::http::HeaderMap::new(),
         Path((run_id, step_id)),
         Json(json!({"approved": true})),
     )

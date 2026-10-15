@@ -2,8 +2,8 @@
 //!
 //! Connections hold credentials, and a workflow refers to one by name. Before the engine
 //! uses a connection on a run's behalf it asks policy, as the user the run acts for
-//! (whoever started it, or whoever created the schedule or rule that did). As with every
-//! policy check, nothing is enforced when no policy engine is configured.
+//! (whoever started it, or whoever created the schedule or rule that did). Nothing is
+//! enforced only in a debug build started with `STORMCHASER_AUTHZ_DISABLED=true`.
 
 use anyhow::{bail, Context, Result};
 use sqlx::PgPool;
@@ -47,8 +47,8 @@ pub async fn ensure_user_may_use(pool: &PgPool, user: &str, connection: &Connect
             subject: OpaSubject {
                 sub: user,
                 email: Some(user),
+                groups: &[],
             },
-            token: None,
         })
         .await
         .context("Policy check for connection use failed")?;

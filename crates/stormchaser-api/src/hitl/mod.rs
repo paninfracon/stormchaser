@@ -3,7 +3,7 @@ use crate::AppState;
 
 use axum::{
     extract::{Path, State},
-    http::{header::AUTHORIZATION, HeaderMap, StatusCode},
+    http::StatusCode,
     response::IntoResponse,
     Json,
 };
@@ -27,7 +27,6 @@ use crate::db::{
 };
 use async_nats::jetstream::new as new_jetstream;
 use chrono::Utc;
-use stormchaser_model::auth::OpaSubject;
 use stormchaser_model::dsl::{Step, Workflow};
 use stormchaser_model::nats::{publish_cloudevent, NatsSubject};
 
@@ -36,7 +35,6 @@ pub(super) async fn check_approval_opa(
     run_id: RunId,
     step_name: &str,
     approver: Option<&Claims>,
-    token: Option<&str>,
 ) -> Result<(), (StatusCode, String)> {
     if !state.opa.is_configured() {
         return Ok(());
@@ -85,11 +83,7 @@ pub(super) async fn check_approval_opa(
             step_ast,
             inputs: context_data.run_inputs,
             run_outputs: Value::Object(run_outputs_map),
-            approver: approver.map(|claims| OpaSubject {
-                sub: &claims.sub,
-                email: claims.email.as_deref(),
-            }),
-            token,
+            approver: approver.map(Claims::opa_subject),
         };
 
         match state.opa.check_approval(opa_context).await {
@@ -157,11 +151,10 @@ pub(crate) async fn resolve_fencing_token_or_response(
 pub async fn approve_step(
     State(state): State<AppState>,
     AuthClaims(claims): AuthClaims,
-    headers: HeaderMap,
     Path((run_id, step_id)): Path<(RunId, StepInstanceId)>,
     Json(inputs): Json<Value>,
 ) -> impl IntoResponse {
-    if let Err(r) = validate_approval_state(&state, run_id, step_id, &claims, &headers).await {
+    if let Err(r) = validate_approval_state(&state, run_id, step_id, &claims).await {
         return *r;
     }
 
@@ -217,10 +210,9 @@ pub async fn approve_step(
 pub async fn reject_step(
     State(state): State<AppState>,
     AuthClaims(claims): AuthClaims,
-    headers: HeaderMap,
     Path((run_id, step_id)): Path<(RunId, StepInstanceId)>,
 ) -> impl IntoResponse {
-    if let Err(r) = validate_approval_state(&state, run_id, step_id, &claims, &headers).await {
+    if let Err(r) = validate_approval_state(&state, run_id, step_id, &claims).await {
         return *r;
     }
 
@@ -372,16 +364,11 @@ async fn validate_approval_state(
     run_id: RunId,
     step_id: StepInstanceId,
     approver: &Claims,
-    headers: &HeaderMap,
 ) -> Result<(), Box<axum::response::Response>> {
     let step = verify_step_for_approval(&state.pool, run_id, step_id).await?;
-    let token = headers
-        .get(AUTHORIZATION)
-        .and_then(|h| h.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer "));
 
     if let Err((status, msg)) =
-        check_approval_opa(state, run_id, &step.step_name, Some(approver), token).await
+        check_approval_opa(state, run_id, &step.step_name, Some(approver)).await
     {
         return Err(Box::new((status, msg).into_response()));
     }

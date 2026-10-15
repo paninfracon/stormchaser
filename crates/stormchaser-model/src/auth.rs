@@ -29,6 +29,17 @@ pub struct Claims {
     pub groups: Vec<String>,
 }
 
+impl Claims {
+    /// The user these claims identify, as policy sees them.
+    pub fn opa_subject(&self) -> OpaSubject<'_> {
+        OpaSubject {
+            sub: &self.sub,
+            email: self.email.as_deref(),
+            groups: &self.groups,
+        }
+    }
+}
+
 /// Trait for executing Open Policy Agent (OPA) policies compiled to WebAssembly.
 #[cfg(not(target_arch = "wasm32"))]
 #[async_trait]
@@ -122,7 +133,9 @@ impl OpaClient {
         // 2. Fallback to HTTP OPA if configured
         let url = match &self.url {
             Some(url) => url,
-            None => return Ok(true), // No-op if not configured
+            // Only a client built with no policy, which services refuse to start with
+            // outside debug builds (see `stormchaser_opa::policy_client`)
+            None => return Ok(true),
         };
 
         debug!("Checking OPA policy at {} with custom context", url);
@@ -191,8 +204,8 @@ pub struct ApiOpaContext<'a> {
     pub path: &'a str,
     /// The HTTP method.
     pub method: &'a str,
-    /// The optional authentication token.
-    pub token: Option<&'a str>,
+    /// Who is asking, as their verified token says. `None` without a valid token.
+    pub subject: Option<OpaSubject<'a>>,
 }
 
 /// Context for OPA checks in the Engine after DSL parsing
@@ -222,8 +235,6 @@ pub struct ApprovalOpaContext<'a> {
     pub run_outputs: Value,
     /// The approver's verified identity, when they are logged in.
     pub approver: Option<OpaSubject<'a>>,
-    /// The optional authentication token of the approver.
-    pub token: Option<&'a str>,
 }
 
 /// A user as policy sees them: the identity the API verified from their token.
@@ -233,6 +244,8 @@ pub struct OpaSubject<'a> {
     pub sub: &'a str,
     /// Email address, when the token carries one.
     pub email: Option<&'a str>,
+    /// The identity provider's groups, as the token carries them.
+    pub groups: &'a [String],
 }
 
 /// The object a resource check is about.
@@ -257,8 +270,6 @@ pub struct ResourceOpaContext<'a> {
     pub resource: OpaResource<'a>,
     /// Who is acting.
     pub subject: OpaSubject<'a>,
-    /// The caller's token, for policies that read further claims such as groups.
-    pub token: Option<&'a str>,
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

@@ -14,12 +14,8 @@ mock_data := {
 	"allowed_email_domains": ["paninfracon.net"],
 }
 
-# Helper to mock a JWT token without having to sign a real one
-mock_token(email, groups) := io.jwt.encode_sign(
-	{"alg": "HS256", "typ": "JWT"},
-	{"email": email, "groups": groups},
-	{"kty": "oct", "k": "c2VjcmV0"},
-)
+# A user as the API describes them to policy, from their verified token
+user(email, groups) := {"sub": email, "email": email, "groups": groups}
 
 # --- Tests ---
 
@@ -27,7 +23,7 @@ test_admin_can_access_anything if {
 	allow with input as {
 		"method": "DELETE",
 		"path": "/api/v1/critical-system",
-		"token": mock_token("admin@paninfracon.net", ["Okta-Global-Admins"]),
+		"subject": user("admin@paninfracon.net", ["Okta-Global-Admins"]),
 	}
 		with data.role_mappings as mock_data.role_mappings
 		with data.allowed_email_domains as mock_data.allowed_email_domains
@@ -37,7 +33,7 @@ test_developer_can_start_run if {
 	allow with input as {
 		"method": "POST",
 		"path": "/api/v1/runs",
-		"token": mock_token("dev@paninfracon.net", ["Okta-Engineering"]),
+		"subject": user("dev@paninfracon.net", ["Okta-Engineering"]),
 	}
 		with data.role_mappings as mock_data.role_mappings
 		with data.allowed_email_domains as mock_data.allowed_email_domains
@@ -47,7 +43,7 @@ test_developer_cannot_delete_webhooks if {
 	not allow with input as {
 		"method": "DELETE",
 		"path": "/api/v1/webhooks/123",
-		"token": mock_token("dev@paninfracon.net", ["Okta-Engineering"]),
+		"subject": user("dev@paninfracon.net", ["Okta-Engineering"]),
 	}
 		with data.role_mappings as mock_data.role_mappings
 		with data.allowed_email_domains as mock_data.allowed_email_domains
@@ -57,7 +53,7 @@ test_invalid_domain_is_rejected if {
 	not allow with input as {
 		"method": "POST",
 		"path": "/api/v1/runs",
-		"token": mock_token("hacker@evil.com", ["Okta-Global-Admins"]), # Has admin group, but wrong domain
+		"subject": user("hacker@evil.com", ["Okta-Global-Admins"]), # Has admin group, but wrong domain
 	}
 		with data.role_mappings as mock_data.role_mappings
 		with data.allowed_email_domains as mock_data.allowed_email_domains
@@ -68,7 +64,7 @@ test_sod_approval_denied if {
 		"initiating_user": "dev@paninfracon.net",
 		"inputs": {"env": "staging"},
 		"step_ast": {"name": "approve", "params": {}},
-		"token": mock_token("dev@paninfracon.net", ["Okta-Global-Admins"]),
+		"approver": user("dev@paninfracon.net", ["Okta-Global-Admins"]),
 	}
 		with data.role_mappings as mock_data.role_mappings
 		with data.allowed_email_domains as mock_data.allowed_email_domains
@@ -79,7 +75,7 @@ test_sod_approval_allowed if {
 		"initiating_user": "dev@paninfracon.net",
 		"inputs": {"env": "staging"},
 		"step_ast": {"name": "approve", "params": {}},
-		"token": mock_token("admin@paninfracon.net", ["Okta-Global-Admins"]),
+		"approver": user("admin@paninfracon.net", ["Okta-Global-Admins"]),
 	}
 		with data.role_mappings as mock_data.role_mappings
 		with data.allowed_email_domains as mock_data.allowed_email_domains
@@ -90,7 +86,7 @@ test_production_approval_denied_if_not_lead if {
 		"initiating_user": "dev@paninfracon.net",
 		"inputs": {"env": "production"},
 		"step_ast": {"name": "approve", "params": {}},
-		"token": mock_token("operator@paninfracon.net", ["Okta-DevOps"]),
+		"approver": user("operator@paninfracon.net", ["Okta-DevOps"]),
 	}
 		with data.role_mappings as mock_data.role_mappings
 		with data.allowed_email_domains as mock_data.allowed_email_domains
@@ -101,7 +97,7 @@ test_production_approval_allowed_if_lead if {
 		"initiating_user": "dev@paninfracon.net",
 		"inputs": {"env": "production"},
 		"step_ast": {"name": "approve", "params": {}},
-		"token": mock_token("lead@paninfracon.net", ["Okta-SRE-Leads"]),
+		"approver": user("lead@paninfracon.net", ["Okta-SRE-Leads"]),
 	}
 		with data.role_mappings as mock_data.role_mappings
 		with data.allowed_email_domains as mock_data.allowed_email_domains
@@ -112,8 +108,7 @@ test_production_approval_allowed_if_lead if {
 resource_request(action, type, owner, email, groups) := {
 	"action": action,
 	"resource": {"type": type, "id": "1", "owner": owner},
-	"subject": {"sub": "some-id", "email": email},
-	"token": mock_token(email, groups),
+	"subject": {"sub": "some-id", "email": email, "groups": groups},
 }
 
 test_owner_can_delete_own_run if {
@@ -144,12 +139,11 @@ test_admin_can_change_any_object if {
 }
 
 test_connections_are_usable_by_any_run_but_not_changeable if {
-	# The engine asks on a run's behalf, with no token
+	# The engine asks on a run's behalf, knowing the user only by name
 	allow with input as {
 		"action": "use",
 		"resource": {"type": "connection", "id": "prod-db", "owner": "admin@paninfracon.net"},
 		"subject": {"sub": "dev@paninfracon.net", "email": "dev@paninfracon.net"},
-		"token": null,
 	}
 		with data.role_mappings as mock_data.role_mappings
 		with data.allowed_email_domains as mock_data.allowed_email_domains
@@ -171,14 +165,14 @@ test_anyone_in_the_domain_may_check_their_session if {
 	allow with input as {
 		"method": "GET",
 		"path": "/api/v1/auth/session",
-		"token": mock_token("dev@paninfracon.net", ["Okta-Engineering"]),
+		"subject": user("dev@paninfracon.net", ["Okta-Engineering"]),
 	}
 		with data.role_mappings as mock_data.role_mappings
 		with data.allowed_email_domains as mock_data.allowed_email_domains
 	not allow with input as {
 		"method": "GET",
 		"path": "/api/v1/auth/session",
-		"token": mock_token("dev@example.com", ["Okta-Engineering"]),
+		"subject": user("dev@example.com", ["Okta-Engineering"]),
 	}
 		with data.role_mappings as mock_data.role_mappings
 		with data.allowed_email_domains as mock_data.allowed_email_domains

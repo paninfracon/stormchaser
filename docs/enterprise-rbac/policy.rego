@@ -4,12 +4,16 @@ import rego.v1
 
 default allow := false
 
-# Handle JWT decoding safely: guard against a null/absent token (e.g. EngineContext)
-# before calling io.jwt.decode, which would raise a built-in type error on null input.
-token_payload := payload if {
-	input.token != null
-	[_, payload, _] := io.jwt.decode(input.token)
-} else := {"groups": [], "email": ""}
+# Who is asking: the identity the API verified from their token, {sub, email, groups}.
+# Requests and resource questions carry it as `subject`, approvals as `approver`. The
+# token itself is never sent.
+nobody := {"groups": [], "email": ""}
+
+caller := object.union(nobody, input.subject) if {
+	is_object(input.subject)
+} else := object.union(nobody, input.approver) if {
+	is_object(input.approver)
+} else := nobody
 
 # --- Core Authorization Logic ---
 
@@ -37,10 +41,10 @@ allow if {
 }
 
 allow if {
-	# 4. Check if it's an Approval request (has step_ast, inputs, token, initiating_user)
+	# 4. Check if it's an Approval request (has step_ast, inputs, approver, initiating_user)
 	input.step_ast
 	input.inputs
-	input.token
+	input.approver
 	input.initiating_user
 	is_valid_domain
 	has_approval_permission
@@ -48,7 +52,7 @@ allow if {
 
 allow if {
 	# 5. Check if it's a resource request: may this user act on this object?
-	# (has action, resource {type, id, owner} and subject {sub, email})
+	# (has action, resource {type, id, owner} and subject {sub, email, groups})
 	input.action
 	input.resource
 	has_resource_permission
@@ -87,10 +91,10 @@ is_public_api_route if {
 
 # --- Data-Driven RBAC ---
 
-# Check if the user's groups in the JWT overlap with the allowed IDP groups for a specific Stormchaser role
+# Check if the user's identity provider groups overlap with the allowed IDP groups for a specific Stormchaser role
 user_has_role(role_name) if {
 	allowed_idp_groups := data.role_mappings[role_name]
-	some user_group in token_payload.groups
+	some user_group in caller.groups
 	user_group in allowed_idp_groups
 }
 
@@ -219,7 +223,7 @@ has_resource_permission if {
 # Only allow users from approved corporate domains
 is_valid_domain if {
 	some domain in data.allowed_email_domains
-	endswith(token_payload.email, concat("", ["@", domain]))
+	endswith(caller.email, concat("", ["@", domain]))
 }
 
 # --- Engine ABAC Policies ---
@@ -291,7 +295,7 @@ user_is_in_approvers_list if {
 # Approval ABAC Example 1: Separation of Duties (SoD)
 approval_deny if {
 	# Prevent the person who initiated the run from approving their own manual steps
-	token_payload.email == input.initiating_user
+	caller.email == input.initiating_user
 }
 
 # Approval ABAC Example 2: Environment-specific restrictions

@@ -95,7 +95,6 @@ async fn test_hitl_opa_integration() {
             exp: 0,
             groups: Vec::new(),
         }),
-        axum::http::HeaderMap::new(),
         Path((run_id, step_id)),
         Json(json!({"decision": "yes"})),
     )

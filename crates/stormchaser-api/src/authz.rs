@@ -8,13 +8,13 @@
 use crate::{AppState, AuthClaims};
 use axum::{
     extract::{FromRequestParts, Request, State},
-    http::{header, request::Parts, Method, StatusCode},
+    http::{request::Parts, Method, StatusCode},
     middleware::Next,
     response::Response,
 };
 use sqlx::PgPool;
 use std::collections::HashMap;
-use stormchaser_model::auth::{Claims, OpaResource, OpaSubject, ResourceOpaContext};
+use stormchaser_model::auth::{Claims, OpaResource, ResourceOpaContext};
 use uuid::Uuid;
 
 /// The kinds of object that have an owner.
@@ -86,14 +86,11 @@ impl Kind {
     }
 }
 
-/// The authenticated caller: verified claims plus the raw token, which policy may read
-/// further claims from.
+/// The authenticated caller, by the claims the API verified.
 #[derive(Debug, Clone)]
 pub struct Caller {
     /// Claims the API verified.
     pub claims: Claims,
-    /// The bearer token as sent.
-    pub token: Option<String>,
 }
 
 impl Caller {
@@ -109,14 +106,6 @@ pub fn owner_key(claims: &Claims) -> String {
     claims.email.clone().unwrap_or_else(|| claims.sub.clone())
 }
 
-fn bearer_token(headers: &axum::http::HeaderMap) -> Option<String> {
-    headers
-        .get(header::AUTHORIZATION)
-        .and_then(|h| h.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer "))
-        .map(str::to_owned)
-}
-
 impl FromRequestParts<AppState> for Caller {
     type Rejection = StatusCode;
 
@@ -125,10 +114,7 @@ impl FromRequestParts<AppState> for Caller {
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
         let AuthClaims(claims) = AuthClaims::from_request_parts(parts, state).await?;
-        Ok(Caller {
-            claims,
-            token: bearer_token(&parts.headers),
-        })
+        Ok(Caller { claims })
     }
 }
 
@@ -151,11 +137,7 @@ pub async fn allowed(
             id,
             owner,
         },
-        subject: OpaSubject {
-            sub: &caller.claims.sub,
-            email: caller.claims.email.as_deref(),
-        },
-        token: caller.token.as_deref(),
+        subject: caller.claims.opa_subject(),
     };
     state.opa.check_resource(context).await.map_err(|e| {
         tracing::error!(
@@ -443,10 +425,7 @@ pub async fn authorize_object(
         .get::<AuthClaims>()
         .cloned()
         .ok_or(StatusCode::UNAUTHORIZED)?;
-    let caller = Caller {
-        claims,
-        token: bearer_token(request.headers()),
-    };
+    let caller = Caller { claims };
 
     if allowed(
         &state,

@@ -237,8 +237,8 @@ pub async fn execute_query(
                     subject: stormchaser_model::auth::OpaSubject {
                         sub: initiating_user,
                         email: Some(initiating_user),
+                        groups: &[],
                     },
-                    token: None,
                 };
                 if !app_state.opa.check_resource(opa_ctx).await? {
                     return Err(anyhow::anyhow!(

@@ -1,3 +1,4 @@
+use super::AuthClaims;
 use crate::AppState;
 use anyhow::Result;
 use axum::{
@@ -33,17 +34,21 @@ pub async fn opa_middleware(
         String::from_utf8_lossy(&urlencoding::decode_binary(raw_path.as_bytes())).into_owned();
     let method = request.method().to_string();
 
-    // Extract token manually from headers if present
-    let token = request
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|h| h.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer "));
+    // Policy is told who is asking only as far as their token has been verified: by
+    // `require_auth` on the authenticated routes, or here on routes without it (the query
+    // service). The token itself never goes to policy.
+    let claims = match request.extensions().get::<AuthClaims>() {
+        Some(AuthClaims(claims)) => Some(claims.clone()),
+        None if request.headers().contains_key(header::AUTHORIZATION) => {
+            super::authenticate(request.headers(), &state).await.ok()
+        }
+        None => None,
+    };
 
     let context = ApiOpaContext {
         path: &path,
         method: &method,
-        token,
+        subject: claims.as_ref().map(|claims| claims.opa_subject()),
     };
 
     match authorizer.check(context).await {
