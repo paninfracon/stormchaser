@@ -25,6 +25,8 @@ struct UnparkParams<'a> {
     volume_mount_path: &'a str,
     destination_path: &'a str,
     get_url: &'a str,
+    /// SHA-256 the archive must have: the one the parking helper reported for it.
+    expected_hash: Option<&'a str>,
     no_extract: bool,
     mode: Option<&'a str>,
     is_bind_mount: bool,
@@ -233,6 +235,10 @@ impl DockerContainerMachine<state::Initialized> {
             "--destination".to_string(),
             params.destination_path.to_string(),
         ];
+        if let Some(hash) = params.expected_hash {
+            cmd.push("--expected-hash".to_string());
+            cmd.push(hash.to_string());
+        }
         if params.no_extract {
             cmd.push("--no-extract".to_string());
         }
@@ -343,6 +349,7 @@ impl DockerContainerMachine<state::Initialized> {
         source_name: &str,
         is_bind_mount: bool,
         get_url: &str,
+        expected_hash: &str,
     ) -> Result<()> {
         info!(
             "Unparking storage '{}' (resume state) for volume '{}'",
@@ -363,6 +370,7 @@ impl DockerContainerMachine<state::Initialized> {
             volume_mount_path: &mount.mount_path,
             destination_path: &mount.mount_path,
             get_url,
+            expected_hash: Some(expected_hash),
             no_extract: false,
             mode: None,
             is_bind_mount,
@@ -434,6 +442,7 @@ impl DockerContainerMachine<state::Initialized> {
                     volume_mount_path: &mount.mount_path,
                     destination_path: &full_dest_str,
                     get_url: url,
+                    expected_hash: None,
                     no_extract: !is_extract,
                     mode: prov_mode.as_deref(),
                     is_bind_mount,
@@ -490,17 +499,23 @@ impl DockerContainerMachine<state::Initialized> {
 
         if let Some(storage_data) = &self.metadata.storage {
             if let Some(urls) = storage_data.get(&mount.name) {
-                let has_state = urls.get("expected_hash").and_then(|h| h.as_str()).is_some();
+                let expected_hash = urls.get("expected_hash").and_then(|h| h.as_str());
 
-                if has_state {
+                if let Some(expected_hash) = expected_hash {
                     if is_bind_mount {
                         info!(
                             "Skipping unpark for storage '{}' due to STORMCHASER_SFS_HOST_PATH",
                             mount.name
                         );
                     } else if let Some(get_url) = urls.get("get_url").and_then(|u| u.as_str()) {
-                        self.resume_storage(mount, &source_name, is_bind_mount, get_url)
-                            .await?;
+                        self.resume_storage(
+                            mount,
+                            &source_name,
+                            is_bind_mount,
+                            get_url,
+                            expected_hash,
+                        )
+                        .await?;
                     }
                 } else if let Some(provision) = urls.get("provision").and_then(|p| p.as_array()) {
                     self.provision_storage(mount, &source_name, is_bind_mount, provision)

@@ -195,7 +195,8 @@ async fn storage_is_restored_and_parked_without_its_urls_showing_in_the_pod() {
         json!({
             "get_url": format!("{storage}/seed?sig=GET-{marker}"),
             "put_url": format!("{storage}/park?sig=PUT-{marker}"),
-            "expected_hash": "previous-state"
+            // The restore refuses an archive without the hash parking reported for it
+            "expected_hash": sha256_of(&format!("{storage}/seed")).await
         }),
     )]));
 
@@ -237,6 +238,20 @@ async fn storage_is_restored_and_parked_without_its_urls_showing_in_the_pod() {
     jobs.delete(&job_name, &delete_in_background())
         .await
         .unwrap();
+}
+
+async fn sha256_of(url: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let output = tokio::process::Command::new("curl")
+        .args(["-sf", url])
+        .output()
+        .await
+        .unwrap();
+    assert!(output.status.success(), "could not fetch {url}");
+    Sha256::digest(&output.stdout)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 async fn fetch_json(url: &str) -> serde_json::Value {

@@ -16,6 +16,51 @@ pub(crate) fn uses_in_step_agent(agent_present: bool, metadata: &JobMetadata) ->
 /// it downloads from.
 const FETCH_URL_ENV: &str = "STORMCHASER_FETCH_URL";
 
+/// The command and arguments of the init container that restores a volume's parked state.
+///
+/// The archive must have the hash the parking helper reported for it; anything else fails
+/// the pod rather than starting the step on missing or altered state. The agent checks
+/// the hash itself; without an agent image, `alpine:latest`'s BusyBox does.
+pub(crate) fn restore_state_command(
+    agent_present: bool,
+    mount_path: &str,
+    expected_hash: &str,
+) -> (Vec<String>, Vec<String>) {
+    let hash_is_valid =
+        expected_hash.len() == 64 && expected_hash.bytes().all(|b| b.is_ascii_hexdigit());
+    if !hash_is_valid {
+        let script =
+            "echo 'The parked state has no valid hash; refusing to restore it' >&2; exit 1";
+        return (
+            vec!["/bin/sh".to_string()],
+            vec!["-c".to_string(), script.to_string()],
+        );
+    }
+    if agent_present {
+        return (
+            vec!["/usr/local/bin/stormchaser-agent".to_string()],
+            vec![
+                "unpark".to_string(),
+                "--url".to_string(),
+                format!("$({})", FETCH_URL_ENV),
+                "--expected-hash".to_string(),
+                expected_hash.to_string(),
+                "--destination".to_string(),
+                mount_path.to_string(),
+            ],
+        );
+    }
+    let script = format!(
+        "set -e; mkdir -p \"{dir}\"; wget -qO /tmp/state.tar.gz \"${url}\"; \
+         echo '{hash}  /tmp/state.tar.gz' | sha256sum -c -; \
+         tar -xzf /tmp/state.tar.gz -C \"{dir}\"; rm -f /tmp/state.tar.gz",
+        dir = mount_path,
+        url = FETCH_URL_ENV,
+        hash = expected_hash,
+    );
+    (vec!["/bin/sh".to_string()], vec!["-c".to_string(), script])
+}
+
 /// Pull policy for the image a step names: `Always` (the default), `IfNotPresent` or
 /// `Never`.
 pub const STEP_IMAGE_PULL_POLICY_ENV: &str = "STORMCHASER_STEP_IMAGE_PULL_POLICY";
@@ -85,21 +130,34 @@ pub(crate) fn build_k8s_containers(
 
                 if has_state && sfs_pvc_name.is_none() {
                     if let Some(get_url) = urls.get("get_url").and_then(|u| u.as_str()) {
+                        let expected_hash = urls
+                            .get("expected_hash")
+                            .and_then(|h| h.as_str())
+                            .unwrap_or_default();
+                        let (command, args) = restore_state_command(
+                            agent_image.is_some(),
+                            &mount.mount_path,
+                            expected_hash,
+                        );
                         init_containers.push(Container {
                             name: normalize_resource_name(&mount.name, "unpark"),
-                            image: Some(agent_image.clone().unwrap_or_else(|| "alpine:latest".to_string())),
+                            image: Some(
+                                agent_image
+                                    .clone()
+                                    .unwrap_or_else(|| "alpine:latest".to_string()),
+                            ),
                             security_context: Some(agent_security_context()),
-                            image_pull_policy: agent_image.as_ref().and_then(|img| if img.contains("stormchaser-agent") { Some("IfNotPresent".to_string()) } else { None }),
-                            command: Some(vec!["/bin/sh".to_string()]),
+                            image_pull_policy: agent_image.as_ref().and_then(|img| {
+                                if img.contains("stormchaser-agent") {
+                                    Some("IfNotPresent".to_string())
+                                } else {
+                                    None
+                                }
+                            }),
                             // The presigned URL is read from the step's Secret, not
                             // written into the pod
-                            args: Some(vec![
-                                "-c".to_string(),
-                                format!(
-                                    "mkdir -p \"{}\" && curl -sL \"${}\" | tar -xz -C \"{}\" || true",
-                                    mount.mount_path, FETCH_URL_ENV, mount.mount_path
-                                ),
-                            ]),
+                            command: Some(command),
+                            args: Some(args),
                             env: Some(vec![secrets.env_var(FETCH_URL_ENV, get_url.to_string())]),
                             volume_mounts: Some(vec![VolumeMount {
                                 name: vol_name.clone(),

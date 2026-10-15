@@ -165,7 +165,6 @@ pub async fn park_storage(urls: Value, paths: Value) -> Result<HashMap<String, S
                         }
                     }
                     let hash = hex::encode(hasher.finalize());
-                    hashes.insert(name.clone(), hash);
 
                     info!("Uploading tarball to {}", put_url);
                     let file = File::open(&tar_path)?;
@@ -185,10 +184,10 @@ pub async fn park_storage(urls: Value, paths: Value) -> Result<HashMap<String, S
                         let text = res.text().await?;
                         error!("Failed to upload storage '{}': {} - {}", name, status, text);
                     } else {
-                        info!(
-                            "Successfully parked storage '{}' (hash: {})",
-                            name, hashes[name]
-                        );
+                        // Only an archive that was stored is reported: the next restore
+                        // refuses anything without this hash
+                        info!("Successfully parked storage '{}' (hash: {})", name, hash);
+                        hashes.insert(name.clone(), hash);
                     }
 
                     let _ = fs::remove_file(tar_path);

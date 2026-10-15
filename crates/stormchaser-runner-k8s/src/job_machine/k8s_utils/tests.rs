@@ -676,7 +676,7 @@ fn nothing_secret_is_written_into_the_job() {
         serde_json::json!({
             "put_url": "https://s3.example.com/PRESIGNED-PUT",
             "get_url": "https://s3.example.com/PRESIGNED-GET",
-            "expected_hash": "abc"
+            "expected_hash": "ab".repeat(32)
         }),
     )]));
     metadata.encryption_key = None;
@@ -722,7 +722,18 @@ fn nothing_secret_is_written_into_the_job() {
     // The init container that restores storage is told where to fetch through its
     // environment, and the URL is not part of its script
     let unpark = &pod.init_containers.as_ref().unwrap()[0];
-    assert!(unpark.args.as_ref().unwrap()[1].contains("$STORMCHASER_FETCH_URL"));
+    assert!(unpark
+        .args
+        .as_ref()
+        .unwrap()
+        .iter()
+        .any(|arg| arg.contains("STORMCHASER_FETCH_URL")));
+    assert!(!unpark
+        .args
+        .as_ref()
+        .unwrap()
+        .concat()
+        .contains("PRESIGNED-GET"));
     assert_eq!(
         unpark.env.as_ref().unwrap()[0].name,
         "STORMCHASER_FETCH_URL"
@@ -848,5 +859,41 @@ fn a_step_that_asks_for_more_than_the_runner_allows_is_refused() {
         metadata.step_dsl.timeout = timeout.map(str::to_string);
         let err = do_build_job_spec("limits-3", &metadata, None, None).unwrap_err();
         assert!(err.to_string().contains(expected), "{expected}: {err}");
+    }
+}
+
+#[test]
+fn restoring_parked_state_checks_its_hash() {
+    let hash = "0f".repeat(32);
+
+    let (command, args) = restore_state_command(true, "/workspace", &hash);
+    assert_eq!(command, ["/usr/local/bin/stormchaser-agent"]);
+    assert_eq!(
+        args,
+        [
+            "unpark",
+            "--url",
+            "$(STORMCHASER_FETCH_URL)",
+            "--expected-hash",
+            hash.as_str(),
+            "--destination",
+            "/workspace"
+        ]
+    );
+
+    let (command, args) = restore_state_command(false, "/workspace", &hash);
+    assert_eq!(command, ["/bin/sh"]);
+    assert!(args[1].starts_with("set -e;"));
+    assert!(args[1].contains(&format!(
+        "echo '{}  /tmp/state.tar.gz' | sha256sum -c -",
+        hash
+    )));
+    assert!(!args[1].contains("|| true"));
+
+    // A hash that is not one never reaches the script, and nothing is restored
+    for bad in ["", "abc", "'; rm -rf / #", &"g".repeat(64)] {
+        let (_, args) = restore_state_command(false, "/workspace", bad);
+        assert!(args[1].ends_with("exit 1"), "{bad}");
+        assert!(!args[1].contains("wget"));
     }
 }
