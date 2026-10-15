@@ -35,7 +35,7 @@ source "$REPO_ROOT/scripts/k8s-api-access.sh"
 
 echo -e "${BLUE}>>> Registering SFS backend...${NC}"
 curl -s -X POST "$API_URL/api/v1/connections" \
-  -H "Authorization: Bearer $TOKEN" \
+  -H @<(printf 'Authorization: Bearer %s\n' "$TOKEN") \
   -H "Content-Type: application/json" \
   -d '{
     "name": "local-minio",
@@ -64,7 +64,14 @@ KUBECONFIG_DATA=$(microk8s config | sed 's|https://127.0.0.1:16443|https://kuber
 
 echo -e "${BLUE}>>> Triggering CLI to launch workflow...${NC}"
 # Use the CLI to run the workflow and parse the run ID
-RUN_JSON=$(cargo run -q -p stormchaser-cli -- --url "$API_URL" --token "$TOKEN" run tests/dogfood-k8s.storm --input repo_url="$REPO_URL" --input kubeconfig="$KUBECONFIG_DATA" --input db_password="$DB_PASSWORD" --input nats_password="$NATS_PASSWORD")
+# The token goes through the environment and the secret inputs through file descriptors,
+# so that none of them appears in the process list.
+export STORMCHASER_TOKEN="$TOKEN"
+RUN_JSON=$(cargo run -q -p stormchaser-cli -- --url "$API_URL" run tests/dogfood-k8s.storm \
+    --input repo_url="$REPO_URL" \
+    --input kubeconfig=@<(printf '%s' "$KUBECONFIG_DATA") \
+    --input db_password=@<(printf '%s' "$DB_PASSWORD") \
+    --input nats_password=@<(printf '%s' "$NATS_PASSWORD"))
 RUN_ID=$(echo "$RUN_JSON" | grep -oP '(?<="run_id": ")[^"]*')
 
 if [ -z "$RUN_ID" ]; then
@@ -77,7 +84,7 @@ echo -e "${BLUE}Run ID:${NC} $RUN_ID"
 # Poll for completion
 STATUS="started"
 for i in {1..60}; do
-    STATUS_JSON=$(cargo run -q -p stormchaser-cli -- --url "$API_URL" --token "$TOKEN" runs get "$RUN_ID")
+    STATUS_JSON=$(cargo run -q -p stormchaser-cli -- --url "$API_URL" runs get "$RUN_ID")
     RUN_STATUS=$(echo "$STATUS_JSON" | jq -r '.detail.status')
 
     if [ "$RUN_STATUS" = "succeeded" ]; then
@@ -95,6 +102,6 @@ if [ "$STATUS" = "succeeded" ]; then
     echo -e "${GREEN}>>> Dogfood workflow execution successful!${NC}"
 else
     echo -e "${RED}>>> Dogfood workflow execution failed or timed out!${NC}"
-    cargo run -q -p stormchaser-cli -- --url "$API_URL" --token "$TOKEN" runs get "$RUN_ID"
+    cargo run -q -p stormchaser-cli -- --url "$API_URL" runs get "$RUN_ID"
     exit 1
 fi

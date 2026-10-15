@@ -54,7 +54,8 @@ fi
 
 echo -e "${BLUE}>>> Verifying OIDC Login Flow...${NC}"
 DEX_IP=$(microk8s kubectl get svc -n stormchaser dex -o jsonpath='{.spec.clusterIP}')
-OIDC_TOKEN=$(HOST_DEX="${DEX_IP}" PORT_DEX="5556" HOST_API="${API_IP}" PORT_API="3000" python3 "$REPO_ROOT/scripts/get_token.py")
+# The API is reached through the HTTPS port-forward, trusting STORMCHASER_CA_CERT
+OIDC_TOKEN=$(HOST_DEX="${DEX_IP}" PORT_DEX="5556" API_URL="${API_URL}" python3 "$REPO_ROOT/scripts/get_token.py")
 if [ -z "$OIDC_TOKEN" ]; then
     echo -e "${RED}>>> OIDC token acquisition failed!${NC}"
     exit 1

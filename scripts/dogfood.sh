@@ -93,7 +93,11 @@ KUBECONFIG="$REPO_ROOT/.tmp/kubeconfig"
 KUBECONFIG_DATA=$(cat "$KUBECONFIG" 2>/dev/null | sed "s/127.0.0.1/$HOST_IP/g" || echo "")
 
 DSL_CONTENT=$(cat "$REPO_ROOT/tests/dogfood.storm")
-INPUTS=$(jq -n --arg url "$REPO_URL" --arg ip "$HOST_IP" --arg kubeconfig "$KUBECONFIG_DATA" \
+# Secrets reach jq through its environment and curl through stdin and a file descriptor,
+# so that none of them appears in the process list.
+INPUTS=$(DOGFOOD_KUBECONFIG="$KUBECONFIG_DATA" DOGFOOD_DB_PASSWORD="$STORMCHASER_DEV_PASSWORD" \
+  DOGFOOD_NATS_PASSWORD="$STORMCHASER_NATS_PASSWORD" \
+  jq -n --arg url "$REPO_URL" --arg ip "$HOST_IP" \
   --argjson port_api "${PORT_API:-3000}" \
   --argjson port_db "${PORT_DB:-5432}" \
   --argjson port_nats "${PORT_NATS:-4222}" \
@@ -101,14 +105,12 @@ INPUTS=$(jq -n --arg url "$REPO_URL" --arg ip "$HOST_IP" --arg kubeconfig "$KUBE
   --argjson port_dex "${PORT_DEX:-5556}" \
   --argjson port_s3 "${PORT_S3:-9000}" \
   --argjson port_reg "${PORT_REG:-32000}" \
-  --argjson port_opa "${PORT_OPA:-8181}" \
-  --arg db_pwd "$STORMCHASER_DEV_PASSWORD" \
-  --arg nats_pwd "$STORMCHASER_NATS_PASSWORD" '{
+  --argjson port_opa "${PORT_OPA:-8181}" '{
   "repo_url": $url,
   "host_ip": $ip,
-  "db_password": $db_pwd,
-  "nats_password": $nats_pwd,
-  "kubeconfig": $kubeconfig,
+  "db_password": $ENV.DOGFOOD_DB_PASSWORD,
+  "nats_password": $ENV.DOGFOOD_NATS_PASSWORD,
+  "kubeconfig": $ENV.DOGFOOD_KUBECONFIG,
   "port_api": $port_api,
   "port_db": $port_db,
   "port_nats": $port_nats,
@@ -119,11 +121,12 @@ INPUTS=$(jq -n --arg url "$REPO_URL" --arg ip "$HOST_IP" --arg kubeconfig "$KUBE
   "port_opa": $port_opa
 }')
 
-LAUNCH_RESP=$(curl -v -X POST "http://localhost:${PORT_API:-3000}/api/v1/runs/direct" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "$(jq -n --arg dsl "$DSL_CONTENT" --argjson inputs "$INPUTS" \
-    '{"dsl": $dsl, "inputs": $inputs, "initiating_user": "stormchaser-admin@paninfracon.net"}')")
+LAUNCH_RESP=$(DOGFOOD_INPUTS="$INPUTS" jq -n --arg dsl "$DSL_CONTENT" \
+    '{"dsl": $dsl, "inputs": ($ENV.DOGFOOD_INPUTS | fromjson), "initiating_user": "stormchaser-admin@paninfracon.net"}' |
+  curl -sS -X POST "http://localhost:${PORT_API:-3000}/api/v1/runs/direct" \
+    -H @<(printf 'Authorization: Bearer %s\n' "$TOKEN") \
+    -H "Content-Type: application/json" \
+    --data-binary @-)
 
 RUN_ID=$(echo "$LAUNCH_RESP" | jq -r '.run_id' 2>/dev/null)
 

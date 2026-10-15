@@ -46,7 +46,8 @@ pub enum Commands {
         /// Path to the .storm file
         file: PathBuf,
 
-        /// Input parameters in key=value format
+        /// Input parameters in key=value format, or key=@path to read the value from a
+        /// file (for secrets, which would otherwise show in the process list)
         #[arg(short, long)]
         input: Vec<String>,
 
