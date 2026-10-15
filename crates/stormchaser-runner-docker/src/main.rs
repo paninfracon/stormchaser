@@ -252,17 +252,8 @@ pub async fn run_runner(config: Config) -> Result<()> {
 
     // 5. Subscribe to task subjects
     let js = async_nats::jetstream::new(nats_client.clone());
-    info!("Ensuring JetStream stream 'stormchaser' exists...");
-    let stream = js
-        .get_or_create_stream(async_nats::jetstream::stream::Config {
-            name: "stormchaser".to_string(),
-            subjects: vec![stormchaser_model::nats::STREAM_SUBJECTS.to_string()],
-            // Only applies if this runner creates the stream; the engine sets it otherwise
-            max_age: stormchaser_model::nats::stream_max_age(),
-            ..Default::default()
-        })
-        .await
-        .context("Failed to ensure JetStream stream")?;
+    info!("Waiting for the JetStream stream 'stormchaser'...");
+    let stream = stormchaser_model::nats::wait_for_stream(&js).await;
 
     let runner_consumer = stream
         .create_consumer(async_nats::jetstream::consumer::pull::Config {

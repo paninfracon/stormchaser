@@ -356,3 +356,78 @@ async fn a_user_reads_only_its_own_inbox() {
         );
     }
 }
+
+/// Checks that a runner can look the stream up but neither create it nor create (and so
+/// reconfigure) one of the engine's consumers. A refused publish gets no answer, while an
+/// allowed JetStream request is always answered, even with an error.
+///
+/// Ignored by default; needs the same server as [`only_the_engine_can_cancel_a_run`].
+#[tokio::test]
+#[ignore = "needs a NATS server with the per-role users"]
+async fn a_runner_cannot_create_the_stream_or_the_engines_consumers() {
+    let url = var("STORMCHASER_PERM_NATS_URL").expect("STORMCHASER_PERM_NATS_URL must be set");
+    let connect = |user: &str, password_var: &str| {
+        let options = async_nats::ConnectOptions::new()
+            .user_and_password(user.to_string(), var(password_var).expect(password_var))
+            .custom_inbox_prefix(format!("_INBOX_{user}"));
+        async_nats::connect_with_options(url.clone(), options)
+    };
+    let engine = connect("stormchaser", "NATS_CONTROL_PASSWORD")
+        .await
+        .unwrap();
+    let runner = connect("stormchaser-runner", "NATS_RUNNER_PASSWORD")
+        .await
+        .unwrap();
+    stormchaser_engine::nats::init_jetstream(&engine)
+        .await
+        .unwrap();
+
+    let answered = |subject: &'static str, body: serde_json::Value| {
+        let runner = runner.clone();
+        async move {
+            matches!(
+                tokio::time::timeout(
+                    Duration::from_secs(3),
+                    runner.request(subject, body.to_string().into()),
+                )
+                .await,
+                Ok(Ok(_))
+            )
+        }
+    };
+
+    assert!(
+        answered("$JS.API.STREAM.INFO.stormchaser", json!({})).await,
+        "the runner cannot look the stream up"
+    );
+    assert!(
+        !answered(
+            "$JS.API.STREAM.CREATE.stormchaser",
+            json!({"name": "stormchaser", "subjects": ["stormchaser.v1.>"], "deny_delete": true})
+        )
+        .await,
+        "the runner may create the stream"
+    );
+    assert!(
+        !answered(
+            "$JS.API.CONSUMER.CREATE.stormchaser.orchestration-engine-global.stormchaser.v1.runner.>",
+            json!({
+                "stream_name": "stormchaser",
+                "config": {"name": "orchestration-engine-global", "filter_subject": "stormchaser.v1.runner.>"}
+            })
+        )
+        .await,
+        "the runner may redefine the engine's consumer"
+    );
+    // ...while its own consumers still work
+    let stream =
+        stormchaser_model::nats::wait_for_stream(&async_nats::jetstream::new(runner.clone())).await;
+    stream
+        .create_consumer(async_nats::jetstream::consumer::pull::Config {
+            name: Some("runner-docker-permission-probe".to_string()),
+            filter_subject: "stormchaser.v1.runner.docker.permission-probe".to_string(),
+            ..Default::default()
+        })
+        .await
+        .expect("the runner cannot create its own consumer");
+}

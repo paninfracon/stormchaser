@@ -236,7 +236,6 @@ publish allow:
   stormchaser.rpc.step.artifact_auth
   stormchaser.rpc.runner.session
   $JS.API.STREAM.INFO.stormchaser
-  $JS.API.STREAM.CREATE.stormchaser
   $JS.API.CONSUMER.INFO.stormchaser.*
   $JS.API.CONSUMER.CREATE.stormchaser.*.stormchaser.v1.*.step.scheduled.>
   $JS.API.CONSUMER.CREATE.stormchaser.*.stormchaser.v1.runner.>
@@ -270,8 +269,9 @@ runners act on whatever arrives on it, so it must stay writable by the engine's
 account alone. Runners read it through a consumer of their own, which the
 `stormchaser.v1.runner.>` consumer entry already permits.
 
-If you create the stream yourself, drop `$JS.API.STREAM.CREATE.stormchaser`
-from the runner list. If you run more than one engine shard
+Runners never create the stream: they wait until the engine (or you) has made
+it, so a runner's credential cannot create it first with settings of its own,
+such as one whose messages can never be deleted. If you run more than one engine shard
 (`STORMCHASER_TOTAL_SHARDS`), add the three deny entries for each shard number.
 
 #### Inboxes

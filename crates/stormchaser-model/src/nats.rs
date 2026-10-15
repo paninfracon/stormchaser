@@ -452,6 +452,31 @@ pub fn stream_max_age() -> std::time::Duration {
     std::time::Duration::from_secs(hours.saturating_mul(3600))
 }
 
+/// Waits until the shared stream exists, and returns it.
+///
+/// Runners only look the stream up. Creating it is the engine's job (or the operator's),
+/// so a runner's credential cannot create it first with settings of its own choosing,
+/// such as a stream whose messages can never be deleted.
+pub async fn wait_for_stream(js: &jetstream::Context) -> jetstream::stream::Stream {
+    let mut delay = std::time::Duration::from_secs(1);
+    loop {
+        match js.get_stream(STREAM_NAME).await {
+            Ok(stream) => return stream,
+            Err(e) => {
+                tracing::warn!(
+                    "JetStream stream '{}' is not available yet ({}); the engine creates it. \
+                     Retrying in {}s",
+                    STREAM_NAME,
+                    e,
+                    delay.as_secs()
+                );
+                tokio::time::sleep(delay).await;
+                delay = (delay * 2).min(std::time::Duration::from_secs(30));
+            }
+        }
+    }
+}
+
 /// Publishes like [`publish_cloudevent`] and returns the message's sequence in the stream.
 ///
 /// `None` means the message was sent but the stream did not confirm storing it.
