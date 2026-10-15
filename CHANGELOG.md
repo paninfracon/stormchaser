@@ -60,6 +60,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Docker runner no longer starts the container of a run that was cancelled while its image was being pulled. The cancellation looked for the run's containers again only 5 and 30 seconds later, so a slower pull started a step nobody would read. A step now checks for cancellation after the pull, and again once its container has started.
+
 - The agent always logs at INFO. Runners read what it parked, published and collected from those lines; an agent built together with the other crates (as `cargo build --workspace` does, which the GNU agent tarball comes from) took its level from `RUST_LOG` and printed errors only, so storage hashes, artifacts and test reports were silently dropped and the next step started with empty storage. Found on a live install.
 - A step publishes only the artifacts its `artifacts` list names, on both runners. On Kubernetes, every step that mounted a storage published all of its artifacts, so each later step published them again and the run listed them several times. The engine now issues upload instructions and registry push tokens only for the artifacts a step lists, and records only those when it completes. **Upgrade impact:** on Kubernetes, a step that publishes artifacts needs them in its `artifacts` list, as on Docker; without one it publishes none.
 - The Docker quickstart's object storage uses `cgr.dev/chainguard/minio`. MinIO no longer publishes images to Docker Hub, so `minio/minio:latest` could not be pulled and the quickstart failed on a machine without a cached copy.

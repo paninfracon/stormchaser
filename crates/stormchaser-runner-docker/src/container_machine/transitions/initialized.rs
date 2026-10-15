@@ -59,6 +59,18 @@ impl DockerContainerMachine<state::Initialized> {
         Ok(())
     }
 
+    /// Fails once the engine has cancelled this step's run.
+    fn ensure_run_not_cancelled(&self) -> Result<()> {
+        if stormchaser_model::run_cancel::is_cancelled(self.metadata.run_id) {
+            anyhow::bail!(
+                "Run {} was cancelled; not starting step {}",
+                self.metadata.run_id,
+                self.metadata.step_id
+            );
+        }
+        Ok(())
+    }
+
     /// Starts a new Docker container, pulling images and unparking storage as necessary.
     pub async fn start(self) -> Result<StartResult> {
         let is_shared = self
@@ -105,6 +117,8 @@ impl DockerContainerMachine<state::Initialized> {
         if !container_exists {
             info!("Pulling image {}", spec.image);
             self.pull_image(&spec.image).await?;
+            // A pull can take longer than the cancellation's sweeps wait for
+            self.ensure_run_not_cancelled()?;
 
             let network_mode = self.get_network_mode().await;
 
@@ -142,6 +156,17 @@ impl DockerContainerMachine<state::Initialized> {
             self.docker
                 .start_container(&container_name, None::<StartContainerOptions>)
                 .await?;
+
+            // A cancellation that arrived since the check above may have swept before this
+            // container existed; one that arrives after this check will find it running.
+            if stormchaser_model::run_cancel::is_cancelled(self.metadata.run_id) {
+                crate::container_machine::cancel::stop_run_containers(
+                    &self.docker,
+                    self.metadata.run_id,
+                )
+                .await;
+            }
+            self.ensure_run_not_cancelled()?;
         }
 
         let mut exec_id = None;
@@ -726,6 +751,19 @@ mod tests {
             test_report_urls: None,
             registry_auth: None,
         }
+    }
+
+    #[test]
+    fn a_step_of_a_cancelled_run_is_not_started() {
+        let docker = Docker::connect_with_local_defaults().unwrap();
+        let metadata = create_test_metadata_with_mounts();
+        let run_id = metadata.run_id;
+        let machine = DockerContainerMachine::new(docker, metadata, None);
+
+        machine.ensure_run_not_cancelled().unwrap();
+        stormchaser_model::run_cancel::mark_cancelled(run_id);
+        let err = machine.ensure_run_not_cancelled().unwrap_err();
+        assert!(err.to_string().contains("was cancelled"), "{err}");
     }
 
     #[tokio::test]
