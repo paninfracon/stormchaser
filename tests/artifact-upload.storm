@@ -18,6 +18,7 @@ workflow "Artifact Upload Test" {
       storage_mounts = [
         { name = "workspace", mount_path = "/workspace" }
       ]
+      artifacts = ["test_artifact"]
     }
   }
 }

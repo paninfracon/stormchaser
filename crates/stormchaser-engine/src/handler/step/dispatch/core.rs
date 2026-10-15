@@ -57,8 +57,15 @@ pub async fn dispatch_step_instance(
     let workflow: dsl::Workflow = serde_json::from_value(run_context.workflow_definition.clone())
         .context("Failed to parse workflow definition from context")?;
 
-    let storage_urls =
-        setup_storage_urls(run_id, &pool, &workflow, &resolved_spec, &run_context).await?;
+    let storage_urls = setup_storage_urls(
+        run_id,
+        &pool,
+        &workflow,
+        step_name,
+        &resolved_spec,
+        &run_context,
+    )
+    .await?;
 
     if try_dispatch_intrinsic(
         run_id,

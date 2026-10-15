@@ -134,11 +134,17 @@ pub async fn artifact_push_auth(payload: &Value, pool: &PgPool) -> Result<Value>
     let workflow: Workflow = serde_json::from_value(context.workflow_definition)
         .context("Failed to parse workflow definition from DB")?;
     let mounted = mounted_storage_names(&instance.spec);
+    let published =
+        crate::handler::step::dispatch::published_artifacts(&workflow, &instance.step_name);
+    // A storage the step pushes to: mounted, and holding an artifact the step publishes
+    let pushes_to = |s: &stormchaser_dsl::ast::Storage| {
+        mounted.contains(&s.name) && s.artifacts.iter().any(|a| published.contains(&a.name))
+    };
 
     let mut auths = Map::new();
     let mut seen_backends = HashSet::new();
     for storage in &workflow.storage {
-        if storage.artifacts.is_empty() || !mounted.contains(&storage.name) {
+        if !pushes_to(storage) {
             continue;
         }
         let backend: Option<Connection> = match &storage.backend {
@@ -161,9 +167,7 @@ pub async fn artifact_push_auth(payload: &Value, pool: &PgPool) -> Result<Value>
         let repositories: Vec<String> = workflow
             .storage
             .iter()
-            .filter(|s| {
-                !s.artifacts.is_empty() && mounted.contains(&s.name) && s.backend == storage.backend
-            })
+            .filter(|s| pushes_to(s) && s.backend == storage.backend)
             .map(|s| location.artifact_repository(run_id.into_inner(), &s.name))
             .collect();
 

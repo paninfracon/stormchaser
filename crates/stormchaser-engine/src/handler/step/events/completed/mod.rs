@@ -168,6 +168,10 @@ pub async fn handle_step_completed(
         step_id,
         artifacts_map.as_ref(),
         &workflow_ast,
+        &crate::handler::step::dispatch::published_artifacts(
+            &workflow_ast,
+            &current_step_instance.step_name,
+        ),
     )
     .await?;
 

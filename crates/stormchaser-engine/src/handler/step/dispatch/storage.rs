@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use serde_json::Value;
 use sqlx::PgPool;
+use std::collections::HashSet;
 use std::time::Duration;
 use stormchaser_model::connections::Connection;
 use stormchaser_model::connections::ConnectionType;
@@ -13,6 +14,19 @@ use stormchaser_model::dsl;
 
 /// Recursively searches for a step by name within a list of steps.
 use super::core::find_step;
+
+/// The artifacts a step publishes: those its `artifacts` list names, none without one.
+///
+/// Only these get upload instructions and registry push credentials, and only these are
+/// recorded when the step completes, whatever else its storage declares.
+pub(crate) fn published_artifacts(workflow: &dsl::Workflow, step_name: &str) -> HashSet<String> {
+    find_step(&workflow.steps, step_name)
+        .and_then(|step| step.artifacts.as_ref())
+        .into_iter()
+        .flatten()
+        .cloned()
+        .collect()
+}
 pub(crate) async fn resolve_storage_provision(
     run_id: RunId,
     pool: &PgPool,
@@ -99,10 +113,12 @@ pub(crate) async fn setup_storage_urls(
     run_id: RunId,
     pool: &PgPool,
     workflow: &dsl::Workflow,
+    step_name: &str,
     resolved_spec: &Value,
     run_context: &RunContext,
 ) -> Result<serde_json::Map<String, Value>> {
     let mut storage_urls = serde_json::Map::new();
+    let published = published_artifacts(workflow, step_name);
 
     let mut mounted_storage_names = std::collections::HashSet::new();
     if let Some(mounts) = resolved_spec
@@ -165,7 +181,11 @@ pub(crate) async fn setup_storage_urls(
                     .await?;
 
             let mut artifacts_data = serde_json::Map::new();
-            for artifact in &storage.artifacts {
+            for artifact in storage
+                .artifacts
+                .iter()
+                .filter(|a| published.contains(&a.name))
+            {
                 let instructions = crate::artifact::generate_parking_instructions(
                     &backend,
                     run_id.into_inner(),
@@ -267,4 +287,51 @@ pub(crate) async fn setup_test_report_urls(
         }
     }
     Ok(test_report_urls)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::published_artifacts;
+    use stormchaser_dsl::StormchaserParser;
+
+    #[test]
+    fn a_step_publishes_only_the_artifacts_it_lists() {
+        let workflow = StormchaserParser::new()
+            .parse(
+                r#"
+                stormchaser_dsl_version = "v1"
+                workflow "w" {
+                    storage "ws" {
+                        size = "1Gi"
+                        artifact "bin" {
+                            path = "bin"
+                            retention = "1d"
+                        }
+                        artifact "debug" {
+                            path = "debug"
+                            retention = "1d"
+                        }
+                    }
+                    steps {
+                        step "build" "RunContainer" {
+                            image = "alpine"
+                            storage_mounts = [{ name = "ws", mount_path = "/w" }]
+                            artifacts = ["bin"]
+                            next = ["test"]
+                        }
+                        step "test" "RunContainer" {
+                            image = "alpine"
+                            storage_mounts = [{ name = "ws", mount_path = "/w" }]
+                        }
+                    }
+                }
+                "#,
+            )
+            .expect("workflow should parse");
+
+        let build = published_artifacts(&workflow, "build");
+        assert!(build.contains("bin") && !build.contains("debug"));
+        assert!(published_artifacts(&workflow, "test").is_empty());
+        assert!(published_artifacts(&workflow, "missing").is_empty());
+    }
 }

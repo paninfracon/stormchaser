@@ -364,9 +364,15 @@ step "my_step" "RunContainer" {
     storage_mounts = [
         { name = "workspace", mount_path = "/data", read_only = false }
     ]
+    artifacts = ["binary"] // Optional: the artifacts this step publishes
     command = ["ls", "-la", "/data"]
 }
 ```
+
+A step publishes only the artifacts its `artifacts` list names, and only from
+storage it mounts; without the list it publishes none. Each artifact is then
+published once, by the step that produces it, rather than by every step that
+mounts its storage.
 
 `mount_path` must be an absolute path that is not a system location: `/`,
 `/usr`, `/usr/local`, `/etc`, and anything at, above or inside `/bin`, `/sbin`,

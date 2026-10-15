@@ -59,6 +59,10 @@ async fn test_artifact_persistence_on_completion() {
                     path = "bin/app"
                     retention = "7d"
                 }}
+                artifact "app-debug" {{
+                    path = "bin/app.debug"
+                    retention = "7d"
+                }}
             }}
             steps {{
                 step "build" "RunContainer" {{
@@ -66,6 +70,7 @@ async fn test_artifact_persistence_on_completion() {
                     storage_mounts = [
                         {{ name = "workspace", mount_path = "/workspace" }}
                     ]
+                    artifacts = ["app-bin"]
                 }}
             }}
         }}
@@ -134,6 +139,12 @@ async fn test_artifact_persistence_on_completion() {
                 "hash": "abc123hash",
                 "size": 1024,
                 "content_type": "application/octet-stream"
+            },
+            // Declared on the storage, but not in the step's `artifacts` list
+            "app-debug": {
+                "hash": "def456hash",
+                "size": 2048,
+                "content_type": "application/octet-stream"
             }
         }
     });
@@ -164,6 +175,7 @@ async fn test_artifact_persistence_on_completion() {
         "Artifact should have been registered in archived_artifact_registry"
     );
 
+    // Only what the step publishes is recorded
     let artifact: (String, Uuid, String) = sqlx::query_as(
         "SELECT artifact_name, connection_id, remote_path FROM archived_artifact_registry WHERE run_id = $1",
     )

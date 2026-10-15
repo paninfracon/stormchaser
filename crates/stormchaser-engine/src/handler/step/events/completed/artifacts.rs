@@ -1,4 +1,5 @@
 use anyhow::Result;
+use std::collections::HashSet;
 use stormchaser_dsl::ast::Workflow;
 use stormchaser_model::{RunId, StepInstanceId};
 use uuid::Uuid;
@@ -9,12 +10,21 @@ pub async fn persist_artifact_metadata(
     step_id: StepInstanceId,
     artifacts: Option<&serde_json::Map<String, serde_json::Value>>,
     workflow: &Workflow,
+    published: &HashSet<String>,
 ) -> Result<()> {
     let Some(artifacts) = artifacts else {
         return Ok(());
     };
 
     for (name, meta) in artifacts {
+        if !published.contains(name) {
+            tracing::warn!(
+                "Step {} reported artifact '{}', which it does not publish; not recorded",
+                step_id,
+                name
+            );
+            continue;
+        }
         let storage = workflow
             .storage
             .iter()

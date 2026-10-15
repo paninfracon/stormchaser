@@ -36,6 +36,17 @@ async fn mock_registry(challenge: impl Fn(&str) -> String) -> MockServer {
 /// Inserts an OCI backend pointing at `registry`, and a run whose step `build` mounts a
 /// volume with one artifact on it. Returns the run and step ids.
 async fn insert_run(pool: &PgPool, registry: &MockServer, status: &str) -> (Uuid, Uuid) {
+    insert_run_at(pool, registry, status, "build").await
+}
+
+/// A run whose step `step_name` is with a runner: `build` publishes the artifact `app`,
+/// `inspect` mounts the same storage but publishes nothing.
+async fn insert_run_at(
+    pool: &PgPool,
+    registry: &MockServer,
+    status: &str,
+    step_name: &str,
+) -> (Uuid, Uuid) {
     let run_id = Uuid::new_v4();
     let step_id = Uuid::new_v4();
     let backend_name = format!("oci-auth-test-{}", run_id);
@@ -67,6 +78,14 @@ async fn insert_run(pool: &PgPool, registry: &MockServer, status: &str) -> (Uuid
                     storage_mounts = [
                         {{ name = "ws", mount_path = "/workspace" }}
                     ]
+                    artifacts = ["app"]
+                    next = ["inspect"]
+                }}
+                step "inspect" "RunContainer" {{
+                    image = "alpine"
+                    storage_mounts = [
+                        {{ name = "ws", mount_path = "/workspace" }}
+                    ]
                 }}
             }}
         }}
@@ -92,9 +111,10 @@ async fn insert_run(pool: &PgPool, registry: &MockServer, status: &str) -> (Uuid
     .await
     .unwrap();
     // completion_token NULL: the step has been handed to a runner
-    sqlx::query("INSERT INTO step_instances (id, run_id, step_name, status, step_type, spec, completion_token) VALUES ($1, $2, 'build', $3::step_status, 'RunContainer', $4, NULL)")
+    sqlx::query("INSERT INTO step_instances (id, run_id, step_name, status, step_type, spec, completion_token) VALUES ($1, $2, $3, $4::step_status, 'RunContainer', $5, NULL)")
         .bind(step_id)
         .bind(run_id)
+        .bind(step_name)
         .bind(status)
         .bind(json!({"image": "alpine", "storage_mounts": [{"name": "ws", "mount_path": "/workspace"}]}))
         .execute(pool)
@@ -178,6 +198,30 @@ async fn a_running_step_gets_a_token_for_its_own_repository_and_never_the_passwo
     let host = registry.uri().trim_start_matches("http://").to_string();
     assert_eq!(config["auths"][&host]["registrytoken"], "scoped-token");
     assert!(!config.to_string().contains("long-lived"));
+}
+
+#[tokio::test]
+async fn a_step_that_publishes_no_artifacts_gets_no_push_token() {
+    let pool = pool().await;
+    let registry =
+        mock_registry(|uri| format!(r#"Bearer realm="{uri}/token",service="mock-registry""#)).await;
+    let (run_id, step_id) = insert_run_at(&pool, &registry, "running", "inspect").await;
+
+    // It mounts the storage holding `app`, but does not list it in `artifacts`
+    Mock::given(method("GET"))
+        .and(path("/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"token": "scoped-token"})))
+        .expect(0)
+        .mount(&registry)
+        .await;
+
+    let config = artifact_push_auth(
+        &signed(&pool, json!({"run_id": run_id, "step_id": step_id})).await,
+        &pool,
+    )
+    .await
+    .unwrap();
+    assert_eq!(config["auths"], json!({}));
 }
 
 #[tokio::test]
