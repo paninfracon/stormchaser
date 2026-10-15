@@ -1,6 +1,5 @@
 use crate::handler::{fetch_outputs, fetch_run_context, fetch_step_instance};
 use anyhow::Result;
-use chrono::Utc;
 use serde_json::Value;
 use sqlx::PgPool;
 use std::time::Duration;
@@ -121,24 +120,16 @@ async fn execute_webhook_request(
             |_| serde_json::json!({ "text": String::from_utf8_lossy(&body_bytes) }),
         );
 
-        let instance = fetch_step_instance(step_id, &pool).await?;
-        let machine =
-            crate::step_machine::StepMachine::<crate::step_machine::state::Running>::from_instance(
-                instance,
-            );
-        let _ = machine.succeed(&mut *pool.acquire().await?).await?;
-
-        let event = serde_json::json!({
-            "run_id": run_id,
-            "step_id": step_id,
-            "event_type": "step_completed",
-            "outputs": body_val,
-            "timestamp": Utc::now(),
-        });
-        let js = async_nats::jetstream::new(nats_client);
-        js.publish("stormchaser.step.completed", event.to_string().into())
-            .await?;
-        Ok(())
+        let outputs = std::collections::HashMap::from([("response".to_string(), body_val)]);
+        super::utils::publish_step_completed_event(
+            run_id,
+            step_id,
+            0,
+            Some(outputs),
+            &pool,
+            nats_client,
+        )
+        .await
     } else {
         let error_body = res
             .text()

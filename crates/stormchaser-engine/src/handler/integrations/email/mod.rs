@@ -13,8 +13,6 @@ use stormchaser_tls::TlsReloader;
 #[cfg(feature = "email")]
 use crate::handler::{fetch_outputs, fetch_run_context, fetch_step_instance};
 #[cfg(feature = "email")]
-use chrono::Utc;
-#[cfg(feature = "email")]
 use stormchaser_model::dsl::{self, EmailBackend};
 #[cfg(feature = "email")]
 use stormchaser_model::workflow;
@@ -225,23 +223,15 @@ pub(crate) async fn complete_email_step(
     pool: PgPool,
     nats_client: async_nats::Client,
 ) -> Result<()> {
-    let instance = fetch_step_instance(step_id, &pool).await?;
-    let machine =
-        crate::step_machine::StepMachine::<crate::step_machine::state::Running>::from_instance(
-            instance,
-        );
-    let _ = machine.succeed(&mut *pool.acquire().await?).await?;
-
-    let event = serde_json::json!({
-        "run_id": run_id,
-        "step_id": step_id,
-        "event_type": "step_completed",
-        "timestamp": Utc::now(),
-    });
-    let js = async_nats::jetstream::new(nats_client);
-    js.publish("stormchaser.step.completed", event.to_string().into())
-        .await?;
-    Ok(())
+    crate::handler::integrations::utils::publish_step_completed_event(
+        run_id,
+        step_id,
+        0,
+        None,
+        &pool,
+        nats_client,
+    )
+    .await
 }
 
 #[cfg(feature = "email")]
@@ -253,26 +243,15 @@ pub(crate) async fn fail_email_step(
     nats_client: async_nats::Client,
 ) -> Result<()> {
     error!("{}", error_msg);
-    let instance = fetch_step_instance(step_id, &pool).await?;
-    let machine =
-        crate::step_machine::StepMachine::<crate::step_machine::state::Running>::from_instance(
-            instance,
-        );
-    let _ = machine
-        .fail(error_msg.clone(), None, &mut *pool.acquire().await?)
-        .await?;
-
-    let event = serde_json::json!({
-        "run_id": run_id,
-        "step_id": step_id,
-        "event_type": "step_failed",
-        "error": error_msg,
-        "timestamp": Utc::now(),
-    });
-    let js = async_nats::jetstream::new(nats_client);
-    js.publish("stormchaser.step.failed", event.to_string().into())
-        .await?;
-    Ok(())
+    crate::handler::integrations::utils::publish_step_failed_event(
+        run_id,
+        step_id,
+        0,
+        error_msg,
+        &pool,
+        nats_client,
+    )
+    .await
 }
 
 #[cfg(not(feature = "email"))]

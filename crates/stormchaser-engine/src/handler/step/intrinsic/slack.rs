@@ -42,8 +42,10 @@ pub async fn try_dispatch(
                 .await
                 {
                     if let Err(fail_err) = fail_step_instance(
+                        _run_id,
                         _step_instance_id,
                         &pool,
+                        nats_client.clone(),
                         format!("SlackMessage error: {:?}", e),
                     )
                     .await
@@ -60,8 +62,10 @@ pub async fn try_dispatch(
         #[cfg(not(feature = "chatops-slack"))]
         {
             if let Err(e) = fail_step_instance(
+                _run_id,
                 _step_instance_id,
                 &_pool,
+                _nats_client.clone(),
                 "ChatOps Slack integration is not enabled in this engine build.".to_string(),
             )
             .await

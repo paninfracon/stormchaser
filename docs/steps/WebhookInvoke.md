@@ -12,6 +12,8 @@ The `spec` block for `WebhookInvoke` supports the following fields:
 * `body` (string, optional): The request body. Supports MiniJinja template rendering.
 * `timeout` (string, optional): Duration to wait for a response (e.g., "30s", "1m").
 
+A 2xx response completes the step. Its body is kept as the step output `response`: the parsed JSON, or `{"text": "<body>"}` when it is not JSON. Any other status fails the step.
+
 ## Example
 
 ```hcl

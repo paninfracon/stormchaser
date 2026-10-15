@@ -128,6 +128,11 @@ async fn test_ses_handler_invoke() {
         .await
         .unwrap();
 
+    let mut failures = nats_client
+        .subscribe("stormchaser.v1.*.step.failed")
+        .await
+        .unwrap();
+
     let res_fail = handle_email_send(
         run_id,
         step_id_2,
@@ -140,19 +145,27 @@ async fn test_ses_handler_invoke() {
 
     // With an invalid role ARN, the STS assume-role response (mocked as
     // {"status": "success"}) cannot be parsed as valid AWS credentials.
-    // The handler should capture this error, mark the step as failed, and return Ok.
+    // The handler reports the failure to the step-failed handler and returns Ok.
     assert!(
         res_fail.is_ok(),
         "Expected Ok even on failure, got: {:?}",
         res_fail
     );
 
-    let failed_step = stormchaser_engine::handler::fetch_step_instance(step_id_2, &pool)
-        .await
-        .unwrap();
-    assert_eq!(
-        failed_step.status,
-        stormchaser_model::step::StepStatus::Failed,
-        "Expected step status to be Failed"
-    );
+    let reported = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        use futures::StreamExt;
+        while let Some(msg) = failures.next().await {
+            let event: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+            if event["data"]["step_id"] == serde_json::json!(step_id_2) {
+                return event["data"]["error"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
+            }
+        }
+        String::new()
+    })
+    .await
+    .expect("no failure was reported for the step");
+    assert!(reported.contains("Failed to send email"), "{reported}");
 }

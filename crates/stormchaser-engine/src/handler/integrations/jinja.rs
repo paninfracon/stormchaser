@@ -90,12 +90,6 @@ async fn save_output_and_complete(
     nats_client: async_nats::Client,
 ) -> Result<()> {
     let mut tx = pool.begin().await?;
-    let instance = fetch_step_instance(step_id, &mut *tx).await?;
-    let machine =
-        crate::step_machine::StepMachine::<crate::step_machine::state::Running>::from_instance(
-            instance,
-        );
-    let _ = machine.succeed(&mut *tx).await?;
 
     let output_key = spec
         .output_key

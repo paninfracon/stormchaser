@@ -157,12 +157,6 @@ async fn handle_lambda_response(
 
     if (200..300).contains(&status_code) {
         // Success
-        let instance = fetch_step_instance(step_id, &pool).await?;
-        let machine =
-            crate::step_machine::StepMachine::<crate::step_machine::state::Running>::from_instance(
-                instance,
-            );
-        let _ = machine.succeed(&mut *pool.acquire().await?).await?;
 
         // Save output
         crate::db::upsert_step_output(&pool, step_id, "response", &payload).await?;
@@ -202,14 +196,6 @@ async fn handle_lambda_response(
             status_code,
             response.function_error()
         );
-        let instance = fetch_step_instance(step_id, &pool).await?;
-        let machine =
-            crate::step_machine::StepMachine::<crate::step_machine::state::Running>::from_instance(
-                instance,
-            );
-        let _ = machine
-            .fail(error_msg.clone(), None, &mut *pool.acquire().await?)
-            .await?;
 
         let event = StepFailedEvent {
             run_id,

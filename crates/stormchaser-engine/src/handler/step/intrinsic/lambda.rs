@@ -6,8 +6,8 @@ use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
 use stormchaser_tls::TlsReloader;
 
-#[cfg(feature = "aws-lambda")]
-use crate::handler::fetch_step_instance;
+use super::utils::fail_step_instance;
+
 #[cfg(feature = "aws-lambda")]
 use crate::handler::handle_lambda_invoke;
 
@@ -38,33 +38,20 @@ pub async fn try_dispatch(
                 )
                 .await
                 {
-                    if let Ok(instance) = fetch_step_instance(step_instance_id, &pool).await {
-                        let machine = crate::step_machine::StepMachine::<
-                            crate::step_machine::state::Pending,
-                        >::from_instance(instance);
-                        if let Ok(mut conn) = pool.acquire().await {
-                            if let Ok(_machine) = machine
-                                .start("error-recovery".to_string(), &mut *conn)
-                                .await
-                            {
-                                if let Ok(instance) =
-                                    fetch_step_instance(step_instance_id, &pool).await
-                                {
-                                    let machine = crate::step_machine::StepMachine::<
-                                        crate::step_machine::state::Running,
-                                    >::from_instance(
-                                        instance
-                                    );
-                                    let _ = machine
-                                        .fail(
-                                            format!("Lambda invoke failed: {:?}", e),
-                                            None,
-                                            &mut *conn,
-                                        )
-                                        .await;
-                                }
-                            }
-                        }
+                    if let Err(fail_err) = fail_step_instance(
+                        run_id,
+                        step_instance_id,
+                        &pool,
+                        nats_client,
+                        format!("Lambda invoke failed: {:?}", e),
+                    )
+                    .await
+                    {
+                        tracing::error!(
+                            "failed to report step {} as failed: {}",
+                            step_instance_id,
+                            fail_err
+                        );
                     }
                 }
             });
@@ -72,12 +59,23 @@ pub async fn try_dispatch(
         }
         #[cfg(not(feature = "aws-lambda"))]
         {
-            let _ = run_id;
-            let _ = step_instance_id;
             let _ = resolved_spec;
-            let _ = pool;
-            let _ = nats_client;
-            return Ok(true); // Ignore if feature is not enabled
+            if let Err(e) = fail_step_instance(
+                run_id,
+                step_instance_id,
+                &pool,
+                nats_client,
+                "AWS Lambda support is not enabled in this engine build.".to_string(),
+            )
+            .await
+            {
+                tracing::error!(
+                    "failed to report step {} as failed: {}",
+                    step_instance_id,
+                    e
+                );
+            }
+            return Ok(true);
         }
     }
 

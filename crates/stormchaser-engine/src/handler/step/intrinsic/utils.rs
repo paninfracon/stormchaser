@@ -1,27 +1,24 @@
 use anyhow::Result;
 use sqlx::PgPool;
-use stormchaser_model::StepInstanceId;
+use stormchaser_model::{RunId, StepInstanceId};
 
-use crate::handler::fetch_step_instance;
-use crate::step_machine::{
-    state::{Pending, Running},
-    StepMachine,
-};
-
+/// Reports that a step the engine runs itself has failed. The failure goes through the
+/// step-failed handler, as a runner's would, so that the run's failure handling follows;
+/// marking the step failed here instead would leave the handler nothing to do.
 pub(super) async fn fail_step_instance(
+    run_id: RunId,
     step_instance_id: StepInstanceId,
     pool: &PgPool,
+    nats_client: async_nats::Client,
     error_message: String,
 ) -> Result<()> {
-    let instance = fetch_step_instance(step_instance_id, pool).await?;
-    let machine = StepMachine::<Pending>::from_instance(instance);
-    let mut conn = pool.acquire().await?;
-    let _machine = machine
-        .start("error-recovery".to_string(), &mut *conn)
-        .await?;
-
-    let instance = fetch_step_instance(step_instance_id, pool).await?;
-    let machine = StepMachine::<Running>::from_instance(instance);
-    let _ = machine.fail(error_message, None, &mut *conn).await?;
-    Ok(())
+    crate::handler::integrations::utils::publish_step_failed_event(
+        run_id,
+        step_instance_id,
+        0,
+        error_message,
+        pool,
+        nats_client,
+    )
+    .await
 }
