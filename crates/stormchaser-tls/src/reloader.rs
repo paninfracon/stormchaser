@@ -281,9 +281,8 @@ mod tests {
 
     fn init_test() {
         INIT.call_once(|| {
-            rustls::crypto::ring::default_provider()
-                .install_default()
-                .expect("Failed to install default crypto provider");
+            // Another test in this binary may have installed it first
+            let _ = rustls::crypto::ring::default_provider().install_default();
         });
     }
 

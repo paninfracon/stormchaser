@@ -10,13 +10,14 @@ use crate::{TlsConfig, TlsReloader};
 use anyhow::Context;
 use axum::extract::ConnectInfo;
 use axum::Router;
-use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
 use hyper_util::server::conn::auto::Builder;
-use hyper_util::server::graceful::GracefulShutdown;
+use hyper_util::server::graceful::{GracefulShutdown, Watcher};
 use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 use tower::ServiceExt;
@@ -27,6 +28,9 @@ pub const LISTEN_TLS_VAR: &str = "STORMCHASER_LISTEN_TLS";
 /// How long a client has to finish the TLS handshake. Without a limit, connections
 /// that never send anything would be held open for free.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long a client has to send a request's headers, on HTTP/1.
+const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How long requests in flight get to finish when the service is shutting down.
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(20);
@@ -75,17 +79,19 @@ pub async fn serve(
     tls: Option<Arc<TlsReloader>>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> anyhow::Result<()> {
-    let Some(tls) = tls else {
-        axum::serve(
-            listener,
-            app.into_make_service_with_connect_info::<SocketAddr>(),
-        )
-        .with_graceful_shutdown(shutdown)
-        .await?;
-        return Ok(());
-    };
+    serve_with(listener, app, tls, shutdown, HEADER_READ_TIMEOUT).await
+}
 
-    let acceptor = TlsAcceptor::from(tls.listener_config());
+async fn serve_with(
+    listener: TcpListener,
+    app: Router,
+    tls: Option<Arc<TlsReloader>>,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+    header_read_timeout: Duration,
+) -> anyhow::Result<()> {
+    let acceptor = tls
+        .as_ref()
+        .map(|tls| TlsAcceptor::from(tls.listener_config()));
     let graceful = GracefulShutdown::new();
     tokio::pin!(shutdown);
 
@@ -106,8 +112,13 @@ pub async fn serve(
         let acceptor = acceptor.clone();
         let app = app.clone();
         let watcher = graceful.watcher();
-        // The handshake runs in its own task, so a slow client holds up no one else
+        // Each connection, and its handshake, runs in its own task, so a slow client
+        // holds up no one else
         tokio::spawn(async move {
+            let Some(acceptor) = acceptor else {
+                serve_connection(stream, peer, app, watcher, header_read_timeout).await;
+                return;
+            };
             let stream =
                 match tokio::time::timeout(HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await {
                     Ok(Ok(stream)) => stream,
@@ -120,17 +131,7 @@ pub async fn serve(
                         return;
                     }
                 };
-
-            let service = hyper::service::service_fn(move |mut request: hyper::Request<_>| {
-                request.extensions_mut().insert(ConnectInfo(peer));
-                app.clone()
-                    .oneshot(request.map(axum::body::Body::new::<hyper::body::Incoming>))
-            });
-            let builder = Builder::new(TokioExecutor::new());
-            let connection = builder.serve_connection_with_upgrades(TokioIo::new(stream), service);
-            if let Err(e) = watcher.watch(connection.into_owned()).await {
-                tracing::debug!("Connection from {peer} ended with an error: {e}");
-            }
+            serve_connection(stream, peer, app, watcher, header_read_timeout).await;
         });
     }
 
@@ -142,6 +143,35 @@ pub async fn serve(
         tracing::warn!("Shut down with requests still in flight");
     }
     Ok(())
+}
+
+/// Serves HTTP/1 or HTTP/2 on one accepted connection until it closes.
+async fn serve_connection<S>(
+    stream: S,
+    peer: SocketAddr,
+    app: Router,
+    watcher: Watcher,
+    header_read_timeout: Duration,
+) where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    let service = hyper::service::service_fn(move |mut request: hyper::Request<_>| {
+        request.extensions_mut().insert(ConnectInfo(peer));
+        app.clone()
+            .oneshot(request.map(axum::body::Body::new::<hyper::body::Incoming>))
+    });
+    let mut builder = Builder::new(TokioExecutor::new());
+    // hyper applies its header read timeout only when it has a timer; without one a
+    // client could hold the connection by sending its headers a byte at a time
+    builder
+        .http1()
+        .timer(TokioTimer::new())
+        .header_read_timeout(header_read_timeout);
+    builder.http2().timer(TokioTimer::new());
+    let connection = builder.serve_connection_with_upgrades(TokioIo::new(stream), service);
+    if let Err(e) = watcher.watch(connection.into_owned()).await {
+        tracing::debug!("Connection from {peer} ended with an error: {e}");
+    }
 }
 
 #[cfg(test)]
@@ -161,6 +191,42 @@ mod tests {
         for value in ["", "flase", "0", "off"] {
             assert!(listen_tls_setting(Some(value)).is_err(), "{value:?}");
         }
+    }
+
+    #[tokio::test]
+    async fn a_client_that_never_finishes_its_headers_is_disconnected() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new().route("/", axum::routing::get(|| async { "ok" }));
+        tokio::spawn(serve_with(
+            listener,
+            app,
+            None,
+            std::future::pending(),
+            Duration::from_millis(200),
+        ));
+
+        // A complete request is still served
+        let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
+        client
+            .write_all(b"GET / HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n")
+            .await
+            .unwrap();
+        let mut response = String::new();
+        client.read_to_string(&mut response).await.unwrap();
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+
+        let mut slow = tokio::net::TcpStream::connect(addr).await.unwrap();
+        slow.write_all(b"GET / HTTP/1.1\r\nhost: x\r\n")
+            .await
+            .unwrap();
+        let mut rest = Vec::new();
+        let closed =
+            tokio::time::timeout(Duration::from_secs(5), slow.read_to_end(&mut rest)).await;
+        assert!(closed.is_ok(), "the connection was held open");
+        assert!(!String::from_utf8_lossy(&rest).contains("200"));
     }
 
     #[tokio::test]
