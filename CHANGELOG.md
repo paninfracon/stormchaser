@@ -62,6 +62,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The API, engine, agent and Docker runner build from a source tarball. Their version strings read the git commit and branch at compile time, which only exist in a git checkout, so a build outside one, such as the dogfood workflow's, failed to compile. Outside a checkout they now read `unknown` (a published crate keeps its commit).
+
 - A step that asks for more CPU or memory than its whole run may use fails with an error saying so. It used to stay pending until the run timed out, 24 hours by default, with nothing in the logs. A workflow that sets no `quotas` may use 1 CPU and 4Gi in all, so a step asking for more needs a `quotas` block. The dogfood workflows now have one, and their build and test steps ask for 8 CPUs and 16Gi: under the default step limits (1 CPU, 2Gi), `rustc` was OOM-killed.
 - The umbrella chart's MinIO settings took effect. They were nested one level too deep (`minio.minio`), so the MinIO chart ignored all of them: its user was `admin` rather than `stormchaser`, it kept its data on a PersistentVolumeClaim instead of none, and the ephemeral-storage limits were not set. `scripts/dogfood-k8s.sh` reads the MinIO user from its Secret, as it does the password. **Upgrade impact:** on upgrade, MinIO's user becomes `stormchaser` and its PersistentVolumeClaim is no longer used, so the objects in it are no longer served. Storage connections registered with the user `admin` need it changed.
 
