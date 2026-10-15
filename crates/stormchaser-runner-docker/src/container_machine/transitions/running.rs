@@ -18,6 +18,15 @@ use tokio::time::sleep;
 use tracing::{error, info};
 use uuid::Uuid;
 
+/// What the parking helper handed in: artifacts, storage hashes and test reports, and why
+/// it failed if it did.
+type ParkingResults = (
+    Option<HashMap<String, Value>>,
+    Option<HashMap<String, String>>,
+    Option<Value>,
+    Option<String>,
+);
+
 impl DockerContainerMachine<state::Running> {
     /// Waits for the running container to finish executing, collects metrics and artifacts, and cleans it up.
     pub async fn wait(self) -> Result<DockerContainerMachine<state::Finished>> {
@@ -117,7 +126,7 @@ impl DockerContainerMachine<state::Running> {
         let spec: Option<CommonContainerSpec> =
             serde_json::from_value(self.metadata.step_dsl.spec.clone()).ok();
 
-        let (artifacts, storage_hashes, test_reports) = self
+        let (artifacts, storage_hashes, test_reports, parking_failure) = self
             .collect_metrics(&storage_names, mounts, spec.as_ref(), exit_code)
             .await?;
 
@@ -156,8 +165,16 @@ impl DockerContainerMachine<state::Running> {
             error!("Container {} failed: {}", container_name, error_msg);
             ContainerState::Failed(error_msg, metrics)
         } else if exit_code == Some(0) {
-            info!("Container {} completed successfully", container_name);
-            ContainerState::Succeeded(metrics)
+            match parking_failure {
+                None => {
+                    info!("Container {} completed successfully", container_name);
+                    ContainerState::Succeeded(metrics)
+                }
+                Some(error_msg) => {
+                    error!("Container {} failed: {}", container_name, error_msg);
+                    ContainerState::Failed(error_msg, metrics)
+                }
+            }
         } else {
             let error_msg = format!("Container exited with code {:?}", exit_code);
             error!("Container {} failed: {}", container_name, error_msg);
@@ -178,16 +195,12 @@ impl DockerContainerMachine<state::Running> {
         mounts: Vec<bollard::models::Mount>,
         spec: Option<&CommonContainerSpec>,
         exit_code: Option<i64>,
-    ) -> Result<(
-        Option<HashMap<String, Value>>,
-        Option<HashMap<String, String>>,
-        Option<Value>,
-    )> {
+    ) -> Result<ParkingResults> {
         // A step with no storage and no reports has nothing to hand in. Its own output is
         // never searched for results: anything a step prints is the workflow author's to
         // choose, so the only log read for results is the parking helper's.
         if storage_names.is_empty() && self.metadata.step_dsl.reports.is_empty() {
-            return Ok((None, None, None));
+            return Ok((None, None, None, None));
         }
         self.run_parking_agent(storage_names, mounts, spec, exit_code)
             .await
@@ -199,11 +212,7 @@ impl DockerContainerMachine<state::Running> {
         mounts: Vec<bollard::models::Mount>,
         spec: Option<&CommonContainerSpec>,
         exit_code: Option<i64>,
-    ) -> Result<(
-        Option<HashMap<String, Value>>,
-        Option<HashMap<String, String>>,
-        Option<Value>,
-    )> {
+    ) -> Result<ParkingResults> {
         let mut artifacts_out = None;
         let mut hashes_out = None;
         let mut reports_out = None;
@@ -316,7 +325,18 @@ impl DockerContainerMachine<state::Running> {
             }),
         );
 
-        let _ = agent_wait_stream.next().await;
+        let parking_exit = match agent_wait_stream.next().await {
+            Some(Ok(response)) => Some(response.status_code),
+            Some(Err(bollard::errors::Error::DockerContainerWaitError { code, .. })) => Some(code),
+            _ => None,
+        };
+        // A volume that was not parked would hand the next step what it held before
+        let parking_failure = (parking_exit != Some(0)).then(|| {
+            format!(
+                "Parking the step's storage and artifacts failed (helper exit code {:?})",
+                parking_exit
+            )
+        });
 
         if let Ok(Some(artifacts)) = self.get_artifact_meta(&park_container_name).await {
             artifacts_out = Some(artifacts);
@@ -335,7 +355,7 @@ impl DockerContainerMachine<state::Running> {
             .remove_container(&park_container_name, None)
             .await;
 
-        Ok((artifacts_out, hashes_out, reports_out))
+        Ok((artifacts_out, hashes_out, reports_out, parking_failure))
     }
 
     /// Asks the engine for the registry credentials of this step's OCI artifact pushes,
