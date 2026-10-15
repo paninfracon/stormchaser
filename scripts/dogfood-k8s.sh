@@ -17,8 +17,9 @@ TEMP_TAR="/tmp/stormchaser-dogfood.tar.gz"
 
 echo -e "${BLUE}>>> Uploading tarball to MinIO...${NC}"
 MINIO_IP=$(microk8s kubectl get svc -n stormchaser stormchaser-minio -o jsonpath='{.spec.clusterIP}')
+MINIO_USER=$(microk8s kubectl get secret -n stormchaser stormchaser-minio -o jsonpath='{.data.root-user}' | base64 -d)
 MINIO_PASSWORD=$(microk8s kubectl get secret -n stormchaser stormchaser-minio -o jsonpath='{.data.root-password}' | base64 -d)
-export AWS_ACCESS_KEY_ID="stormchaser"
+export AWS_ACCESS_KEY_ID="$MINIO_USER"
 export AWS_SECRET_ACCESS_KEY="$MINIO_PASSWORD"
 export AWS_DEFAULT_REGION="us-east-1"
 
@@ -34,10 +35,8 @@ echo -e "${BLUE}>>> Launching dogfood workflow...${NC}"
 source "$REPO_ROOT/scripts/k8s-api-access.sh"
 
 echo -e "${BLUE}>>> Registering SFS backend...${NC}"
-curl -s -X POST "$API_URL/api/v1/connections" \
-  -H @<(printf 'Authorization: Bearer %s\n' "$TOKEN") \
-  -H "Content-Type: application/json" \
-  -d '{
+# The MinIO credentials reach jq through its environment and curl through stdin
+MINIO_USER="$MINIO_USER" MINIO_PASSWORD="$MINIO_PASSWORD" jq -n '{
     "name": "local-minio",
     "description": "Local Minio S3-compatible storage for SFS parking",
     "connection_type": "s3",
@@ -46,11 +45,15 @@ curl -s -X POST "$API_URL/api/v1/connections" \
       "endpoint": "http://stormchaser-minio.stormchaser.svc.cluster.local:9000",
       "bucket": "stormchaser-sfs",
       "region": "us-east-1",
-      "access_key": "stormchaser",
-      "secret_key": "'"$MINIO_PASSWORD"'",
+      "access_key": $ENV.MINIO_USER,
+      "secret_key": $ENV.MINIO_PASSWORD,
       "force_path_style": true
     }
-  }' > /dev/null
+  }' |
+  curl -s -X POST "$API_URL/api/v1/connections" \
+    -H @<(printf 'Authorization: Bearer %s\n' "$TOKEN") \
+    -H "Content-Type: application/json" \
+    --data-binary @- > /dev/null
 
 if [ -z "$STORMCHASER_DEV_PASSWORD" ] && [ -z "$1" ]; then
     echo -e "${RED}Error: STORMCHASER_DEV_PASSWORD is not set and no password was passed as argument.${NC}" >&2
@@ -83,7 +86,8 @@ echo -e "${BLUE}Run ID:${NC} $RUN_ID"
 
 # Poll for completion
 STATUS="started"
-for i in {1..60}; do
+# A release build and the tests from scratch take well over ten minutes
+for i in {1..180}; do
     STATUS_JSON=$(cargo run -q -p stormchaser-cli -- --url "$API_URL" runs get "$RUN_ID")
     RUN_STATUS=$(echo "$STATUS_JSON" | jq -r '.detail.status')
 
@@ -94,7 +98,7 @@ for i in {1..60}; do
         STATUS="failed"
         break
     fi
-    echo "Waiting for workflow to complete (attempt $i/60)..."
+    echo "Waiting for workflow to complete (attempt $i/180)..."
     sleep 10
 done
 

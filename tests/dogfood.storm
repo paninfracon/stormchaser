@@ -11,6 +11,12 @@ stormchaser_dsl_version = "v1"
 workflow "dogfood" {
   description = "Stormchaser dogfooding workflow: Build, Test, Image, Deploy"
 
+  # Without quotas a run may use 1 CPU and 4Gi in all, less than the build step asks for
+  quotas {
+    max_cpu    = "8"
+    max_memory = "16Gi"
+  }
+
   # Connection variables pointing to the target infrastructure (MicroK8s and supporting services)
   inputs {
     type = "object"
@@ -123,6 +129,10 @@ workflow "dogfood" {
     # This runs in a clean rust:nightly container.
     step "build" "RunContainer" {
       image = "rustlang/rust:nightly"
+      # A release build of the workspace needs more than the default step limits
+      # (1 CPU, 2Gi): rustc is OOM-killed at 2Gi
+      cpu    = "8"
+      memory = "16Gi"
       storage_mounts = [
         { name = "workspace", mount_path = "/app" }
       ]
@@ -151,7 +161,9 @@ workflow "dogfood" {
     # volume at the end of this step, it only keeps the specific files needed for the
     # subsequent steps, discarding the massive intermediate `target/` compilation objects.
     step "test" "RunContainer" {
-      image = "rustlang/rust:nightly"
+      image  = "rustlang/rust:nightly"
+      cpu    = "8"
+      memory = "16Gi"
       storage_mounts = [
         {
           name       = "workspace",
