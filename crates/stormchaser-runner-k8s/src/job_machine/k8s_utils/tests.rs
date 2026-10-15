@@ -897,3 +897,51 @@ fn restoring_parked_state_checks_its_hash() {
         assert!(!args[1].contains("wget"));
     }
 }
+
+#[test]
+fn an_artifact_is_provisioned_as_a_file_at_its_full_destination() {
+    let (command, args, env) = provision_command(
+        true,
+        "/app",
+        "/target/release/stormchaser-api",
+        Some("artifact"),
+        Some("0755"),
+    );
+    assert_eq!(command, vec!["/bin/sh"]);
+    let script = &args[1];
+    assert!(script.contains("stormchaser-agent unpark"), "{script}");
+    assert!(script.contains("--no-extract"), "{script}");
+    assert!(script.contains("--mode"), "{script}");
+    assert!(!script.contains("|| true"), "{script}");
+    // The destination keeps its directories, and reaches the script only through the
+    // environment
+    assert!(env.contains(&(
+        "STORMCHASER_PROVISION_DEST".to_string(),
+        "/app/target/release/stormchaser-api".to_string()
+    )));
+    assert!(!script.contains("target/release"), "{script}");
+}
+
+#[test]
+fn a_download_is_unpacked_and_a_failure_stops_the_pod() {
+    let (_, args, env) = provision_command(false, "/app", "/", Some("download"), None);
+    let script = &args[1];
+    assert!(script.starts_with("set -eo pipefail;"), "{script}");
+    assert!(script.contains("tar -xz"), "{script}");
+    assert!(!script.contains("|| true"), "{script}");
+    assert!(!script.contains("curl"), "alpine has no curl: {script}");
+    assert!(env.contains(&("STORMCHASER_PROVISION_DEST".to_string(), "/app".to_string())));
+}
+
+#[test]
+fn a_provision_that_would_leave_its_volume_is_refused() {
+    for (dest, mode) in [
+        ("../etc/passwd", None),
+        ("/a/../../b", None),
+        ("/bin/x", Some("0755; rm -rf /")),
+    ] {
+        let (_, args, env) = provision_command(true, "/app", dest, Some("artifact"), mode);
+        assert!(args[1].ends_with("exit 1"), "{dest}");
+        assert!(env.is_empty(), "{dest}");
+    }
+}

@@ -62,6 +62,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Kubernetes runner provisions storage the way the Docker runner does. A provisioned artifact, which is a single file, was untarred and failed; its destination lost every `/` (`/target/release/x` became `targetreleasex`); the fallback image had no `curl`; and `|| true` hid all of it, so the step started without its inputs. Provisioning now goes through the agent's `unpark` (`--no-extract` for an artifact), a destination that leaves the volume is refused, the destination reaches the script only through the environment, and a failed download fails the pod.
+
 - The API, engine, agent and Docker runner build from a source tarball. Their version strings read the git commit and branch at compile time, which only exist in a git checkout, so a build outside one, such as the dogfood workflow's, failed to compile. Outside a checkout they now read `unknown` (a published crate keeps its commit).
 
 - A step that asks for more CPU or memory than its whole run may use fails with an error saying so. It used to stay pending until the run timed out, 24 hours by default, with nothing in the logs. A workflow that sets no `quotas` may use 1 CPU and 4Gi in all, so a step asking for more needs a `quotas` block. The dogfood workflows now have one, and their build and test steps ask for 8 CPUs and 16Gi: under the default step limits (1 CPU, 2Gi), `rustc` was OOM-killed.

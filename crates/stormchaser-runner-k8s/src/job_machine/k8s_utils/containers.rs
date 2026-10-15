@@ -61,6 +61,90 @@ pub(crate) fn restore_state_command(
     (vec!["/bin/sh".to_string()], vec!["-c".to_string(), script])
 }
 
+/// Environment variables through which a provisioning init container is told where to
+/// put what it downloads, and the file mode to give an artifact. They come from the
+/// workflow, so they are never written into the script.
+const PROVISION_DEST_ENV: &str = "STORMCHASER_PROVISION_DEST";
+const PROVISION_MODE_ENV: &str = "STORMCHASER_PROVISION_MODE";
+
+/// The command, arguments and extra environment of the init container that provisions
+/// one resource into a storage volume before the step runs.
+///
+/// A `download` is a gzipped tarball unpacked into its destination; an `artifact` is a
+/// file written to its destination as it is. Nothing is fetched when the destination is
+/// already there, as on a shared volume an earlier step provisioned. A destination that
+/// would leave the volume, or a download that fails, fails the pod: the step does not
+/// start without what it was promised.
+pub(crate) fn provision_command(
+    agent_present: bool,
+    mount_path: &str,
+    destination: &str,
+    resource_type: Option<&str>,
+    mode: Option<&str>,
+) -> (Vec<String>, Vec<String>, Vec<(String, String)>) {
+    let shell = |script: String| (vec!["/bin/sh".to_string()], vec!["-c".to_string(), script]);
+
+    let relative = destination.trim_start_matches('/');
+    let escapes = std::path::Path::new(relative).components().any(|c| {
+        !matches!(
+            c,
+            std::path::Component::Normal(_) | std::path::Component::CurDir
+        )
+    });
+    let mode = mode.filter(|m| !m.is_empty());
+    let mode_is_valid =
+        mode.is_none_or(|m| m.len() <= 4 && m.bytes().all(|b| (b'0'..=b'7').contains(&b)));
+    if escapes || !mode_is_valid {
+        let (command, args) = shell(
+            "echo 'Refusing a provision whose destination leaves its volume or whose mode is not octal' >&2; exit 1"
+                .to_string(),
+        );
+        return (command, args, Vec::new());
+    }
+
+    let mut full_dest = PathBuf::from(mount_path);
+    if !relative.is_empty() {
+        full_dest.push(relative);
+    }
+    let mut env = vec![(
+        PROVISION_DEST_ENV.to_string(),
+        full_dest.to_string_lossy().into_owned(),
+    )];
+    if let Some(m) = mode {
+        env.push((PROVISION_MODE_ENV.to_string(), m.to_string()));
+    }
+
+    let is_file = resource_type == Some("artifact");
+    let skip = format!(
+        "if [ -n \"$(ls -A \"${dest}\" 2>/dev/null)\" ]; then exit 0; fi; ",
+        dest = PROVISION_DEST_ENV
+    );
+    let script = if agent_present {
+        format!(
+            "set -e; {skip}exec /usr/local/bin/stormchaser-agent unpark --url \"${url}\" --destination \"${dest}\"{no_extract}{mode}",
+            url = FETCH_URL_ENV,
+            dest = PROVISION_DEST_ENV,
+            no_extract = if is_file { " --no-extract" } else { "" },
+            mode = if mode.is_some() { format!(" --mode \"${}\"", PROVISION_MODE_ENV) } else { String::new() },
+        )
+    } else if is_file {
+        format!(
+            "set -e; {skip}mkdir -p \"$(dirname \"${dest}\")\"; wget -qO \"${dest}\" \"${url}\"{mode}",
+            url = FETCH_URL_ENV,
+            dest = PROVISION_DEST_ENV,
+            mode = if mode.is_some() { format!("; chmod \"${m}\" \"${d}\"", m = PROVISION_MODE_ENV, d = PROVISION_DEST_ENV) } else { String::new() },
+        )
+    } else {
+        format!(
+            "set -eo pipefail; {skip}mkdir -p \"${dest}\"; wget -qO- \"${url}\" | tar -xz -C \"${dest}\"",
+            url = FETCH_URL_ENV,
+            dest = PROVISION_DEST_ENV,
+        )
+    };
+    let (command, args) = shell(script);
+    (command, args, env)
+}
+
 /// Pull policy for the image a step names: `Always` (the default), `IfNotPresent` or
 /// `Never`.
 pub const STEP_IMAGE_PULL_POLICY_ENV: &str = "STORMCHASER_STEP_IMAGE_PULL_POLICY";
@@ -174,27 +258,42 @@ pub(crate) fn build_k8s_containers(
                             prov.get("url").and_then(|u| u.as_str()),
                             prov.get("destination").and_then(|d| d.as_str()),
                         ) {
-                            let mut full_dest = PathBuf::from(&mount.mount_path);
-                            if dest != "/" && !dest.is_empty() {
-                                let relative_dest = dest.trim_start_matches('/').replace('/', "");
-                                full_dest.push(relative_dest);
-                            }
-                            let dest_str = full_dest.to_str().unwrap_or(&mount.mount_path);
+                            let (command, args, extra_env) = provision_command(
+                                agent_image.is_some(),
+                                &mount.mount_path,
+                                dest,
+                                prov.get("resource_type").and_then(|r| r.as_str()),
+                                prov.get("mode").and_then(|m| m.as_str()),
+                            );
+                            let mut env = vec![secrets.env_var(FETCH_URL_ENV, url.to_string())];
+                            env.extend(extra_env.into_iter().map(|(name, value)| K8sEnvVar {
+                                name,
+                                value: Some(value),
+                                ..Default::default()
+                            }));
 
                             init_containers.push(Container {
-                                name: format!("{}-{}", normalize_resource_name(&mount.name, "prov"), prov_idx),
-                                image: Some(agent_image.clone().unwrap_or_else(|| "alpine:latest".to_string())),
-                            security_context: Some(agent_security_context()),
-                            image_pull_policy: agent_image.as_ref().and_then(|img| if img.contains("stormchaser-agent") { Some("IfNotPresent".to_string()) } else { None }),
-                                command: Some(vec!["/bin/sh".to_string()]),
-                                args: Some(vec![
-                                    "-c".to_string(),
-                                    format!(
-                                        "if [ -z \"$(ls -A \\\"{}\\\" 2>/dev/null)\" ]; then mkdir -p \"{}\" && curl -sL \"${}\" | tar -xz -C \"{}\" || true; fi",
-                                        dest_str, dest_str, FETCH_URL_ENV, dest_str
-                                    ),
-                                ]),
-                                env: Some(vec![secrets.env_var(FETCH_URL_ENV, url.to_string())]),
+                                name: format!(
+                                    "{}-{}",
+                                    normalize_resource_name(&mount.name, "prov"),
+                                    prov_idx
+                                ),
+                                image: Some(
+                                    agent_image
+                                        .clone()
+                                        .unwrap_or_else(|| "alpine:latest".to_string()),
+                                ),
+                                security_context: Some(agent_security_context()),
+                                image_pull_policy: agent_image.as_ref().and_then(|img| {
+                                    if img.contains("stormchaser-agent") {
+                                        Some("IfNotPresent".to_string())
+                                    } else {
+                                        None
+                                    }
+                                }),
+                                command: Some(command),
+                                args: Some(args),
+                                env: Some(env),
                                 volume_mounts: Some(vec![VolumeMount {
                                     name: vol_name.clone(),
                                     mount_path: mount.mount_path.clone(),
