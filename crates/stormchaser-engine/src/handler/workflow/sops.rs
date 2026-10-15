@@ -77,6 +77,18 @@ pub async fn decrypt_sops_secrets(
 
     debug!("Found SOPS file: {:?}", target);
 
+    // `.sops.yaml` is also the name of sops's own configuration file, which holds no
+    // secrets. A file found by name alone is only decrypted when it carries SOPS metadata.
+    if sops_file.is_none() {
+        let content = tokio::fs::read_to_string(&target)
+            .await
+            .with_context(|| format!("Failed to read {:?}", target))?;
+        if !has_sops_metadata(&content) {
+            debug!("{:?} is not a SOPS-encrypted file; no secrets", target);
+            return Ok((serde_json::json!({}), vec![]));
+        }
+    }
+
     let mut envs = HashMap::new();
 
     #[cfg(feature = "aws-sops")]
@@ -147,6 +159,14 @@ pub async fn decrypt_sops_secrets(
     Ok((secrets_val, sensitive_values))
 }
 
+/// Whether a YAML or JSON document is SOPS-encrypted, which sops marks with a top-level
+/// `sops` metadata key.
+fn has_sops_metadata(content: &str) -> bool {
+    parse_decrypted_output(content)
+        .map(|doc| doc.get("sops").is_some_and(Value::is_object))
+        .unwrap_or(false)
+}
+
 /// Parses decrypted SOPS output, which may be YAML or JSON.
 fn parse_decrypted_output(output: &str) -> Result<Value> {
     serde_saphyr::from_str(output)
@@ -206,5 +226,35 @@ mod tests {
         assert!(registry.contains("secret5678"));
         assert!(registry.contains("secret9012"));
         assert!(!registry.contains("too"));
+    }
+
+    #[test]
+    fn test_has_sops_metadata() {
+        let config = "creation_rules:\n  - age: age1paninfracon\n";
+        assert!(!has_sops_metadata(config));
+
+        let yaml = "db_password: ENC[AES256_GCM,data:abc,type:str]\nsops:\n  version: 3.9.0\n";
+        assert!(has_sops_metadata(yaml));
+
+        let json =
+            r#"{"token": "ENC[AES256_GCM,data:abc,type:str]", "sops": {"version": "3.9.0"}}"#;
+        assert!(has_sops_metadata(json));
+
+        assert!(!has_sops_metadata("sops: plain-string\n"));
+        assert!(!has_sops_metadata("not: [valid"));
+    }
+
+    #[tokio::test]
+    async fn test_sops_config_file_means_no_secrets() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::write(
+            repo.path().join(".sops.yaml"),
+            "creation_rules:\n  - age: age1paninfracon\n",
+        )
+        .unwrap();
+
+        let (secrets, sensitive) = decrypt_sops_secrets(repo.path(), None, None).await.unwrap();
+        assert_eq!(secrets, serde_json::json!({}));
+        assert!(sensitive.is_empty());
     }
 }

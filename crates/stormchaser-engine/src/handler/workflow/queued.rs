@@ -329,16 +329,25 @@ pub async fn handle_workflow_queued(
     let sops_role_arn: Option<String> =
         serde_json::from_value(payload["sops_role_arn"].clone()).ok();
 
-    let (secrets, mut sensitive_values) = crate::handler::workflow::sops::decrypt_sops_secrets(
-        &repo_path,
-        sops_file.as_deref(),
-        sops_role_arn.as_deref(),
-    )
-    .await
-    .unwrap_or_else(|e| {
-        error!("Failed to decrypt SOPS secrets for run {}: {:?}", run_id, e);
-        (serde_json::json!({}), vec![])
-    });
+    // A run whose secrets cannot be read does not go ahead without them
+    let (secrets, mut sensitive_values) =
+        match crate::handler::workflow::sops::decrypt_sops_secrets(
+            &repo_path,
+            sops_file.as_deref(),
+            sops_role_arn.as_deref(),
+        )
+        .await
+        {
+            Ok(decrypted) => decrypted,
+            Err(e) => {
+                let err_msg = format!("Failed to decrypt SOPS secrets: {:#}", e);
+                error!("{} (run {})", err_msg, run_id);
+                let _ = machine
+                    .fail(err_msg.clone(), &mut *pool.acquire().await?)
+                    .await?;
+                return Err(anyhow::anyhow!(err_msg));
+            }
+        };
 
     sensitive_values.extend(query_secrets);
     sensitive_values.extend(crate::hcl_eval::take_alias_secrets(run_id));
