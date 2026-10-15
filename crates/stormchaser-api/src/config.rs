@@ -28,6 +28,10 @@ pub struct Config {
     pub opa_wasm_path: Option<String>,
     /// The opa entrypoint.
     pub opa_entrypoint: Option<String>,
+    /// `OPA_DATA_PATH`: the data document (settings) for a WASM policy.
+    pub opa_data_path: Option<PathBuf>,
+    /// `STORMCHASER_AUTHZ_DISABLED`: enforce no policy. Debug builds only.
+    pub authz_disabled: bool,
     /// The loki url.
     pub loki_url: Option<String>,
     /// The elasticsearch url.
@@ -67,6 +71,8 @@ impl Config {
         let mut opa_url = None;
         let mut opa_wasm_path = None;
         let mut opa_entrypoint = None;
+        let mut opa_data_path = None;
+        let mut authz_disabled = false;
         let mut loki_url = None;
         let mut elasticsearch_url = None;
         let mut elasticsearch_index = None;
@@ -100,6 +106,11 @@ impl Config {
                 }
                 "OPA_WASM_PATH" => opa_wasm_path = Some(v.as_ref().to_string()),
                 "OPA_ENTRYPOINT" => opa_entrypoint = Some(v.as_ref().to_string()),
+                "OPA_DATA_PATH" => opa_data_path = Some(PathBuf::from(v.as_ref())),
+                "STORMCHASER_AUTHZ_DISABLED" => {
+                    authz_disabled =
+                        stormchaser_tls::parse_switch("STORMCHASER_AUTHZ_DISABLED", v.as_ref())?
+                }
                 "LOKI_URL" => loki_url = Some(v.as_ref().to_string()),
                 "ELASTICSEARCH_URL" => elasticsearch_url = Some(v.as_ref().to_string()),
                 "ELASTICSEARCH_INDEX" => elasticsearch_index = Some(v.as_ref().to_string()),
@@ -133,6 +144,8 @@ impl Config {
             opa_url,
             opa_wasm_path,
             opa_entrypoint,
+            opa_data_path,
+            authz_disabled,
             loki_url,
             elasticsearch_url,
             elasticsearch_index,

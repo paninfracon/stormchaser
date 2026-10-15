@@ -29,7 +29,7 @@ To facilitate integration with external Identity Providers (IdPs), Stormchaser p
 
 Stormchaser uses **Open Policy Agent (OPA)** to enforce fine-grained, decoupled authorization policies. Policy is asked four kinds of question, all at the same entrypoint and told apart by the shape of the input: about a request, about an object, about a run that is starting, and about an approval.
 
-> **Without OPA there is no isolation between users.** If no policy engine is configured (`OPA_URL` unset), every one of these checks is skipped: any authenticated user can read, change and delete every run, connection, webhook, rule and schedule. That is intended for single-user development only.
+There is always a policy. The API, the engine and the query service enforce a WebAssembly policy named by `OPA_WASM_PATH`, else the OPA server at `OPA_URL`, else a **built-in copy of the shipped policy** below, with settings from the JSON file named by `OPA_DATA_PATH`. Only a debug build started with `STORMCHASER_AUTHZ_DISABLED=true` runs without one, which lets any authenticated user read, change and delete everything; a release build refuses to start with it. See [opa-rbac.md](opa-rbac.md#which-policy-is-enforced).
 
 The policy Stormchaser ships (`deploy/opa/policy.rego`, also packaged in the Helm chart) refuses anything it does not recognise, and by default:
 
@@ -39,7 +39,7 @@ The policy Stormchaser ships (`deploy/opa/policy.rego`, also packaged in the Hel
 * lets only admins make a connection the default storage backend (`is_default_sfs`), once any admin is configured. Every run that names no storage backend keeps its files, artifacts and test reports there, so whoever owns it could read and replace other users' data. Until an admin is configured, the connection's creator may, as with any other change;
 * leaves objects that predate ownership readable by everyone, and changeable by everyone until an admin is configured, by admins only after that.
 
-Settings for it live in `deploy/opa/settings.json` (Helm: `api.opa.sidecar.settings`): `admins` (emails or subject ids), `admin_groups` (values of the token's `groups` claim), `separation_of_duties` (when true, whoever started a run may not approve its steps) and `author_groups`.
+Settings for it live in `deploy/opa/settings.json` (Helm: `api.opa.sidecar.settings`; for the built-in policy, the file named by `OPA_DATA_PATH`): `admins` (emails or subject ids), `admin_groups` (values of the token's `groups` claim), `separation_of_duties` (when true, whoever started a run may not approve its steps) and `author_groups`.
 
 **Groups.** Group settings match the `groups` claim of the user's identity provider. The API copies it from the provider's verified ID token into the token it issues at login and on each refresh, so a change of membership takes effect within the hour a token lasts. Many providers only include groups when asked: list the scope in `STORMCHASER_OIDC_EXTRA_SCOPES` (space or comma separated; Helm: `global.oidc.extraScopes`), `groups` for Dex. The bundled compose stack and umbrella chart ask for it; the orchestration chart on its own does not, because some providers refuse a login that asks for a scope they do not know. Without groups, group settings simply match no one.
 
@@ -47,7 +47,9 @@ Settings for it live in `deploy/opa/settings.json` (Helm: `api.opa.sidecar.setti
 
 OPA's own HTTP API is restricted (`deploy/opa/authz.rego`, with `--authorization=basic`) to evaluating the policy, so that nothing which can reach OPA's port can replace the policy or its data.
 
-In the Helm charts, the API, the engine and the query service each run their own OPA sidecar, listening on `127.0.0.1` only. Policy questions carry the user's bearer token, so they never leave the pod, and nothing else in the cluster can ask the policy anything.
+In the Helm charts, the API, the engine and the query service each run their own OPA sidecar, listening on `127.0.0.1` only. Policy questions carry who the user is, so they never leave the pod, and nothing else in the cluster can ask the policy anything.
+
+Policy is told who is asking as the API verified it: the token's subject, email and groups. It is never sent the token itself, so an OPA server's decision logs hold no credentials and a policy cannot be misled by claims the API did not check.
 
 ### Tier 1: API Level (Request Authorization)
 
@@ -56,7 +58,7 @@ The first check occurs at the API gateway before a request is processed.
 * **Context Sent to OPA**:
   * `path`: The requested URL path, including the `/api/v1` prefix (e.g., `/api/v1/runs`).
   * `method`: The HTTP method (e.g., `POST`).
-  * `token`: The raw bearer token (if provided).
+  * `subject`: `{ "sub", "email", "groups" }`, the identity the API verified from the token, or `null` without a valid token.
 * **Purpose**: To determine if the user is allowed to access specific API endpoints or perform certain actions (e.g., "Can this user trigger *any* workflow?").
 
 ### Tier 2: Engine Level (Execution Authorization)
@@ -80,15 +82,14 @@ For every request whose path names a run, connection, webhook, event rule or cro
 * **Context Sent to OPA**:
   * `action`: `read`, `update`, `delete` or `use`.
   * `resource`: `{ "type": "run" | "connection" | "webhook" | "event_rule" | "cron_workflow", "id": "...", "owner": "alice@example.com" | null }`.
-  * `subject`: `{ "sub": "...", "email": "..." }`, the identity the API verified from the token.
-  * `token`: the raw bearer token, for policies that read further claims such as groups.
+  * `subject`: `{ "sub": "...", "email": "...", "groups": [...] }`, the identity the API verified from the token.
 * **Owner**: whoever created the object: their email, or their subject id when the token carries no email. An identity provider's token that names an email is accepted only with `"email_verified": true`, since an unverified address would let a user act as whoever really owns it; `STORMCHASER_OIDC_REQUIRE_EMAIL_VERIFIED=false` turns this off for a provider that only issues verified addresses but omits the claim. For a run it is whoever started it. A run started by a webhook rule or a cron schedule acts as whoever created that rule or schedule. Objects created before ownership was recorded have no owner (`null`).
-* **Connection use**: before the engine or the query service uses a connection on a run's behalf, it asks with `action: "use"` and the run's user as the subject (and no token).
+* **Connection use**: before the engine or the query service uses a connection on a run's behalf, it asks with `action: "use"` and the run's user as the subject (with no groups).
 * **Not covered**: approving or rejecting a step is decided by the approval question below, since approvers are by nature not the owner. Completing a `Wait` step through `POST /api/v1/events/correlate` is governed by request-level policy only. The runs list is filtered after paging, so a page can hold fewer than `limit` entries.
 
 ### Approvals
 
-When a user approves or rejects a step, policy is asked with `run_id`, `initiating_user`, `step_ast`, `inputs`, `run_outputs`, the `approver` (`{ "sub", "email" }`, as verified) and the raw `token`.
+When a user approves or rejects a step, policy is asked with `run_id`, `initiating_user`, `step_ast`, `inputs`, `run_outputs`, and the `approver` (`{ "sub", "email", "groups" }`, as verified).
 
 ### Approval links
 
@@ -207,8 +208,8 @@ For connections to 3rd-party services (e.g., S3-compatible storage, external Web
 
 Stormchaser follows a strict **Fail-Closed** security philosophy regarding OPA:
 
-1. **Optional Configuration**: If `OPA_URL` is not configured in the environment, the checks are treated as a **no-op** (all requests allowed). This facilitates local development and testing.
-2. **Hard Failure**: If `OPA_URL` **is** configured, the system requires a successful "allow" response from OPA to proceed.
+1. **Always a Policy**: With neither `OPA_URL` nor `OPA_WASM_PATH` set, the services enforce the built-in policy. Checks are skipped only in a debug build started with `STORMCHASER_AUTHZ_DISABLED=true`; a release build refuses to start with it.
+2. **Hard Failure**: Every check requires an "allow" from the policy to proceed.
 3. **Strict Reliability**: If the OPA server is unreachable, returns a non-200 status code, or experiences an internal error, Stormchaser treats this as a **Deny**.
     * The API will return `500 Internal Server Error`.
     * The Orchestration Engine will transition the workflow run to the `Failed` state and halt execution.
@@ -221,7 +222,9 @@ Stormchaser follows a strict **Fail-Closed** security philosophy regarding OPA:
 | `NATS_URL` | Connection string for NATS. | Message integrity. |
 | `NATS_CREDS_FILE`, `NATS_USER` / `NATS_PASSWORD`, `NATS_TOKEN` | NATS credentials (see [nats.md](nats.md)). | **Who may schedule and report on steps.** |
 | `NATS_CA_FILE`, `NATS_TLS_REQUIRED` | Verify the NATS server and refuse plaintext. | Protects credentials and events in transit. |
-| `OPA_URL` | URL of the remote OPA server. | **Enables Authorization Enforcement.** |
+| `OPA_URL` | URL of the remote OPA server. Unset, with no `OPA_WASM_PATH`, the built-in policy is enforced. | Which policy decides who may do what. |
+| `OPA_WASM_PATH`, `OPA_DATA_PATH` | A policy compiled to WebAssembly, and the JSON `data` document (settings) for it or for the built-in policy. | As above. |
+| `STORMCHASER_AUTHZ_DISABLED` | Debug builds only: `true` enforces no policy. A release build refuses to start with it. | Any authenticated user may do anything. |
 | `STORMCHASER_APPROVAL_LINK_KEY` | Engine and API: key that seals approve and reject links in approval emails (32+ characters, same on both). Unset by default. | Whoever has it can forge approvals. Links are disabled without it. |
 | `STORMCHASER_APPROVAL_LINK_TTL_HOURS` | Engine: lifetime of an approval link. Default `72`. | Bounds how long a leaked link is usable. |
 | `STORMCHASER_OCI_ALLOW_STATIC_CREDENTIALS` | Engine: send an OCI artifact backend's stored credentials to runner helpers when its registry cannot issue scoped tokens. Default `false`. | Long-lived registry credentials leave the engine. |

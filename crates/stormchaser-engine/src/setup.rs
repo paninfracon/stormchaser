@@ -1,12 +1,11 @@
 use crate::config::Config;
-use anyhow::Context;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::ConnectOptions;
 use std::sync::Arc;
 use std::time::Duration;
 use stormchaser_model::auth::OpaClient;
 use stormchaser_model::LogBackend;
-use stormchaser_opa::OpaWasmInstance;
+use stormchaser_opa::PolicyConfig;
 use stormchaser_tls::TlsConfig;
 use stormchaser_tls::TlsReloader;
 
@@ -56,20 +55,16 @@ pub async fn setup_database(config: &Config) -> anyhow::Result<sqlx::PgPool> {
 }
 
 pub fn setup_opa(config: &Config, tls_reloader: &TlsReloader) -> anyhow::Result<Arc<OpaClient>> {
-    let mut opa_client = OpaClient::new(config.opa_url.clone(), Some(tls_reloader.client_config()));
-
-    if let Some(wasm_path) = &config.opa_wasm_path {
-        tracing::info!("Loading OPA WASM policy from {:?}", wasm_path);
-        let wasm_bytes = std::fs::read(wasm_path).context("Failed to read OPA WASM policy")?;
-        let executor = OpaWasmInstance::new(&wasm_bytes)?;
-        opa_client = opa_client.with_wasm_executor(Arc::new(executor));
-    }
-
-    if let Some(entrypoint) = config.opa_entrypoint.clone() {
-        opa_client = opa_client.with_entrypoint(entrypoint);
-    }
-
-    Ok(Arc::new(opa_client))
+    Ok(Arc::new(stormchaser_opa::policy_client(
+        &PolicyConfig {
+            url: config.opa_url.clone(),
+            wasm_path: config.opa_wasm_path.clone(),
+            data_path: config.opa_data_path.clone(),
+            entrypoint: config.opa_entrypoint.clone(),
+            disabled: config.authz_disabled,
+        },
+        Some(tls_reloader.client_config()),
+    )?))
 }
 
 pub fn setup_log_backend(config: &Config) -> Arc<Option<LogBackend>> {
