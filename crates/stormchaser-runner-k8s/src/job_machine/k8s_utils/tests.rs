@@ -591,7 +591,9 @@ fn test_reports_are_still_collected_inside_the_step_container() {
 
     // The agent wraps the command there, with report settings only
     let script = &worker.args.as_ref().unwrap()[1];
-    assert!(script.contains("stormchaser-agent run --parking-urls '{}' --mount-paths '{}'"));
+    assert!(script.contains(
+        "stormchaser-agent run --parking-urls '{}' --mount-paths '{}' --reports-anywhere"
+    ));
     let env: Vec<&str> = worker
         .env
         .as_ref()

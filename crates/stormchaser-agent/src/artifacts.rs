@@ -144,10 +144,12 @@ fn split_for_push(path: &str) -> (&Path, &std::ffi::OsStr) {
 /// Uploads artifacts to configured backends and returns metadata maps.
 ///
 /// `registry_config` is a Docker client configuration file with the credentials for OCI
-/// pushes, if the runner provided one.
+/// pushes, if the runner provided one. An artifact is published only if its path
+/// resolves inside one of `roots`, the step's storage volumes.
 pub async fn park_artifacts(
     artifacts: Value,
     registry_config: Option<&str>,
+    roots: &crate::Roots,
 ) -> Result<HashMap<String, Value>> {
     let client = crate::http_client()?;
     let mut metadata_map = HashMap::new();
@@ -168,6 +170,14 @@ pub async fn park_artifacts(
                 warn!("Artifact '{}' path '{}' not found, skipping", name, path);
                 continue;
             }
+            let resolved = match roots.resolve(Path::new(path)) {
+                Ok(p) => p.to_string_lossy().into_owned(),
+                Err(e) => {
+                    warn!("Not publishing artifact '{}': {:#}", name, e);
+                    continue;
+                }
+            };
+            let path = resolved.as_str();
 
             info!("Parking artifact '{}' from path '{}'...", name, path);
 
@@ -264,8 +274,40 @@ mod tests {
             }
         });
 
-        let metadata = park_artifacts(artifacts, None).await.unwrap();
+        let roots = crate::Roots::from_mount_paths(&json!({"ws": dir.path()}));
+        let metadata = park_artifacts(artifacts, None, &roots).await.unwrap();
         assert!(metadata.contains_key("my-artifact"));
         assert_eq!(metadata["my-artifact"]["size"], 14);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_artifact_symlinked_out_of_the_mounts_is_not_published() {
+        let mock_server = MockServer::start().await;
+        let mount = tempdir().unwrap();
+        let helper_only = tempdir().unwrap();
+        fs::write(helper_only.path().join("config.json"), "push credentials").unwrap();
+        std::os::unix::fs::symlink(
+            helper_only.path().join("config.json"),
+            mount.path().join("artifact.bin"),
+        )
+        .unwrap();
+
+        Mock::given(method("PUT"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&mock_server)
+            .await;
+
+        let artifacts = json!({
+            "leak": {
+                "connection_type": "s3",
+                "path": mount.path().join("artifact.bin").to_str().unwrap(),
+                "put_url": format!("{}/artifacts/artifact.bin", mock_server.uri())
+            }
+        });
+        let roots = crate::Roots::from_mount_paths(&json!({"ws": mount.path()}));
+        let metadata = park_artifacts(artifacts, None, &roots).await.unwrap();
+        assert!(metadata.is_empty());
     }
 }

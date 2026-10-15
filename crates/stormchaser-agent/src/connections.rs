@@ -105,35 +105,48 @@ pub async fn park_storage(urls: Value, paths: Value) -> Result<HashMap<String, S
                 if let Some(mount_path) = paths.get(name).and_then(|p| p.as_str()) {
                     info!("Parking storage '{}' from path '{}'...", name, mount_path);
 
-                    let tar_path = format!("/tmp/{}.tar.gz", name);
+                    let tar_path = std::env::temp_dir()
+                        .join(format!("park_{}.tar.gz", Uuid::new_v4()))
+                        .to_string_lossy()
+                        .into_owned();
                     let mut hasher = Sha256::new();
                     {
+                        let root = Path::new(mount_path).canonicalize().with_context(|| {
+                            format!("Cannot resolve storage '{}' at '{}'", name, mount_path)
+                        })?;
                         let tar_gz = File::create(&tar_path)?;
                         let enc = GzEncoder::new(tar_gz, Compression::default());
                         let mut tar = Builder::new(enc);
+                        // Symlinks the step left are archived as symlinks, never followed:
+                        // this helper can read files the step cannot.
+                        tar.follow_symlinks(false);
 
-                        let preserve = url_val.get("preserve").and_then(|p| p.as_array());
+                        let preserve = url_val
+                            .get("preserve")
+                            .and_then(|p| p.as_array())
+                            .filter(|paths| !paths.is_empty());
                         if let Some(paths) = preserve {
-                            if !paths.is_empty() {
-                                for path_val in paths {
-                                    if let Some(path_str) = path_val.as_str() {
-                                        let src_path = Path::new(mount_path).join(path_str);
-                                        if src_path.exists() {
-                                            if src_path.is_dir() {
-                                                tar.append_dir_all(path_str, &src_path)?;
-                                            } else {
-                                                tar.append_path_with_name(&src_path, path_str)?;
-                                            }
-                                        } else {
-                                            warn!("Preserved path not found: {}", path_str);
-                                        }
-                                    }
+                            for path_str in paths.iter().filter_map(|p| p.as_str()) {
+                                let src_path = Path::new(mount_path).join(path_str);
+                                if !src_path.exists() {
+                                    warn!("Preserved path not found: {}", path_str);
+                                    continue;
                                 }
-                            } else {
-                                tar.append_dir_all(".", mount_path)?;
+                                let src_path = match crate::resolve_within(&root, path_str) {
+                                    Ok(p) => p,
+                                    Err(e) => {
+                                        warn!("Not preserving '{}': {:#}", path_str, e);
+                                        continue;
+                                    }
+                                };
+                                if src_path.is_dir() {
+                                    tar.append_dir_all(path_str, &src_path)?;
+                                } else {
+                                    tar.append_path_with_name(&src_path, path_str)?;
+                                }
                             }
                         } else {
-                            tar.append_dir_all(".", mount_path)?;
+                            tar.append_dir_all(".", &root)?;
                         }
 
                         tar.finish()?;
@@ -290,5 +303,84 @@ mod tests {
 
         let hashes = park_storage(urls, paths).await.unwrap();
         assert!(hashes.contains_key("storage1"));
+    }
+    /// Unpacks every request body the mock received and returns the archived entries,
+    /// with the contents of the regular files.
+    async fn uploaded_entries(server: &MockServer) -> Vec<(String, Option<String>)> {
+        let mut entries = Vec::new();
+        for request in server.received_requests().await.unwrap() {
+            let mut archive = Archive::new(GzDecoder::new(request.body.as_slice()));
+            for entry in archive.entries().unwrap() {
+                let mut entry = entry.unwrap();
+                let name = entry.path().unwrap().to_string_lossy().into_owned();
+                let content = entry.header().entry_type().is_file().then(|| {
+                    let mut s = String::new();
+                    entry.read_to_string(&mut s).unwrap();
+                    s
+                });
+                entries.push((name, content));
+            }
+        }
+        entries
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn parking_never_reads_through_symlinks_or_out_of_the_mount() {
+        use std::os::unix::fs::symlink;
+
+        let mock_server = MockServer::start().await;
+        let mount = tempdir().unwrap();
+        let helper_only = tempdir().unwrap();
+        fs::write(helper_only.path().join("config.json"), "push credentials").unwrap();
+        fs::write(mount.path().join("file.txt"), "data").unwrap();
+        symlink(
+            helper_only.path().join("config.json"),
+            mount.path().join("leak"),
+        )
+        .unwrap();
+        symlink(helper_only.path(), mount.path().join("leakdir")).unwrap();
+
+        Mock::given(method("PUT"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&mock_server)
+            .await;
+
+        let outside = format!(
+            "../{}/config.json",
+            helper_only.path().file_name().unwrap().to_str().unwrap()
+        );
+        let put_url = format!("{}/upload", mock_server.uri());
+        let urls = json!({
+            "whole": {"put_url": put_url},
+            "preserved": {
+                "put_url": put_url,
+                "preserve": ["file.txt", "leak", "leakdir", outside,
+                             helper_only.path().join("config.json")]
+            }
+        });
+        let paths = json!({
+            "whole": mount.path(),
+            "preserved": mount.path(),
+        });
+
+        let hashes = park_storage(urls, paths).await.unwrap();
+        assert_eq!(hashes.len(), 2);
+
+        let entries = uploaded_entries(&mock_server).await;
+        assert!(entries
+            .iter()
+            .any(|(name, content)| name == "file.txt" && content.as_deref() == Some("data")));
+        // The whole-volume archive keeps the symlinks as symlinks
+        assert!(entries
+            .iter()
+            .any(|(name, content)| name == "leak" && content.is_none()));
+        assert!(
+            entries
+                .iter()
+                .all(|(_, content)| content.as_deref() != Some("push credentials")),
+            "{:?}",
+            entries
+        );
     }
 }

@@ -255,9 +255,10 @@ pub(crate) fn wrap_main_command(
     let wrapped_script = if needs_agent {
         // Here the agent only collects test reports (named in its environment). Storage
         // and artifacts are parked by the sidecar, so it is given nothing to upload them
-        // with.
-        let agent_cmd =
-            "/stormchaser/agent/stormchaser-agent run --parking-urls '{}' --mount-paths '{}'";
+        // with. Inside the step's own container it can read nothing the step cannot, so
+        // reports may lie anywhere in the step's filesystem.
+        let agent_cmd = "/stormchaser/agent/stormchaser-agent run --parking-urls '{}' \
+                         --mount-paths '{}' --reports-anywhere";
 
         format!(
             "echo '========================================'; \

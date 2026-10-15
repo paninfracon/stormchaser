@@ -18,6 +18,9 @@ pub use artifacts::*;
 mod reports;
 pub use reports::*;
 
+mod confine;
+pub use confine::*;
+
 /// Builds the HTTP client used to talk to storage and the engine.
 ///
 /// The agent runs inside arbitrary task images, many of which ship without a
@@ -70,6 +73,12 @@ pub enum Commands {
         /// Docker client configuration file holding the credentials for OCI artifact pushes
         #[arg(long, env = "STORMCHASER_REGISTRY_CONFIG")]
         registry_config: Option<String>,
+
+        /// Collect test reports from anywhere, not only from inside the mounts. Only for
+        /// an agent running inside the step's own container, where it can read nothing
+        /// the step cannot.
+        #[arg(long)]
+        reports_anywhere: bool,
 
         /// The user command to run
         #[arg(last = true)]
@@ -197,6 +206,7 @@ pub async fn run_agent(cli: Cli) -> Result<()> {
             test_reports,
             report_urls,
             registry_config,
+            reports_anywhere,
             command,
         } => {
             let urls: Value = serde_json::from_str(&parking_urls)?;
@@ -218,7 +228,9 @@ pub async fn run_agent(cli: Cli) -> Result<()> {
                 let reports: Value = serde_json::from_str(&reports_json)?;
                 let urls_val: Option<Value> =
                     report_urls.and_then(|u| serde_json::from_str(&u).ok());
-                let collected_reports = collect_test_reports(reports, urls_val).await?;
+                let roots = Roots::from_mount_paths(&paths);
+                let roots = (!reports_anywhere).then_some(&roots);
+                let collected_reports = collect_test_reports(reports, urls_val, roots).await?;
                 if !collected_reports.is_empty() {
                     info!("Collected test reports: {:?}", collected_reports.keys());
                     let reports_out = serde_json::to_string(&collected_reports)?;
@@ -245,6 +257,7 @@ async fn park_all(
     artifact_urls: Option<String>,
     registry_config: Option<&str>,
 ) -> Result<()> {
+    let roots = Roots::from_mount_paths(&paths);
     let hashes = park_storage(urls, paths).await?;
     if !hashes.is_empty() {
         let hashes_json = serde_json::to_string(&hashes)?;
@@ -254,7 +267,7 @@ async fn park_all(
 
     if let Some(artifacts_json) = artifact_urls {
         let artifacts: Value = serde_json::from_str(&artifacts_json)?;
-        let artifact_meta = park_artifacts(artifacts, registry_config).await?;
+        let artifact_meta = park_artifacts(artifacts, registry_config, &roots).await?;
         if !artifact_meta.is_empty() {
             let meta_json = serde_json::to_string(&artifact_meta)?;
             info!("Parked artifacts: {}", meta_json);
