@@ -60,6 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The agent always logs at INFO. Runners read what it parked, published and collected from those lines; an agent built together with the other crates (as `cargo build --workspace` does, which the GNU agent tarball comes from) took its level from `RUST_LOG` and printed errors only, so storage hashes, artifacts and test reports were silently dropped and the next step started with empty storage. Found on a live install.
 - A runner that restarts keeps its identity and its steps. Runner ids now default to the host or pod name (`docker-<host>`, `k8s-<pod>`) instead of a new random id on every start, and a runner that adopts a step's container or job tells the engine, which moves the step to it. Previously the engine failed such steps as lost about 30 seconds after the restart even though they were still running.
 - OCI artifacts are now pushed from the Docker runner. `oras` refuses absolute paths, so these pushes always failed.
 - The MCP server can now be reached through a non-loopback hostname. It accepts the host of `API_BASE_URL` and any hosts listed in the new `MCP_ALLOWED_HOSTS` setting (Helm: `api.mcpAllowedHosts`), in addition to loopback names.

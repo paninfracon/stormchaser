@@ -139,7 +139,13 @@ pub enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
+    // Runners read what was parked, published and collected from INFO lines of this
+    // output, so the level is fixed. `fmt::init()` would read RUST_LOG when Cargo
+    // unifies tracing-subscriber's `env-filter` feature into this build (any build
+    // together with the services), and then print errors only.
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .init();
     let cli = Cli::parse();
     run_agent(cli).await
 }
