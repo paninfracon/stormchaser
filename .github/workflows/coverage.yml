@@ -62,6 +62,10 @@ jobs:
           STORMCHASER_NATS_RUNNER_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
           STORMCHASER_NATS_API_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
           STORMCHASER_NATS_QUERY_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
+          STORMCHASER_JWT_SECRET=$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')
+          # docker compose refuses to start without it. Only compose reads it: the tests sign
+          # with the debug key, so it stays out of $GITHUB_ENV.
+          echo "STORMCHASER_JWT_SECRET=$STORMCHASER_JWT_SECRET" >> .env
           echo "STORMCHASER_NATS_PASSWORD=$STORMCHASER_NATS_PASSWORD" >> .env
           echo "STORMCHASER_NATS_RUNNER_PASSWORD=$STORMCHASER_NATS_RUNNER_PASSWORD" >> .env
           echo "STORMCHASER_NATS_PASSWORD=$STORMCHASER_NATS_PASSWORD" >> $GITHUB_ENV
