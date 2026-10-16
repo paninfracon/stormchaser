@@ -149,10 +149,12 @@ if [ "$CLEANUP" = true ] || [ ! -f "$ENV_FILE" ]; then
     STORMCHASER_DEV_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
     STORMCHASER_MINIO_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
     STORMCHASER_CLI_SECRET=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
-    STORMCHASER_NATS_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')
-    STORMCHASER_NATS_RUNNER_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')
-    STORMCHASER_NATS_API_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')
-    STORMCHASER_NATS_QUERY_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')
+    # NATS reads its passwords as unquoted config values: one starting with '-' or looking
+    # like a number stops the server, so these start with a letter
+    STORMCHASER_NATS_PASSWORD=$(python3 -c 'import secrets; print("n" + secrets.token_hex(24))')
+    STORMCHASER_NATS_RUNNER_PASSWORD=$(python3 -c 'import secrets; print("n" + secrets.token_hex(24))')
+    STORMCHASER_NATS_API_PASSWORD=$(python3 -c 'import secrets; print("n" + secrets.token_hex(24))')
+    STORMCHASER_NATS_QUERY_PASSWORD=$(python3 -c 'import secrets; print("n" + secrets.token_hex(24))')
     STORMCHASER_JWT_SECRET=$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')
     if [ -z "$STORMCHASER_DEV_PASSWORD" ] || [ -z "$STORMCHASER_MINIO_PASSWORD" ] || [ -z "$STORMCHASER_CLI_SECRET" ] || [ -z "$STORMCHASER_NATS_PASSWORD" ] || [ -z "$STORMCHASER_NATS_RUNNER_PASSWORD" ] || [ -z "$STORMCHASER_NATS_API_PASSWORD" ] || [ -z "$STORMCHASER_NATS_QUERY_PASSWORD" ]; then
         echo -e "${RED}Error: Failed to generate random passwords.${NC}" >&2
@@ -176,7 +178,7 @@ fi
 # service got users of their own, lacks some of these; add them in place.
 for key in STORMCHASER_NATS_PASSWORD STORMCHASER_NATS_RUNNER_PASSWORD STORMCHASER_NATS_API_PASSWORD STORMCHASER_NATS_QUERY_PASSWORD STORMCHASER_JWT_SECRET; do
     if ! grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
-        echo "${key}=$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')" >> "$ENV_FILE"
+        echo "${key}=$(python3 -c 'import secrets; print("n" + secrets.token_hex(32))')" >> "$ENV_FILE"
     fi
 done
 

@@ -114,10 +114,12 @@ jobs:
         STORMCHASER_DEV_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
         STORMCHASER_MINIO_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
         STORMCHASER_CLI_SECRET="stormchaser-cli-secret"
-        STORMCHASER_NATS_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
-        STORMCHASER_NATS_RUNNER_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
-        STORMCHASER_NATS_API_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
-        STORMCHASER_NATS_QUERY_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
+        # NATS reads its passwords as unquoted config values: one starting with '-' or
+        # looking like a number stops the server, so these start with a letter
+        STORMCHASER_NATS_PASSWORD=$(python3 -c 'import secrets; print("n" + secrets.token_hex(16))')
+        STORMCHASER_NATS_RUNNER_PASSWORD=$(python3 -c 'import secrets; print("n" + secrets.token_hex(16))')
+        STORMCHASER_NATS_API_PASSWORD=$(python3 -c 'import secrets; print("n" + secrets.token_hex(16))')
+        STORMCHASER_NATS_QUERY_PASSWORD=$(python3 -c 'import secrets; print("n" + secrets.token_hex(16))')
         STORMCHASER_JWT_SECRET=$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')
         # docker compose refuses to start without it. Only compose reads it: the tests sign
         # with the debug key, so it stays out of $GITHUB_ENV.

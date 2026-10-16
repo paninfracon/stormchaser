@@ -35,7 +35,8 @@ if [ ! -f "$TEST_ENV_SECRETS" ]; then
     umask 077
     mkdir -p "$TEST_ENV_SECRETS_DIR"
     for user in CONTROL RUNNER API QUERY; do
-      echo "TEST_NATS_${user}_PASSWORD=$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+      # Starting with a letter: NATS reads the password as an unquoted config value
+      echo "TEST_NATS_${user}_PASSWORD=n$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
     done > "$TEST_ENV_SECRETS"
   )
   # A stack started with other passwords is set up again with these

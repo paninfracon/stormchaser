@@ -44,6 +44,11 @@ generates the Helm Secrets on first install and keeps them across upgrades
 `deploy/nats/nats-server.conf` for compose and under `nats.config.merge` in the
 umbrella chart's `values.yaml`; keep the two in step.
 
+Both read the passwords from environment variables as unquoted configuration
+values, so a password must start with a letter. One that starts with `-` or
+looks like a number (`12e4`, `123456`) stops the server or is not read as text.
+The generated passwords start with `n`; a password you set yourself must too.
+
 To talk to the quickstart server yourself, pass the engine's credentials, which are
 the only unrestricted ones:
 

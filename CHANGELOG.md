@@ -62,6 +62,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- NATS passwords are generated to start with a letter. NATS reads its passwords from the environment as unquoted configuration values, so a generated password that happened to start with `-` or look like a number (`12e4…`) stopped the server. `scripts/setup.sh`, the umbrella chart, the test environment and CI could all generate one now and then; CI failed this way. A password you set yourself must also start with a letter (`docs/nats.md`). Passwords already generated are kept.
+
 - The test environment's NATS users get random passwords, generated on first use and kept, readable by you alone, until `scripts/test-env-down.sh`. The fixed passwords in `scripts/test-env.sh` let anyone who could reach the published test port use the broker. `scripts/test-env-up.sh` starts the stack again when its passwords change, and gives docker compose placeholders for the settings of services the test stack does not run.
 - `scripts/setup.sh` in microk8s mode signs its bootstrap token with the cluster's key (`stormchaser-jwt`) rather than the one in `.env`, which the cluster's API refused, so the MinIO storage connection was never registered.
 
