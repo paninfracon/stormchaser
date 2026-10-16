@@ -162,6 +162,12 @@ Swagger UI (`/swagger-ui`) and the OpenAPI document (`/api-docs/openapi.json`)
 need no token, so they are off unless `STORMCHASER_API_DOCS=true` (Helm:
 `api.docs`). The quickstart turns them on.
 
+The API serves the document and a small page; the page loads Swagger UI 5.29.1
+from cdnjs, which the browser checks against the release's published hashes
+(subresource integrity). Its content security policy allows scripts only from
+those two places and no inline code. A browser that cannot reach cdnjs gets an
+empty page; point another OpenAPI viewer at the document instead.
+
 ### Cron triggers on Kubernetes
 
 A cron workflow is fired by a CronJob that calls the API with a token that

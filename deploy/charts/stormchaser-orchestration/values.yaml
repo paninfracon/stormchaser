@@ -124,7 +124,8 @@ api:
     create: true
     name: ""
   # Serve Swagger UI and the OpenAPI document, without authentication, at
-  # /swagger-ui and /api-docs/openapi.json.
+  # /swagger-ui and /api-docs/openapi.json. The page loads Swagger UI from cdnjs
+  # (pinned, integrity-checked), so the browser needs to reach it.
   docs: false
   # Each client gets a bucket of rateLimitBurstSize requests that refills at
   # rateLimitPerSecond.

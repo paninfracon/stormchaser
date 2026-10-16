@@ -61,7 +61,6 @@ urlencoding = "2.1"
 tokio-stream = "0.1.18"
 futures.workspace = true
 utoipa = { version = "6.0", features = ["axum_extras", "uuid", "chrono"] }
-utoipa-swagger-ui = { version = "10.0", features = ["axum", "vendored"] }
 bytes = "1.11.1"
 cloudevents-sdk = "0.9.0"
 rmcp = { version = "3.5", features = ["server", "macros", "transport-streamable-http-server", "schemars"], optional = true }

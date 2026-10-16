@@ -1,6 +1,8 @@
 //! Stormchaser API implementation.
 //! This crate contains the REST API for the Stormchaser system.
 
+/// The interactive API documentation
+pub mod api_docs;
 /// Authentication and authorization module
 pub mod auth;
 /// Per-object authorization
@@ -338,10 +340,7 @@ pub fn app(state: AppState) -> Router {
     // and its bundled UI is code that need not be exposed in production.
     let mut root = Router::new();
     if api_docs_enabled() {
-        root = root.merge(
-            utoipa_swagger_ui::SwaggerUi::new("/swagger-ui")
-                .url("/api-docs/openapi.json", ApiDoc::openapi()),
-        );
+        root = root.merge(api_docs::routes());
     }
 
     root.route("/", get(|| async { "Stormchaser API" }))

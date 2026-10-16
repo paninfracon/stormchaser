@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The API serves its Swagger UI page itself instead of through `utoipa-swagger-ui`. Every release of `zip`, which that crate needs at 8.x, was yanked from crates.io, so a build without a lock file could not resolve its dependencies. The OpenAPI document stays at `/api-docs/openapi.json`; `/swagger-ui` is now a small page that loads Swagger UI 5.29.1 from cdnjs, checked against its published integrity hashes, under a content security policy with no inline code. Both are still served only with `STORMCHASER_API_DOCS=true`. The browser needs to reach cdnjs to show the page.
 - Upgraded all dependencies to their latest releases, including Axum 0.8, Leptos 0.8, SQLx 0.9, reqwest 0.13, kube 4, schemars 1, MiniJinja 3 and jaq 3.
 - The minimum supported Rust version is now 1.96, declared as `rust-version` in the workspace manifest. The Docker builder images use `rust:1.96`.
 - The Kubernetes runner is now built against the Kubernetes 1.32 API (previously 1.31).
