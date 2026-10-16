@@ -211,7 +211,7 @@ Stormchaser follows a strict **Fail-Closed** security philosophy regarding OPA:
 
 | Variable | Description | Security Impact |
 | :--- | :--- | :--- |
-| `DATABASE_URL` | Connection string for Postgres. Helm: name a Secret in `global.database.existingSecret`; a URL given as `global.database.url` is kept in a Secret the chart creates, never in the pod spec. The orchestration chart has no default and refuses the password `stormchaser`, its former default. | Core data security. |
+| `DATABASE_URL` | Connection string for Postgres. Helm: name a Secret in `global.database.existingSecret`; a URL given as `global.database.url` is kept in a Secret the chart creates, never in the pod spec. The orchestration chart has no default and refuses the password `stormchaser` and the umbrella chart's old placeholder. The umbrella chart generates the bundled PostgreSQL's passwords and URL into the Secret `stormchaser-postgresql`. | Core data security. |
 | `NATS_URL` | Connection string for NATS. | Message integrity. |
 | `NATS_CREDS_FILE`, `NATS_USER` / `NATS_PASSWORD`, `NATS_TOKEN` | NATS credentials (see [nats.md](nats.md)). | **Who may schedule and report on steps.** |
 | `NATS_CA_FILE`, `NATS_TLS_REQUIRED` | Verify the NATS server and refuse plaintext. | Protects credentials and events in transit. |

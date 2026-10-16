@@ -163,4 +163,7 @@ its default, which is public.
 {{- if regexMatch "^[a-z]+://[^:/@]*:stormchaser@" $url -}}
 {{- fail "global.database.url uses the password \"stormchaser\", which was this chart's public default: choose another, preferably in a Secret named by global.database.existingSecret" -}}
 {{- end -}}
+{{- if contains "CHANGE_ME_IN_PRODUCTION" $url -}}
+{{- fail "global.database.url uses the placeholder password the umbrella chart once shipped, which is public: choose another, preferably in a Secret named by global.database.existingSecret" -}}
+{{- end -}}
 {{- end }}

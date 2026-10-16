@@ -12,12 +12,14 @@ stormchaser-orchestration:
   enabled: true
   global:
     database:
-      # If using the built-in postgres, this is generated dynamically via templates or overridden below.
+      # The bundled PostgreSQL's URL, with its generated password, is in the Secret this
+      # chart creates (postgresqlAuth.generate). For an external database, name your own
+      # Secret here, or set url and clear existingSecret.
       # The bundled PostgreSQL has no TLS, so this switches database TLS off. Point
       # this at an external database and set ssl to true (the orchestration chart's
       # default) before relying on the install.
-      url: "postgres://stormchaser:<CHANGE_ME_IN_PRODUCTION>@stormchaser-postgresql:5432/stormchaser?sslmode=disable"
-      existingSecret: ""
+      url: ""
+      existingSecret: "stormchaser-postgresql"
       existingSecretKey: "DATABASE_URL"
       ssl: false
     # Created by this chart (jwtSecret.generate)
@@ -120,8 +122,9 @@ postgresql:
     tag: 16.4.0-debian-12-r14
   auth:
     username: stormchaser
-    password: <CHANGE_ME_IN_PRODUCTION>
     database: stormchaser
+    # Passwords from the Secret this chart generates (postgresqlAuth.generate)
+    existingSecret: stormchaser-postgresql
   primary:
     persistence:
       enabled: false
@@ -144,6 +147,13 @@ natsAuth:
 # on first install, and keep it across upgrades. Set to false and set
 # stormchaser-orchestration.global.jwt.existingSecret to use your own.
 jwtSecret:
+  generate: true
+
+# Generate the Secret `stormchaser-postgresql`: passwords for the bundled PostgreSQL and
+# the DATABASE_URL the services use. Kept across upgrades. An install from before this
+# keeps the passwords its PostgreSQL already has. To change one, change it in PostgreSQL
+# first (ALTER USER), then in this Secret's `password` and `DATABASE_URL`.
+postgresqlAuth:
   generate: true
 
 # The bundled NATS is a single node for evaluation. It requires authentication and

@@ -55,11 +55,16 @@ MINIO_USER="$MINIO_USER" MINIO_PASSWORD="$MINIO_PASSWORD" jq -n '{
     -H "Content-Type: application/json" \
     --data-binary @- > /dev/null
 
-if [ -z "$STORMCHASER_DEV_PASSWORD" ] && [ -z "$1" ]; then
-    echo -e "${RED}Error: STORMCHASER_DEV_PASSWORD is not set and no password was passed as argument.${NC}" >&2
+# The database password: an argument, or STORMCHASER_DEV_PASSWORD, or else the one in
+# the cluster
+DB_PASSWORD="${1:-$STORMCHASER_DEV_PASSWORD}"
+if [ -z "$DB_PASSWORD" ]; then
+    DB_PASSWORD=$(microk8s kubectl get secret -n stormchaser stormchaser-postgresql -o jsonpath='{.data.password}' 2>/dev/null | base64 -d)
+fi
+if [ -z "$DB_PASSWORD" ]; then
+    echo -e "${RED}Error: no database password: pass one, set STORMCHASER_DEV_PASSWORD, or install the umbrella chart.${NC}" >&2
     exit 1
 fi
-DB_PASSWORD="${1:-$STORMCHASER_DEV_PASSWORD}"
 # The bundled NATS requires authentication; the umbrella chart generates this Secret.
 NATS_PASSWORD=$(microk8s kubectl get secret -n stormchaser stormchaser-nats-control -o jsonpath='{.data.password}' | base64 -d)
 
