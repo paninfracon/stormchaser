@@ -8,6 +8,9 @@ if [ -f ".env" ]; then
     set -a
     source .env
     set +a
+    # The tests sign their tokens with the API's debug key; the deployment's own key in
+    # .env would make the API refuse them
+    unset STORMCHASER_JWT_SECRET
 fi
 
 source ./scripts/test-env.sh

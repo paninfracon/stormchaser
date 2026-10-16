@@ -111,6 +111,8 @@ fn groups_in(body: &serde_json::Value) -> serde_json::Value {
     claims["groups"].clone()
 }
 
+static NEXT_JWKS_URL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 async fn setup_app(mock_server_url: String) -> Option<axum::Router> {
     init_test();
     std::env::set_var("CRON_ENGINE", "none");
@@ -146,7 +148,15 @@ async fn setup_app(mock_server_url: String) -> Option<axum::Router> {
             external_issuer: mock_server_url.clone(),
             client_id: "test-client".to_string(),
             client_secret: "test-secret".to_string(),
-            jwks_url: format!("{}/.well-known/jwks.json", mock_server_url),
+            // A refresh of the key set is limited to one per URL every 30 s, and
+            // wiremock hands consecutive tests the same pooled server. The query, which
+            // the mocks ignore, gives each test a key set URL of its own, so one test's
+            // refresh cannot use up the next one's.
+            jwks_url: format!(
+                "{}/.well-known/jwks.json?test={}",
+                mock_server_url,
+                NEXT_JWKS_URL.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            ),
         }),
         jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
