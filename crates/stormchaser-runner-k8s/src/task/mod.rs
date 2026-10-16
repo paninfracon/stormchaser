@@ -91,6 +91,17 @@ async fn execute_job_on_cluster(
         .with_nats(nats_client.clone());
 
     let result = match machine.start().await {
+        // A cancellation that arrived while the Job was being created may have swept
+        // before it existed; one that arrives after this check will find it
+        Ok(job_machine::StartResult::Running(_))
+            if stormchaser_model::run_cancel::is_cancelled(run_id) =>
+        {
+            crate::job_machine::k8s_utils::stop_run_jobs(&client, &metadata.namespace, run_id)
+                .await;
+            Err(anyhow::anyhow!(
+                "Run {run_id} was cancelled; stopped step {step_id}'s Job"
+            ))
+        }
         Ok(job_machine::StartResult::Running(running_machine)) => {
             // Notify orchestrator that we are actually running
             let running_event = stormchaser_model::events::StepRunningEvent {
