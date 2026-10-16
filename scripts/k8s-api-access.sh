@@ -13,13 +13,16 @@ export STORMCHASER_CA_CERT
 microk8s kubectl get secret -n "$K8S_NAMESPACE" stormchaser-tls-certs \
     -o jsonpath='{.data.ca\.crt}' | base64 -d > "$STORMCHASER_CA_CERT"
 
-microk8s kubectl port-forward -n "$K8S_NAMESPACE" "svc/${K8S_RELEASE_PREFIX}-api" \
+# `microk8s kubectl` runs kubectl under layers of wrapper scripts, so each forward gets a
+# process group of its own, stopped whole on exit. A forward left running holds its port
+# and keeps pointing at a pod that may since have been replaced.
+setsid microk8s kubectl port-forward -n "$K8S_NAMESPACE" "svc/${K8S_RELEASE_PREFIX}-api" \
     "${PORT_FORWARD_API:-13000}:3000" > /dev/null 2>&1 &
 API_FORWARD_PID=$!
-microk8s kubectl port-forward -n "$K8S_NAMESPACE" "svc/${K8S_RELEASE_PREFIX}-query" \
+setsid microk8s kubectl port-forward -n "$K8S_NAMESPACE" "svc/${K8S_RELEASE_PREFIX}-query" \
     "${PORT_FORWARD_QUERY:-13001}:3001" > /dev/null 2>&1 &
 QUERY_FORWARD_PID=$!
-trap 'kill "$API_FORWARD_PID" "$QUERY_FORWARD_PID" 2> /dev/null; rm -f "$STORMCHASER_CA_CERT"' EXIT
+trap 'kill -- -"$API_FORWARD_PID" -"$QUERY_FORWARD_PID" 2> /dev/null; rm -f "$STORMCHASER_CA_CERT"' EXIT
 
 API_URL="https://localhost:${PORT_FORWARD_API:-13000}"
 QUERY_URL="https://localhost:${PORT_FORWARD_QUERY:-13001}"
