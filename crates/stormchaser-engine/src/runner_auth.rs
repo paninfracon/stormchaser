@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 use sqlx::PgPool;
 use stormchaser_model::runner_auth::{
-    issue_session, signatures_required, verify_payload, SessionRequest, SessionResponse,
+    issue_session, signatures_required, verify_payload_at, SessionRequest, SessionResponse,
 };
 
 /// Who may send a message on a subject.
@@ -36,12 +36,14 @@ pub fn sender_of(subject: &str) -> Option<Sender> {
 }
 
 /// Checks that a message naming a runner, received on `subject`, was signed with that
-/// runner's key for that subject. Returns why it is refused, if it is.
+/// runner's key for that subject, at about `published_at` (Unix seconds: when the
+/// server received it). Returns why it is refused, if it is.
 pub async fn refusal(
     pool: &PgPool,
     sender: Sender,
     subject: &str,
     payload: &Value,
+    published_at: i64,
 ) -> Option<String> {
     let runner_id = payload.get("runner_id").and_then(Value::as_str);
     let key = match runner_id {
@@ -63,7 +65,7 @@ pub async fn refusal(
     }
 
     if let (Some(key), Some(id)) = (&key, runner_id) {
-        return verify_payload(payload, key, subject)
+        return verify_payload_at(payload, key, subject, published_at)
             .err()
             .map(|e| format!("not signed by runner {id}: {e:#}"));
     }

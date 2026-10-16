@@ -267,9 +267,16 @@ pub async fn handle_message(
     let subject = normalized_subject.as_str();
 
     // What a runner reports must be signed with the key the engine issued it, for the
-    // subject it arrived on
+    // subject it arrived on. Its signature is timed against when the stream received
+    // it, not now: the stream keeps reports while the engine is down.
     if let Some(sender) = crate::runner_auth::sender_of(subject) {
-        if let Some(reason) = crate::runner_auth::refusal(&pool, sender, subject, &payload).await {
+        let published_at = message
+            .info()
+            .map(|info| info.published.unix_timestamp())
+            .unwrap_or_else(|_| chrono::Utc::now().timestamp());
+        if let Some(reason) =
+            crate::runner_auth::refusal(&pool, sender, subject, &payload, published_at).await
+        {
             tracing::warn!("Ignoring {}: {}", subject, reason);
             let _ = message.double_ack().await;
             return;

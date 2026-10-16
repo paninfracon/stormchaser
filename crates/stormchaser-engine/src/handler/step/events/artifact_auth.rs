@@ -116,6 +116,7 @@ pub async fn artifact_push_auth(payload: &Value, pool: &PgPool) -> Result<Value>
         crate::runner_auth::Sender::Runner,
         ARTIFACT_AUTH_SUBJECT,
         payload,
+        chrono::Utc::now().timestamp(),
     )
     .await
     {

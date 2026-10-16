@@ -488,7 +488,8 @@ async fn a_signature_holds_only_on_the_subject_it_was_made_for() {
             &pool,
             Sender::Runner,
             "stormchaser.v1.step.running",
-            &signed
+            &signed,
+            chrono::Utc::now().timestamp()
         )
         .await,
         None
@@ -498,7 +499,8 @@ async fn a_signature_holds_only_on_the_subject_it_was_made_for() {
         &pool,
         Sender::Runner,
         "stormchaser.v1.runner.offline",
-        &signed
+        &signed,
+        chrono::Utc::now().timestamp()
     )
     .await
     .is_some());
@@ -525,7 +527,8 @@ async fn the_engines_verdict_on_a_lost_runner_needs_no_signature() {
             &pool,
             Sender::RunnerOrControlPlane,
             "stormchaser.v1.step.failed",
-            &payload
+            &payload,
+            chrono::Utc::now().timestamp()
         )
         .await,
         None
@@ -536,7 +539,8 @@ async fn the_engines_verdict_on_a_lost_runner_needs_no_signature() {
         &pool,
         Sender::RunnerOrControlPlane,
         "stormchaser.v1.step.failed",
-        &payload
+        &payload,
+        chrono::Utc::now().timestamp()
     )
     .await
     .is_some());

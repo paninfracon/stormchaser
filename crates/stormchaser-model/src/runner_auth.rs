@@ -28,7 +28,7 @@ pub const SESSION_SUBJECT: &str = "stormchaser.rpc.runner.session";
 /// The field of a runner's message that carries its signature.
 pub const SIGNATURE_FIELD: &str = "runner_signature";
 
-/// How far a signature's timestamp may be from the engine's clock.
+/// How far a signature's timestamp may be from when the message was published.
 pub const MAX_SIGNATURE_AGE_SECS: i64 = 300;
 
 /// `STORMCHASER_RUNNER_SIGNATURES` on the engine: `required` (the default) or
@@ -271,6 +271,19 @@ pub fn is_signed(payload: &Value) -> bool {
 
 /// Checks the signature on `payload`, received on `subject`, against `key`.
 pub fn verify_payload(payload: &Value, key: &[u8], subject: &str) -> Result<()> {
+    verify_payload_at(payload, key, subject, chrono::Utc::now().timestamp())
+}
+
+/// [`verify_payload`], holding the signature's time to `published_at` (Unix seconds)
+/// rather than to now. A message JetStream kept while the engine was down is checked
+/// against when the server received it, so it is not refused for having waited; one
+/// published again later gets a new time from the server, and is refused.
+pub fn verify_payload_at(
+    payload: &Value,
+    key: &[u8],
+    subject: &str,
+    published_at: i64,
+) -> Result<()> {
     let mut object = payload
         .as_object()
         .context("the message is not an object")?
@@ -288,7 +301,7 @@ pub fn verify_payload(payload: &Value, key: &[u8], subject: &str) -> Result<()> 
                 .context("the signature has no MAC")?,
         )
         .context("the signature is not base64")?;
-    if (chrono::Utc::now().timestamp() - signed_at).abs() > MAX_SIGNATURE_AGE_SECS {
+    if (published_at - signed_at).abs() > MAX_SIGNATURE_AGE_SECS {
         bail!("the signature is too old, or from too far in the future");
     }
     let key = hmac::Key::new(hmac::HMAC_SHA256, key);
@@ -480,6 +493,19 @@ mod tests {
         stale[SIGNATURE_FIELD]["signed_at"] =
             json!(chrono::Utc::now().timestamp() - MAX_SIGNATURE_AGE_SECS - 10);
         assert!(verify_payload(&stale, &key, subject).is_err());
+    }
+
+    #[test]
+    fn a_signature_is_timed_against_when_its_message_was_published() {
+        let key = [7u8; 32];
+        let subject = "stormchaser.v1.step.completed";
+        let signed = sign_payload(json!({ "runner_id": "r1" }), &key, subject);
+        let signed_at = signed[SIGNATURE_FIELD]["signed_at"].as_i64().unwrap();
+
+        // Kept by the stream an hour and delivered now: still good
+        verify_payload_at(&signed, &key, subject, signed_at + 1).unwrap();
+        // Published again an hour later: refused
+        assert!(verify_payload_at(&signed, &key, subject, signed_at + 3600).is_err());
     }
 
     #[test]
