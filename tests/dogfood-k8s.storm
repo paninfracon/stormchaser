@@ -160,6 +160,7 @@ workflow "dogfood" {
       command = ["/bin/sh", "-c"]
       args = [<<-EOF
         set -eo pipefail
+        umask 077
         mkdir -p ~/.kube
         printf '%b\n' "$KUBECONFIG_DATA" > ~/.kube/config
         export KUBECONFIG=~/.kube/config
@@ -181,14 +182,17 @@ workflow "dogfood" {
         { name = "workspace", mount_path = "/app" }
       ]
       env = [
-        { name = "KUBECONFIG_DATA", value = inputs.kubeconfig }
+        { name = "KUBECONFIG_DATA", value = inputs.kubeconfig },
+        # The password reaches the script through the environment: spliced into it, a
+        # password with shell syntax in it (the chart default's `<`) breaks the script
+        { name = "DB_PASSWORD", value = inputs.db_password }
       ]
       command = ["/bin/sh", "-c"]
       args = [<<-EOF
         set -eo pipefail
+        umask 077
         mkdir -p ~/.kube
         printf '%b\n' "$KUBECONFIG_DATA" > ~/.kube/config
-        cat ~/.kube/config
         export KUBECONFIG=~/.kube/config
 
         helm upgrade --install stormchaser-dogfood /app/deploy/charts/stormchaser-orchestration \
@@ -197,7 +201,7 @@ workflow "dogfood" {
           --set global.image.repository=localhost:32000/stormchaser-api \
           --set global.image.tag=dogfood \
           --set global.database.ssl=false \
-          --set global.database.url=postgres://stormchaser:${inputs.db_password}@stormchaser-postgresql.stormchaser.svc.cluster.local:5432/stormchaser \
+          --set "global.database.url=postgres://stormchaser:$DB_PASSWORD@stormchaser-postgresql.stormchaser.svc.cluster.local:5432/stormchaser" \
           --set global.nats.url=nats://stormchaser-nats.stormchaser.svc.cluster.local:4222 \
           --set global.nats.authSecret=stormchaser-nats-control \
           --set global.loki.url=http://stormchaser-loki.stormchaser.svc.cluster.local:3100 \

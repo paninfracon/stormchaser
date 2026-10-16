@@ -241,6 +241,7 @@ workflow "dogfood" {
       command = ["/bin/sh", "-c"]
       args = [<<-EOF
         set -eo pipefail
+        umask 077
         mkdir -p ~/.kube
         echo "$KUBECONFIG_DATA" > ~/.kube/config
         export KUBECONFIG=~/.kube/config
@@ -266,11 +267,15 @@ workflow "dogfood" {
         { name = "workspace", mount_path = "/app" }
       ]
       env = [
-        { name = "KUBECONFIG_DATA", value = inputs.kubeconfig }
+        { name = "KUBECONFIG_DATA", value = inputs.kubeconfig },
+        # The password reaches the script through the environment: spliced into it, a
+        # password with shell syntax in it (the chart default's `<`) breaks the script
+        { name = "DB_PASSWORD", value = inputs.db_password }
       ]
       command = ["/bin/sh", "-c"]
       args = [<<-EOF
         set -eo pipefail
+        umask 077
         mkdir -p ~/.kube
         echo "$KUBECONFIG_DATA" > ~/.kube/config
         export KUBECONFIG=~/.kube/config
@@ -279,7 +284,7 @@ workflow "dogfood" {
           --set global.image.repository=${inputs.host_ip}:${inputs.port_reg}/stormchaser-api \
           --set global.image.tag=dogfood \
           --set global.database.ssl=false \
-          --set global.database.url=postgres://stormchaser:${inputs.db_password}@${inputs.host_ip}:${inputs.port_db}/stormchaser \
+          --set "global.database.url=postgres://stormchaser:$DB_PASSWORD@${inputs.host_ip}:${inputs.port_db}/stormchaser" \
           --set global.nats.url=nats://${inputs.host_ip}:${inputs.port_nats} \
           --set global.nats.authSecret=stormchaser-nats-control \
           --set global.loki.url=http://${inputs.host_ip}:${inputs.port_loki} \
