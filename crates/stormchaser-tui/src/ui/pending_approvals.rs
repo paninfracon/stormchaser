@@ -10,7 +10,7 @@ use ratatui::{
 pub fn render_pending_approvals_tab(f: &mut Frame, area: Rect, app: &mut App) {
     let chunks = Layout::default()
         .direction(ratatui::layout::Direction::Horizontal)
-        .constraints([Constraint::Percentage(100)].as_ref())
+        .constraints([Constraint::Percentage(100)])
         .split(area);
 
     let block = Block::default()

@@ -401,6 +401,8 @@ fn render_file_browser() {
     // Use a stable fixture directory to ensure consistent snapshots
     let dir_path = std::path::PathBuf::from("../../tests/fixtures/file_browser");
     app.file_explorer = tui_file_explorer::FileExplorer::new(dir_path, vec![]);
+    // Free disk space is machine-dependent; drop it so the snapshot stays stable
+    app.file_explorer.disk_usage = None;
 
     let backend = TestBackend::new(100, 30);
     let mut terminal = Terminal::new(backend).unwrap();

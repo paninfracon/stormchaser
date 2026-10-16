@@ -43,6 +43,13 @@ allow if {
 	input.path == "/api/v1/auth/exchange"
 }
 
+# Anyone with a token may ask who it identifies (the web UI checks its session this way)
+allow if {
+	input.method == "GET"
+	input.path == "/api/v1/auth/session"
+	input.token
+}
+
 # ---------------------------------------------------------------------------
 # RBAC RULES
 # ---------------------------------------------------------------------------

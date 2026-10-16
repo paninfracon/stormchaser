@@ -19,16 +19,24 @@ pub async fn handle_approval_notification(
     {
         use lettre::message::header::ContentType;
         use lettre::{Message, Transport};
-        use minijinja::Environment;
         use tracing::info;
 
         let spec: stormchaser_model::dsl::EmailSpec = serde_json::from_value(spec)?;
-        let secret = var("JWT_SECRET").unwrap_or_else(|_| "test-secret".to_string());
         let base_url = var("SYSTEM_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
 
-        // 1. Generate Tokens
-        let (approve_link, reject_link) =
-            generate_approval_links(run_id, step_id, &secret, &base_url)?;
+        // 1. Generate Tokens. There is no fallback key: without one the mail goes out
+        // with no links, and approvers use the UI or CLI.
+        let (approve_link, reject_link) = match crate::hitl::approval_link_key() {
+            Some(key) => generate_approval_links(run_id, step_id, &spec.to, &key, &base_url)?,
+            None => {
+                tracing::warn!(
+                    "{} is not set; the approval email for step {} carries no approve or reject links",
+                    crate::hitl::APPROVAL_LINK_KEY_ENV,
+                    step_id
+                );
+                (String::new(), String::new())
+            }
+        };
 
         // 2. Prepare Context
         let run_context: workflow::RunContext =
@@ -49,9 +57,7 @@ pub async fn handle_approval_notification(
         });
 
         // 3. Render Body
-        let env = Environment::new();
-        let rendered_body = env
-            .render_str(&spec.body, template_ctx)
+        let rendered_body = crate::templating::render_str(&spec.body, &template_ctx)
             .map_err(|e| anyhow::anyhow!("Failed to render approval email body: {:?}", e))?;
 
         // 4. Build Email
@@ -91,11 +97,14 @@ pub async fn handle_approval_notification(
 fn generate_approval_links(
     run_id: stormchaser_model::RunId,
     step_id: stormchaser_model::StepInstanceId,
-    secret: &str,
+    approvers: &[String],
+    key: &str,
     base_url: &str,
 ) -> Result<(String, String)> {
-    let approve_token = crate::hitl::generate_approval_token(run_id, step_id, "approve", secret)?;
-    let reject_token = crate::hitl::generate_approval_token(run_id, step_id, "reject", secret)?;
+    let approve_token =
+        crate::hitl::generate_approval_token(run_id, step_id, "approve", approvers, key)?;
+    let reject_token =
+        crate::hitl::generate_approval_token(run_id, step_id, "reject", approvers, key)?;
 
     let approve_link = format!("{}/api/v1/approve-link/{}", base_url, approve_token);
     let reject_link = format!("{}/api/v1/approve-link/{}", base_url, reject_token);
@@ -104,28 +113,22 @@ fn generate_approval_links(
 
 #[cfg(feature = "email")]
 fn build_approval_mailer(spec: &stormchaser_model::dsl::EmailSpec) -> lettre::SmtpTransport {
+    use super::email::smtp::{resolve_smtp_params, EngineSmtp, SmtpOverrides};
     use lettre::SmtpTransport;
-    let smtp_server = spec
-        .smtp_server
-        .clone()
-        .unwrap_or_else(|| var("SMTP_SERVER").unwrap_or_else(|_| "localhost".to_string()));
-    let smtp_port = spec.smtp_port.unwrap_or_else(|| {
-        var("SMTP_PORT")
-            .ok()
-            .and_then(|p| p.parse().ok())
-            .unwrap_or(25)
-    });
+    let params = resolve_smtp_params(
+        SmtpOverrides {
+            server: spec.smtp_server.clone(),
+            port: spec.smtp_port,
+            username: spec.smtp_username.clone(),
+            password: spec.smtp_password.clone(),
+            ..Default::default()
+        },
+        EngineSmtp::from_env(),
+    );
 
-    let mut mailer_builder = SmtpTransport::builder_dangerous(&smtp_server).port(smtp_port);
+    let mut mailer_builder = SmtpTransport::builder_dangerous(&params.server).port(params.port);
 
-    if let (Some(user), Some(pass)) = (
-        spec.smtp_username
-            .clone()
-            .or_else(|| var("SMTP_USERNAME").ok()),
-        spec.smtp_password
-            .clone()
-            .or_else(|| var("SMTP_PASSWORD").ok()),
-    ) {
+    if let (Some(user), Some(pass)) = (params.username, params.password) {
         let credentials = lettre::transport::smtp::authentication::Credentials::new(user, pass);
         mailer_builder = mailer_builder.credentials(credentials);
     }
@@ -142,10 +145,12 @@ mod tests {
     fn test_generate_approval_links() {
         let run_id = stormchaser_model::RunId::new_v4();
         let step_id = stormchaser_model::StepInstanceId::new_v4();
-        let secret = "test-secret";
+        let key = "test-only-approval-link-key-aaaaaa";
         let base_url = "https://paninfracon.net";
+        let approvers = vec!["lead@paninfracon.net".to_string()];
 
-        let (approve, reject) = generate_approval_links(run_id, step_id, secret, base_url).unwrap();
+        let (approve, reject) =
+            generate_approval_links(run_id, step_id, &approvers, key, base_url).unwrap();
 
         assert!(approve.starts_with(base_url));
         assert!(reject.starts_with(base_url));

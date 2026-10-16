@@ -17,9 +17,18 @@ spec:
         {{- include "stormchaser-orchestration.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: api
     spec:
+      serviceAccountName: {{ .Values.api.serviceAccount.name | default (printf "%s-api" (include "stormchaser-orchestration.fullname" .)) }}
+      {{- if ne .Values.api.cron.engine "kubernetes" }}
+      # Only cron registration talks to the Kubernetes API
+      automountServiceAccountToken: false
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: api
-          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag | default .Chart.AppVersion }}"
+          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag | default (printf "v%s" .Chart.AppVersion) }}"
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
           imagePullPolicy: {{ .Values.api.image.pullPolicy }}
           env:
             - name: BINARY
@@ -28,19 +37,41 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            - name: DATABASE_URL
-              {{- if .Values.global.database.existingSecret }}
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.global.database.existingSecret }}
-                  key: {{ .Values.global.database.existingSecretKey }}
-              {{- else }}
-              value: {{ .Values.global.database.url | quote }}
-              {{- end }}
+            {{- include "stormchaser-orchestration.databaseUrlEnv" . | nindent 12 }}
             - name: STORMCHASER_DB_SSL
               value: {{ .Values.global.database.ssl | quote }}
             - name: NATS_URL
               value: {{ .Values.global.nats.url | quote }}
+            {{- with (.Values.global.nats.apiAuthSecret | default .Values.global.nats.authSecret) }}
+            - name: NATS_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: user
+            - name: NATS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: password
+            {{- end }}
+            {{- with .Values.global.approvalLinks.existingSecret }}
+            - name: STORMCHASER_APPROVAL_LINK_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: {{ $.Values.global.approvalLinks.existingSecretKey }}
+            {{- end }}
+            {{- with .Values.global.jwt.existingSecret }}
+            - name: STORMCHASER_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: {{ $.Values.global.jwt.existingSecretKey }}
+            {{- end }}
+            - name: STORMCHASER_SSRF_ALLOWED_HOSTS
+              value: {{ join "," .Values.global.ssrfAllowedHosts | quote }}
+            - name: STORMCHASER_AWS_ALLOWED_ROLE_ARNS
+              value: {{ join "," .Values.global.aws.allowedRoleArns | quote }}
             - name: RUST_LOG
               value: {{ .Values.api.rustLog | quote }}
             - name: OIDC_ISSUER
@@ -51,8 +82,23 @@ spec:
             {{- end }}
             - name: OIDC_CLIENT_ID
               value: {{ .Values.global.oidc.clientId | quote }}
+            {{- with .Values.global.oidc.extraScopes }}
+            - name: STORMCHASER_OIDC_EXTRA_SCOPES
+              value: {{ join " " . | quote }}
+            {{- end }}
+            {{- if .Values.global.oidc.existingSecret }}
             - name: OIDC_CLIENT_SECRET
-              value: {{ .Values.global.oidc.clientSecret | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.oidc.existingSecret }}
+                  key: {{ .Values.global.oidc.existingSecretKey }}
+            {{- else if .Values.global.oidc.clientSecret }}
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "stormchaser-orchestration.credentialsSecret" . }}
+                  key: OIDC_CLIENT_SECRET
+            {{- end }}
             - name: LOKI_URL
               value: {{ .Values.global.loki.url | quote }}
             - name: GRAFANA_URL
@@ -67,6 +113,12 @@ spec:
               value: {{ .Values.api.rateLimitPerSecond | quote }}
             - name: API_RATE_LIMIT_BURST_SIZE
               value: {{ .Values.api.rateLimitBurstSize | quote }}
+            - name: STORMCHASER_TRUSTED_PROXIES
+              value: {{ join "," .Values.api.trustedProxies | quote }}
+            {{- if .Values.api.mcpAllowedHosts }}
+            - name: MCP_ALLOWED_HOSTS
+              value: {{ .Values.api.mcpAllowedHosts | quote }}
+            {{- end }}
             {{- if .Values.global.tls.enabled }}
             - name: TLS_CA_CERT_PATH
               value: {{ .Values.global.tls.caCertPath | quote }}
@@ -75,6 +127,23 @@ spec:
             - name: TLS_KEY_PATH
               value: {{ .Values.global.tls.keyPath | quote }}
             {{- end }}
+            - name: STORMCHASER_LISTEN_TLS
+              value: {{ include "stormchaser-orchestration.listenTls" . | quote }}
+            {{- if eq (include "stormchaser-orchestration.listenTls" .) "true" }}
+            # Cron triggers call the API, and must trust its certificate
+            - name: STORMCHASER_CRON_CA_FILE
+              value: {{ .Values.global.tls.caCertPath | quote }}
+            {{- end }}
+            - name: CRON_ENGINE
+              value: {{ .Values.api.cron.engine | quote }}
+            {{- if eq .Values.api.cron.engine "kubernetes" }}
+            # Where cron triggers call the API: its own Service, by a name its
+            # certificate carries
+            - name: SYSTEM_URL
+              value: "{{ include "stormchaser-orchestration.internalScheme" . }}://{{ include "stormchaser-orchestration.fullname" . }}-api.{{ .Release.Namespace }}.svc:{{ .Values.api.service.port }}"
+            {{- end }}
+            - name: STORMCHASER_API_DOCS
+              value: {{ .Values.api.docs | quote }}
           ports:
             - name: http
               containerPort: 3000
@@ -83,10 +152,16 @@ spec:
             httpGet:
               path: /healthz
               port: http
+              {{- if eq (include "stormchaser-orchestration.listenTls" .) "true" }}
+              scheme: HTTPS
+              {{- end }}
           readinessProbe:
             httpGet:
               path: /healthz
               port: http
+              {{- if eq (include "stormchaser-orchestration.listenTls" .) "true" }}
+              scheme: HTTPS
+              {{- end }}
           resources:
             {{- toYaml .Values.api.resources | nindent 12 }}
           volumeMounts:
@@ -95,25 +170,7 @@ spec:
               mountPath: /etc/stormchaser/certs
               readOnly: true
             {{- end }}
-        {{- if .Values.api.opa.sidecar.enabled }}
-        - name: opa
-          image: "{{ .Values.api.opa.sidecar.image.repository }}:{{ .Values.api.opa.sidecar.image.tag }}"
-          args:
-            - "run"
-            - "--server"
-            - "--addr=0.0.0.0:8181"
-            - "/config/policy.rego"
-          ports:
-            - name: http-opa
-              containerPort: 8181
-              protocol: TCP
-          volumeMounts:
-            - name: opa-policy
-              mountPath: /config
-              readOnly: true
-          resources:
-            {{- toYaml .Values.api.opa.sidecar.resources | nindent 12 }}
-        {{- end }}
+        {{- include "stormchaser-orchestration.opaSidecar" . | nindent 8 }}
       {{- if or .Values.global.tls.enabled .Values.api.opa.sidecar.enabled }}
       volumes:
         {{- if .Values.global.tls.enabled }}
@@ -121,9 +178,5 @@ spec:
           secret:
             secretName: {{ .Values.global.tls.existingSecret }}
         {{- end }}
-        {{- if .Values.api.opa.sidecar.enabled }}
-        - name: opa-policy
-          configMap:
-            name: {{ include "stormchaser-orchestration.fullname" . }}-opa-policy
-        {{- end }}
+        {{- include "stormchaser-orchestration.opaPolicyVolume" . | nindent 8 }}
       {{- end }}

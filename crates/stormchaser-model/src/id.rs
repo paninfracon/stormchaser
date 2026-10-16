@@ -1,5 +1,5 @@
 use nutype::nutype;
-use schemars::{gen::SchemaGenerator, schema::Schema, JsonSchema};
+use schemars::{JsonSchema, Schema, SchemaGenerator};
 #[cfg(not(target_arch = "wasm32"))]
 use sqlx::{
     decode::Decode,
@@ -37,11 +37,11 @@ macro_rules! impl_id_traits {
         }
 
         impl JsonSchema for $t {
-            fn schema_name() -> String {
-                stringify!($t).to_string()
+            fn schema_name() -> std::borrow::Cow<'static, str> {
+                stringify!($t).into()
             }
-            fn json_schema(gen: &mut SchemaGenerator) -> Schema {
-                <Uuid as JsonSchema>::json_schema(gen)
+            fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+                <Uuid as JsonSchema>::json_schema(generator)
             }
         }
 

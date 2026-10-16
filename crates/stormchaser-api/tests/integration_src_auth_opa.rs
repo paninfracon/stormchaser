@@ -7,7 +7,7 @@ use std::sync::Arc;
 use stormchaser_api::auth::opa::opa_middleware;
 use stormchaser_api::AppState;
 use stormchaser_model::auth::ApprovalOpaContext;
-use stormchaser_model::auth::{ApiOpaContext, ConnectionOpaContext, OpaAuthorizer};
+use stormchaser_model::auth::{ApiOpaContext, OpaAuthorizer, ResourceOpaContext};
 use tower::ServiceExt;
 
 struct MockAuthorizer {
@@ -29,7 +29,7 @@ impl OpaAuthorizer for MockAuthorizer {
             Err(_) => anyhow::bail!("error"),
         }
     }
-    async fn check_connection(&self, _context: ConnectionOpaContext<'_>) -> anyhow::Result<bool> {
+    async fn check_resource(&self, _context: ResourceOpaContext<'_>) -> anyhow::Result<bool> {
         match &self.result {
             Ok(b) => Ok(*b),
             Err(_) => anyhow::bail!("error"),
@@ -57,7 +57,7 @@ async fn mock_state(auth: MockAuthorizer) -> AppState {
         .unwrap();
 
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats = async_nats::connect(nats_url).await.unwrap();
+    let nats = stormchaser_model::nats::connect(nats_url).await.unwrap();
 
     AppState {
         pool,
@@ -67,6 +67,7 @@ async fn mock_state(auth: MockAuthorizer) -> AppState {
         jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
         api_base_url: "http://localhost:3000".to_string(),
+        mcp_allowed_hosts: Vec::new(),
     }
 }
 

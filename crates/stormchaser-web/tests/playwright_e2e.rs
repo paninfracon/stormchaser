@@ -65,6 +65,8 @@ async fn run_playwright_tests() {
         .env("EXTERNAL_API_URL", mock_server.uri())
         .env("WEB_URL", "http://127.0.0.1:3009")
         .env("LEPTOS_SITE_ADDR", "127.0.0.1:3009")
+        // Playwright talks to it on plain HTTP
+        .env("STORMCHASER_LISTEN_TLS", "false")
         .env("LEPTOS_OUTPUT_NAME", "stormchaser-web")
         .env("LEPTOS_SITE_ROOT", &site_root)
         // explicitly set the CWD to the workspace root, because cargo run -p runs from workspace root in cargo leptos

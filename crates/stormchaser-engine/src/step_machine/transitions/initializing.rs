@@ -42,7 +42,7 @@ impl StepMachine<state::Initializing> {
         })
     }
 
-    #[tracing::instrument(skip(self, executor), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
+    #[tracing::instrument(skip(self, executor, error), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
     /// Fail.
     pub async fn fail(
         mut self,

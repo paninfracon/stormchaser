@@ -78,6 +78,17 @@ pub async fn handle_task(
         }
     };
 
+    // The engine has ended this run. A task for it that was already queued is dropped:
+    // nothing would read its result.
+    if stormchaser_model::run_cancel::is_cancelled(run_id) {
+        term_message(
+            &msg,
+            &format!("Dropping step {step_id}: run {run_id} was cancelled"),
+        )
+        .await;
+        return;
+    }
+
     let step_dsl = match parse_step_from_nats_payload(&payload) {
         Ok(step) => step,
         Err(e) => {
@@ -215,7 +226,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_task_invalid_event() {
         let docker = bollard::Docker::connect_with_local_defaults().unwrap();
-        let nats_client = async_nats::connect("nats://localhost:4222").await;
+        let nats_client = stormchaser_model::nats::connect("nats://localhost:4222").await;
         if let Ok(nats) = nats_client {
             let js = async_nats::jetstream::new(nats.clone());
 

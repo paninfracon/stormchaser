@@ -63,7 +63,18 @@ pub fn extract_vars(expr: &Expression, deps: &mut std::collections::HashSet<Stri
     }
 }
 
+/// The inputs a query's template refers to.
+///
+/// The template is parsed, walked and dropped under the guard that keeps deeply nested
+/// text from overflowing the stack. One that is refused has no dependencies found.
 pub fn extract_template_deps(query: &str) -> Vec<String> {
+    stormchaser_model::hcl_guard::guarded(query, stormchaser_model::hcl_guard::expr_limit(), || {
+        Ok(extract_template_deps_unguarded(query))
+    })
+    .unwrap_or_default()
+}
+
+fn extract_template_deps_unguarded(query: &str) -> Vec<String> {
     let mut deps = std::collections::HashSet::new();
     if let Ok(template) = query.parse::<hcl::Template>() {
         for el in template.elements() {
@@ -129,12 +140,16 @@ pub fn extract_queries(queries: &[stormchaser_model::dsl::Query], tasks: &mut Ve
     }
 }
 
+/// The hydration event stream's receiver has gone away.
+#[derive(Debug)]
+pub struct ReceiverClosed;
+
 pub async fn emit_event(
     schema: &Value,
     inputs: &Value,
     tasks: &[QueryTask],
     tx: &tokio::sync::mpsc::Sender<HydrationEvent>,
-) -> Result<(), ()> {
+) -> Result<(), ReceiverClosed> {
     let mut query_status = std::collections::HashMap::new();
     let mut any_running = false;
     for task in tasks {
@@ -185,13 +200,14 @@ pub async fn emit_event(
         validation_errors,
     };
 
-    tx.send(event).await.map_err(|_| ())
+    tx.send(event).await.map_err(|_| ReceiverClosed)
 }
 
 pub async fn execute_query(
     query_type: &str,
     params: &std::collections::HashMap<String, String>,
     state: Option<&AppState>,
+    initiating_user: &str,
 ) -> Result<Vec<Value>, anyhow::Error> {
     let mut db_url = None;
 
@@ -205,12 +221,26 @@ pub async fn execute_query(
             .ok_or_else(|| anyhow::anyhow!("Connection '{}' not found", conn_name))?;
 
             if app_state.opa.is_configured() {
-                let opa_ctx = stormchaser_model::auth::ConnectionOpaContext {
-                    connection_name: conn_name,
-                    // In a real scenario we extract the username from JWT claims.
-                    initiating_user: "schema_hydration_service",
+                let owner: Option<String> =
+                    sqlx::query_scalar("SELECT created_by FROM connections WHERE id = $1")
+                        .bind(conn.id)
+                        .fetch_optional(&app_state.pool)
+                        .await?
+                        .flatten();
+                let opa_ctx = stormchaser_model::auth::ResourceOpaContext {
+                    action: "use",
+                    resource: stormchaser_model::auth::OpaResource {
+                        kind: "connection",
+                        id: conn_name,
+                        owner: owner.as_deref(),
+                    },
+                    subject: stormchaser_model::auth::OpaSubject {
+                        sub: initiating_user,
+                        email: Some(initiating_user),
+                    },
+                    token: None,
                 };
-                if !app_state.opa.check_connection(opa_ctx).await? {
+                if !app_state.opa.check_resource(opa_ctx).await? {
                     return Err(anyhow::anyhow!(
                         "Access to connection '{}' denied by OPA",
                         conn_name
@@ -225,7 +255,9 @@ pub async fn execute_query(
     }
 
     let pool = state.map(|s| &s.pool);
-    stormchaser_engine::query::execute_query(query_type, params, pool, db_url).await
+    stormchaser_engine::query::// Connection use was checked above, as the caller
+    execute_query(query_type, params, pool, db_url, None)
+    .await
 }
 
 pub async fn run_hydration_loop(
@@ -233,12 +265,17 @@ pub async fn run_hydration_loop(
     inputs: Value,
     queries: Vec<stormchaser_model::dsl::Query>,
     state: Option<AppState>,
+    initiating_user: String,
     tx: tokio::sync::mpsc::Sender<HydrationEvent>,
 ) {
     let mut tasks = Vec::new();
     extract_queries(&queries, &mut tasks);
 
     let mut join_set = tokio::task::JoinSet::new();
+    // A workflow can declare any number of queries; only so many run at once
+    let running = std::sync::Arc::new(tokio::sync::Semaphore::new(
+        crate::limits::MAX_CONCURRENT_QUERIES,
+    ));
 
     let mut tasks_to_run = Vec::new();
     for (idx, task) in tasks.iter_mut().enumerate() {
@@ -305,9 +342,14 @@ pub async fn run_hydration_loop(
         let state_for_query = state.clone();
         let query_type = task.query_type.clone();
         let params_clone = resolved_params.clone();
+        let user = initiating_user.clone();
+        let running = running.clone();
 
         join_set.spawn(async move {
-            let res = execute_query(&query_type, &params_clone, state_for_query.as_ref()).await;
+            // The semaphore is never closed
+            let _permit = running.acquire_owned().await.ok();
+            let res =
+                execute_query(&query_type, &params_clone, state_for_query.as_ref(), &user).await;
             (idx, res)
         });
     }
@@ -382,7 +424,9 @@ mod tests {
     async fn test_execute_query_mock() {
         let mut params = std::collections::HashMap::new();
         params.insert("items".to_string(), "a,b,c".to_string());
-        let res = execute_query("mock", &params, None).await.unwrap();
+        let res = execute_query("mock", &params, None, "tester")
+            .await
+            .unwrap();
         assert_eq!(res, vec![json!("a"), json!("b"), json!("c")]);
     }
 
@@ -417,7 +461,15 @@ mod tests {
         // 1. Missing dependency
         let (tx, mut rx) = tokio::sync::mpsc::channel(100);
         let inputs_missing = json!({});
-        run_hydration_loop(schema.clone(), inputs_missing, queries.clone(), None, tx).await;
+        run_hydration_loop(
+            schema.clone(),
+            inputs_missing,
+            queries.clone(),
+            None,
+            "tester".to_string(),
+            tx,
+        )
+        .await;
 
         let event1 = rx.recv().await.unwrap();
         assert_eq!(event1.status, HydrationStatus::SchemaValidationFailed);
@@ -429,7 +481,15 @@ mod tests {
         // 2. Dependency provided
         let (tx2, mut rx2) = tokio::sync::mpsc::channel(100);
         let inputs_provided = json!({"dep": "val"});
-        run_hydration_loop(schema.clone(), inputs_provided, queries.clone(), None, tx2).await;
+        run_hydration_loop(
+            schema.clone(),
+            inputs_provided,
+            queries.clone(),
+            None,
+            "tester".to_string(),
+            tx2,
+        )
+        .await;
 
         let event_start = rx2.recv().await.unwrap();
         assert_eq!(event_start.status, HydrationStatus::UpdatePending);

@@ -125,6 +125,8 @@ pub async fn handle(
                     .get("message")
                     .and_then(|v| v.as_str())
                     .unwrap_or("Unknown");
+                // Can quote what the tested server answered
+                let msg = crate::utils::strip_control(msg);
 
                 if !success {
                     anyhow::bail!("Connection test failed: {}. Aborting creation.", msg);

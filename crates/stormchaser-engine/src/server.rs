@@ -117,7 +117,13 @@ pub async fn setup_nats_consumers(
     }
 
     let (query_tx, query_rx) = tokio::sync::mpsc::channel(1000);
-    for subject in ["stormchaser.v1.*.step.query", "stormchaser.v1.step.query"] {
+    // Request-reply subjects, outside the stream so that the engine's answer, not the
+    // stream's acknowledgement, is what the requester gets
+    for subject in [
+        stormchaser_model::nats::STEP_QUERY_SUBJECT,
+        handler::step::events::artifact_auth::ARTIFACT_AUTH_SUBJECT,
+        stormchaser_model::runner_auth::SESSION_SUBJECT,
+    ] {
         let mut query_subscriber = nats_client
             .queue_subscribe(subject.to_string(), "engine-query-group".into())
             .await?;
@@ -178,6 +184,22 @@ fn process_query_message(
     pool: sqlx::PgPool,
     nats_client: async_nats::Client,
 ) {
+    if message.subject.as_str() == stormchaser_model::runner_auth::SESSION_SUBJECT {
+        let reply = message.reply.clone().map(|r| r.to_string());
+        tokio::spawn(async move {
+            if let Err(e) = crate::runner_auth::handle_session_request(
+                &message.payload,
+                pool,
+                nats_client,
+                reply,
+            )
+            .await
+            {
+                tracing::error!("Failed to answer a runner's key request: {:?}", e);
+            }
+        });
+        return;
+    }
     let ce: cloudevents::Event = match serde_json::from_slice(&message.payload) {
         Ok(e) => e,
         Err(e) => {
@@ -192,8 +214,16 @@ fn process_query_message(
         return;
     };
     let reply = message.reply.clone().map(|r| r.to_string());
+    let wants_artifact_auth =
+        message.subject.as_str() == handler::step::events::artifact_auth::ARTIFACT_AUTH_SUBJECT;
     tokio::spawn(async move {
-        if let Err(e) = handler::handle_step_query(payload, pool, nats_client, reply).await {
+        if wants_artifact_auth {
+            if let Err(e) =
+                handler::handle_artifact_auth_request(payload, pool, nats_client, reply).await
+            {
+                tracing::error!("Failed to handle artifact auth request: {:?}", e);
+            }
+        } else if let Err(e) = handler::handle_step_query(payload, pool, nats_client, reply).await {
             tracing::error!("Failed to handle step query: {:?}", e);
         }
     });
@@ -249,12 +279,13 @@ async fn run_event_loop(
                             continue;
                         }
 
-                        tracing::debug!("Received event on {}: {:?}", subject, message.payload);
+                        // Payloads carry step specs, outputs and secrets, so only their size is logged
+                        tracing::debug!("Received event on {} ({} bytes)", subject, message.payload.len());
 
                         let ce: cloudevents::Event = match serde_json::from_slice(&message.payload) {
                             Ok(e) => e,
                             Err(e) => {
-                                tracing::error!("Failed to parse CloudEvent from {}: {:?}. Payload: {:?}", subject, e, String::from_utf8_lossy(&message.payload));
+                                tracing::error!("Failed to parse CloudEvent from {} ({} bytes): {:?}", subject, message.payload.len(), e);
                                 let _ = message.ack().await;
                                 continue;
                             }
@@ -316,18 +347,24 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
     let git_cache = Arc::new(GitCache::new(config.git_cache_dir.clone()));
 
     let opa_client = setup_opa(&config, &tls_reloader)?;
+    crate::authz::install(opa_client.clone());
     let log_backend = setup_log_backend(&config);
 
     // Initialize Secret Backend
-    let secret_backend = Arc::new(VaultBackend::new(
-        config.vault_addr.clone(),
-        config.vault_token.clone(),
-    )?) as secrets::SharedSecretBackend;
-    hcl_eval::set_secrets_backend(secret_backend);
+    match &config.vault_token {
+        Some(token) => {
+            let secret_backend =
+                Arc::new(VaultBackend::new(config.vault_addr.clone(), token.clone())?)
+                    as secrets::SharedSecretBackend;
+            hcl_eval::set_secrets_backend(secret_backend);
+        }
+        None => tracing::info!("VAULT_TOKEN is not set; secret() lookups are disabled"),
+    }
 
     let nats_options = async_nats::ConnectOptions::new()
         .retry_on_initial_connect()
         .tls_client_config((*tls_reloader.client_config()).clone());
+    let nats_options = stormchaser_model::nats::apply_auth_from_env(nats_options).await?;
 
     let nats_client =
         async_nats::connect_with_options(config.nats_url.clone(), nats_options).await?;
@@ -349,6 +386,7 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
         start_timeout_worker(pool.clone(), nats_client.clone(), tls_reloader.clone());
         start_resolver_crash_recovery_worker(pool.clone(), nats_client.clone());
         let _outbox_relay_worker = start_outbox_relay_worker(pool.clone(), nats_client.clone());
+        start_task_message_purge_worker(pool.clone(), nats_client.clone());
     }
 
     let (messages, query_messages) = setup_nats_consumers(&nats_client, &assigned_shards).await?;

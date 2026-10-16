@@ -56,12 +56,11 @@ fn render_webhook_body(
     spec: &dsl::WebhookInvokeSpec,
     template_ctx: &Value,
 ) -> Result<Option<String>> {
-    use minijinja::Environment;
     if let Some(body_tmpl) = &spec.body {
-        let env = Environment::new();
-        Ok(Some(env.render_str(body_tmpl, template_ctx).map_err(
-            |e| anyhow::anyhow!("Failed to render webhook body: {:?}", e),
-        )?))
+        Ok(Some(
+            crate::templating::render_str(body_tmpl, template_ctx)
+                .map_err(|e| anyhow::anyhow!("Failed to render webhook body: {:?}", e))?,
+        ))
     } else {
         Ok(None)
     }
@@ -75,7 +74,7 @@ async fn execute_webhook_request(
     pool: PgPool,
     nats_client: async_nats::Client,
 ) -> Result<()> {
-    let client = reqwest::Client::new();
+    let (client, url) = stormchaser_model::net_guard::guarded_client(&spec.url).await?;
     let method = match spec
         .method
         .as_deref()
@@ -91,7 +90,7 @@ async fn execute_webhook_request(
         _ => reqwest::Method::POST,
     };
 
-    let mut builder = client.request(method, &spec.url);
+    let mut builder = client.request(method, url);
 
     if let Some(headers) = &spec.headers {
         for (k, v) in headers {
@@ -113,7 +112,11 @@ async fn execute_webhook_request(
     let status = res.status();
 
     if status.is_success() {
-        let body_bytes = res.bytes().await?;
+        let body_bytes = stormchaser_model::net_guard::read_body_capped(
+            res,
+            stormchaser_model::net_guard::MAX_RESPONSE_BYTES,
+        )
+        .await?;
         let body_val: Value = serde_json::from_slice(&body_bytes).unwrap_or_else(
             |_| serde_json::json!({ "text": String::from_utf8_lossy(&body_bytes) }),
         );

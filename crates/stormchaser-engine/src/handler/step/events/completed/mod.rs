@@ -14,7 +14,10 @@ use tracing::{debug, info};
 use crate::handler::step::dispatch::find_step;
 use crate::handler::step::quota::release_step_quota_for_instance;
 
-use super::helpers::{is_terminal_step_status, persist_step_test_reports};
+use super::helpers::{
+    completion_authorized, is_terminal_step_status, persist_step_test_reports,
+    reporter_is_assigned_runner, step_belongs_to_run,
+};
 
 mod artifacts;
 mod logs;
@@ -72,9 +75,19 @@ pub async fn handle_step_completed(
 
     // 1. Update StepInstance status
     let instance = fetch_step_instance(step_id, &mut *tx).await?;
+    if !step_belongs_to_run(&instance, run_id) {
+        return Ok(());
+    }
 
     // Ensure we don't process duplicate completion events
     if is_terminal_step_status(&instance.status) {
+        return Ok(());
+    }
+
+    if !completion_authorized(&mut tx, &instance, event.completion_token.as_deref()).await {
+        return Ok(());
+    }
+    if !reporter_is_assigned_runner(&mut tx, &instance, event.runner_id.as_deref()).await {
         return Ok(());
     }
 
@@ -136,8 +149,13 @@ pub async fn handle_step_completed(
             .into_iter()
             .collect::<serde_json::Map<String, serde_json::Value>>()
     });
-    storage::persist_storage_hashes(&mut *tx, run_id.into_inner(), storage_hashes_map.as_ref())
-        .await?;
+    storage::persist_storage_hashes(
+        &mut *tx,
+        run_id.into_inner(),
+        storage_hashes_map.as_ref(),
+        &workflow_ast,
+    )
+    .await?;
 
     let artifacts_map = event.artifacts.as_ref().map(|m| {
         m.clone()
@@ -150,10 +168,26 @@ pub async fn handle_step_completed(
         step_id,
         artifacts_map.as_ref(),
         &workflow_ast,
+        &crate::handler::step::dispatch::published_artifacts(
+            &workflow_ast,
+            &current_step_instance.step_name,
+        ),
     )
     .await?;
 
-    persist_step_test_reports(event.test_reports.as_ref(), &mut tx, run_id, step_id, &pool).await?;
+    let declared_reports = dsl_step
+        .as_ref()
+        .map(|step| step.reports.as_slice())
+        .unwrap_or_default();
+    persist_step_test_reports(
+        event.test_reports.as_ref(),
+        declared_reports,
+        &mut tx,
+        run_id,
+        step_id,
+        &pool,
+    )
+    .await?;
 
     if let Some(step) = &mut dsl_step {
         outputs::setup_terraform_outputs(step);

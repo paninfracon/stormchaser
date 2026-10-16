@@ -9,14 +9,19 @@ on:
 env:
   CARGO_TERM_COLOR: always
   SQL_OFFLINE: true
+  # Tests point HTTP steps at mock servers on loopback, which the SSRF guard blocks by default.
+  STORMCHASER_SSRF_ALLOWED_HOSTS: "127.0.0.1,localhost"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+permissions:
+  contents: read
 
 jobs:
   coverage:
     name: Code Coverage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Maximize Disk Space
         run: |
@@ -35,16 +40,16 @@ jobs:
           sudo swapon /swapfile-extra
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           components: llvm-tools-preview
           targets: wasm32-unknown-unknown
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
+        uses: taiki-e/install-action@32e16a23c68a001a1621efca19f131f965d4d122 # cargo-llvm-cov
 
       - name: Install sqlx-cli and cargo-leptos
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
           tool: sqlx-cli,cargo-leptos
 
@@ -53,6 +58,26 @@ jobs:
           STORMCHASER_DEV_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
           STORMCHASER_MINIO_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
           STORMCHASER_CLI_SECRET="stormchaser-cli-secret"
+          # NATS reads its passwords as unquoted config values: one starting with '-' or
+          # looking like a number stops the server, so these start with a letter
+          STORMCHASER_NATS_PASSWORD=$(python3 -c 'import secrets; print("n" + secrets.token_hex(16))')
+          STORMCHASER_NATS_RUNNER_PASSWORD=$(python3 -c 'import secrets; print("n" + secrets.token_hex(16))')
+          STORMCHASER_NATS_API_PASSWORD=$(python3 -c 'import secrets; print("n" + secrets.token_hex(16))')
+          STORMCHASER_NATS_QUERY_PASSWORD=$(python3 -c 'import secrets; print("n" + secrets.token_hex(16))')
+          STORMCHASER_JWT_SECRET=$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')
+          # docker compose refuses to start without it. Only compose reads it: the tests sign
+          # with the debug key, so it stays out of $GITHUB_ENV.
+          echo "STORMCHASER_JWT_SECRET=$STORMCHASER_JWT_SECRET" >> .env
+          echo "STORMCHASER_NATS_PASSWORD=$STORMCHASER_NATS_PASSWORD" >> .env
+          echo "STORMCHASER_NATS_RUNNER_PASSWORD=$STORMCHASER_NATS_RUNNER_PASSWORD" >> .env
+          echo "STORMCHASER_NATS_PASSWORD=$STORMCHASER_NATS_PASSWORD" >> $GITHUB_ENV
+          echo "STORMCHASER_NATS_RUNNER_PASSWORD=$STORMCHASER_NATS_RUNNER_PASSWORD" >> $GITHUB_ENV
+          echo "STORMCHASER_NATS_API_PASSWORD=$STORMCHASER_NATS_API_PASSWORD" >> .env
+          echo "STORMCHASER_NATS_API_PASSWORD=$STORMCHASER_NATS_API_PASSWORD" >> $GITHUB_ENV
+          echo "STORMCHASER_NATS_QUERY_PASSWORD=$STORMCHASER_NATS_QUERY_PASSWORD" >> .env
+          echo "STORMCHASER_NATS_QUERY_PASSWORD=$STORMCHASER_NATS_QUERY_PASSWORD" >> $GITHUB_ENV
+          echo "NATS_USER=stormchaser" >> $GITHUB_ENV
+          echo "NATS_PASSWORD=$STORMCHASER_NATS_PASSWORD" >> $GITHUB_ENV
           echo "STORMCHASER_DEV_PASSWORD=$STORMCHASER_DEV_PASSWORD" >> .env
           echo "STORMCHASER_MINIO_PASSWORD=$STORMCHASER_MINIO_PASSWORD" >> .env
           echo "STORMCHASER_CLI_SECRET=$STORMCHASER_CLI_SECRET" >> .env
@@ -78,10 +103,15 @@ jobs:
           npx playwright install --with-deps
 
       - name: Generate coverage report
+        # Without DATABASE_URL the tests fall back to loading .env, whose
+        # STORMCHASER_JWT_SECRET (there for docker compose) the API would then check
+        # their tokens against
+        env:
+          DATABASE_URL: postgres://stormchaser:${{ env.STORMCHASER_DEV_PASSWORD }}@localhost:5432/stormchaser
         run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4.6.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           file: lcov.info

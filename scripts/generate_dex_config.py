@@ -26,7 +26,11 @@ role_map = {"ADMIN": "admin", "DEV": "dev", "OPS": "ops", "SEC": "sec"}
 with open(template_path, "r") as f:
     content = f.read()
 
-client_secret = os.environ.get("STORMCHASER_CLI_SECRET", "stormchaser-cli-secret")
+# No built-in value: a well-known client secret lets anyone redeem login codes
+client_secret = os.environ.get("STORMCHASER_CLI_SECRET")
+if not client_secret:
+    print("\033[0;31mError: STORMCHASER_CLI_SECRET must be set.\033[0m", file=sys.stderr)
+    sys.exit(1)
 content = content.replace("DEX_DB_PASSWORD", db_password)
 content = content.replace("DEX_CLIENT_SECRET", client_secret)
 

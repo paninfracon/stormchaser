@@ -1,14 +1,20 @@
 //! Stormchaser API implementation.
 //! This crate contains the REST API for the Stormchaser system.
 
+/// The interactive API documentation
+pub mod api_docs;
 /// Authentication and authorization module
 pub mod auth;
+/// Per-object authorization
+pub mod authz;
 /// Configuration module
 pub mod config;
 /// Database access module
 pub mod db;
 /// Human-in-the-loop module
 pub mod hitl;
+/// The HTTP listener, with or without TLS.
+pub mod listener;
 /// API routes module
 pub mod routes;
 /// Setup module
@@ -47,6 +53,8 @@ use stormchaser_model::LogBackend;
 use tokio::sync;
 /// Rate limiting middleware and configuration
 pub mod rate_limit;
+/// Masking of stored secrets in API responses.
+pub mod redact;
 
 use tower_http::trace::TraceLayer;
 use utoipa::OpenApi;
@@ -66,6 +74,7 @@ pub use routes::*;
 #[openapi(
     paths(
         routes::auth::login,
+        routes::auth::session,
         routes::auth::exchange_token,
         routes::auth::refresh_token,
         routes::workflow::enqueue_workflow,
@@ -101,11 +110,12 @@ pub use routes::*;
         routes::step::stream_run_logs_api,
         routes::step::stream_run_status_api,
         routes::schema::get_schema,
+        hitl::approve_step_link_page,
         hitl::approve_step_link
     ),
     components(
         schemas(
-            AuthExchangeRequest, AuthExchangeResponse, AuthRefreshRequest,
+            AuthExchangeRequest, AuthExchangeResponse, AuthRefreshRequest, SessionResponse,
             EnqueueRequest, EnqueueResponse, RunOverrides,
             ListRunsQuery, WorkflowRunDetail,
             WorkflowRunFullDetail, StepDetail,
@@ -165,6 +175,24 @@ pub struct AppState {
     pub log_backend: Option<LogBackend>,
     /// API base URL for MCP tool callback
     pub api_base_url: String,
+    /// Additional `Host` header values the MCP server accepts
+    pub mcp_allowed_hosts: Vec<String>,
+}
+
+/// Whether Swagger UI and the OpenAPI document are served (`STORMCHASER_API_DOCS=true`).
+pub fn api_docs_enabled() -> bool {
+    std::env::var("STORMCHASER_API_DOCS").is_ok_and(|value| value.eq_ignore_ascii_case("true"))
+}
+
+/// A request URI as it may be written to logs and traces.
+///
+/// An approval link's token is a credential that sits in the path, so it is left out.
+pub fn loggable_uri(uri: &axum::http::Uri) -> String {
+    const LINK_PREFIX: &str = "/api/v1/approve-link/";
+    match uri.path().strip_prefix(LINK_PREFIX) {
+        Some(token) if !token.is_empty() => format!("{}[redacted]", LINK_PREFIX),
+        _ => uri.to_string(),
+    }
 }
 
 /// Constructs the Axum application router with all routes and middleware
@@ -183,34 +211,41 @@ pub fn app(state: AppState) -> Router {
         store: Arc::new(sync::OnceCell::new()),
         per_second,
         burst_size,
+        trusted_proxies: rate_limit::parse_trusted_proxies(
+            &env::var(rate_limit::TRUSTED_PROXIES_ENV).unwrap_or_default(),
+        ),
     });
 
-    #[allow(unused_mut)]
-    let mut authenticated_routes = Router::new()
+    // Every route here requires a valid bearer token, enforced by `require_auth` below
+    // whether or not the handler also extracts `AuthClaims`.
+    let authenticated_routes = Router::new()
         .route("/runs", get(list_workflow_runs).post(enqueue_workflow))
         .route("/runs/stream", get(stream_workflow_runs_api))
         .route(
-            "/runs/:id",
+            "/runs/{id}",
             get(get_workflow_run).delete(delete_workflow_run_api),
         )
-        .route("/runs/:id/steps/:step_id/approve", post(hitl::approve_step))
-        .route("/runs/:id/steps/:step_id/reject", post(hitl::reject_step))
-        .route("/events/correlate", post(hitl::correlate_event))
-        .route("/runs/:id/artifacts", get(list_run_artifacts))
-        .route("/runs/:id/reports", get(list_run_test_reports))
-        .route("/runs/:id/summaries", get(list_run_test_summaries))
-        .route("/runs/:id/reports/:report_id", get(get_test_report))
         .route(
-            "/runs/:id/steps/:step_id/logs/stream",
+            "/runs/{id}/steps/{step_id}/approve",
+            post(hitl::approve_step),
+        )
+        .route("/runs/{id}/steps/{step_id}/reject", post(hitl::reject_step))
+        .route("/events/correlate", post(hitl::correlate_event))
+        .route("/runs/{id}/artifacts", get(list_run_artifacts))
+        .route("/runs/{id}/reports", get(list_run_test_reports))
+        .route("/runs/{id}/summaries", get(list_run_test_summaries))
+        .route("/runs/{id}/reports/{report_id}", get(get_test_report))
+        .route(
+            "/runs/{id}/steps/{step_id}/logs/stream",
             get(stream_step_logs_api),
         )
-        .route("/runs/:id/steps/:step_id/logs", get(get_step_logs_api))
-        .route("/runs/:id/logs/stream", get(stream_run_logs_api))
-        .route("/runs/:id/status/stream", get(stream_run_status_api))
+        .route("/runs/{id}/steps/{step_id}/logs", get(get_step_logs_api))
+        .route("/runs/{id}/logs/stream", get(stream_run_logs_api))
+        .route("/runs/{id}/status/stream", get(stream_run_status_api))
         .route("/runs/direct", post(direct_run))
         .route("/webhooks", get(list_webhooks).post(create_webhook))
         .route(
-            "/webhooks/:id",
+            "/webhooks/{id}",
             get(get_webhook)
                 .patch(update_webhook)
                 .delete(delete_webhook),
@@ -219,43 +254,66 @@ pub fn app(state: AppState) -> Router {
             "/cron-workflows",
             get(list_cron_workflows).post(create_cron_workflow),
         )
-        .route("/cron-workflows/:id", delete(delete_cron_workflow))
+        .route("/cron-workflows/{id}", delete(delete_cron_workflow))
         .route("/rules", get(list_event_rules).post(create_event_rule))
-        .route("/rules/:id", delete(delete_event_rule))
+        .route("/rules/{id}", delete(delete_event_rule))
         .route(
             "/connections",
             get(list_connections).post(create_connection),
         )
         .route(
-            "/connections/:id",
+            "/connections/{id}",
             get(get_connection)
                 .patch(update_connection)
                 .delete(delete_connection),
         )
         .route("/connections/test", post(test_connection))
-        .route("/schema/parse-git", post(routes::schema::parse_git));
+        .route("/schema/parse-git", post(routes::schema::parse_git))
+        .route("/auth/session", get(session))
+        // Runs after the two below: who may act on the object the path names.
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            authz::authorize_object,
+        ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            opa_middleware,
+        ))
+        // Added last so it runs first: unauthenticated requests get 401 before policy
+        // is consulted.
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth::require_auth,
+        ));
 
+    // The MCP transport is governed by policy alone (see docs/security.md): clients
+    // connect without a token and the tool calls it proxies arrive unauthenticated.
+    #[allow(unused_mut)]
+    let mut policy_only_routes = Router::new();
     #[cfg(feature = "mcp")]
     {
-        if let Some(service) = mcp_service(&state.api_base_url) {
-            authenticated_routes = authenticated_routes.nest_service("/mcp", service);
+        if let Some(service) = mcp_service(&state.api_base_url, &state.mcp_allowed_hosts) {
+            policy_only_routes = policy_only_routes.nest_service("/mcp", service);
         }
     }
-
-    let authenticated_routes = authenticated_routes.layer(middleware::from_fn_with_state(
+    let policy_only_routes = policy_only_routes.layer(middleware::from_fn_with_state(
         state.clone(),
         opa_middleware,
     ));
 
     let api_v1 = Router::new()
         .merge(authenticated_routes)
-        .route("/webhooks/:id", post(handle_webhook))
+        .merge(policy_only_routes)
+        .route("/webhooks/{id}", post(handle_webhook))
         .route("/auth/login", get(login))
         .route("/auth/exchange", post(exchange_token))
         .route("/auth/refresh", post(refresh_token))
-        .route("/approve-link/:token", get(hitl::approve_step_link))
         .route(
-            "/cron-trigger/:id",
+            "/approve-link/{token}",
+            get(hitl::approve_step_link_page).post(hitl::approve_step_link),
+        )
+        .route(
+            "/cron-trigger/{id}",
             post(routes::cron::trigger_cron_workflow),
         )
         .route("/schema", get(routes::schema::get_schema))
@@ -277,19 +335,22 @@ pub fn app(state: AppState) -> Router {
             },
         ));
 
-    Router::new()
-        .merge(
-            utoipa_swagger_ui::SwaggerUi::new("/swagger-ui")
-                .url("/api-docs/openapi.json", ApiDoc::openapi()),
-        )
-        .route("/", get(|| async { "Stormchaser API" }))
+    // The interactive API documentation is served without a token, so it is only there
+    // when asked for: it describes every route to anyone who can reach the listener,
+    // and its bundled UI is code that need not be exposed in production.
+    let mut root = Router::new();
+    if api_docs_enabled() {
+        root = root.merge(api_docs::routes());
+    }
+
+    root.route("/", get(|| async { "Stormchaser API" }))
         .route("/healthz", get(|| async { "OK" }))
         .route("/api/health", get(|| async { "OK" }))
         .nest("/api/v1", api_v1)
         .layer(
             TraceLayer::new_for_http().make_span_with(|request: &axum::extract::Request| {
                 let method = request.method();
-                let uri = request.uri();
+                let uri = loggable_uri(request.uri());
                 tracing::info_span!(
                     "HTTP request",
                     method = %method,
@@ -301,4 +362,20 @@ pub fn app(state: AppState) -> Router {
             }),
         )
         .with_state(state)
+}
+
+#[cfg(test)]
+mod loggable_uri_tests {
+    use super::loggable_uri;
+
+    #[test]
+    fn approval_link_tokens_are_left_out_of_logged_uris() {
+        let uri: axum::http::Uri = "/api/v1/approve-link/c2VjcmV0LXRva2Vu".parse().unwrap();
+        let logged = loggable_uri(&uri);
+        assert_eq!(logged, "/api/v1/approve-link/[redacted]");
+        assert!(!logged.contains("c2VjcmV0"));
+
+        let other: axum::http::Uri = "/api/v1/runs?limit=5".parse().unwrap();
+        assert_eq!(loggable_uri(&other), "/api/v1/runs?limit=5");
+    }
 }

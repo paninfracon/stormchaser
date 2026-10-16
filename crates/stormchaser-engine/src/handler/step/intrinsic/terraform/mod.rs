@@ -51,34 +51,46 @@ async fn assume_aws_role(
     }
 }
 
+/// The image Terraform steps run in, pinned by digest so that what may hold an assumed
+/// role's credentials does not change under a moving tag.
+/// `STORMCHASER_TERRAFORM_IMAGE` replaces it.
+const DEFAULT_TERRAFORM_IMAGE: &str = "hashicorp/terraform:1.16.6@sha256:bfffc1ded5fbf0a17beaaf22eb4793980abdb19d0761ff6a3a0efb2ab4d9b316";
+
+fn terraform_image() -> String {
+    std::env::var("STORMCHASER_TERRAFORM_IMAGE")
+        .ok()
+        .filter(|image| !image.is_empty())
+        .unwrap_or_else(|| DEFAULT_TERRAFORM_IMAGE.to_string())
+}
+
+/// The step's script. The workspace, backend settings and plan file reach it as
+/// environment variables (see [`terraform_env`]), never as part of its text: they can
+/// come from a run's inputs, and the container may hold an assumed role's credentials.
 fn build_terraform_command(
-    workspace_dir: &str,
-    backend_bucket: Option<&str>,
-    backend_key: Option<&str>,
-    region: Option<&str>,
+    has_backend_bucket: bool,
+    has_backend_key: bool,
+    has_region: bool,
     is_apply: bool,
     auto_approve: bool,
-    out_file: &str,
 ) -> String {
-    let mut init_cmd = format!("cd {} && terraform init", workspace_dir);
-    if let Some(bucket) = backend_bucket {
-        init_cmd.push_str(&format!(" -backend-config='bucket={}'", bucket));
+    let mut init_cmd = r#"cd -- "$STORMCHASER_TF_DIR" && terraform init"#.to_string();
+    if has_backend_bucket {
+        init_cmd.push_str(r#" -backend-config="bucket=$STORMCHASER_TF_BACKEND_BUCKET""#);
     }
-    if let Some(key) = backend_key {
-        init_cmd.push_str(&format!(" -backend-config='key={}'", key));
+    if has_backend_key {
+        init_cmd.push_str(r#" -backend-config="key=$STORMCHASER_TF_BACKEND_KEY""#);
     }
-    if let Some(r) = region {
-        init_cmd.push_str(&format!(" -backend-config='region={}'", r));
+    if has_region {
+        init_cmd.push_str(r#" -backend-config="region=$AWS_REGION""#);
     }
 
     let mut run_cmd = if is_apply {
         format!(
-            "terraform apply {} {}",
-            if auto_approve { "-auto-approve" } else { "" },
-            out_file
+            r#"terraform apply {}"$STORMCHASER_TF_OUT""#,
+            if auto_approve { "-auto-approve " } else { "" },
         )
     } else {
-        format!("terraform plan -out={}", out_file)
+        r#"terraform plan -out="$STORMCHASER_TF_OUT""#.to_string()
     };
 
     if is_apply {
@@ -88,24 +100,54 @@ fn build_terraform_command(
         );
     } else {
         // output a plan summary for log scraping, and also save the full plan text to plan.txt
-        run_cmd.push_str(&format!(
-            " && terraform show -no-color {} > plan.txt",
-            out_file
-        ));
-        run_cmd.push_str(&format!(
-            " && echo '' && echo -n '--- TF PLAN SUMMARY --- ' && terraform show -no-color {} | grep -E '^Plan:|^No changes.' | tail -n 1",
-            out_file
-        ));
-        run_cmd.push_str(&format!(
-            " && echo '' && echo -n '--- TF PLAN JSON --- ' && terraform show -json {} | tr -d '\\n'",
-            out_file
-        ));
+        run_cmd.push_str(r#" && terraform show -no-color "$STORMCHASER_TF_OUT" > plan.txt"#);
+        run_cmd.push_str(
+            r#" && echo '' && echo -n '--- TF PLAN SUMMARY --- ' && terraform show -no-color "$STORMCHASER_TF_OUT" | grep -E '^Plan:|^No changes.' | tail -n 1"#,
+        );
+        run_cmd.push_str(
+            r#" && echo '' && echo -n '--- TF PLAN JSON --- ' && terraform show -json "$STORMCHASER_TF_OUT" | tr -d '\n'"#,
+        );
     }
 
     format!(
         "mkdir -p /tmp/.terraform_plugin_cache && {} && {}",
         init_cmd, run_cmd
     )
+}
+
+/// The values [`build_terraform_command`] reads. The plan file is a positional argument
+/// to `terraform apply`, so one that starts with `-` would be read as an option.
+fn terraform_env(
+    workspace_dir: &str,
+    backend_bucket: Option<&str>,
+    backend_key: Option<&str>,
+    out_file: &str,
+) -> anyhow::Result<Vec<EnvVar>> {
+    if out_file.is_empty() || out_file.starts_with('-') {
+        anyhow::bail!("Terraform out_file {:?} is not a file name", out_file);
+    }
+    let mut envs = vec![
+        EnvVar {
+            name: "STORMCHASER_TF_DIR".to_string(),
+            value: workspace_dir.to_string(),
+        },
+        EnvVar {
+            name: "STORMCHASER_TF_OUT".to_string(),
+            value: out_file.to_string(),
+        },
+    ];
+    for (name, value) in [
+        ("STORMCHASER_TF_BACKEND_BUCKET", backend_bucket),
+        ("STORMCHASER_TF_BACKEND_KEY", backend_key),
+    ] {
+        if let Some(value) = value {
+            envs.push(EnvVar {
+                name: name.to_string(),
+                value: value.to_string(),
+            });
+        }
+    }
+    Ok(envs)
 }
 
 fn extract_destructive_change_count(plan_summary: &str) -> Option<u32> {
@@ -170,16 +212,14 @@ async fn mutate_terraform_spec(
         .and_then(|v| v.as_str());
 
     let script = build_terraform_command(
-        workspace_dir,
-        backend_bucket,
-        backend_key,
-        region,
+        backend_bucket.is_some(),
+        backend_key.is_some(),
+        region.is_some(),
         is_apply,
         auto_approve,
-        out_file,
     );
 
-    let mut envs = Vec::new();
+    let mut envs = terraform_env(workspace_dir, backend_bucket, backend_key, out_file)?;
     if let Some(r) = region {
         envs.push(EnvVar {
             name: "AWS_REGION".to_string(),
@@ -193,6 +233,7 @@ async fn mutate_terraform_spec(
 
     #[cfg(feature = "aws-sdk-sts")]
     if let Some(role_arn) = assume_role_arn {
+        crate::aws_guard::ensure_role_allowed(role_arn)?;
         let mut sts_envs = assume_aws_role(run_id, region, role_arn, role_session_name).await?;
         envs.append(&mut sts_envs);
     }
@@ -223,7 +264,7 @@ async fn mutate_terraform_spec(
     let container_spec = CommonContainerSpec {
         registry_connection: None,
         connections: None,
-        image: "hashicorp/terraform:latest".to_string(),
+        image: terraform_image(),
         command: Some(vec!["sh".to_string(), "-c".to_string(), script]),
         args: None,
         env: if envs.is_empty() { None } else { Some(envs) },

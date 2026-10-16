@@ -13,26 +13,92 @@ spec:
       labels:
         {{- include "stormchaser-runner-docker.selectorLabels" . | nindent 8 }}
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- with .Values.dockerSocketGroup }}
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        supplementalGroups:
+          - {{ . }}
+        {{- else }}
+        # The image's own user is unprivileged; without the socket's group only root
+        # can use the socket
+        runAsUser: 0
+        runAsGroup: 0
+        {{- end }}
       containers:
         - name: runner
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default (printf "v%s" .Chart.AppVersion) }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
             - name: BINARY
               value: "stormchaser-runner-docker"
             - name: NATS_URL
               value: {{ .Values.config.natsUrl | quote }}
+            {{- with .Values.config.natsAuthSecret }}
+            - name: NATS_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: user
+            - name: NATS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: password
+            {{- end }}
+            {{- with .Values.config.stateEncryptionSecret }}
+            - name: STORMCHASER_STATE_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: {{ $.Values.config.stateEncryptionSecretKey }}
+            {{- end }}
+            {{- with .Values.config.stepNetwork }}
+            - name: STORMCHASER_STEP_NETWORK
+              value: {{ . | quote }}
+            {{- end }}
+            - name: STORMCHASER_STEP_DEFAULT_CPU
+              value: {{ .Values.config.stepLimits.defaultCpu | quote }}
+            - name: STORMCHASER_STEP_DEFAULT_MEMORY
+              value: {{ .Values.config.stepLimits.defaultMemory | quote }}
+            - name: STORMCHASER_STEP_MAX_CPU
+              value: {{ .Values.config.stepLimits.maxCpu | quote }}
+            - name: STORMCHASER_STEP_MAX_MEMORY
+              value: {{ .Values.config.stepLimits.maxMemory | quote }}
+            - name: STORMCHASER_STEP_DEFAULT_TIMEOUT
+              value: {{ .Values.config.stepLimits.defaultTimeout | quote }}
+            - name: STORMCHASER_STEP_MAX_TIMEOUT
+              value: {{ .Values.config.stepLimits.maxTimeout | quote }}
+            - name: STORMCHASER_STEP_PIDS_LIMIT
+              value: {{ .Values.config.stepLimits.pidsLimit | quote }}
             - name: RUST_LOG
               value: {{ .Values.config.rustLog | quote }}
+            - name: STORMCHASER_ALLOW_PRIVILEGED
+              value: {{ .Values.config.allowPrivileged | quote }}
+            {{- with .Values.config.agentImage }}
+            - name: STORMCHASER_AGENT_IMAGE
+              value: {{ . | quote }}
+            {{- end }}
             - name: DOCKER_HOST
               value: "unix:///var/run/docker.sock"
           volumeMounts:
             - name: docker-socket
               mountPath: /var/run/docker.sock
+            - name: tmp
+              mountPath: /tmp
       volumes:
         - name: docker-socket
           hostPath:
             path: {{ .Values.dockerSocketPath }}
+            type: Socket
+        - name: tmp
+          emptyDir: {}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

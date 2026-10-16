@@ -4,6 +4,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 use stormchaser_model::dsl::Step;
 
+/// Stopping the containers of a cancelled run.
+pub mod cancel;
 /// Cryptographic utilities for container state encryption.
 pub mod crypto;
 /// Docker-specific helper utilities.
@@ -94,7 +96,7 @@ pub mod state {
         /// Names of the storage endpoints.
         pub storage_names: Vec<String>,
         /// The mounts configured for this container.
-        pub mounts: Vec<bollard::service::Mount>,
+        pub mounts: Vec<bollard::models::Mount>,
     }
     /// The state when the container has finished executing.
     pub struct Finished {
@@ -131,3 +133,17 @@ impl DockerContainerMachine<state::Initialized> {
         }
     }
 }
+
+/// The image of the agent container that parks storage and publishes artifacts beside
+/// a step: `STORMCHASER_AGENT_IMAGE`, or `stormchaser-agent:v1`, the tag the local
+/// build gives it. Set it to a digest-pinned reference in production.
+pub fn agent_image() -> String {
+    std::env::var("STORMCHASER_AGENT_IMAGE")
+        .ok()
+        .filter(|image| !image.is_empty())
+        .unwrap_or_else(|| "stormchaser-agent:v1".to_string())
+}
+
+/// The user agent containers run as. The image runs as an unprivileged user by
+/// default; the agent reads and writes files a step created as any user.
+pub const AGENT_USER: &str = "0:0";

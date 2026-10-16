@@ -1,6 +1,6 @@
 # stormchaser-agent
 
-Runner-side execution wrapper for Stormchaser. Executes user commands within the runner environment, manages storage "parking" for the Stormchaser File System (SFS), and collects artifacts and test reports.
+Runner-side helper for Stormchaser. Manages storage "parking" for the Stormchaser File System (SFS) and publishes artifacts from a helper container or pod sidecar that the step's own code does not share (`park`, `unpark`), and wraps a step's command to collect its test reports (`run`).
 
 ---
 

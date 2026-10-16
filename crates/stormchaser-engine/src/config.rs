@@ -14,8 +14,9 @@ pub struct Config {
     pub tls_key_path: PathBuf,
     /// The tls server name.
     pub tls_server_name: Option<String>,
-    /// The db ssl.
-    pub db_ssl: bool,
+    /// `STORMCHASER_DB_SSL`, if set. Unset, the database connection is verified TLS
+    /// unless `DATABASE_URL` names an `sslmode` of its own.
+    pub db_ssl: Option<bool>,
     /// The git cache dir.
     pub git_cache_dir: PathBuf,
     /// The opa url.
@@ -32,8 +33,8 @@ pub struct Config {
     pub elasticsearch_index: Option<String>,
     /// The vault addr.
     pub vault_addr: String,
-    /// The vault token.
-    pub vault_token: String,
+    /// The Vault token. Without one, `secret()` lookups are refused.
+    pub vault_token: Option<String>,
     /// The nats url.
     pub nats_url: String,
     /// The rust log.
@@ -53,7 +54,7 @@ impl Config {
         let mut tls_cert_path = PathBuf::from("/etc/engine/certs/tls.crt");
         let mut tls_key_path = PathBuf::from("/etc/engine/certs/tls.key");
         let mut tls_server_name = None;
-        let mut db_ssl = false;
+        let mut db_ssl = None;
         let mut git_cache_dir = PathBuf::from("/tmp/stormchaser/git-cache");
         let mut opa_url = None;
         let mut opa_wasm_path = None;
@@ -62,9 +63,9 @@ impl Config {
         let mut elasticsearch_url = None;
         let mut elasticsearch_index = None;
         let mut vault_addr = "http://localhost:8200".to_string();
-        let mut vault_token = "root".to_string();
+        let mut vault_token = None;
         let mut nats_url = "nats://localhost:4222".to_string();
-        let mut rust_log = "stormchaser_engine=debug".to_string();
+        let mut rust_log = "stormchaser_engine=info".to_string();
 
         for (k, v) in env {
             match k.as_ref() {
@@ -73,7 +74,12 @@ impl Config {
                 "TLS_CERT_PATH" => tls_cert_path = PathBuf::from(v.as_ref()),
                 "TLS_KEY_PATH" => tls_key_path = PathBuf::from(v.as_ref()),
                 "TLS_SERVER_NAME" => tls_server_name = Some(v.as_ref().to_string()),
-                "STORMCHASER_DB_SSL" => db_ssl = v.as_ref() == "true",
+                "STORMCHASER_DB_SSL" => {
+                    db_ssl = Some(stormchaser_tls::parse_switch(
+                        "STORMCHASER_DB_SSL",
+                        v.as_ref(),
+                    )?)
+                }
                 "GIT_CACHE_DIR" => git_cache_dir = PathBuf::from(v.as_ref()),
                 "OPA_URL" => {
                     let val = v.as_ref().to_string();
@@ -87,7 +93,12 @@ impl Config {
                 "ELASTICSEARCH_URL" => elasticsearch_url = Some(v.as_ref().to_string()),
                 "ELASTICSEARCH_INDEX" => elasticsearch_index = Some(v.as_ref().to_string()),
                 "VAULT_ADDR" => vault_addr = v.as_ref().to_string(),
-                "VAULT_TOKEN" => vault_token = v.as_ref().to_string(),
+                "VAULT_TOKEN" => {
+                    let val = v.as_ref().to_string();
+                    if !val.is_empty() {
+                        vault_token = Some(val);
+                    }
+                }
                 "NATS_URL" => nats_url = v.as_ref().to_string(),
                 "RUST_LOG" => rust_log = v.as_ref().to_string(),
                 _ => {}
@@ -160,11 +171,12 @@ mod tests {
             config.tls_server_name.as_deref(),
             Some("engine.example.com")
         );
-        assert!(config.db_ssl);
+        assert_eq!(config.db_ssl, Some(true));
         assert_eq!(config.nats_url, "nats://localhost:4222");
         assert_eq!(config.loki_url.as_deref(), Some("http://loki:3100"));
         assert_eq!(config.vault_addr, "http://vault:8200");
-        assert_eq!(config.vault_token, "root");
+        // No built-in token: Vault is off until the operator supplies one
+        assert_eq!(config.vault_token, None);
         assert_eq!(
             config.tls_cert_path,
             PathBuf::from("/etc/engine/certs/tls.crt")

@@ -1,16 +1,18 @@
 use async_trait::async_trait;
-use bollard::container::{
-    Config, CreateContainerOptions, InspectContainerOptions, ListContainersOptions, LogOutput,
-    LogsOptions, RemoveContainerOptions, StartContainerOptions, StopContainerOptions,
-    WaitContainerOptions,
-};
+use bollard::container::LogOutput;
 use bollard::errors::Error;
-use bollard::image::CreateImageOptions;
+use bollard::models::ContainerCreateBody;
+use bollard::models::VolumeCreateRequest;
 use bollard::models::{
     ContainerCreateResponse, ContainerInspectResponse, ContainerSummary, ContainerWaitResponse,
     CreateImageInfo, Volume, VolumeListResponse,
 };
-use bollard::volume::{CreateVolumeOptions, ListVolumesOptions, RemoveVolumeOptions};
+use bollard::query_parameters::CreateImageOptions;
+use bollard::query_parameters::{
+    CreateContainerOptions, InspectContainerOptions, ListContainersOptions, LogsOptions,
+    RemoveContainerOptions, StartContainerOptions, StopContainerOptions, WaitContainerOptions,
+};
+use bollard::query_parameters::{ListVolumesOptions, RemoveVolumeOptions};
 use bollard::Docker;
 use bytes::Bytes;
 use futures::{stream::BoxStream, StreamExt};
@@ -26,14 +28,14 @@ mockall::mock! {
     impl ContainerRuntime for ContainerRuntime {
         async fn create_container(
             &self,
-            options: Option<CreateContainerOptions<String>>,
-            config: Config<String>,
+            options: Option<CreateContainerOptions>,
+            config: ContainerCreateBody,
         ) -> Result<ContainerCreateResponse, Error>;
 
         async fn start_container(
             &self,
             container_name: &str,
-            options: Option<StartContainerOptions<String>>,
+            options: Option<StartContainerOptions>,
         ) -> Result<(), Error>;
 
         async fn stop_container(
@@ -51,12 +53,12 @@ mockall::mock! {
         fn wait_container(
             &self,
             container_name: &str,
-            options: Option<WaitContainerOptions<String>>,
+            options: Option<WaitContainerOptions>,
         ) -> BoxStream<'static, Result<ContainerWaitResponse, Error>>;
 
         async fn create_volume(
             &self,
-            config: CreateVolumeOptions<String>,
+            config: VolumeCreateRequest,
         ) -> Result<Volume, Error>;
 
         async fn remove_volume(
@@ -67,7 +69,7 @@ mockall::mock! {
 
         fn create_image(
             &self,
-            options: Option<CreateImageOptions<'static, String>>,
+            options: Option<CreateImageOptions>,
             root_fs: Option<Bytes>,
             credentials: Option<bollard::auth::DockerCredentials>,
         ) -> BoxStream<'static, Result<CreateImageInfo, Error>>;
@@ -75,7 +77,7 @@ mockall::mock! {
         fn logs(
             &self,
             container_name: &str,
-            options: Option<LogsOptions<String>>,
+            options: Option<LogsOptions>,
         ) -> BoxStream<'static, Result<LogOutput, Error>>;
 
         async fn create_exec(
@@ -103,12 +105,12 @@ mockall::mock! {
 
         async fn list_containers(
             &self,
-            options: Option<ListContainersOptions<String>>,
+            options: Option<ListContainersOptions>,
         ) -> Result<Vec<ContainerSummary>, Error>;
 
         async fn list_volumes(
             &self,
-            options: Option<ListVolumesOptions<String>>,
+            options: Option<ListVolumesOptions>,
         ) -> Result<VolumeListResponse, Error>;
     }
 
@@ -123,15 +125,15 @@ pub trait ContainerRuntime: Send + Sync + Clone + 'static {
     /// Creates a new container.
     async fn create_container(
         &self,
-        options: Option<CreateContainerOptions<String>>,
-        config: Config<String>,
+        options: Option<CreateContainerOptions>,
+        config: ContainerCreateBody,
     ) -> Result<ContainerCreateResponse, Error>;
 
     /// Starts an existing container.
     async fn start_container(
         &self,
         container_name: &str,
-        options: Option<StartContainerOptions<String>>,
+        options: Option<StartContainerOptions>,
     ) -> Result<(), Error>;
 
     /// Stops a running container.
@@ -152,11 +154,11 @@ pub trait ContainerRuntime: Send + Sync + Clone + 'static {
     fn wait_container(
         &self,
         container_name: &str,
-        options: Option<WaitContainerOptions<String>>,
+        options: Option<WaitContainerOptions>,
     ) -> BoxStream<'static, Result<ContainerWaitResponse, Error>>;
 
     /// Creates a volume.
-    async fn create_volume(&self, config: CreateVolumeOptions<String>) -> Result<Volume, Error>;
+    async fn create_volume(&self, config: VolumeCreateRequest) -> Result<Volume, Error>;
 
     /// Removes a volume.
     async fn remove_volume(
@@ -168,7 +170,7 @@ pub trait ContainerRuntime: Send + Sync + Clone + 'static {
     /// Creates an image.
     fn create_image(
         &self,
-        options: Option<CreateImageOptions<'static, String>>,
+        options: Option<CreateImageOptions>,
         root_fs: Option<Bytes>,
         credentials: Option<bollard::auth::DockerCredentials>,
     ) -> BoxStream<'static, Result<CreateImageInfo, Error>>;
@@ -177,7 +179,7 @@ pub trait ContainerRuntime: Send + Sync + Clone + 'static {
     fn logs(
         &self,
         container_name: &str,
-        options: Option<LogsOptions<String>>,
+        options: Option<LogsOptions>,
     ) -> BoxStream<'static, Result<LogOutput, Error>>;
 
     async fn create_exec(
@@ -207,13 +209,13 @@ pub trait ContainerRuntime: Send + Sync + Clone + 'static {
     /// Lists containers.
     async fn list_containers(
         &self,
-        options: Option<ListContainersOptions<String>>,
+        options: Option<ListContainersOptions>,
     ) -> Result<Vec<ContainerSummary>, Error>;
 
     /// Lists volumes.
     async fn list_volumes(
         &self,
-        options: Option<ListVolumesOptions<String>>,
+        options: Option<ListVolumesOptions>,
     ) -> Result<VolumeListResponse, Error>;
 }
 
@@ -221,8 +223,8 @@ pub trait ContainerRuntime: Send + Sync + Clone + 'static {
 impl ContainerRuntime for Docker {
     async fn create_container(
         &self,
-        options: Option<CreateContainerOptions<String>>,
-        config: Config<String>,
+        options: Option<CreateContainerOptions>,
+        config: ContainerCreateBody,
     ) -> Result<ContainerCreateResponse, Error> {
         self.create_container(options, config).await
     }
@@ -230,7 +232,7 @@ impl ContainerRuntime for Docker {
     async fn start_container(
         &self,
         container_name: &str,
-        options: Option<StartContainerOptions<String>>,
+        options: Option<StartContainerOptions>,
     ) -> Result<(), Error> {
         self.start_container(container_name, options).await
     }
@@ -254,12 +256,12 @@ impl ContainerRuntime for Docker {
     fn wait_container(
         &self,
         container_name: &str,
-        options: Option<WaitContainerOptions<String>>,
+        options: Option<WaitContainerOptions>,
     ) -> BoxStream<'static, Result<ContainerWaitResponse, Error>> {
         self.wait_container(container_name, options).boxed()
     }
 
-    async fn create_volume(&self, config: CreateVolumeOptions<String>) -> Result<Volume, Error> {
+    async fn create_volume(&self, config: VolumeCreateRequest) -> Result<Volume, Error> {
         self.create_volume(config).await
     }
 
@@ -273,17 +275,18 @@ impl ContainerRuntime for Docker {
 
     fn create_image(
         &self,
-        options: Option<CreateImageOptions<'static, String>>,
+        options: Option<CreateImageOptions>,
         root_fs: Option<Bytes>,
         credentials: Option<bollard::auth::DockerCredentials>,
     ) -> BoxStream<'static, Result<CreateImageInfo, Error>> {
-        self.create_image(options, root_fs, credentials).boxed()
+        self.create_image(options, root_fs.map(bollard::body_full), credentials)
+            .boxed()
     }
 
     fn logs(
         &self,
         container_name: &str,
-        options: Option<LogsOptions<String>>,
+        options: Option<LogsOptions>,
     ) -> BoxStream<'static, Result<LogOutput, Error>> {
         self.logs(container_name, options).boxed()
     }
@@ -321,14 +324,14 @@ impl ContainerRuntime for Docker {
 
     async fn list_containers(
         &self,
-        options: Option<ListContainersOptions<String>>,
+        options: Option<ListContainersOptions>,
     ) -> Result<Vec<ContainerSummary>, Error> {
         self.list_containers(options).await
     }
 
     async fn list_volumes(
         &self,
-        options: Option<ListVolumesOptions<String>>,
+        options: Option<ListVolumesOptions>,
     ) -> Result<VolumeListResponse, Error> {
         self.list_volumes(options).await
     }

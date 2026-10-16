@@ -49,7 +49,8 @@ pub async fn approve_link(
     link_token: String,
 ) -> Result<()> {
     let res = http_client
-        .get(format!("{}/api/v1/approve-link/{}", url, link_token))
+        // POST acts on the link; GET only returns its confirmation page
+        .post(format!("{}/api/v1/approve-link/{}", url, link_token))
         .send()
         .await?;
     handle_response(res).await
@@ -147,7 +148,7 @@ mod tests {
     #[tokio::test]
     async fn test_runs_approve_link() {
         let server = MockServer::start().await;
-        Mock::given(method("GET"))
+        Mock::given(method("POST"))
             .and(path("/api/v1/approve-link/my-secret-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "approved"})))
             .mount(&server)

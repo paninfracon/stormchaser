@@ -50,6 +50,11 @@ pub async fn handle_lambda_invoke(
         .start("aws-lambda".to_string(), &mut *pool.acquire().await?)
         .await?;
 
+    // With no role to assume the function is invoked as the engine itself.
+    if spec.assume_role_arn.is_none() {
+        crate::aws_guard::ensure_lambda_allowed(&spec.function_name)?;
+    }
+
     let client = build_lambda_client(&spec, run_id).await?;
 
     // 3. Prepare Payload
@@ -96,6 +101,7 @@ async fn build_lambda_client(
     let config = config_loader.load().await;
 
     if let Some(role_arn) = &spec.assume_role_arn {
+        crate::aws_guard::ensure_role_allowed(role_arn)?;
         let sts_client = aws_sdk_sts::Client::new(&config);
         let session_name = spec
             .role_session_name
@@ -168,6 +174,7 @@ async fn handle_lambda_response(
             run_id,
             step_id,
             fencing_token: 0,
+            completion_token: crate::db::step_completion_token(&pool, step_id).await,
             event_type: EventType::Step(StepEventType::Completed),
             outputs: Some(outputs_map),
             exit_code: Some(0),
@@ -208,6 +215,7 @@ async fn handle_lambda_response(
             run_id,
             step_id,
             fencing_token: 0, // Intrinsic step, don't strictly need fencing token but passing 0 is safe as it's generated internally, though ideal would be passing the actual run's token. Let's pass 0, or since it's an intrinsic step, we could pass it from the try_dispatch function. For now 0 is fine because intrinsic steps are not subject to the same runner reassignment race conditions.
+            completion_token: crate::db::step_completion_token(&pool, step_id).await,
             event_type: EventType::Step(StepEventType::Failed),
             error: error_msg,
             runner_id: None,

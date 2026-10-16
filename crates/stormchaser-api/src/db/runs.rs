@@ -109,14 +109,14 @@ pub async fn list_workflow_runs(
             SELECT
                 wr.id, wr.workflow_name, wr.initiating_user, wr.repo_url, wr.workflow_path, wr.git_ref,
                 wr.status::run_status as "status", wr.version, wr.created_at, wr.updated_at, wr.started_resolving_at, wr.started_at, wr.finished_at, wr.error,
-                rc.inputs, rc.secrets, rc.source_code, rc.dsl_version
+                rc.inputs, rc.workflow_definition->'inputs_schema' AS inputs_schema, rc.source_code, rc.dsl_version
             FROM workflow_runs wr
             JOIN run_contexts rc ON wr.id = rc.run_id
             UNION ALL
             SELECT
                 wr.id, wr.workflow_name, wr.initiating_user, wr.repo_url, wr.workflow_path, wr.git_ref,
                 wr.status::run_status as "status", wr.version, wr.created_at, wr.updated_at, wr.started_resolving_at, wr.started_at, wr.finished_at, wr.error,
-                rc.inputs, rc.secrets, rc.source_code, rc.dsl_version
+                rc.inputs, rc.workflow_definition->'inputs_schema' AS inputs_schema, rc.source_code, rc.dsl_version
             FROM archived_workflow_runs wr
             JOIN archived_run_contexts rc ON wr.id = rc.run_id
         )
@@ -164,7 +164,11 @@ pub async fn list_workflow_runs(
     query.push(" OFFSET ");
     query.push_bind(offset);
 
-    query.build_query_as().fetch_all(pool).await
+    let runs: Vec<WorkflowRunDetail> = query.build_query_as().fetch_all(pool).await?;
+    Ok(runs
+        .into_iter()
+        .map(WorkflowRunDetail::mask_secret_inputs)
+        .collect())
 }
 
 /// Retrieves full details for a workflow run.
@@ -173,10 +177,23 @@ pub async fn get_workflow_run_detail(
     pool: &PgPool,
     run_id: RunId,
 ) -> Result<Option<WorkflowRunDetail>, sqlx::Error> {
-    sqlx::query_as("SELECT * FROM combined_run_details WHERE id = $1")
-        .bind(run_id)
-        .fetch_optional(pool)
-        .await
+    // The view also exposes the decrypted `secrets` column; it is deliberately not part of
+    // `WorkflowRunDetail`, so it never reaches a response.
+    let detail: Option<WorkflowRunDetail> = sqlx::query_as(
+        r#"
+        SELECT d.*,
+               COALESCE(
+                   (SELECT rc.workflow_definition->'inputs_schema' FROM run_contexts rc WHERE rc.run_id = d.id),
+                   (SELECT rc.workflow_definition->'inputs_schema' FROM archived_run_contexts rc WHERE rc.run_id = d.id)
+               ) AS inputs_schema
+        FROM combined_run_details d
+        WHERE d.id = $1
+        "#,
+    )
+    .bind(run_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(detail.map(WorkflowRunDetail::mask_secret_inputs))
 }
 
 /// Retrieves the status of a workflow run.

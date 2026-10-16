@@ -15,21 +15,12 @@ ignore = [
     # Marvin Attack (timing side-channel in RSA PKCS#1v1.5 decryption) in the `rsa` crate.
     # Safe to ignore: the `rsa` crate is only used in integration_auth_tests.rs to generate
     # a temporary, in-memory RSA keypair for signing test JWTs. No decryption is performed
-    # and the key never leaves the test process.
+    # and the key never leaves the test process. No fixed release exists.
     "RUSTSEC-2023-0071",
+    # `paste` is unmaintained. It is a build-time proc-macro reached only through Leptos
+    # (either_of, tachys) for the web tier; nothing of it is in a built binary. Drop this
+    # when Leptos moves off it.
     "RUSTSEC-2024-0436",
-    "RUSTSEC-2025-0012",
-    "RUSTSEC-2025-0111",
-    "RUSTSEC-2026-0008",
-    "RUSTSEC-2024-0384",
-    "RUSTSEC-2025-0134",
-    "RUSTSEC-2026-0098",
-    "RUSTSEC-2024-0421",
-    "RUSTSEC-2026-0049",
-    "RUSTSEC-2026-0099",
-    "RUSTSEC-2026-0104",
-    "RUSTSEC-2026-0049",
-    "RUSTSEC-2026-0141"
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.
@@ -45,7 +36,6 @@ allow = [
     "Apache-2.0",
     "Unicode-3.0", # Compatibility verified - JAC
     "ISC", # Compatibility verified - JAC
-    "OpenSSL", # Compatibility verified - JAC
     "BSD-3-Clause", # Compatibility verified - JAC
     "CC0-1.0", # Sus. Clarifcation needed - JAC
     "BSL-1.0", # Compatibility verified - JAC

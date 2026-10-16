@@ -7,13 +7,15 @@ Stormchaser supports three primary deployment models: **Docker Only**,
 
 ## 1. Quick Start: Full Stack with MicroK8s
 
-This is the fastest way to get a production-like environment running on your
+This is the fastest way to get the full stack running on Kubernetes on your
 local machine, complete with automated log management and monitoring
 (Prometheus/Grafana).
 
 ### Quick Start Prerequisites
 
-- **MicroK8s**: Install via `snap install microk8s --classic`.
+- **MicroK8s**: Install via `snap install microk8s --classic`. The Kubernetes
+  runner is built against the Kubernetes 1.32 API, so use a cluster running
+  1.32 or newer.
 - **Enable Addons**:
 
   ```bash
@@ -21,6 +23,13 @@ local machine, complete with automated log management and monitoring
   ```
 
 - **Helm**: Ensure `helm` is installed locally.
+
+> **This is an evaluation environment.** It deploys single-node PostgreSQL,
+> NATS and MinIO alongside Stormchaser. PostgreSQL is not encrypted at rest,
+> so do not store real credentials in it. NATS requires generated passwords
+> but has no TLS and no clustering. Before relying on it, read
+> [Encryption at rest](security.md#5-encryption-at-rest) and
+> [NATS: Quickstart and Production](nats.md).
 
 ### Step 1: Run the Deployment Script
 
@@ -43,6 +52,16 @@ port forwarding.
   ```bash
   kubectl port-forward -n stormchaser \
     svc/stormchaser-stormchaser-orchestration-api 3000:3000
+  ```
+
+  The API serves HTTPS with a certificate from the CA the chart generated. Save
+  that CA and pass it to the CLI or TUI with `--ca-cert` (or
+  `STORMCHASER_CA_CERT`), or to curl with `--cacert`:
+
+  ```bash
+  kubectl get secret stormchaser-tls-certs -n stormchaser \
+    -o jsonpath='{.data.ca\.crt}' | base64 -d > stormchaser-ca.crt
+  stormchaser --url https://localhost:3000 --ca-cert stormchaser-ca.crt login
   ```
 
 - **Dex (Authentication)**: Access the OIDC provider.
@@ -154,7 +173,19 @@ and the Runners in isolated worker clusters).
 - `helm` and `kubectl` installed and configured to communicate with your
   cluster.
 - External dependencies provisioned (PostgreSQL Database, NATS JetStream
-  cluster).
+  cluster). PostgreSQL must be encrypted at rest and reached over TLS:
+  Stormchaser stores workflow secrets and connection credentials in it and
+  does not encrypt them itself; see
+  [Encryption at rest](security.md#5-encryption-at-rest) for what your
+  database administrator needs to provide. NATS must require authentication, give runners a separate
+  restricted user, use TLS, and be unreachable from workflow step pods; see
+  [NATS: Quickstart and Production](nats.md) for the exact requirements.
+- A log backend of your own (Loki, or Elasticsearch). The bundled Loki,
+  Tempo, Prometheus and Grafana are for the quickstart. Step logs hold
+  whatever a workflow prints, so the backend must require authentication,
+  be unreachable from workflow step pods, and keep logs no longer than your
+  retention policy allows; point `LOKI_URL` (or the Elasticsearch settings) at
+  it.
 
 ### Step 1: Provision the Namespace and Secrets
 
@@ -169,11 +200,24 @@ kubectl create secret generic stormchaser-db-secret \
   --namespace stormchaser \
   --from-literal=DATABASE_URL="postgres://user:password@host:5432/db"
 
-# Example: Create the TLS secret for mTLS
-kubectl create secret tls stormchaser-tls-certs \
+# NATS credentials: one Secret for the control plane, one for runners
+kubectl create secret generic nats-control \
   --namespace stormchaser \
-  --cert=path/to/tls.crt \
-  --key=path/to/tls.key
+  --from-literal=user=stormchaser \
+  --from-literal=password='<control password>'
+kubectl create secret generic nats-runner \
+  --namespace stormchaser \
+  --from-literal=user=stormchaser-runner \
+  --from-literal=password='<runner password>'
+
+# The services' certificate, its key, and the CA that signed it. The API, the
+# query service and the web tier serve HTTPS with it, so it must name their
+# Services (<release>-stormchaser-orchestration-api, -query and -web).
+kubectl create secret generic stormchaser-tls-certs \
+  --namespace stormchaser \
+  --from-file=ca.crt=path/to/ca.crt \
+  --from-file=tls.crt=path/to/tls.crt \
+  --from-file=tls.key=path/to/tls.key
 ```
 
 ### Step 2: Install the Orchestration Chart
@@ -189,7 +233,8 @@ helm install stormchaser-orchestration \
   ./deploy/charts/stormchaser-orchestration \
   --namespace stormchaser \
   --set global.database.existingSecret="stormchaser-db-secret" \
-  --set global.nats.url="nats://my-nats-cluster:4222" \
+  --set global.nats.url="tls://my-nats-cluster:4222" \
+  --set global.nats.authSecret="nats-control" \
   --set global.oidc.issuer="https://my-identity-provider/dex"
 ```
 
@@ -205,12 +250,16 @@ NATS and runner behavior.
 ```bash
 helm install stormchaser-runner ./deploy/charts/stormchaser-runner-k8s \
   --namespace stormchaser \
-  --set config.natsUrl="nats://my-nats-cluster:4222" \
+  --set config.natsUrl="tls://my-nats-cluster:4222" \
+  --set config.natsAuthSecret="nats-runner" \
   --set rbac.create=true
 ```
 
-*Note: The runner chart creates a ServiceAccount and RoleBinding to allow it to
-spawn and monitor Jobs and Pods in the target namespace.*
+*Note: Workflow steps never run in the runner's own namespace. The chart creates
+a separate step namespace (`rbac.targetNamespace`, by default
+`<release namespace>-steps`, here `stormchaser-steps`) and a Role and
+RoleBinding there so the runner can spawn and monitor Jobs and Pods. The runner
+refuses to start if the step namespace is unset or equals its own.*
 
 ### Step 4: Verify Deployment
 

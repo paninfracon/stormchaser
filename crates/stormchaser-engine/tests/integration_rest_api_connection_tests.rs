@@ -37,7 +37,7 @@ async fn test_rest_api_with_httpapi_connection() {
         .unwrap();
 
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
     let _opa_client = Arc::new(OpaClient::new(None, None));
 
     let mock_server = MockServer::start().await;

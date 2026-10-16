@@ -1,0 +1,26 @@
+{{- /*
+The bundled Loki holds every step's log lines and has no authentication of its own.
+Only pods in the release's namespace may reach it: the API reading logs, and the
+collectors and Grafana beside it. Workflow steps run in their own namespace and
+cannot read other runs' logs. Requires a CNI that enforces NetworkPolicy.
+*/ -}}
+{{- if and .Values.loki.enabled .Values.lokiNetworkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-loki-ingress
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: loki
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+        {{- with .Values.lokiNetworkPolicy.extraFrom }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+{{- end }}

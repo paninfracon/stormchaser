@@ -43,7 +43,7 @@ impl<'a> App<'a> {
             }
         }
 
-        let client = reqwest::Client::new();
+        let client = crate::http::client();
         let mut req = client.request(reqwest::Method::GET, url);
         if let Some(token) = &self.token {
             req = req.header(AUTHORIZATION, format!("Bearer {}", token));
@@ -260,7 +260,7 @@ impl<'a> App<'a> {
         let workflow_handle = tokio::spawn(async move {
             loop {
                 if let Some(token) = &token {
-                    let client = reqwest::Client::new();
+                    let client = crate::http::client();
                     if let Ok(res) = client
                         .get(format!("{}/api/v1/runs/stream", url))
                         .header(AUTHORIZATION, format!("Bearer {}", token))

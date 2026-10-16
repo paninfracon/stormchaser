@@ -1,0 +1,12 @@
+{{- if .Values.rbac.createTargetNamespace -}}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ include "stormchaser-runner-k8s.stepNamespace" . }}
+  labels:
+    {{- include "stormchaser-runner-k8s.labels" . | nindent 4 }}
+    {{- with .Values.rbac.stepPodSecurity }}
+    pod-security.kubernetes.io/enforce: {{ ternary "privileged" .enforce $.Values.config.allowPrivileged | quote }}
+    pod-security.kubernetes.io/warn: {{ .warn | quote }}
+    {{- end }}
+{{- end }}

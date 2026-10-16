@@ -50,12 +50,23 @@ pub async fn decrypt_sops_secrets(
         ]
     };
 
+    // `sops_file` comes from the run request. It must stay inside this repository and may
+    // not be, or pass through, a symlink; a named file that fails that check is an error
+    // rather than "no secrets".
     let mut target_path = None;
     for f in possible_files {
-        let p = repo_dir.join(&f);
-        if p.exists() {
-            target_path = Some(p);
-            break;
+        match crate::git_cache::safe_worktree_path(repo_dir, &f) {
+            Ok(p) => {
+                target_path = Some(p);
+                break;
+            }
+            Err(e) => {
+                let missing = crate::git_cache::validate_relative_path(&f).is_ok()
+                    && repo_dir.join(&f).symlink_metadata().is_err();
+                if sops_file.is_some() && !missing {
+                    return Err(e.context("Refusing SOPS file"));
+                }
+            }
         }
     }
 
@@ -71,6 +82,7 @@ pub async fn decrypt_sops_secrets(
     #[cfg(feature = "aws-sops")]
     {
         if let Some(arn) = role_arn {
+            crate::aws_guard::ensure_role_allowed(arn)?;
             debug!("Assuming AWS STS role {} for SOPS decryption", arn);
             let config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
             let sts = aws_sdk_sts::Client::new(&config);
@@ -126,10 +138,7 @@ pub async fn decrypt_sops_secrets(
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // Parse as JSON or YAML
-    let secrets_val: Value = serde_yaml::from_str(&stdout)
-        .or_else(|_| serde_json::from_str(&stdout))
-        .context("Failed to parse decrypted SOPS output as JSON or YAML")?;
+    let secrets_val = parse_decrypted_output(&stdout)?;
 
     let mut sensitive_set = HashSet::new();
     extract_sensitive_values(&secrets_val, &mut sensitive_set);
@@ -138,9 +147,45 @@ pub async fn decrypt_sops_secrets(
     Ok((secrets_val, sensitive_values))
 }
 
+/// Parses decrypted SOPS output, which may be YAML or JSON.
+fn parse_decrypted_output(output: &str) -> Result<Value> {
+    serde_saphyr::from_str(output)
+        .or_else(|_| serde_json::from_str(output))
+        .context("Failed to parse decrypted SOPS output as JSON or YAML")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_parse_decrypted_output_yaml() {
+        let yaml = "db:\n  password: s3cret\n  port: 5432\n  tls: true\ntokens:\n  - abc\n  - \"123\"\nempty: null\n";
+        let parsed = parse_decrypted_output(yaml).unwrap();
+        assert_eq!(
+            parsed,
+            serde_json::json!({
+                "db": { "password": "s3cret", "port": 5432, "tls": true },
+                "tokens": ["abc", "123"],
+                "empty": null
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_decrypted_output_json() {
+        let json = r#"{"api_key": "abc", "nested": {"n": 1.5, "list": [1, 2]}}"#;
+        let parsed = parse_decrypted_output(json).unwrap();
+        assert_eq!(
+            parsed,
+            serde_json::json!({"api_key": "abc", "nested": {"n": 1.5, "list": [1, 2]}})
+        );
+    }
+
+    #[test]
+    fn test_parse_decrypted_output_rejects_garbage() {
+        parse_decrypted_output("key: [unterminated").unwrap_err();
+    }
 
     #[test]
     fn test_extract_sensitive_values() {

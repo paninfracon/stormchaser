@@ -14,8 +14,12 @@ pub struct Config {
     pub tls_key_path: PathBuf,
     /// The tls server name.
     pub tls_server_name: Option<String>,
-    /// The db ssl.
-    pub db_ssl: bool,
+    /// `STORMCHASER_DB_SSL`, if set. Unset, the database connection is verified TLS
+    /// unless `DATABASE_URL` names an `sslmode` of its own.
+    pub db_ssl: Option<bool>,
+    /// Whether the HTTP listener serves TLS itself: yes unless
+    /// `STORMCHASER_LISTEN_TLS=false`.
+    pub listen_tls: bool,
     /// The nats url.
     pub nats_url: String,
     /// The opa url.
@@ -40,6 +44,8 @@ pub struct Config {
     pub oidc_client_secret: Option<String>,
     /// The API base URL for MCP callback.
     pub api_base_url: String,
+    /// Additional `Host` header values the MCP server accepts.
+    pub mcp_allowed_hosts: Vec<String>,
 }
 
 impl Config {
@@ -55,7 +61,8 @@ impl Config {
         let mut tls_cert_path = PathBuf::from("/etc/engine/certs/tls.crt");
         let mut tls_key_path = PathBuf::from("/etc/engine/certs/tls.key");
         let mut tls_server_name = None;
-        let mut db_ssl = false;
+        let mut db_ssl = None;
+        let mut listen_tls = None;
         let mut nats_url = "nats://localhost:4222".to_string();
         let mut opa_url = None;
         let mut opa_wasm_path = None;
@@ -68,6 +75,7 @@ impl Config {
         let mut oidc_client_id = None;
         let mut oidc_client_secret = None;
         let mut api_base_url = "http://localhost:3000".to_string();
+        let mut mcp_allowed_hosts = Vec::new();
 
         for (k, v) in env {
             match k.as_ref() {
@@ -76,7 +84,13 @@ impl Config {
                 "TLS_CERT_PATH" => tls_cert_path = PathBuf::from(v.as_ref()),
                 "TLS_KEY_PATH" => tls_key_path = PathBuf::from(v.as_ref()),
                 "TLS_SERVER_NAME" => tls_server_name = Some(v.as_ref().to_string()),
-                "STORMCHASER_DB_SSL" => db_ssl = v.as_ref() == "true",
+                "STORMCHASER_DB_SSL" => {
+                    db_ssl = Some(stormchaser_tls::parse_switch(
+                        "STORMCHASER_DB_SSL",
+                        v.as_ref(),
+                    )?)
+                }
+                "STORMCHASER_LISTEN_TLS" => listen_tls = Some(v.as_ref().to_string()),
                 "NATS_URL" => nats_url = v.as_ref().to_string(),
                 "OPA_URL" => {
                     let val = v.as_ref().to_string();
@@ -94,6 +108,15 @@ impl Config {
                 "OIDC_CLIENT_ID" => oidc_client_id = Some(v.as_ref().to_string()),
                 "OIDC_CLIENT_SECRET" => oidc_client_secret = Some(v.as_ref().to_string()),
                 "API_BASE_URL" => api_base_url = v.as_ref().to_string(),
+                "MCP_ALLOWED_HOSTS" => {
+                    mcp_allowed_hosts = v
+                        .as_ref()
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|host| !host.is_empty())
+                        .map(str::to_string)
+                        .collect();
+                }
                 _ => {}
             }
         }
@@ -105,6 +128,7 @@ impl Config {
             tls_key_path,
             tls_server_name,
             db_ssl,
+            listen_tls: stormchaser_tls::listener::listen_tls_setting(listen_tls.as_deref())?,
             nats_url,
             opa_url,
             opa_wasm_path,
@@ -117,6 +141,7 @@ impl Config {
             oidc_client_id,
             oidc_client_secret,
             api_base_url,
+            mcp_allowed_hosts,
         })
     }
 }
@@ -135,6 +160,29 @@ mod tests {
         assert!(
             config.opa_url.is_none(),
             "Empty OPA_URL should be treated as None"
+        );
+    }
+
+    #[test]
+    fn test_config_mcp_allowed_hosts_defaults_to_empty() {
+        let env = vec![("DATABASE_URL", "postgres://user:pass@localhost/db")];
+        let config = Config::from_env(env).unwrap();
+        assert!(config.mcp_allowed_hosts.is_empty());
+    }
+
+    #[test]
+    fn test_config_mcp_allowed_hosts_parses_comma_separated_list() {
+        let env = vec![
+            ("DATABASE_URL", "postgres://user:pass@localhost/db"),
+            (
+                "MCP_ALLOWED_HOSTS",
+                "stormchaser.paninfracon.net, api.paninfracon.net:8443,,",
+            ),
+        ];
+        let config = Config::from_env(env).unwrap();
+        assert_eq!(
+            config.mcp_allowed_hosts,
+            vec!["stormchaser.paninfracon.net", "api.paninfracon.net:8443"]
         );
     }
 

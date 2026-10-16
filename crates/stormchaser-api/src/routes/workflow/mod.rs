@@ -3,6 +3,7 @@ use super::{
     DirectRunRequest, EnqueueRequest, EnqueueResponse, ListRunsQuery, StepDetail,
     WorkflowRunDetail, WorkflowRunFullDetail,
 };
+use crate::authz::{self, Caller, Kind};
 use crate::db;
 use crate::{AppState, AuthClaims, RUNS_ENQUEUED};
 use async_nats::jetstream;
@@ -35,15 +36,15 @@ pub use stream::*;
     ),
     tag = "stormchaser"
 )]
-#[tracing::instrument(skip(state, claims), fields(run_id = tracing::field::Empty, initiating_user = tracing::field::Empty))]
+#[tracing::instrument(skip(state, caller, payload), fields(run_id = tracing::field::Empty, initiating_user = tracing::field::Empty))]
 /// Enqueue workflow.
 pub async fn enqueue_workflow(
-    AuthClaims(claims): AuthClaims,
+    caller: Caller,
     State(state): State<AppState>,
     Json(payload): Json<EnqueueRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let run_id = RunId::new_v4();
-    let user_id = claims.email.clone().unwrap_or(claims.sub.clone());
+    let user_id = caller.owner_key();
 
     let span = tracing::Span::current();
     span.record("run_id", tracing::field::display(run_id));
@@ -74,6 +75,8 @@ pub async fn enqueue_workflow(
         tracing::error!("Connection {} is not a Git connection", payload.connection);
         return Err(StatusCode::BAD_REQUEST);
     }
+
+    authz::authorize_connection_use(&state, &caller, conn.id.into_inner()).await?;
 
     let repo_url = conn
         .config
@@ -122,11 +125,14 @@ pub async fn enqueue_workflow(
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // 3. Create RunQuotas (always, with defaults + overrides)
-    let timeout = payload
-        .overrides
-        .as_ref()
-        .and_then(|o| o.timeout.clone())
-        .unwrap_or_else(|| "1h".to_string());
+    // Chosen by the caller, so the operator's ceiling applies
+    let timeout = stormchaser_engine::run_limits::RunLimits::from_env().timeout(
+        &payload
+            .overrides
+            .as_ref()
+            .and_then(|o| o.timeout.clone())
+            .unwrap_or_else(|| "1h".to_string()),
+    );
 
     db::insert_run_quotas(&mut tx, run_id, 10, "1", "4Gi", "10Gi", &timeout)
         .await
@@ -192,7 +198,7 @@ pub async fn enqueue_workflow(
 )]
 /// List workflow runs.
 pub async fn list_workflow_runs(
-    AuthClaims(_claims): AuthClaims,
+    caller: Caller,
     State(state): State<AppState>,
     Query(params): Query<ListRunsQuery>,
 ) -> Result<impl IntoResponse, StatusCode> {
@@ -206,7 +212,23 @@ pub async fn list_workflow_runs(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    Ok(Json(runs))
+    // Filtered after paging, so a page can come back shorter than `limit`
+    let mut filter = authz::ReadFilter::new(&state, &caller, Kind::Run);
+    let mut readable = Vec::with_capacity(runs.len());
+    for mut run in runs {
+        if filter.can_read(Some(&run.initiating_user)).await? {
+            // A run's error can quote its secrets, as on the run's own page
+            run.error = crate::redact::RunRedactor::scrub_run_error(&state.pool, run.id, run.error)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to load redaction data for {}: {:?}", run.id, e);
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
+            readable.push(run);
+        }
+    }
+
+    Ok(Json(readable))
 }
 
 /// Gets workflow run details.
@@ -232,7 +254,7 @@ pub async fn get_workflow_run(
     Path(run_id): Path<RunId>,
 ) -> Result<impl IntoResponse, StatusCode> {
     // 1. Fetch the workflow run detail
-    let detail: WorkflowRunDetail = db::get_workflow_run_detail(&state.pool, run_id)
+    let mut detail: WorkflowRunDetail = db::get_workflow_run_detail(&state.pool, run_id)
         .await
         .map_err(|e| {
             tracing::error!(
@@ -243,6 +265,16 @@ pub async fn get_workflow_run(
             StatusCode::INTERNAL_SERVER_ERROR
         })?
         .ok_or(StatusCode::NOT_FOUND)?;
+
+    // The run's secrets are interpolated into step specs and can surface in outputs, errors
+    // and logs; they are scrubbed from everything returned below.
+    let redactor = crate::redact::RunRedactor::load(&state.pool, run_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to load redaction data for {}: {:?}", run_id, e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    detail.error = detail.error.map(|error| redactor.text(&error));
 
     // 2. Fetch all step instances for this run (active or archived)
     let instances = db::get_step_instances(&state.pool, run_id)
@@ -287,10 +319,13 @@ pub async fn get_workflow_run(
         }
 
         steps.push(StepDetail {
-            instance,
-            outputs,
+            instance: redactor.step_instance(instance),
+            outputs: outputs
+                .into_iter()
+                .map(|output| redactor.step_output(output))
+                .collect(),
             history,
-            logs,
+            logs: logs.iter().map(|line| redactor.text(line)).collect(),
         });
     }
 
@@ -366,7 +401,7 @@ pub async fn delete_workflow_run_api(
     tag = "workflow"
 )]
 /// Executes a direct run.
-#[tracing::instrument(skip(state, claims), fields(run_id = tracing::field::Empty, initiating_user = tracing::field::Empty))]
+#[tracing::instrument(skip(state, claims, payload), fields(run_id = tracing::field::Empty, initiating_user = tracing::field::Empty))]
 pub async fn direct_run(
     AuthClaims(claims): AuthClaims,
     State(state): State<AppState>,

@@ -1,5 +1,5 @@
-use aead::{Aead, AeadCore, KeyInit, OsRng};
-use aes_gcm::Aes256Gcm;
+use aead::{Aead, Generate, KeyInit};
+use aes_gcm::{Aes256Gcm, Nonce};
 use anyhow::Result;
 use base64::{engine::general_purpose, Engine as _};
 use sha2::{Digest, Sha256};
@@ -12,7 +12,7 @@ pub fn encrypt_state(data: &str, key_str: &str) -> Result<String> {
 
     let cipher = Aes256Gcm::new_from_slice(&key_bytes)
         .map_err(|e| anyhow::anyhow!("Invalid key length: {}", e))?;
-    let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+    let nonce = Nonce::generate();
     let ciphertext = cipher
         .encrypt(&nonce, data.as_bytes())
         .map_err(|e| anyhow::anyhow!("Encryption failed: {}", e))?;
@@ -35,12 +35,13 @@ pub fn decrypt_state(encoded: &str, key_str: &str) -> Result<String> {
     }
 
     let (nonce_bytes, ciphertext) = combined.split_at(12);
-    let nonce = aead::Nonce::<Aes256Gcm>::from_slice(nonce_bytes);
+    let nonce =
+        Nonce::try_from(nonce_bytes).map_err(|_| anyhow::anyhow!("Invalid encrypted data"))?;
     let cipher = Aes256Gcm::new_from_slice(&key_bytes)
         .map_err(|e| anyhow::anyhow!("Invalid key length: {}", e))?;
 
     let plaintext = cipher
-        .decrypt(nonce, ciphertext)
+        .decrypt(&nonce, ciphertext)
         .map_err(|e| anyhow::anyhow!("Decryption failed: {}", e))?;
 
     Ok(String::from_utf8(plaintext)?)

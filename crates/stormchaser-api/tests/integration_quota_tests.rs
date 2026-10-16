@@ -40,7 +40,7 @@ async fn test_api_enqueue_inserts_quotas() {
         .try_init();
     let pool = setup_db().await;
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
 
     let state = AppState {
         pool: pool.clone(),
@@ -50,6 +50,7 @@ async fn test_api_enqueue_inserts_quotas() {
         jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
         api_base_url: "http://localhost:3000".to_string(),
+        mcp_allowed_hosts: Vec::new(),
     };
 
     let conn_id = Uuid::new_v4();
@@ -67,6 +68,7 @@ async fn test_api_enqueue_inserts_quotas() {
         sub: "test-user".to_string(),
         email: Some("test-user@paninfracon.net".to_string()),
         exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
+        groups: Vec::new(),
     };
     let token = encode(
         &Header::default(),

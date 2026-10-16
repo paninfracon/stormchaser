@@ -149,13 +149,20 @@ if [ "$CLEANUP" = true ] || [ ! -f "$ENV_FILE" ]; then
     STORMCHASER_DEV_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
     STORMCHASER_MINIO_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(16))')
     STORMCHASER_CLI_SECRET=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
-    if [ -z "$STORMCHASER_DEV_PASSWORD" ] || [ -z "$STORMCHASER_MINIO_PASSWORD" ] || [ -z "$STORMCHASER_CLI_SECRET" ]; then
+    # NATS reads its passwords as unquoted config values: one starting with '-' or looking
+    # like a number stops the server, so these start with a letter
+    STORMCHASER_NATS_PASSWORD=$(python3 -c 'import secrets; print("n" + secrets.token_hex(24))')
+    STORMCHASER_NATS_RUNNER_PASSWORD=$(python3 -c 'import secrets; print("n" + secrets.token_hex(24))')
+    STORMCHASER_NATS_API_PASSWORD=$(python3 -c 'import secrets; print("n" + secrets.token_hex(24))')
+    STORMCHASER_NATS_QUERY_PASSWORD=$(python3 -c 'import secrets; print("n" + secrets.token_hex(24))')
+    STORMCHASER_JWT_SECRET=$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')
+    if [ -z "$STORMCHASER_DEV_PASSWORD" ] || [ -z "$STORMCHASER_MINIO_PASSWORD" ] || [ -z "$STORMCHASER_CLI_SECRET" ] || [ -z "$STORMCHASER_NATS_PASSWORD" ] || [ -z "$STORMCHASER_NATS_RUNNER_PASSWORD" ] || [ -z "$STORMCHASER_NATS_API_PASSWORD" ] || [ -z "$STORMCHASER_NATS_QUERY_PASSWORD" ]; then
         echo -e "${RED}Error: Failed to generate random passwords.${NC}" >&2
         exit 1
     fi
     # Upsert keys so that unrelated entries in .env are preserved
     touch "$ENV_FILE"
-    for key_val in "STORMCHASER_DEV_PASSWORD=$STORMCHASER_DEV_PASSWORD" "STORMCHASER_MINIO_PASSWORD=$STORMCHASER_MINIO_PASSWORD" "STORMCHASER_CLI_SECRET=$STORMCHASER_CLI_SECRET"; do
+    for key_val in "STORMCHASER_DEV_PASSWORD=$STORMCHASER_DEV_PASSWORD" "STORMCHASER_MINIO_PASSWORD=$STORMCHASER_MINIO_PASSWORD" "STORMCHASER_CLI_SECRET=$STORMCHASER_CLI_SECRET" "STORMCHASER_NATS_PASSWORD=$STORMCHASER_NATS_PASSWORD" "STORMCHASER_NATS_RUNNER_PASSWORD=$STORMCHASER_NATS_RUNNER_PASSWORD" "STORMCHASER_NATS_API_PASSWORD=$STORMCHASER_NATS_API_PASSWORD" "STORMCHASER_NATS_QUERY_PASSWORD=$STORMCHASER_NATS_QUERY_PASSWORD" "STORMCHASER_JWT_SECRET=$STORMCHASER_JWT_SECRET"; do
         key="${key_val%%=*}"
         val="${key_val#*=}"
         if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
@@ -165,6 +172,19 @@ if [ "$CLEANUP" = true ] || [ ! -f "$ENV_FILE" ]; then
             echo "${key}=${val}" >> "$ENV_FILE"
         fi
     done
+fi
+
+# An .env written before NATS authentication was added, or before the API and query
+# service got users of their own, lacks some of these; add them in place.
+for key in STORMCHASER_NATS_PASSWORD STORMCHASER_NATS_RUNNER_PASSWORD STORMCHASER_NATS_API_PASSWORD STORMCHASER_NATS_QUERY_PASSWORD STORMCHASER_JWT_SECRET; do
+    if ! grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
+        echo "${key}=$(python3 -c 'import secrets; print("n" + secrets.token_hex(32))')" >> "$ENV_FILE"
+    fi
+done
+
+# The Docker runner's state key must be 32 characters
+if ! grep -q "^STORMCHASER_STATE_ENCRYPTION_KEY=" "$ENV_FILE" 2>/dev/null; then
+    echo "STORMCHASER_STATE_ENCRYPTION_KEY=$(python3 -c 'import secrets; print(secrets.token_hex(16))')" >> "$ENV_FILE"
 fi
 
 # Load .env into the current shell so subsequent steps can use the passwords
@@ -200,6 +220,23 @@ if [ "$REGENERATE_DEX_CONFIG" = true ]; then
         exit 1
     fi
     python3 "$REPO_ROOT/scripts/generate_dex_config.py"
+fi
+
+# The dogfood workflows build images with privileged Buildah steps, which runners
+# reject unless the operator opts in. This is a local dev environment, so opt in by
+# default; set STORMCHASER_ALLOW_PRIVILEGED=false (shell or .env) to keep it off.
+export STORMCHASER_ALLOW_PRIVILEGED="${STORMCHASER_ALLOW_PRIVILEGED:-true}"
+
+# The dogfood workflows also run the test suite and deploy charts from inside steps, so
+# their steps must reach Postgres, NATS and the Kubernetes API. Everywhere else steps
+# are cut off from the control plane; here that isolation is off unless you set
+# STORMCHASER_ISOLATE_STEPS=true. The Kubernetes runner in hybrid mode also needs the
+# control-plane ports published beyond loopback.
+export STORMCHASER_ISOLATE_STEPS="${STORMCHASER_ISOLATE_STEPS:-false}"
+if [ "$STORMCHASER_ISOLATE_STEPS" = "true" ] && [ "$MODE" != "hybrid" ]; then
+    export STORMCHASER_CONTROL_PLANE_BIND="${STORMCHASER_CONTROL_PLANE_BIND:-127.0.0.1}"
+else
+    export STORMCHASER_CONTROL_PLANE_BIND="${STORMCHASER_CONTROL_PLANE_BIND:-0.0.0.0}"
 fi
 
 # 3. Start Docker Services
@@ -249,6 +286,7 @@ if [ "$MODE" == "hybrid" ]; then
     HOST_IP=$(ip -4 addr show docker0 | grep -Po 'inet \K[\d.]+' || hostname -I | awk '{print $1}')
     echo -e "${BLUE}>>> Importing Runner image to MicroK8s...${NC}"
     docker save stormchaser-runner-k8s:v1 | microk8s images import -
+    docker save stormchaser-agent:v1 | microk8s images import -
 
     echo -e "${BLUE}>>> Deploying K8s Runner via Helm...${NC}"
     mkdir -p "$REPO_ROOT/.tmp"
@@ -264,10 +302,25 @@ if [ "$MODE" == "hybrid" ]; then
       --set "alloy.extraEnvVars[0].name=LOKI_HOST,alloy.extraEnvVars[0].value=$HOST_IP" \
       --wait
 
+    # The runner authenticates to the compose NATS as the restricted runner user.
+    microk8s kubectl create secret generic stormchaser-nats-runner \
+      --namespace default \
+      --from-literal=user=stormchaser-runner \
+      --from-literal=password="$STORMCHASER_NATS_RUNNER_PASSWORD" \
+      --dry-run=client -o yaml | microk8s kubectl apply -f -
+
     helm upgrade --install stormchaser-runner "$REPO_ROOT/deploy/charts/stormchaser-runner-k8s" \
       --namespace default \
+      --set config.natsAuthSecret=stormchaser-nats-runner \
+      --set networkPolicy.enabled="$STORMCHASER_ISOLATE_STEPS" \
+      --set-json "networkPolicy.extraEgress=[{\"to\":[{\"ipBlock\":{\"cidr\":\"$HOST_IP/32\"}}],\"ports\":[{\"protocol\":\"TCP\",\"port\":${PORT_S3:-9000}}]}]" \
       --set config.natsUrl="nats://$HOST_IP:${PORT_NATS}" \
       --set config.rustLog="stormchaser_runner_k8s=debug" \
+      --set config.allowPrivileged="$STORMCHASER_ALLOW_PRIVILEGED" \
+      --set image.tag=v1 \
+      --set image.pullPolicy=Never \
+      --set global.agent.image.tag=v1 \
+      --set global.agent.image.pullPolicy=Never \
       --wait
 elif [ "$MODE" == "microk8s" ]; then
     NAMESPACE="stormchaser"
@@ -297,9 +350,21 @@ elif [ "$MODE" == "microk8s" ]; then
         docker save "$IMAGE_NAME:latest" | microk8s images import -
     done
 
-    echo -e "${BLUE}>>> Creating namespace and TLS secrets...${NC}"
+    echo -e "${BLUE}>>> Creating namespace...${NC}"
     microk8s kubectl create namespace "$NAMESPACE" || true
-    microk8s kubectl create secret generic stormchaser-tls-certs       --namespace "$NAMESPACE"       --from-file=ca.crt="$CERT_DIR/ca.crt"       --from-file=tls.crt="$CERT_DIR/tls.crt"       --from-file=tls.key="$CERT_DIR/tls.key"       --dry-run=client -o yaml | microk8s kubectl apply -f -
+    # The chart generates the services' certificate, naming their Services. Earlier
+    # versions of this script created the Secret from tests/certs, whose certificate
+    # names none of them; remove that one so the chart can create its own.
+    if [ "$(microk8s kubectl get secret stormchaser-tls-certs --namespace "$NAMESPACE" \
+        -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}' 2>/dev/null)" != "stormchaser" ]; then
+        microk8s kubectl delete secret stormchaser-tls-certs --namespace "$NAMESPACE" --ignore-not-found
+    fi
+
+    echo -e "${BLUE}>>> Storing the OIDC client secret...${NC}"
+    microk8s kubectl create secret generic stormchaser-oidc-client \
+        --namespace "$NAMESPACE" \
+        --from-literal=client-secret="$STORMCHASER_CLI_SECRET" \
+        --dry-run=client -o yaml | microk8s kubectl apply -f -
 
     echo -e "${BLUE}>>> Deploying via Helm...${NC}"
     (
@@ -307,7 +372,7 @@ elif [ "$MODE" == "microk8s" ]; then
         rm -f charts/stormchaser-*.tgz
         helm dependency update
 
-        helm upgrade --install stormchaser .           --namespace "$NAMESPACE"           --create-namespace           --set "stormchaser-orchestration.api.image.repository=stormchaser-api"           --set "stormchaser-orchestration.api.image.tag=latest"           --set "stormchaser-orchestration.api.image.pullPolicy=Never"           --set "stormchaser-orchestration.query.image.repository=stormchaser-query"           --set "stormchaser-orchestration.query.image.tag=v2"           --set "stormchaser-orchestration.query.image.pullPolicy=Never"           --set "stormchaser-orchestration.engine.image.repository=stormchaser-engine"           --set "stormchaser-orchestration.engine.image.tag=latest"           --set "stormchaser-orchestration.engine.image.pullPolicy=Never"           --set "stormchaser-runner-k8s.image.repository=stormchaser-runner-k8s"           --set "stormchaser-runner-k8s.image.tag=latest"           --set "stormchaser-runner-k8s.image.pullPolicy=Never"           --set "global.agent.image.repository=stormchaser-agent"           --set "global.agent.image.tag=latest"           --set "global.agent.image.pullPolicy=Never"
+        helm upgrade --install stormchaser .           --namespace "$NAMESPACE"           --create-namespace           --set "global.oidc.existingSecret=stormchaser-oidc-client"           --set "stormchaser-orchestration.api.image.repository=stormchaser-api"           --set "stormchaser-orchestration.api.image.tag=latest"           --set "stormchaser-orchestration.api.image.pullPolicy=Never"           --set "stormchaser-orchestration.query.image.repository=stormchaser-query"           --set "stormchaser-orchestration.query.image.tag=latest"           --set "stormchaser-orchestration.query.image.pullPolicy=Never"           --set "stormchaser-orchestration.web.image.repository=stormchaser-web"           --set "stormchaser-orchestration.web.image.tag=latest"           --set "stormchaser-orchestration.web.image.pullPolicy=Never"           --set "stormchaser-orchestration.engine.image.repository=stormchaser-engine"           --set "stormchaser-orchestration.engine.image.tag=latest"           --set "stormchaser-orchestration.engine.image.pullPolicy=Never"           --set "stormchaser-runner-k8s.image.repository=stormchaser-runner-k8s"           --set "stormchaser-runner-k8s.image.tag=latest"           --set "stormchaser-runner-k8s.image.pullPolicy=Never"           --set "stormchaser-runner-k8s.config.allowPrivileged=$STORMCHASER_ALLOW_PRIVILEGED"           --set "stormchaser-runner-k8s.networkPolicy.enabled=$STORMCHASER_ISOLATE_STEPS"           --set "global.agent.image.repository=stormchaser-agent"           --set "global.agent.image.tag=latest"           --set "global.agent.image.pullPolicy=Never"
     )
 
     echo -e "${BLUE}>>> Deploying Dex Identity Provider...${NC}"
@@ -334,7 +399,15 @@ fi
 echo -e "${BLUE}>>> Registering Local Storage (S3)...${NC}"
 if command -v python3 >/dev/null 2>&1 && [ -f "$REPO_ROOT/scripts/generate_dev_token.py" ]; then
     echo -e "${BLUE}>>> Generating authentication token...${NC}"
-    STORMCHASER_TOKEN=$(python3 "$REPO_ROOT/scripts/generate_dev_token.py")
+    if [[ "$MODE" == "microk8s" ]]; then
+        # The cluster's API checks tokens with the key the chart generated
+        # (stormchaser-jwt), not the one in .env. It goes to the token script through
+        # the environment.
+        STORMCHASER_TOKEN=$(STORMCHASER_JWT_SECRET="$(microk8s kubectl get secret -n "$NAMESPACE" stormchaser-jwt -o jsonpath='{.data.jwt-secret}' | base64 -d)" \
+            python3 "$REPO_ROOT/scripts/generate_dev_token.py")
+    else
+        STORMCHASER_TOKEN=$(python3 "$REPO_ROOT/scripts/generate_dev_token.py")
+    fi
     export STORMCHASER_TOKEN
 
     if [ -n "$STORMCHASER_TOKEN" ]; then
@@ -352,15 +425,24 @@ if command -v python3 >/dev/null 2>&1 && [ -f "$REPO_ROOT/scripts/generate_dev_t
             # For microk8s, we need the dynamically generated password and cluster-internal DNS
             echo -e "${BLUE}>>> Registering cluster MinIO backend for SFS...${NC}"
             MINIO_PASSWORD=$(microk8s kubectl get secret -n stormchaser stormchaser-minio -o jsonpath='{.data.root-password}' | base64 -d)
+            # The API serves TLS with the certificate the chart generated, which names
+            # the API's Service rather than its cluster IP: reach the IP by that name
+            # and trust the chart's CA.
+            API_SERVICE="stormchaser-stormchaser-orchestration-api.stormchaser.svc"
             API_IP=$(microk8s kubectl get svc -n stormchaser stormchaser-stormchaser-orchestration-api -o jsonpath='{.spec.clusterIP}')
-            API_URL="http://${API_IP}:${PORT_API}"
+            API_URL="https://${API_SERVICE}:${PORT_API}"
+            API_CA="$(mktemp)"
+            trap 'rm -f "$API_CA"' EXIT
+            microk8s kubectl get secret -n stormchaser stormchaser-tls-certs \
+                -o jsonpath='{.data.ca\.crt}' | base64 -d > "$API_CA"
+            api_curl() { curl --cacert "$API_CA" --resolve "${API_SERVICE}:${PORT_API}:${API_IP}" "$@"; }
 
             # Wait for API to be ready
             echo -e "${BLUE}>>> Waiting for API to become ready at ${API_URL}...${NC}"
             API_READY=false
             for _ in {1..30}; do
-                if curl -s -o /dev/null -w "%{http_code}" "$API_URL/api/health" | grep -q "200" || \
-                   curl -s -o /dev/null -w "%{http_code}" "$API_URL/healthz" | grep -q "200"; then
+                if api_curl -s -o /dev/null -w "%{http_code}" "$API_URL/api/health" | grep -q "200" || \
+                   api_curl -s -o /dev/null -w "%{http_code}" "$API_URL/healthz" | grep -q "200"; then
                     API_READY=true
                     break
                 fi
@@ -371,7 +453,7 @@ if command -v python3 >/dev/null 2>&1 && [ -f "$REPO_ROOT/scripts/generate_dev_t
                 exit 1
             fi
 
-            curl -s -X POST "$API_URL/api/v1/connections" \
+            api_curl -s -X POST "$API_URL/api/v1/connections" \
               -H "Authorization: Bearer $STORMCHASER_TOKEN" \
               -H "Content-Type: application/json" \
               -d '{
@@ -399,7 +481,11 @@ else
 fi
 
 echo -e "${GREEN}>>> Stormchaser is UP ($MODE mode)!${NC}"
-echo -e "${BLUE}API:${NC} http://localhost:${PORT_API}"
+if [[ "$MODE" == "microk8s" ]]; then
+    echo -e "${BLUE}API:${NC} HTTPS, with the chart's CA; source scripts/k8s-api-access.sh to reach it"
+else
+    echo -e "${BLUE}API:${NC} http://localhost:${PORT_API}"
+fi
 if [[ -f "$REPO_ROOT/.tmp/kubeconfig" ]]; then
     echo -e "${BLUE}Kubeconfig:${NC} .tmp/kubeconfig"
 fi

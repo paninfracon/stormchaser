@@ -11,8 +11,10 @@ pub enum WebhookCommands {
     /// Create a new webhook
     Create {
         name: String,
+        /// `github`, `signed` (Standard Webhooks HMAC signature) or `generic` (bearer token)
         #[arg(long)]
         source_type: String,
+        /// The secret deliveries are checked against. Required.
         #[arg(long)]
         secret: Option<String>,
         #[arg(long)]

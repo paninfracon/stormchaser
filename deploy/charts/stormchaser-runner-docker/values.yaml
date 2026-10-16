@@ -1,7 +1,8 @@
 image:
-  repository: stormchaser
+  repository: stormchaser-runner-docker
   pullPolicy: IfNotPresent
-  tag: "latest"
+  # Empty means the release this chart belongs to (v<appVersion>)
+  tag: ""
 
 nameOverride: ""
 fullnameOverride: ""
@@ -14,7 +15,67 @@ tolerations: []
 # Configuration for the docker runner
 config:
   natsUrl: "nats://nats:4222"
+  # Name of a Secret with `user` and `password` keys for NATS authentication.
+  natsAuthSecret: ""
+  # Name of a Secret holding a 32-character key (under stateEncryptionSecretKey). With it
+  # the runner keeps each step's full definition, encrypted, on the container it starts,
+  # so a restarted runner picks a step up with everything it had. Without it the runner
+  # keeps the definition with its environment and parameter values removed.
+  stateEncryptionSecret: ""
+  stateEncryptionSecretKey: "key"
+  # Docker network on each node that step containers join (STORMCHASER_STEP_NETWORK).
+  # It must exist on every node's Docker daemon, created for steps alone: for example
+  # `docker network create --internal stormchaser-steps` for steps with no network
+  # access, or a bridge whose egress you filter. Empty, steps join the runner's own
+  # network (the node's default bridge here), which reaches cluster and cloud metadata
+  # addresses; the runner logs a warning.
+  stepNetwork: ""
+  # What any one step may use, whatever its workflow asks for. A step that asks for
+  # more is refused; one that asks for nothing gets the defaults.
+  stepLimits:
+    defaultCpu: "1"
+    defaultMemory: "2Gi"
+    maxCpu: "8"
+    maxMemory: "16Gi"
+    # A step with no `timeout` of its own is stopped after this long.
+    defaultTimeout: "24h"
+    maxTimeout: "24h"
+    # Most processes and threads a step's container may have.
+    pidsLimit: 4096
   rustLog: "stormchaser_runner_docker=info"
+  # Image of the agent container beside each step. Empty means `stormchaser-agent:v1`,
+  # the tag a local build gives it; in production name a digest-pinned reference.
+  agentImage: ""
+  # Permit steps that set `privileged = true`. Such a step is root on the node.
+  allowPrivileged: false
 
 # Configure the hostPath for docker socket
+#
+# Whatever else is restricted, access to the Docker socket is root on the node: it can
+# start a container that mounts the host. A socket proxy that filters API endpoints does
+# not change that, since container options are in the request body, so this chart does
+# not ship one. Run the Docker runner only on nodes set aside for it (nodeSelector,
+# tolerations), and keep STORMCHASER_ALLOW_PRIVILEGED off.
 dockerSocketPath: "/var/run/docker.sock"
+
+# The group that owns the Docker socket on the nodes (often `docker`; `stat -c %g
+# /var/run/docker.sock`). Set, the runner runs as an unprivileged user in that group.
+# Left empty, it runs as root, which owns the socket, but with no capabilities.
+dockerSocketGroup: ""
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi

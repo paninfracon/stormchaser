@@ -82,8 +82,7 @@ Scheduled execution is handled by registering workflows with an **external cron 
 * **Security**: Each cron schedule is assigned a unique `secret_token`. The external engine is configured to hit a secured webhook endpoint (`POST /api/v1/cron-trigger/:id`) using an `Authorization: Bearer` header containing this token.
 * **Pluggable Engines** (Configured via `CRON_ENGINE`):
   * **Kubernetes**: Automatically creates a `CronJob` resource in the cluster that uses `curl` to trigger the API.
-  * **Ofelia**: Creates a dummy Docker container with `ofelia.*` labels. Ofelia (running as a separate container) detects these labels and schedules a `job-run` to trigger the API.
-  * **None**: The system stores the schedule and token, but registration is left to the user.
+  * **None**: The system stores the schedule and shows its token once; a scheduler of the operator's own (cron, a systemd timer, a CI schedule) calls the trigger URL. The Docker quickstart uses this.
 * **Identity**: Runs triggered by cron are initiated by the system identity `system:cron`.
 
 See [Workflow DSL](workflow_dsl.md) for details on specifying cron schedules in `.storm` files.
@@ -102,13 +101,14 @@ See [Workflow DSL](workflow_dsl.md) for details on specifying cron schedules in 
   * **SFS Coordination (Parking):** When a step requiring `storage` is
         scheduled, the Controller:
 
-        1. Identifies the default SFS storage backend (S3-compatible).
-        2. Generates short-lived **Pre-signed URLs** for both GET (unparking)
-            and PUT (parking) operations.
-        3. Retrieves the **Cryptographic Hash** (SHA-256) of the last parked
-            state for that storage volume in the current run.
-        4. Injects these URLs and the expected hash into the task dispatched to
-            the Runner.
+    1. Identifies the default SFS storage backend (S3-compatible), which only
+        an admin may choose.
+    2. Generates short-lived **Pre-signed URLs** for both GET (unparking)
+        and PUT (parking) operations.
+    3. Retrieves the **Cryptographic Hash** (SHA-256) of the last parked
+        state for that storage volume in the current run.
+    4. Injects these URLs and the expected hash into the task dispatched to
+        the Runner.
 
   * **DSL Transformation Engine:** Before execution, the Controller parses the
         `stormchaser_dsl_version`. If the version is older than the current
@@ -118,27 +118,27 @@ See [Workflow DSL](workflow_dsl.md) for details on specifying cron schedules in 
   * **Async Step Handling (WaitForEvent):** When a workflow enters a wait
         state:
 
-        1. **State Persistence:** The Controller persists the run's state and a
-            set of "Expected Correlation Keys" in the DB.
-        2. **Event Matching:** Incoming NATS events are matched against these
-            keys.
-        3. **Multi-Approval Logic:** For steps with `require_approvals > 1`:
+    1. **State Persistence:** The Controller persists the run's state and a
+        set of "Expected Correlation Keys" in the DB.
+    2. **Event Matching:** Incoming NATS events are matched against these
+        keys.
+    3. **Multi-Approval Logic:** For steps with `require_approvals > 1`:
 
-            * The Controller maintains an **Approval Registry** (a list of
-                unique `user_id` values from the matched events).
-            * Each incoming event is de-duplicated by identity.
-            * The `on_partial` block is executed for each valid approval that
-                doesn't reach the threshold.
-            * The workflow only proceeds to the `next` step once the
-                `require_approvals` threshold is reached.
+        * The Controller maintains an **Approval Registry** (a list of
+            unique `user_id` values from the matched events).
+        * Each incoming event is de-duplicated by identity.
+        * The `on_partial` block is executed for each valid approval that
+            doesn't reach the threshold.
+        * The workflow only proceeds to the `next` step once the
+            `require_approvals` threshold is reached.
 
-        4. **Identity Validation:** If `approvers` are defined in the DSL, the
-            Controller performs a policy check (via OPA or a built-in provider)
-            to ensure the event's `user_id` belongs to the authorized list or
-            group.
-        5. **Rejection Handling:** If an event matching the `on_reject`
-            condition arrives, the step is immediately terminated, and the
-            rejection logic is triggered.
+    4. **Identity Validation:** If `approvers` are defined in the DSL, the
+        Controller performs a policy check (via OPA or a built-in provider)
+        to ensure the event's `user_id` belongs to the authorized list or
+        group.
+    5. **Rejection Handling:** If an event matching the `on_reject`
+        condition arrives, the step is immediately terminated, and the
+        rejection logic is triggered.
 
   * **Subject-Based Partitioning:** NATS JetStream is configured to
         partition workflow events by `RunID`. Each Controller instance "owns" a
@@ -180,8 +180,9 @@ See [Workflow DSL](workflow_dsl.md) for details on specifying cron schedules in 
     architecture. It ensures that no events or step-tasks are lost even if a
     controller or runner restarts. Task scheduled events are stored in the
     `stormchaser` stream.
-* **Durable Consumers:** Runners use durable pull consumers (e.g.,
-    `docker-runner`, `k8s-runner`) to retrieve tasks. This allows the NATS
+* **Durable Consumers:** Runners use durable pull consumers to retrieve tasks:
+    `runner-container-tasks`, which Docker and Kubernetes runners share so that
+    each `RunContainer` task is run once, and `runner-k8s-job-tasks`. This allows the NATS
     server to track which messages have been delivered and acknowledged,
     enabling automatic redelivery if a runner fails during a task.
 * **Task Queues:** Used to distribute workflow steps to the appropriate
@@ -259,12 +260,12 @@ PostgreSQL and NATS JetStream:
         decrypts the SOPS-encrypted secrets defined in the DSL for that
         specific run.
 
-3. **Persistence:** These decrypted secrets are then stored in the PostgreSQL
-    "Run State" (encrypted at rest using the system's Master Key).
-4. **Step Injection:** Subsequent steps within the workflow retrieve these
-    secrets directly from the database, eliminating the need for repeated
-    SOPS tool calls and preventing a CPU bottleneck during high-concurrency
-    execution.
+    3. **Persistence:** These decrypted secrets are then stored in the PostgreSQL
+        "Run State" (encrypted at rest using the system's Master Key).
+    4. **Step Injection:** Subsequent steps within the workflow retrieve these
+        secrets directly from the database, eliminating the need for repeated
+        SOPS tool calls and preventing a CPU bottleneck during high-concurrency
+        execution.
 
 * **Secret Masking:** To prevent accidental leakage of sensitive information,
     the Control Plane maintains a "Sensitive Values Registry" for each active
@@ -289,8 +290,8 @@ management system:
 1. **Quota Tracking:** The Control Plane tracks the "In-Flight Resource
     Consumption" for every active run in PostgreSQL.
 2. **Validation (Pre-Execution):** Before initiating a run, the Controller
-    verifies that the requested `quotas` comply with the organizational policy
-    stored in OPA.
+    holds the requested `quotas` to the ceilings the operator sets
+    (`STORMCHASER_RUN_MAX_*`, see [quotas.md](quotas.md)).
 3. **Active Enforcement:**
 
     * **Concurrency Limits:** The Controller uses NATS JetStream "pull
@@ -332,10 +333,10 @@ Plane implements an automated **Retention Policy Engine**:
 1. **Global Retention Period:** By default, all workflow "Run State"
     (decrypted secrets, step outputs, and NATS event streams) is retained for
     **30 days**. This is configurable at the organizational or workflow level.
-2. **NATS Stream Cleanup:** Once a workflow reaches a terminal state
-    (`Succeeded`, `Failed`, or `Aborted`) and its grace period expires, the
-    Controller issues a `DeleteStream` command to NATS JetStream for all
-    streams scoped to that `RunID`.
+2. **NATS Stream Cleanup:** All runs share one stream. The Controller erases
+    a step's task message, which carries its resolved secrets, shortly after
+    the step finishes or its run is archived. Other messages are removed by the
+    stream's maximum age (one week by default; see [NATS](nats.md)).
 3. **Postgres Archiving:**
 
     * **Audit Logs:** High-level metadata (who ran what, when, and the final
@@ -454,7 +455,7 @@ specific to the underlying runtime capabilities.
 
 | Feature | K8s Runner (`RunK8sJob` / `RunContainer`) | Docker Runner (`RunContainer`) |
 | :--- | :--- | :--- |
-| **Shared File System (SFS)** | ✅ Full (Init Containers + Agent) | ✅ Full (Sequential Containers + Agent) |
+| **Shared File System (SFS)** | ✅ Full (Init Containers + Agent Sidecar) | ✅ Full (Sequential Containers + Agent) |
 | **Orphan Adoption** | ✅ Full (Startup scan + Orchestrator sync) | ✅ Full (Startup scan + Orchestrator sync) |
 | **Metadata Encryption** | ✅ AES-256-GCM (Annotations) | ✅ AES-256-GCM (Labels) |
 | **Resource Limits** | ✅ CPU/Memory Requests & Limits | ✅ CPU Quota & Memory Bytes |
@@ -473,7 +474,9 @@ Both runners implement the **Park/Unpark** model. Before a step starts, they
 "unpark" (download and extract) any required storage volumes from the SFS
 backend. After the step completes successfully, they "park" (compress and
 upload) the modified files and report the new SHA-256 hash back to the
-orchestrator.
+orchestrator. Parking and artifact publishing are done by a helper the step's
+own code does not share: a separate container on Docker, an agent sidecar in
+the pod on Kubernetes. See [Security](security.md) for what that protects.
 
 #### 2. Orphan Adoption & Recovery
 

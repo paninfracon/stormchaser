@@ -33,7 +33,7 @@ async fn test_heavy_load_queues_and_quotas() {
         .unwrap();
 
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
     let opa_client = Arc::new(OpaClient::new(None, None));
     let tls_reloader = Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap());
     let log_backend = Arc::new(None);
@@ -267,7 +267,7 @@ async fn test_heavy_load_multiple_workflows() {
         .unwrap();
 
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
     let opa_client = Arc::new(OpaClient::new(None, None));
     let tls_reloader = Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap());
     let log_backend = Arc::new(None);

@@ -26,7 +26,7 @@ async fn setup_db() -> sqlx::PgPool {
 async fn test_headless_validation_dynamic_query_success() {
     let pool = setup_db().await;
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
     let opa_client = Arc::new(OpaClient::new(None, None));
 
     let run_id = RunId::new_v4();
@@ -64,7 +64,7 @@ async fn test_headless_validation_dynamic_query_success() {
 async fn test_headless_validation_dynamic_query_failure() {
     let pool = setup_db().await;
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
     let opa_client = Arc::new(OpaClient::new(None, None));
 
     let run_id = RunId::new_v4();
@@ -93,23 +93,23 @@ async fn test_headless_validation_dynamic_query_failure() {
 }
 
 #[tokio::test]
-async fn test_execute_query_sql_success() {
+async fn test_execute_query_sql_without_connection_is_rejected() {
     let pool = setup_db().await;
     let mut params = std::collections::HashMap::new();
     params.insert("query".to_string(), "SELECT 'test_val'".to_string());
 
-    let res = stormchaser_engine::query::execute_query("sql", &params, Some(&pool), None)
+    // A query that names no connection must never run on the system pool.
+    let err = stormchaser_engine::query::execute_query("sql", &params, Some(&pool), None, None)
         .await
-        .unwrap();
-    assert_eq!(res.len(), 1);
-    assert_eq!(res[0], serde_json::json!("test_val"));
+        .unwrap_err();
+    assert!(err.to_string().contains("require a 'connection'"));
 }
 
 #[tokio::test]
 async fn test_headless_validation_malformed_schema_compile_error() {
     let pool = setup_db().await;
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
     let opa_client = Arc::new(OpaClient::new(None, None));
 
     let run_id = RunId::new_v4();
@@ -144,7 +144,7 @@ workflow "bad-schema" {
 async fn test_headless_validation_hcl_eval_error() {
     let pool = setup_db().await;
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
     let opa_client = Arc::new(OpaClient::new(None, None));
 
     let run_id = RunId::new_v4();
@@ -202,11 +202,51 @@ async fn test_execute_query_connection_resolution() {
     params.insert("connection".to_string(), "test-db-conn".to_string());
     params.insert("query".to_string(), "SELECT 'test_conn_val'".to_string());
 
-    let res = stormchaser_engine::query::execute_query("sql", &params, Some(&pool), None)
+    let res = stormchaser_engine::query::execute_query("sql", &params, Some(&pool), None, None)
         .await
         .unwrap();
     assert_eq!(res.len(), 1);
     assert_eq!(res[0], serde_json::json!("test_conn_val"));
+
+    // A query cannot change data: it runs in a read-only transaction.
+    for write in [
+        "CREATE TABLE query_write_probe (id int)",
+        "UPDATE connections SET description = 'changed' WHERE name = 'test-db-conn' RETURNING name",
+    ] {
+        params.insert("query".to_string(), write.to_string());
+        let err = stormchaser_engine::query::execute_query("sql", &params, Some(&pool), None, None)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("read-only transaction"),
+            "{write}: {err}"
+        );
+    }
+
+    // Nor can it lift the restriction for a later statement: only one statement runs, and
+    // the transaction is rolled back.
+    params.insert(
+        "query".to_string(),
+        "SET TRANSACTION READ WRITE".to_string(),
+    );
+    let _ = stormchaser_engine::query::execute_query("sql", &params, Some(&pool), None, None).await;
+    let description: Option<String> =
+        sqlx::query_scalar("SELECT description FROM connections WHERE id = $1")
+            .bind(conn_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(description, None);
+
+    // More rows than the cap is an error, not an unbounded read.
+    params.insert(
+        "query".to_string(),
+        "SELECT g::text FROM generate_series(1, 10001) g".to_string(),
+    );
+    let err = stormchaser_engine::query::execute_query("sql", &params, Some(&pool), None, None)
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("more than 10000 rows"), "{err}");
 
     sqlx::query("DELETE FROM connections WHERE id = $1")
         .bind(conn_id)

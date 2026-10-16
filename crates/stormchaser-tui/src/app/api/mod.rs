@@ -15,7 +15,7 @@ use std::sync::OnceLock;
 static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 
 fn get_client() -> reqwest::Client {
-    HTTP_CLIENT.get_or_init(reqwest::Client::new).clone()
+    HTTP_CLIENT.get_or_init(crate::http::client).clone()
 }
 
 impl<'a> App<'a> {
@@ -27,7 +27,7 @@ impl<'a> App<'a> {
         body: Option<Value>,
     ) -> Result<reqwest::Response> {
         let client = get_client();
-        let base_url = if path == "/api/v1/schema/hydrate" {
+        let base_url = if path.starts_with("/api/v1/schema/hydrate") {
             &self.query_url
         } else {
             &self.url

@@ -2,6 +2,8 @@
 
 /// Application state and business logic for the TUI.
 pub mod app;
+/// HTTP clients that trust the CA given with `--ca-cert`.
+pub mod http;
 #[cfg(test)]
 mod tests;
 /// User interface rendering logic.

@@ -1,5 +1,5 @@
 # Multi-stage Dockerfile for stormchaser-web (Leptos)
-FROM rust:1.91-slim-bookworm AS builder
+FROM rust:1.96-slim-bookworm@sha256:e18a79fc84dfcfc3ab5ba72290398a644c135c97eaa881447fddc354ee4701a3 AS builder
 
 # Install build dependencies required for rust and cargo-leptos
 RUN apt-get update && apt-get install -y \
@@ -27,7 +27,7 @@ COPY . .
 RUN SQLX_OFFLINE=true cargo leptos build --release -p stormchaser-web
 
 # Final runtime image
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
 
 RUN apt-get update && apt-get install -y \
     ca-certificates \
@@ -44,5 +44,10 @@ COPY --from=builder /app/target/site /app/site
 ENV LEPTOS_OUTPUT_NAME="stormchaser-web"
 ENV LEPTOS_SITE_ROOT="/app/site"
 ENV LEPTOS_SITE_ADDR="0.0.0.0:3000"
+
+# The web tier runs as an unprivileged user
+RUN groupadd --system --gid 65532 stormchaser && \
+    useradd --system --uid 65532 --gid 65532 --no-create-home --home-dir /nonexistent stormchaser
+USER 65532:65532
 
 CMD ["/usr/local/bin/stormchaser-web"]

@@ -66,6 +66,8 @@ pub async fn handle_workflow_direct(
 
     // 1.6 Schema Validation and Default Value Hydration
     let mut query_results = serde_json::Map::new();
+    // Secrets fetched for query parameters, recorded with the run below
+    let mut query_secrets = Vec::new();
     for query in &parsed_workflow.queries {
         let hcl_ctx = crate::hcl_eval::create_context(
             inputs.clone(),
@@ -76,7 +78,11 @@ pub async fn handle_workflow_direct(
             None,
         );
         let mut resolved_params = serde_json::to_value(&query.params)?;
-        if let Err(e) = crate::hcl_eval::resolve_expressions(&mut resolved_params, &hcl_ctx, true) {
+        let (resolved, fetched) = crate::hcl_eval::capturing_secrets(|| {
+            crate::hcl_eval::resolve_expressions(&mut resolved_params, &hcl_ctx, true)
+        });
+        query_secrets.extend(fetched);
+        if let Err(e) = resolved {
             let err_msg = format!(
                 "Failed to evaluate parameters for query {}: {}",
                 query.name, e
@@ -93,6 +99,7 @@ pub async fn handle_workflow_direct(
             &resolved_params_map,
             Some(&pool),
             None,
+            Some(&initiating_user),
         )
         .await
         {
@@ -176,31 +183,41 @@ pub async fn handle_workflow_direct(
 
     let mut tx = pool.begin().await?;
 
-    let max_concurrency = parsed_workflow
-        .quotas
-        .as_ref()
-        .and_then(|q| q.max_concurrency)
-        .unwrap_or(10) as i32;
-    let max_cpu = parsed_workflow
-        .quotas
-        .as_ref()
-        .and_then(|q| q.max_cpu.clone())
-        .unwrap_or_else(|| "1".to_string());
-    let max_memory = parsed_workflow
-        .quotas
-        .as_ref()
-        .and_then(|q| q.max_memory.clone())
-        .unwrap_or_else(|| "4Gi".to_string());
+    // The workflow's author chooses these, so the operator's ceilings apply
+    let limits = crate::run_limits::RunLimits::from_env();
+    let max_concurrency = limits.concurrency(
+        parsed_workflow
+            .quotas
+            .as_ref()
+            .and_then(|q| q.max_concurrency)
+            .unwrap_or(10),
+    ) as i32;
+    let max_cpu = limits.cpu(
+        &parsed_workflow
+            .quotas
+            .as_ref()
+            .and_then(|q| q.max_cpu.clone())
+            .unwrap_or_else(|| "1".to_string()),
+    );
+    let max_memory = limits.memory(
+        &parsed_workflow
+            .quotas
+            .as_ref()
+            .and_then(|q| q.max_memory.clone())
+            .unwrap_or_else(|| "4Gi".to_string()),
+    );
     let max_storage = parsed_workflow
         .quotas
         .as_ref()
         .and_then(|q| q.max_storage.clone())
         .unwrap_or_else(|| "10Gi".to_string());
-    let timeout = parsed_workflow
-        .quotas
-        .as_ref()
-        .and_then(|q| q.timeout.clone())
-        .unwrap_or_else(|| "1h".to_string());
+    let timeout = limits.timeout(
+        &parsed_workflow
+            .quotas
+            .as_ref()
+            .and_then(|q| q.timeout.clone())
+            .unwrap_or_else(|| "1h".to_string()),
+    );
 
     crate::db::insert_full_workflow_run(
         &mut *tx,
@@ -216,6 +233,8 @@ pub async fn handle_workflow_direct(
         &timeout,
     )
     .await?;
+    query_secrets.extend(crate::hcl_eval::take_alias_secrets(run_id));
+    crate::db::add_sensitive_values(&mut *tx, run_id, &query_secrets).await?;
 
     // 4. Emit event for transition to StartPending
     let event = WorkflowStartPendingEvent {

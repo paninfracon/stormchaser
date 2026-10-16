@@ -1,6 +1,6 @@
 use anyhow::Result;
-use bollard::container::ListContainersOptions;
-use bollard::volume::ListVolumesOptions;
+use bollard::query_parameters::ListContainersOptions;
+use bollard::query_parameters::ListVolumesOptions;
 use bollard::Docker;
 use chrono::Utc;
 use std::collections::HashMap;
@@ -17,13 +17,16 @@ pub async fn run_reaper(docker: Docker) -> Result<()> {
         info!("Running garbage collection (reaper) on Docker containers and volumes...");
 
         let mut filters = HashMap::new();
-        filters.insert("label", vec!["managed-by=stormchaser"]);
+        filters.insert(
+            "label".to_string(),
+            vec!["managed-by=stormchaser".to_string()],
+        );
 
         // 1. Reap old containers
         if let Ok(containers) = docker
             .list_containers(Some(ListContainersOptions {
                 all: true,
-                filters: filters.clone(),
+                filters: Some(filters.clone()),
                 ..Default::default()
             }))
             .await
@@ -48,7 +51,7 @@ pub async fn run_reaper(docker: Docker) -> Result<()> {
         // 2. Reap old volumes
         if let Ok(volumes_res) = docker
             .list_volumes(Some(ListVolumesOptions {
-                filters: filters.clone(),
+                filters: Some(filters.clone()),
             }))
             .await
         {

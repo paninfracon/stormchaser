@@ -46,6 +46,14 @@ allow if {
 	has_approval_permission
 }
 
+allow if {
+	# 5. Check if it's a resource request: may this user act on this object?
+	# (has action, resource {type, id, owner} and subject {sub, email})
+	input.action
+	input.resource
+	has_resource_permission
+}
+
 # Public API endpoints that must remain accessible without a token.
 is_public_api_route if {
 	input.method == "GET"
@@ -108,6 +116,12 @@ has_api_permission if {
 	user_has_role("admin")
 }
 
+# Anyone may ask who their own token identifies (the web UI checks a session this way)
+has_api_permission if {
+	input.method == "GET"
+	input.path == "/api/v1/auth/session"
+}
+
 # Developers can view and start runs
 has_api_permission if {
 	user_has_role("developer")
@@ -147,6 +161,57 @@ has_api_permission if {
 	user_has_role("security")
 	input.method == "GET"
 	startswith(input.path, "/api/v1/runs")
+}
+
+# --- Resource (per-object) Permissions ---
+
+# The API sends the identity it verified from the token; the engine sends the user a
+# run acts for in both fields.
+subject_ids contains id if {
+	id := input.subject.sub
+	is_string(id)
+}
+
+subject_ids contains id if {
+	id := input.subject.email
+	is_string(id)
+}
+
+resource_has_owner if {
+	is_string(input.resource.owner)
+	input.resource.owner != ""
+}
+
+# Admins may do anything to any object
+has_resource_permission if {
+	user_has_role("admin")
+}
+
+# Owners may do anything to what they created (for a run: started), except make a
+# connection the default storage backend, which receives every other user's run data
+has_resource_permission if {
+	resource_has_owner
+	input.resource.owner in subject_ids
+	input.action != "make_default"
+}
+
+# Operators may read every run, whoever started it
+has_resource_permission if {
+	input.resource.type == "run"
+	input.action == "read"
+	user_has_role("operator")
+}
+
+# Objects created before ownership was recorded can be read by everyone
+has_resource_permission if {
+	not resource_has_owner
+	input.action == "read"
+}
+
+# Connections are shared: everyone may see them and every run may use them
+has_resource_permission if {
+	input.resource.type == "connection"
+	input.action in ["read", "use"]
 }
 
 # --- General Security Policies (API) ---

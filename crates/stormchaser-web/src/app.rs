@@ -13,7 +13,54 @@ use leptos_router::{
     path,
 };
 
+/// The Content-Security-Policy for a rendered page.
+///
+/// Scripts run only from this origin or with this response's nonce, which Leptos puts on
+/// the inline scripts it generates for hydration and streaming. Styles still allow inline
+/// `style` attributes, which the views use throughout; the stylesheet imports its font
+/// from Google Fonts. The only thing that may be framed is the configured Grafana.
+/// `dev_reload` adds the live-reload socket used under `cargo leptos watch`.
+#[cfg(feature = "ssr")]
+pub fn content_security_policy(nonce: &str, grafana: Option<&str>, dev_reload: bool) -> String {
+    let frames = grafana.unwrap_or("'none'");
+    let connect = if dev_reload {
+        "'self' ws://127.0.0.1:* ws://localhost:*"
+    } else {
+        "'self'"
+    };
+    format!(
+        "default-src 'self'; \
+         script-src 'self' 'nonce-{nonce}' 'wasm-unsafe-eval'; \
+         style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; \
+         font-src 'self' https://fonts.gstatic.com; \
+         img-src 'self' data:; \
+         connect-src {connect}; \
+         frame-src {frames}; \
+         object-src 'none'; \
+         base-uri 'self'; \
+         form-action 'self'; \
+         frame-ancestors 'none'"
+    )
+}
+
 pub fn shell(options: LeptosOptions) -> impl IntoView {
+    // The policy has to name the nonce of this very response, so it is set here, where
+    // the nonce is known, and not by the server's blanket header layer.
+    #[cfg(feature = "ssr")]
+    if let (Some(nonce), Some(response)) = (
+        leptos::nonce::use_nonce(),
+        use_context::<leptos_axum::ResponseOptions>(),
+    ) {
+        let policy = content_security_policy(
+            &nonce,
+            crate::api::grafana_origin().as_deref(),
+            std::env::var("LEPTOS_WATCH").is_ok(),
+        );
+        if let Ok(value) = axum::http::HeaderValue::from_str(&policy) {
+            response.insert_header(axum::http::header::CONTENT_SECURITY_POLICY, value);
+        }
+    }
+
     view! {
         <!DOCTYPE html>
         <html lang="en">
@@ -110,9 +157,11 @@ pub fn Layout() -> impl IntoView {
                                 {move || {
                                     if auth_res.get().unwrap_or(false) {
                                         view! {
-                                            <a href="/auth/logout" class="btn" rel="external">
-                                                "Logout"
-                                            </a>
+                                            // A form, not a link: logging out changes state,
+                                            // and a GET could be triggered by any page
+                                            <form method="post" action="/auth/logout" style="display: inline; margin: 0;">
+                                                <button type="submit" class="btn">"Logout"</button>
+                                            </form>
                                         }.into_any()
                                     } else {
                                         view! {
@@ -184,5 +233,35 @@ pub fn App() -> impl IntoView {
                 </Routes>
             </main>
         </Router>
+    }
+}
+
+#[cfg(all(test, feature = "ssr"))]
+mod csp_tests {
+    use super::content_security_policy;
+
+    #[test]
+    fn scripts_need_this_response_nonce_and_nothing_may_frame_the_page() {
+        let policy = content_security_policy("abc123", None, false);
+        assert!(policy.contains("script-src 'self' 'nonce-abc123' 'wasm-unsafe-eval';"));
+        assert!(!policy.contains("script-src 'self' 'unsafe-inline'"));
+        assert!(policy.contains("frame-ancestors 'none'"));
+        assert!(policy.contains("frame-src 'none';"));
+        assert!(policy.contains("object-src 'none';"));
+        assert!(policy.contains("connect-src 'self';"));
+        // One line: a header value cannot hold a line break
+        assert!(!policy.contains('\n'));
+    }
+
+    #[test]
+    fn only_the_configured_grafana_may_be_framed() {
+        let policy = content_security_policy("n", Some("https://grafana.example.com"), false);
+        assert!(policy.contains("frame-src https://grafana.example.com;"));
+    }
+
+    #[test]
+    fn the_reload_socket_is_allowed_only_in_watch_mode() {
+        assert!(content_security_policy("n", None, true).contains("ws://127.0.0.1:*"));
+        assert!(!content_security_policy("n", None, false).contains("ws:"));
     }
 }

@@ -5,6 +5,28 @@ use aws_sdk_s3::Client;
 use std::time::Duration;
 use stormchaser_model::connections::Connection;
 
+/// Refuses a connection that would sign with the engine's own AWS identity, unless it is
+/// the default storage backend.
+///
+/// A connection with no keys and no role falls back to whatever credentials the engine
+/// runs with (an IRSA or instance role). Any user may create a connection naming any
+/// bucket, so that would let them have the engine sign uploads into every bucket its
+/// role can write. Only an admin chooses the default backend, so it alone may rely on
+/// them; any other connection brings its own keys or an allow-listed role.
+fn ensure_credentials_are_its_own(backend: &Connection) -> Result<()> {
+    let has_keys =
+        backend.config["access_key"].is_string() && backend.config["secret_key"].is_string();
+    let has_role = cfg!(feature = "aws-s3-sts") && backend.aws_assume_role_arn.is_some();
+    if backend.is_default_sfs || has_keys || has_role {
+        Ok(())
+    } else {
+        anyhow::bail!(
+            "S3 connection '{}' has no access_key and secret_key or role; only the default storage backend may use the engine's own credentials",
+            backend.name
+        )
+    }
+}
+
 /// Get s3 client.
 pub async fn get_s3_client(backend: &Connection) -> Result<Client> {
     let config = &backend.config;
@@ -12,6 +34,8 @@ pub async fn get_s3_client(backend: &Connection) -> Result<Client> {
     let region = config["region"].as_str().unwrap_or("us-east-1");
     let access_key = config["access_key"].as_str();
     let secret_key = config["secret_key"].as_str();
+
+    ensure_credentials_are_its_own(backend)?;
 
     let mut loader = aws_config::defaults(aws_config::BehaviorVersion::latest())
         .region(Region::new(region.to_string()));
@@ -45,6 +69,7 @@ pub async fn get_s3_client(backend: &Connection) -> Result<Client> {
 
     #[cfg(feature = "aws-s3-sts")]
     let sdk_config = if let Some(role_arn) = &backend.aws_assume_role_arn {
+        crate::aws_guard::ensure_role_allowed(role_arn)?;
         let sts_client = aws_sdk_sts::Client::new(&sdk_config);
         let assume_role_res = sts_client
             .assume_role()
@@ -149,5 +174,45 @@ mod tests {
 
         let client = get_s3_client(&backend).await;
         client.unwrap();
+    }
+
+    fn keyless(is_default_sfs: bool) -> Connection {
+        Connection {
+            id: ConnectionId::new_v4(),
+            name: "keyless".to_string(),
+            description: None,
+            connection_type: ConnectionType::S3,
+            config: json!({"bucket": "someone-elses-bucket"}),
+            aws_assume_role_arn: None,
+            is_default_sfs,
+            encrypted_credentials: None,
+            ca_cert: None,
+            client_cert: None,
+            client_key: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn only_the_default_backend_may_use_the_engines_own_credentials() {
+        assert!(ensure_credentials_are_its_own(&keyless(true)).is_ok());
+        let err = ensure_credentials_are_its_own(&keyless(false)).unwrap_err();
+        assert!(err.to_string().contains("default storage backend"));
+
+        let mut with_keys = keyless(false);
+        with_keys.config = json!({"bucket": "b", "access_key": "a", "secret_key": "s"});
+        assert!(ensure_credentials_are_its_own(&with_keys).is_ok());
+
+        let mut half_keys = keyless(false);
+        half_keys.config = json!({"bucket": "b", "access_key": "a"});
+        assert!(ensure_credentials_are_its_own(&half_keys).is_err());
+
+        let mut with_role = keyless(false);
+        with_role.aws_assume_role_arn = Some("arn:aws:iam::1:role/r".to_string());
+        assert_eq!(
+            ensure_credentials_are_its_own(&with_role).is_ok(),
+            cfg!(feature = "aws-s3-sts")
+        );
     }
 }

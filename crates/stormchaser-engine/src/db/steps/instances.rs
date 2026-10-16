@@ -438,6 +438,46 @@ where
         .await
 }
 
+/// Returns the secret that must accompany the event finishing a step the engine handles
+/// itself, or `None` once the step has been handed to a runner.
+///
+/// A lookup failure is reported as `None`: the resulting event is then rejected by the
+/// handler, which is the safe outcome.
+pub async fn step_completion_token<'a, E>(executor: E, id: StepInstanceId) -> Option<String>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    match sqlx::query_scalar::<_, Option<String>>(
+        "SELECT completion_token FROM step_instances WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_optional(executor)
+    .await
+    {
+        Ok(token) => token.flatten(),
+        Err(e) => {
+            tracing::error!("Failed to read completion token for step {}: {:?}", id, e);
+            None
+        }
+    }
+}
+
+/// Clears a step's completion token because it is being handed to a runner, which
+/// reports the result itself and never holds the token.
+pub async fn clear_step_completion_token<'a, E>(
+    executor: E,
+    id: StepInstanceId,
+) -> Result<(), sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    sqlx::query("UPDATE step_instances SET completion_token = NULL WHERE id = $1")
+        .bind(id)
+        .execute(executor)
+        .await?;
+    Ok(())
+}
+
 /// Fetch steps that are currently running on offline runners.
 pub async fn fetch_zombie_steps<'a, E>(executor: E) -> Result<Vec<ZombieStep>, sqlx::Error>
 where
@@ -455,6 +495,63 @@ where
         "#,
     )
     .fetch_all(executor)
+    .await
+}
+
+/// Whether a runner has gone quiet: it is unknown, offline, or has missed a heartbeat.
+///
+/// Runners send a heartbeat every 10 seconds. One that has sent none for
+/// `RUNNER_QUIET_SECS` has missed at least one, which is the earliest sign that the
+/// steps it holds may need another runner. It is a lower bar than the 30 seconds after
+/// which the engine gives a runner's steps up for lost: a task is redelivered to another
+/// runner before then, and that runner must be able to take the step over.
+pub async fn runner_has_gone_quiet<'a, E>(executor: E, runner_id: &str) -> Result<bool, sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    let alive: bool = sqlx::query_scalar(
+        r#"
+        SELECT EXISTS (
+            SELECT 1 FROM runners
+            WHERE id = $1
+              AND status <> 'offline'
+              AND last_heartbeat_at >= NOW() - make_interval(secs => $2)
+        )
+        "#,
+    )
+    .bind(runner_id)
+    .bind(RUNNER_QUIET_SECS)
+    .fetch_one(executor)
+    .await?;
+    Ok(!alive)
+}
+
+/// Seconds without a heartbeat after which another runner may take over a runner's steps.
+pub const RUNNER_QUIET_SECS: f64 = 12.0;
+
+/// Whether a step is still in flight on a runner that is offline or has stopped
+/// heartbeating: the same condition [`fetch_zombie_steps`] selects on.
+pub async fn step_runner_is_lost<'a, E>(
+    executor: E,
+    id: StepInstanceId,
+) -> Result<bool, sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    sqlx::query_scalar(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM step_instances s
+            JOIN runners r ON s.runner_id = r.id
+            WHERE s.id = $1
+            AND s.status IN ('running', 'unpacking_sfs', 'packing_sfs')
+            AND (r.status = 'offline' OR r.last_heartbeat_at < NOW() - INTERVAL '30 seconds')
+        )
+        "#,
+    )
+    .bind(id)
+    .fetch_one(executor)
     .await
 }
 
@@ -511,4 +608,32 @@ where
     .await?;
 
     Ok(record.map(|r| r.0))
+}
+
+/// Moves a step that is with a runner to another runner, returning true if it moved.
+///
+/// Used when a different runner reports that it is now executing the step: it adopted the
+/// step's container or job after a restart, or it received the redelivered task.
+pub async fn reassign_step_runner<'a, E>(
+    executor: E,
+    id: StepInstanceId,
+    runner_id: &str,
+) -> Result<bool, sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    let result = sqlx::query(
+        r#"
+        UPDATE step_instances
+        SET runner_id = $2
+        WHERE id = $1
+          AND status IN ('initializing', 'running', 'unpacking_sfs', 'packing_sfs')
+          AND runner_id IS DISTINCT FROM $2
+        "#,
+    )
+    .bind(id)
+    .bind(runner_id)
+    .execute(executor)
+    .await?;
+    Ok(result.rows_affected() > 0)
 }

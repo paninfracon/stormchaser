@@ -6,7 +6,9 @@ services:
       POSTGRES_PASSWORD: ${STORMCHASER_DEV_PASSWORD:-stormchaser_dev_password}
       POSTGRES_DB: stormchaser
     ports:
-      - "${PORT_DB:-5432}:5432"
+      # Control-plane ports are published on loopback only unless overridden, so that
+      # step containers cannot reach them through the host.
+      - "${STORMCHASER_CONTROL_PLANE_BIND:-127.0.0.1}:${PORT_DB:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -18,9 +20,17 @@ services:
   nats:
     image: nats:2.10
     ports:
-      - "${PORT_NATS:-4222}:4222"
-      - "${PORT_NATS_MGT:-8222}:8222"
-    command: ["-js"] # Enable JetStream if needed
+      - "${STORMCHASER_CONTROL_PLANE_BIND:-127.0.0.1}:${PORT_NATS:-4222}:4222"
+      - "${STORMCHASER_CONTROL_PLANE_BIND:-127.0.0.1}:${PORT_NATS_MGT:-8222}:8222"
+    environment:
+      NATS_CONTROL_PASSWORD: '${STORMCHASER_NATS_PASSWORD?Error: STORMCHASER_NATS_PASSWORD is not set}'
+      NATS_API_PASSWORD: '${STORMCHASER_NATS_API_PASSWORD?Error: STORMCHASER_NATS_API_PASSWORD is not set}'
+      NATS_QUERY_PASSWORD: '${STORMCHASER_NATS_QUERY_PASSWORD?Error: STORMCHASER_NATS_QUERY_PASSWORD is not set}'
+      NATS_RUNNER_PASSWORD: '${STORMCHASER_NATS_RUNNER_PASSWORD?Error: STORMCHASER_NATS_RUNNER_PASSWORD is not set}'
+    volumes:
+      - ./deploy/nats/nats-server.conf:/etc/nats/nats-server.conf:ro
+    # JetStream, authentication and per-role permissions are set in the config file.
+    command: ["-c", "/etc/nats/nats-server.conf"]
 
   dex:
     image: dexidp/dex:v2.41.1
@@ -39,7 +49,8 @@ services:
     volumes:
       - ./deploy/loki/loki-config.yaml:/etc/loki/local-config.yaml
     ports:
-      - "${PORT_LOKI:-3100}:3100"
+      # Every step's log lines are here, and Loki has no authentication of its own
+      - "${STORMCHASER_CONTROL_PLANE_BIND:-127.0.0.1}:${PORT_LOKI:-3100}:3100"
     command: -config.file=/etc/loki/local-config.yaml
 
   tempo:
@@ -48,14 +59,14 @@ services:
     volumes:
       - ./deploy/tempo/tempo.yaml:/etc/tempo.yaml
     ports:
-      - "3200:3200"   # tempo
-      - "4317:4317"   # otlp grpc
-      - "4318:4318"   # otlp http
+      - "${STORMCHASER_CONTROL_PLANE_BIND:-127.0.0.1}:3200:3200"   # tempo
+      - "${STORMCHASER_CONTROL_PLANE_BIND:-127.0.0.1}:4317:4317"   # otlp grpc
+      - "${STORMCHASER_CONTROL_PLANE_BIND:-127.0.0.1}:4318:4318"   # otlp http
 
   prometheus:
     image: prom/prometheus:latest
     ports:
-      - "${PORT_PROMETHEUS:-9090}:9090"
+      - "${STORMCHASER_CONTROL_PLANE_BIND:-127.0.0.1}:${PORT_PROMETHEUS:-9090}:9090"
     volumes:
       - ./deploy/prometheus/prometheus.yaml:/etc/prometheus/prometheus.yml
     command:
@@ -66,10 +77,12 @@ services:
   grafana:
     image: grafana/grafana:latest
     ports:
-      - "${PORT_GRAFANA:-3002}:3000"
+      - "${STORMCHASER_CONTROL_PLANE_BIND:-127.0.0.1}:${PORT_GRAFANA:-3002}:3000"
     environment:
+      # Anonymous visitors (the web UI embeds dashboards) may look, not change
+      # datasources or users. Sign in as admin for that.
       - GF_AUTH_ANONYMOUS_ENABLED=true
-      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
       - GF_SECURITY_ALLOW_EMBEDDING=true
     volumes:
       - ./deploy/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
@@ -96,16 +109,25 @@ services:
       - loki
 
   s3:
-    image: minio/minio:latest
+    # MinIO no longer publishes images to Docker Hub or Quay; Chainguard builds current
+    # releases (amd64 and arm64). It runs as uid 65532 and has no curl, hence `mc ready`.
+    image: cgr.dev/chainguard/minio:latest
     ports:
-      - "${PORT_S3:-9000}:9000"
-      - "${PORT_S3_CONS:-9001}:9001"
+      # Steps reach it on the steps network; the host port is for the operator, and for
+      # a hybrid install, which widens the bind
+      - "${STORMCHASER_CONTROL_PLANE_BIND:-127.0.0.1}:${PORT_S3:-9000}:9000"
+      - "${STORMCHASER_CONTROL_PLANE_BIND:-127.0.0.1}:${PORT_S3_CONS:-9001}:9001"
     environment:
       MINIO_ROOT_USER: stormchaser
       MINIO_ROOT_PASSWORD: ${STORMCHASER_MINIO_PASSWORD:-stormchaser_dev_password}
     command: server /data --console-address ":9001"
+    # Object storage is the one service workflow steps need, so it is also attached to
+    # the network step containers run on.
+    networks:
+      - default
+      - steps
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "mc", "ready", "local"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -113,17 +135,33 @@ services:
   registry:
     image: registry:2
     ports:
-      - "${PORT_REG:-32000}:5000"
+      # Unauthenticated: anyone who can reach it can replace the images steps run
+      - "${STORMCHASER_CONTROL_PLANE_BIND:-127.0.0.1}:${PORT_REG:-32000}:5000"
     environment:
       REGISTRY_HTTP_ADDR: 0.0.0.0:5000
 
   opa:
     image: openpolicyagent/opa:latest
     ports:
-      - "${PORT_OPA:-8181}:8181"
+      - "${STORMCHASER_CONTROL_PLANE_BIND:-127.0.0.1}:${PORT_OPA:-8181}:8181"
     volumes:
       - ./deploy/opa:/etc/opa
-    command: run --server --addr 0.0.0.0:8181 --log-level debug /etc/opa/policy.rego
+    # --authorization=basic applies deploy/opa/authz.rego to OPA's own API, so the policy
+    # can be evaluated but not replaced over the network.
+    command: run --server --addr 0.0.0.0:8181 --authorization=basic /etc/opa/policy.rego /etc/opa/authz.rego /etc/opa/settings.json
+
+  # The services run as an unprivileged user (65532), which cannot read a key that
+  # belongs to you on the host. This copies the certificate and key into a volume that
+  # user owns, with the key readable by it alone.
+  certs:
+    image: alpine:3.20
+    command:
+      - sh
+      - -c
+      - cp /src/ca.crt /src/tls.crt /src/tls.key /certs/ && chown 65532:65532 /certs/* && chmod 0444 /certs/*.crt && chmod 0400 /certs/tls.key
+    volumes:
+      - ${STORMCHASER_CERT_DIR:-./tests/certs}:/src:ro
+      - certs:/certs
 
   orchestration-engine:
     build:
@@ -133,8 +171,17 @@ services:
         BINARY: stormchaser-engine
     environment:
       DATABASE_URL: 'postgres://stormchaser:${STORMCHASER_DEV_PASSWORD?Error: STORMCHASER_DEV_PASSWORD is not set}@postgres:5432/stormchaser'
+      # This local stack runs without TLS, which every service otherwise uses by
+      # default: its PostgreSQL offers none, and the CLI would have to be told to
+      # trust tests/certs. Do not copy the TLS settings below into a real deployment.
+      STORMCHASER_DB_SSL: 'false'
       NATS_URL: nats://nats:4222
-      RUST_LOG: stormchaser_engine=debug
+      NATS_USER: stormchaser
+      NATS_PASSWORD: '${STORMCHASER_NATS_PASSWORD?Error: STORMCHASER_NATS_PASSWORD is not set}'
+      # Seals the approve and reject links in approval emails. Leave unset to send
+      # no links; set the same 32+ character value on the engine and the API.
+      STORMCHASER_APPROVAL_LINK_KEY: '${STORMCHASER_APPROVAL_LINK_KEY:-}'
+      RUST_LOG: ${RUST_LOG:-stormchaser_engine=info}
       GIT_CACHE_DIR: /tmp/stormchaser/git-cache
       LOKI_URL: http://loki:3100
       OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4317
@@ -149,8 +196,10 @@ services:
       TLS_KEY_PATH: /etc/engine/certs/tls.key
     volumes:
       - git-cache:/tmp/stormchaser/git-cache
-      - ${STORMCHASER_CERT_DIR:-./tests/certs}:/etc/engine/certs:ro
+      - certs:/etc/engine/certs:ro
     depends_on:
+      certs:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       nats:
@@ -166,8 +215,15 @@ services:
         BINARY: stormchaser-query
     environment:
       DATABASE_URL: 'postgres://stormchaser:${STORMCHASER_DEV_PASSWORD?Error: STORMCHASER_DEV_PASSWORD is not set}@postgres:5432/stormchaser'
+      # This local stack runs without TLS, which every service otherwise uses by
+      # default: its PostgreSQL offers none, and the CLI would have to be told to
+      # trust tests/certs. Do not copy the TLS settings below into a real deployment.
+      STORMCHASER_DB_SSL: 'false'
+      STORMCHASER_LISTEN_TLS: 'false'
       NATS_URL: nats://nats:4222
-      RUST_LOG: stormchaser_query=debug
+      NATS_USER: stormchaser-query
+      NATS_PASSWORD: '${STORMCHASER_NATS_QUERY_PASSWORD?Error: STORMCHASER_NATS_QUERY_PASSWORD is not set}'
+      RUST_LOG: ${RUST_LOG:-stormchaser_query=info}
       OIDC_ISSUER: http://dex:5556/dex
       OIDC_EXTERNAL_ISSUER: http://localhost:${PORT_DEX:-5556}/dex
       OIDC_CLIENT_ID: stormchaser-cli
@@ -182,8 +238,10 @@ services:
       TLS_CERT_PATH: /etc/engine/certs/tls.crt
       TLS_KEY_PATH: /etc/engine/certs/tls.key
     volumes:
-      - ${STORMCHASER_CERT_DIR:-./tests/certs}:/etc/engine/certs:ro
+      - certs:/etc/engine/certs:ro
     depends_on:
+      certs:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       nats:
@@ -203,12 +261,33 @@ services:
         BINARY: stormchaser-api
     environment:
       DATABASE_URL: 'postgres://stormchaser:${STORMCHASER_DEV_PASSWORD?Error: STORMCHASER_DEV_PASSWORD is not set}@postgres:5432/stormchaser'
+      # This local stack runs without TLS, which every service otherwise uses by
+      # default: its PostgreSQL offers none, and the CLI would have to be told to
+      # trust tests/certs. Do not copy the TLS settings below into a real deployment.
+      STORMCHASER_DB_SSL: 'false'
+      STORMCHASER_LISTEN_TLS: 'false'
+      # Cron schedules are stored, with a token shown once when each is created; fire
+      # them from a scheduler of your own: curl -X POST -H "Authorization: Bearer <token>"
+      # http://localhost:3000/api/v1/cron-trigger/<id>
+      CRON_ENGINE: none
+      # Signs the API's own session tokens; scripts/setup.sh generates it into .env
+      STORMCHASER_JWT_SECRET: '${STORMCHASER_JWT_SECRET?Error: STORMCHASER_JWT_SECRET is not set}'
       NATS_URL: nats://nats:4222
-      RUST_LOG: stormchaser_api=debug
+      NATS_USER: stormchaser-api
+      NATS_PASSWORD: '${STORMCHASER_NATS_API_PASSWORD?Error: STORMCHASER_NATS_API_PASSWORD is not set}'
+      # Seals the approve and reject links in approval emails. Leave unset to send
+      # no links; set the same 32+ character value on the engine and the API.
+      STORMCHASER_APPROVAL_LINK_KEY: '${STORMCHASER_APPROVAL_LINK_KEY:-}'
+      RUST_LOG: ${RUST_LOG:-stormchaser_api=info}
+      # Swagger UI at /swagger-ui (loaded from cdnjs). It needs no token, so it is off
+      # unless asked for.
+      STORMCHASER_API_DOCS: 'true'
       OIDC_ISSUER: http://dex:5556/dex
       OIDC_EXTERNAL_ISSUER: http://localhost:${PORT_DEX:-5556}/dex
       OIDC_CLIENT_ID: stormchaser-cli
       OIDC_CLIENT_SECRET: '${STORMCHASER_CLI_SECRET?Error: STORMCHASER_CLI_SECRET is not set}'
+      # Dex puts a user's groups in the ID token only when asked for them
+      STORMCHASER_OIDC_EXTRA_SCOPES: groups
       LOKI_URL: http://loki:3100
       OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4317
       OTEL_SERVICE_NAME: stormchaser-api
@@ -219,8 +298,10 @@ services:
       TLS_CERT_PATH: /etc/engine/certs/tls.crt
       TLS_KEY_PATH: /etc/engine/certs/tls.key
     volumes:
-      - ${STORMCHASER_CERT_DIR:-./tests/certs}:/etc/engine/certs:ro
+      - certs:/etc/engine/certs:ro
     depends_on:
+      certs:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       nats:
@@ -237,11 +318,13 @@ services:
       context: .
       dockerfile: Dockerfile.web
     environment:
+      # Plain HTTP for this local stack only; see orchestration-api
+      STORMCHASER_LISTEN_TLS: 'false'
       API_URL: http://orchestration-api:3000
       QUERY_URL: http://orchestration-query:3001
       EXTERNAL_API_URL: http://localhost:${PORT_API:-3000}
       WEB_URL: http://localhost:${PORT_WEB:-3003}
-      RUST_LOG: stormchaser_web=debug
+      RUST_LOG: ${RUST_LOG:-stormchaser_web=info}
       GRAFANA_URL: http://localhost:${PORT_GRAFANA:-3002}
     depends_on:
       - orchestration-api
@@ -255,10 +338,23 @@ services:
       args:
         BINARY: stormchaser-runner-docker
     profiles: ["docker"]
+    # The image runs as an unprivileged user; only root (or the socket's group) can use
+    # the Docker socket. No capabilities are needed for that.
+    user: "0:0"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     environment:
       NATS_URL: nats://nats:4222
-      RUST_LOG: stormchaser_runner_docker=debug
-      STORMCHASER_STATE_ENCRYPTION_KEY: "01234567890123456789012345678901"
+      NATS_USER: stormchaser-runner
+      NATS_PASSWORD: '${STORMCHASER_NATS_RUNNER_PASSWORD?Error: STORMCHASER_NATS_RUNNER_PASSWORD is not set}'
+      RUST_LOG: ${RUST_LOG:-stormchaser_runner_docker=info}
+      # Privileged steps are root on this host; tests/dogfood.storm needs this set to true.
+      STORMCHASER_ALLOW_PRIVILEGED: ${STORMCHASER_ALLOW_PRIVILEGED:-false}
+      # Steps run on their own network, away from NATS and Postgres.
+      STORMCHASER_STEP_NETWORK: ${COMPOSE_PROJECT_NAME:-stormchaser}_steps
+      # Generated into .env by scripts/setup.sh; without one, secret values are left out
+      # of the step definitions the runner keeps on containers
+      STORMCHASER_STATE_ENCRYPTION_KEY: ${STORMCHASER_STATE_ENCRYPTION_KEY:-}
       LOKI_URL: ${LOKI_URL:-http://loki:3100/loki/api/v1/push}
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -285,6 +381,11 @@ services:
     image: stormchaser-agent:v1
     profiles: [build-only]
 
+networks:
+  # Workflow step containers join this network. Only object storage is reachable on it.
+  steps:
+
 volumes:
+  certs:
   git-cache:
   postgres-data:

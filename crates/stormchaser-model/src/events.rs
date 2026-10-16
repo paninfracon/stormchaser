@@ -9,11 +9,28 @@ use std::collections::HashMap;
 
 use nutype::nutype;
 
-#[nutype(derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema))]
+#[nutype(derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize))]
 pub struct SchemaVersion(String);
 
-#[nutype(derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema))]
+#[nutype(derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize))]
 pub struct SchemaId(String);
+
+macro_rules! impl_string_json_schema {
+    ($t:ident) => {
+        impl JsonSchema for $t {
+            fn schema_name() -> std::borrow::Cow<'static, str> {
+                stringify!($t).into()
+            }
+
+            fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+                String::json_schema(generator)
+            }
+        }
+    };
+}
+
+impl_string_json_schema!(SchemaVersion);
+impl_string_json_schema!(SchemaId);
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub enum EventSource {
@@ -64,6 +81,8 @@ pub enum StepEventType {
     Failed,
     Query,
     QueryResponse,
+    UnpackingSfs,
+    PackingSfs,
 }
 
 impl StepEventType {
@@ -76,6 +95,8 @@ impl StepEventType {
             StepEventType::Failed => "StepFailedEvent",
             StepEventType::Query => "StepQueryEvent",
             StepEventType::QueryResponse => "StepQueryResponseEvent",
+            StepEventType::UnpackingSfs => "StepUnpackingSfsEvent",
+            StepEventType::PackingSfs => "StepPackingSfsEvent",
         }
     }
 }
@@ -85,6 +106,8 @@ pub enum RunnerEventType {
     Register,
     Heartbeat,
     Offline,
+    /// The engine telling runners that a run has ended and its steps must stop.
+    Cancel,
 }
 
 impl RunnerEventType {
@@ -93,6 +116,7 @@ impl RunnerEventType {
             RunnerEventType::Register => "RunnerRegisterEvent",
             RunnerEventType::Heartbeat => "RunnerHeartbeatEvent",
             RunnerEventType::Offline => "RunnerOfflineEvent",
+            RunnerEventType::Cancel => "RunCancelEvent",
         }
     }
 }
@@ -154,6 +178,7 @@ impl<'de> Deserialize<'de> for EventType {
             "RunnerRegisterEvent" => Ok(EventType::Runner(RunnerEventType::Register)),
             "RunnerHeartbeatEvent" => Ok(EventType::Runner(RunnerEventType::Heartbeat)),
             "RunnerOfflineEvent" => Ok(EventType::Runner(RunnerEventType::Offline)),
+            "RunCancelEvent" => Ok(EventType::Runner(RunnerEventType::Cancel)),
             _ => Err(serde::de::Error::custom(format!(
                 "Unknown EventType: {}",
                 s
@@ -163,12 +188,12 @@ impl<'de> Deserialize<'de> for EventType {
 }
 
 impl schemars::JsonSchema for EventType {
-    fn schema_name() -> String {
-        "EventType".to_string()
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "EventType".into()
     }
 
-    fn json_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-        String::json_schema(gen)
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        String::json_schema(generator)
     }
 }
 
@@ -280,6 +305,10 @@ pub struct StepCompletedEvent {
     pub run_id: RunId,
     pub step_id: StepInstanceId,
     pub fencing_token: i64,
+    /// Secret proving the sender may finish a step the engine handles itself. Runners
+    /// never have one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_token: Option<String>,
     pub event_type: EventType,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runner_id: Option<String>,
@@ -301,6 +330,10 @@ pub struct StepFailedEvent {
     pub run_id: RunId,
     pub step_id: StepInstanceId,
     pub fencing_token: i64,
+    /// Secret proving the sender may finish a step the engine handles itself. Runners
+    /// never have one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_token: Option<String>,
     pub event_type: EventType,
     pub error: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -361,6 +394,17 @@ pub struct RunnerHeartbeatEvent {
 pub struct RunnerOfflineEvent {
     pub runner_id: String,
     pub event_type: EventType,
+    pub timestamp: DateTime<Utc>,
+}
+
+/// Sent by the engine when a run ends with steps that may still be running. Every
+/// runner stops the containers or Jobs it holds for the run.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct RunCancelEvent {
+    pub run_id: RunId,
+    pub event_type: EventType,
+    /// Why the run ended, for the runner's log.
+    pub reason: String,
     pub timestamp: DateTime<Utc>,
 }
 

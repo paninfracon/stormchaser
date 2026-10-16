@@ -77,9 +77,7 @@ fn prepare_template_context(
 }
 
 fn render_template(template: &str, context: &Value) -> Result<String> {
-    use minijinja::Environment;
-    let env = Environment::new();
-    env.render_str(template, context)
+    crate::templating::render_str(template, context)
         .map_err(|e| anyhow::anyhow!("Failed to render Jinja template: {:?}", e))
 }
 
@@ -120,6 +118,7 @@ async fn save_output_and_complete(
         run_id,
         step_id,
         fencing_token: 0,
+        completion_token: crate::db::step_completion_token(&pool, step_id).await,
         event_type: EventType::Step(StepEventType::Completed),
         outputs: Some(outputs_map),
         exit_code: Some(0),

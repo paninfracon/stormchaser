@@ -33,7 +33,7 @@ pub(crate) struct StepSpec {
 }
 
 pub(crate) fn build_k8s_pod_spec(
-    container: Container,
+    containers: Vec<Container>,
     init_containers: Vec<Container>,
     volumes: Vec<Volume>,
     metadata: &JobMetadata,
@@ -53,6 +53,8 @@ pub(crate) fn build_k8s_pod_spec(
         None
     };
 
+    let has_sidecar = containers.iter().any(|c| c.name == AGENT_SIDECAR_CONTAINER);
+
     PodTemplateSpec {
         metadata: Some(ObjectMeta {
             labels: Some(BTreeMap::from([
@@ -70,10 +72,13 @@ pub(crate) fn build_k8s_pod_spec(
                     metadata.fencing_token.to_string(),
                 ),
             ])),
+            // Empty until the runner reports the step container's exit code to the sidecar
+            annotations: has_sidecar
+                .then(|| BTreeMap::from([(WORKER_EXIT_ANNOTATION.to_string(), String::new())])),
             ..Default::default()
         }),
         spec: Some(PodSpec {
-            containers: vec![container],
+            containers,
             init_containers: Some(init_containers),
             restart_policy: Some(
                 step_spec
@@ -86,6 +91,12 @@ pub(crate) fn build_k8s_pod_spec(
                 .node_selector
                 .clone()
                 .map(|ns| ns.into_iter().collect()),
+            // Steps get no API credentials unless the operator has allow-listed the
+            // service account they ask for.
+            automount_service_account_token: step_spec
+                .service_account_name
+                .is_none()
+                .then_some(false),
             service_account_name: step_spec.service_account_name.clone(),
             image_pull_secrets,
             ..Default::default()
@@ -99,6 +110,8 @@ pub(crate) fn parse_step_spec(metadata: &JobMetadata) -> Result<StepSpec> {
             let spec: dsl::CommonContainerSpec =
                 serde_json::from_value(metadata.step_dsl.spec.clone())
                     .context("Failed to parse RunContainer spec as CommonContainerSpec")?;
+
+            dsl::ensure_privileged_permitted(spec.privileged, dsl::privileged_steps_allowed())?;
 
             let env = map_dsl_env_to_k8s(spec.env.unwrap_or_default());
 
@@ -129,6 +142,8 @@ pub(crate) fn parse_step_spec(metadata: &JobMetadata) -> Result<StepSpec> {
         "RunK8sJob" => {
             let spec: K8sJobSpec = serde_json::from_value(metadata.step_dsl.spec.clone())
                 .context("Failed to parse RunK8sJob spec as K8sJobSpec")?;
+
+            dsl::ensure_privileged_permitted(spec.privileged, dsl::privileged_steps_allowed())?;
 
             let env = map_dsl_env_to_k8s(spec.env.unwrap_or_default());
 

@@ -1,101 +1,66 @@
 use super::*;
-use std::collections::HashMap;
 use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use stormchaser_model::login_flow::{wait_for_code, LoginAttempt};
 
 async fn handle_oauth_callback(
     listener: tokio::net::TcpListener,
     tx: tokio::sync::mpsc::Sender<AppEvent>,
     url: String,
     callback_url: String,
+    attempt: LoginAttempt,
 ) {
-    let (mut stream, _) = match tokio::time::timeout(
-        Duration::from_secs(300), // 5 minute timeout for user to login
-        listener.accept(),
-    )
-    .await
-    {
-        Ok(Ok(s)) => s,
-        _ => {
-            let _ = tx
-                .send(AppEvent::LoginFailed(
-                    "Login timed out or failed to accept connection".to_string(),
-                ))
-                .await;
+    // Only the callback that carries this attempt's state is accepted; anything else
+    // that reaches the port is answered and ignored. Five minutes for the user to log in.
+    let code = match wait_for_code(&listener, &attempt, Duration::from_secs(300)).await {
+        Ok(code) => code,
+        Err(e) => {
+            let _ = tx.send(AppEvent::LoginFailed(e.to_string())).await;
             return;
         }
     };
+    drop(listener);
 
-    let mut buf = [0; 4096];
-    let mut request_str = String::new();
-    if let Ok(n) = stream.read(&mut buf).await {
-        request_str = String::from_utf8_lossy(&buf[0..n]).to_string();
-    }
-
-    let mut code = None;
-    if let Some(path) = request_str.split_whitespace().nth(1) {
-        if let Some(query) = path.split('?').nth(1) {
-            if let Ok(params) = serde_urlencoded::from_str::<HashMap<String, String>>(query) {
-                code = params.get("code").cloned();
-            }
-        }
-    }
-
-    // Respond to browser
-    let response = "HTTP/1.1 200 OK
-Content-Type: text/html
-
-<html><body><h1>Login Successful</h1><p>You can close this window now.</p><script>window.close();</script></body></html>";
-    let _ = stream.write_all(response.as_bytes()).await;
-
-    if let Some(code) = code {
-        let client = reqwest::Client::new();
-        match client
-            .post(format!("{}/api/v1/auth/exchange", url))
-            .json(&serde_json::json!({
-                "sso_token": code,
-                "callback_url": callback_url
-            }))
-            .send()
-            .await
-        {
-            Ok(res) => {
-                if res.status().is_success() {
-                    if let Ok(auth_res) = res.json::<crate::app::AuthExchangeResponse>().await {
-                        let _ = tx
-                            .send(AppEvent::LoginSuccessful(
-                                auth_res.access_token,
-                                auth_res.refresh_token,
-                            ))
-                            .await;
-                    } else {
-                        let _ = tx
-                            .send(AppEvent::LoginFailed(
-                                "Failed to parse token response".to_string(),
-                            ))
-                            .await;
-                    }
+    let client = crate::http::client();
+    match client
+        .post(format!("{}/api/v1/auth/exchange", url))
+        .json(&serde_json::json!({
+            "sso_token": code,
+            "callback_url": callback_url,
+            "code_verifier": attempt.code_verifier,
+        }))
+        .send()
+        .await
+    {
+        Ok(res) => {
+            if res.status().is_success() {
+                if let Ok(auth_res) = res.json::<crate::app::AuthExchangeResponse>().await {
+                    let _ = tx
+                        .send(AppEvent::LoginSuccessful(
+                            auth_res.access_token,
+                            auth_res.refresh_token,
+                        ))
+                        .await;
                 } else {
                     let _ = tx
-                        .send(AppEvent::LoginFailed(format!(
-                            "Token exchange failed: {}",
-                            res.status()
-                        )))
+                        .send(AppEvent::LoginFailed(
+                            "Failed to parse token response".to_string(),
+                        ))
                         .await;
                 }
-            }
-            Err(e) => {
+            } else {
                 let _ = tx
-                    .send(AppEvent::LoginFailed(format!("Request failed: {}", e)))
+                    .send(AppEvent::LoginFailed(format!(
+                        "Token exchange failed: {}",
+                        res.status()
+                    )))
                     .await;
             }
         }
-    } else {
-        let _ = tx
-            .send(AppEvent::LoginFailed(
-                "No authorization code received from provider".to_string(),
-            ))
-            .await;
+        Err(e) => {
+            let _ = tx
+                .send(AppEvent::LoginFailed(format!("Request failed: {}", e)))
+                .await;
+        }
     }
 }
 
@@ -108,11 +73,8 @@ impl<'a> App<'a> {
         let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port)).await?;
         let callback_url = format!("http://localhost:{}/callback", port);
 
-        let login_url = format!(
-            "{}/api/v1/auth/login?callback_url={}",
-            self.url,
-            urlencoding::encode(&callback_url)
-        );
+        let attempt = LoginAttempt::new();
+        let login_url = attempt.login_url(&self.url, &callback_url);
 
         if let Err(e) = open::that(&login_url) {
             self.error = Some(format!("Failed to open browser: {}", e));
@@ -123,7 +85,7 @@ impl<'a> App<'a> {
         let tx = self.status_tx.clone();
 
         tokio::spawn(async move {
-            handle_oauth_callback(listener, tx, url, callback_url).await;
+            handle_oauth_callback(listener, tx, url, callback_url, attempt).await;
         });
 
         Ok(())
@@ -137,11 +99,8 @@ impl<'a> App<'a> {
         let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port)).await?;
         let callback_url = format!("http://localhost:{}/callback", port);
 
-        let login_url = format!(
-            "{}/api/v1/auth/login?callback_url={}",
-            self.url,
-            urlencoding::encode(&callback_url)
-        );
+        let attempt = LoginAttempt::new();
+        let login_url = attempt.login_url(&self.url, &callback_url);
 
         let tx = self.status_tx.clone();
         let email_str = email.to_string();
@@ -149,7 +108,7 @@ impl<'a> App<'a> {
         let url = self.url.clone();
 
         tokio::spawn(async move {
-            handle_oauth_callback(listener, tx, url, callback_url).await;
+            handle_oauth_callback(listener, tx, url, callback_url, attempt).await;
         });
 
         let tx2 = self.status_tx.clone();
@@ -194,7 +153,7 @@ impl<'a> App<'a> {
 }
 
 async fn simulate_browser_login(login_url: &str, email: &str, password: &str) -> Result<()> {
-    let client_no_redirect = reqwest::Client::builder()
+    let client_no_redirect = crate::http::builder()
         .cookie_store(true)
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
@@ -216,7 +175,7 @@ async fn simulate_browser_login(login_url: &str, email: &str, password: &str) ->
         }
     }
 
-    let client = reqwest::Client::builder().cookie_store(true).build()?;
+    let client = crate::http::builder().cookie_store(true).build()?;
 
     let res1 = client.get(&dex_auth_url).send().await?;
     let url1 = res1.url().clone();
@@ -286,6 +245,7 @@ async fn simulate_browser_login(login_url: &str, email: &str, password: &str) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::AsyncWriteExt;
     use tokio::sync::mpsc;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -358,17 +318,21 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(10);
         let url = server.uri();
         let callback_url = format!("http://localhost:{}/callback", port);
+        let attempt = LoginAttempt::new();
+        let state = attempt.state.clone();
 
         // Spawn the callback handler
         tokio::spawn(async move {
-            handle_oauth_callback(listener, tx, url, callback_url).await;
+            handle_oauth_callback(listener, tx, url, callback_url, attempt).await;
         });
 
         // Simulate the browser hitting the callback endpoint
         let mut stream = tokio::net::TcpStream::connect(format!("127.0.0.1:{}", port))
             .await
             .unwrap();
-        let request = "GET /callback?code=mock_auth_code HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        let request = format!(
+            "GET /callback?code=mock_auth_code&state={state} HTTP/1.1\r\nHost: localhost\r\n\r\n"
+        );
         stream.write_all(request.as_bytes()).await.unwrap();
 
         // Wait for the event from the tx

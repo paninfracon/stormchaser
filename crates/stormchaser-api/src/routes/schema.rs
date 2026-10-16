@@ -1,4 +1,4 @@
-use crate::{AppState, AuthClaims};
+use crate::AppState;
 use axum::{response::IntoResponse, Json};
 use stormchaser_model::schema_gen::generate_dsl_schema;
 
@@ -33,8 +33,20 @@ pub async fn get_schema() -> impl IntoResponse {
 )]
 pub async fn parse_git(
     axum::extract::State(state): axum::extract::State<AppState>,
-    AuthClaims(_claims): AuthClaims,
+    caller: crate::authz::Caller,
     Json(payload): Json<crate::routes::ParseGitRequest>,
+) -> Result<String, axum::http::StatusCode> {
+    read_workflow_from_git(&state, &caller, &payload).await
+}
+
+/// Reads a workflow file from the repository of a Git connection, as `caller`.
+///
+/// The caller must be allowed to use the connection: this returns a file's contents, and
+/// whoever may read one path of a repository through it may read them all.
+pub async fn read_workflow_from_git(
+    state: &AppState,
+    caller: &crate::authz::Caller,
+    payload: &crate::routes::ParseGitRequest,
 ) -> Result<String, axum::http::StatusCode> {
     let mut tx = state
         .pool
@@ -53,11 +65,14 @@ pub async fn parse_git(
             .map_err(|_| axum::http::StatusCode::NOT_FOUND)?
             .ok_or(axum::http::StatusCode::NOT_FOUND)?
     };
+    drop(tx);
 
     if conn.connection_type != stormchaser_model::connections::ConnectionType::Git {
         tracing::error!("Connection {} is not a Git connection", payload.connection);
         return Err(axum::http::StatusCode::BAD_REQUEST);
     }
+
+    crate::authz::authorize_connection_use(state, caller, conn.id.into_inner()).await?;
 
     let repo_url = conn
         .config
@@ -86,24 +101,25 @@ pub async fn parse_git(
         return Err(axum::http::StatusCode::BAD_REQUEST);
     }
 
-    // Use GitCache to clone/fetch the file
-    let git_cache = stormchaser_engine::git_cache::GitCache::new("/tmp/stormchaser-api-git-cache");
-    let target_dir = git_cache
-        .ensure_files(
-            &repo_url,
-            &payload.git_ref,
-            std::slice::from_ref(&payload.workflow_path),
-        )
+    // Clone (if needed) and read the file from the git object database, off the async
+    // executor. Reading the blob rather than the working tree means a symlink committed to
+    // the repository cannot be used to read files from this host.
+    let git_ref = payload.git_ref.clone();
+    let workflow_path = payload.workflow_path.clone();
+    let dsl =
+        tokio::task::spawn_blocking(move || {
+            stormchaser_engine::git_cache::GitCache::new("/tmp/stormchaser-api-git-cache")
+                .read_file(&repo_url, &git_ref, &workflow_path)
+        })
+        .await
         .map_err(|e| {
-            tracing::error!("Failed to fetch git repo: {:?}", e);
+            tracing::error!("Git read task failed: {:?}", e);
             axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .map_err(|e| {
+            tracing::error!("Failed to read workflow file from git: {:?}", e);
+            axum::http::StatusCode::BAD_REQUEST
         })?;
-
-    let file_path = target_dir.join(&payload.workflow_path);
-    let dsl = tokio::fs::read_to_string(&file_path).await.map_err(|e| {
-        tracing::error!("Failed to read workflow file {:?}: {:?}", file_path, e);
-        axum::http::StatusCode::INTERNAL_SERVER_ERROR
-    })?;
 
     Ok(dsl)
 }

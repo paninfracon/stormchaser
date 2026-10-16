@@ -10,17 +10,31 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
-permissions:
-  contents: write
-  packages: write
+# Nothing by default; each job asks for what it uses
+permissions: {}
 
 jobs:
   build-linux-binaries:
     name: Build Linux Binaries
+    permissions:
+      contents: write # attach the binaries to the release
+      id-token: write # sign them with cosign, keyless
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      # Cargo.lock is not committed: refuse to release whatever the build is about to
+      # resolve if it has a known advisory or a banned crate
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-deny@0.19.4
+
+      - name: Check dependencies
+        run: cargo deny check
 
       - name: Install dependencies
         run: |
@@ -28,7 +42,7 @@ jobs:
           sudo apt-get install -y pkg-config libssl-dev libgit2-dev zlib1g-dev musl-tools
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           targets: x86_64-unknown-linux-musl,wasm32-unknown-unknown
 
@@ -57,14 +71,31 @@ jobs:
             fi
           done
 
+      - name: Install cosign
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      # Keyless: the signature binds each archive to this workflow run through GitHub's
+      # OIDC identity. Verify with `cosign verify-blob --bundle <file>.sigstore.json
+      # --certificate-identity-regexp '^https://github.com/<owner>/<repo>/'
+      # --certificate-oidc-issuer https://token.actions.githubusercontent.com <file>`.
+      - name: Sign Linux Binaries
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          for ARCHIVE in dist/*.tar.gz; do
+            cosign sign-blob --yes --bundle "$ARCHIVE.sigstore.json" "$ARCHIVE"
+          done
+
       - name: Upload to GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
-          files: dist/*.tar.gz
+          files: |
+            dist/*.tar.gz
+            dist/*.sigstore.json
 
       - name: Upload Binaries as Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: linux-binaries
           path: |
@@ -75,6 +106,10 @@ jobs:
 
   build-docker-images:
     name: Build Docker Images
+    permissions:
+      contents: read
+      packages: write # push the images
+      id-token: write # sign them with cosign, keyless
     needs: build-linux-binaries
     runs-on: ubuntu-latest
     strategy:
@@ -89,10 +124,12 @@ jobs:
           - image: stormchaser-web
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Download Binaries Artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: linux-binaries
           path: target/
@@ -101,7 +138,7 @@ jobs:
         run: chmod +x target/release/stormchaser-*
 
       - name: Log in to the Container registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -109,12 +146,13 @@ jobs:
 
       - name: Extract metadata for Docker
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.image }}
 
       - name: Build and Push Docker image
-        uses: docker/build-push-action@v5
+        id: build
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
         with:
           context: .
           file: Dockerfile.prebuilt
@@ -124,8 +162,24 @@ jobs:
           build-args: |
             BINARY=${{ matrix.image }}
 
+      - name: Install cosign
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      # Signs the pushed image by digest, keyless; verify with `cosign verify` and the
+      # same identity and issuer as the binaries
+      - name: Sign Docker image
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        # Registry references are lowercase; the repository name may not be
+        run: cosign sign --yes "${IMAGE,,}@${DIGEST}"
+
   build-mac-windows-cli:
     name: Build CLI for macOS/Windows
+    permissions:
+      contents: write # attach the binaries to the release
     needs: build-linux-binaries
     if: startsWith(github.ref, 'refs/tags/')
     strategy:
@@ -140,17 +194,19 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           targets: ${{ matrix.target }}
 
 
 
       - name: Build and Upload CLI
-        uses: taiki-e/upload-rust-binary-action@v1
+        uses: taiki-e/upload-rust-binary-action@f0d45ae91ee7b8ee928de7a9d04d893a08bcbec6 # v1.30.2
         with:
           bin: stormchaser
           target: ${{ matrix.target }}
@@ -161,15 +217,19 @@ jobs:
 
   publish-crates:
     name: Publish to Crates.io
+    permissions:
+      contents: read
     needs: build-linux-binaries
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
 
       - name: Publish Crates
         env:

@@ -1,4 +1,4 @@
-use crate::utils::{handle_run_response, parse_key_val_list, require_token};
+use crate::utils::{handle_run_response, parse_inputs, require_token};
 use anyhow::Result;
 use reqwest::header::AUTHORIZATION;
 use serde_json::json;
@@ -15,7 +15,7 @@ pub async fn handle(
     watch: bool,
 ) -> Result<()> {
     let dsl = fs::read_to_string(file)?;
-    let inputs = parse_key_val_list(input);
+    let inputs = parse_inputs(input)?;
     let token = require_token(token)?;
 
     let res = http_client

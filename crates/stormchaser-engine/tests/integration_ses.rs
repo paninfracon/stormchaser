@@ -27,7 +27,7 @@ async fn setup() -> (PgPool, async_nats::Client, Arc<TlsReloader>) {
         .await
         .expect("Failed to connect to DB");
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = async_nats::connect(&nats_url).await.unwrap();
+    let nats_client = stormchaser_model::nats::connect(&nats_url).await.unwrap();
     let tls_config = TlsConfig::default();
     let tls_reloader = Arc::new(TlsReloader::new(tls_config).await.unwrap());
     (pool, nats_client, tls_reloader)

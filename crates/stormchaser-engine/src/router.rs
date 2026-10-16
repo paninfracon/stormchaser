@@ -263,14 +263,36 @@ pub async fn handle_message(
     tls_reloader: Arc<TlsReloader>,
     log_backend: Arc<Option<LogBackend>>,
 ) {
-    let parts: Vec<&str> = subject.split('.').collect();
-    let normalized_subject =
-        if parts.len() > 3 && (parts[2] == "global" || parts[2].parse::<u32>().is_ok()) {
-            format!("{}.{}.{}", parts[0], parts[1], parts[3..].join("."))
-        } else {
-            subject.to_string()
-        };
+    let normalized_subject = stormchaser_model::runner_auth::normalize_subject(subject);
     let subject = normalized_subject.as_str();
+
+    // What a runner reports must be signed with the key the engine issued it, for the
+    // subject it arrived on. Its signature is timed against when the stream received
+    // it, not now: the stream keeps reports while the engine is down.
+    if let Some(sender) = crate::runner_auth::sender_of(subject) {
+        let published_at = message
+            .info()
+            .map(|info| info.published.unix_timestamp())
+            .unwrap_or_else(|_| chrono::Utc::now().timestamp());
+        match crate::runner_auth::refusal(&pool, sender, subject, &payload, published_at).await {
+            Ok(None) => {}
+            Ok(Some(reason)) => {
+                tracing::warn!("Ignoring {}: {}", subject, reason);
+                let _ = message.double_ack().await;
+                return;
+            }
+            // Not known to be bad: the stream delivers it again
+            Err(e) => {
+                tracing::warn!("Could not check {}, retrying later: {:#}", subject, e);
+                let _ = message
+                    .ack_with(async_nats::jetstream::AckKind::Nak(Some(
+                        std::time::Duration::from_secs(5),
+                    )))
+                    .await;
+                return;
+            }
+        }
+    }
 
     if subject.starts_with("stormchaser.v1.run.") {
         handle_run_events(

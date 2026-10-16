@@ -2,11 +2,18 @@ use serde_json::Value;
 use sqlx::PgPool;
 use std::collections::HashMap;
 
+/// Longest a `sql` query may run.
+const SQL_QUERY_TIMEOUT_MS: u64 = 30_000;
+
+/// Most rows a `sql` query may return.
+const MAX_SQL_QUERY_ROWS: usize = 10_000;
+
 pub async fn execute_query(
     query_type: &str,
     params: &HashMap<String, String>,
     pool: Option<&PgPool>,
     db_url_override: Option<String>,
+    acting_user: Option<&str>,
 ) -> Result<Vec<Value>, anyhow::Error> {
     let mut db_url = db_url_override;
 
@@ -19,6 +26,9 @@ pub async fn execute_query(
                 >(p, conn_name)
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("Connection '{}' not found", conn_name))?;
+                if let Some(user) = acting_user {
+                    crate::authz::ensure_user_may_use(p, user, &conn).await?;
+                }
 
                 if let Some(url) = conn.config.get("url").and_then(|u| u.as_str()) {
                     db_url = Some(url.to_string());
@@ -28,7 +38,7 @@ pub async fn execute_query(
     }
 
     if query_type == "sql" {
-        execute_sql_query(params, db_url, pool).await
+        execute_sql_query(params, db_url).await
     } else if query_type == "api" {
         execute_api_query(params).await
     } else if query_type == "mock" {
@@ -53,48 +63,59 @@ pub async fn execute_query(
 async fn execute_sql_query(
     params: &HashMap<String, String>,
     db_url: Option<String>,
-    pool: Option<&PgPool>,
 ) -> Result<Vec<Value>, anyhow::Error> {
     let sql_query = params
         .get("query")
         .ok_or_else(|| anyhow::anyhow!("Missing 'query' param"))?;
 
-    use sqlx::Row;
+    // The query text is the workflow author's own source, executed as written, so it only
+    // ever runs against a database named by a connection — never Stormchaser's own.
+    let url = db_url.ok_or_else(|| {
+        anyhow::anyhow!("SQL queries require a 'connection' param naming a connection with a 'url'")
+    })?;
+
+    use futures::TryStreamExt;
+    use sqlx::{AssertSqlSafe, Connection, Row};
     let mut results = Vec::new();
 
-    if let Some(url) = db_url {
-        let tmp_pool = sqlx::PgPool::connect(&url).await?;
-        let rows = sqlx::query(sql_query).fetch_all(&tmp_pool).await?;
-        for row in rows {
-            if row.is_empty() {
-                continue;
+    // A query fills in a form; it has no business changing data. It runs as one statement in
+    // a read-only transaction that is always rolled back, with a time limit and a row cap.
+    let mut conn = sqlx::PgConnection::connect(&url).await?;
+    let mut tx = conn.begin().await?;
+    sqlx::query("SET TRANSACTION READ ONLY")
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(AssertSqlSafe(format!(
+        "SET LOCAL statement_timeout = {}",
+        SQL_QUERY_TIMEOUT_MS
+    )))
+    .execute(&mut *tx)
+    .await?;
+
+    let mut rows = Vec::new();
+    {
+        let mut stream = sqlx::query(AssertSqlSafe(sql_query.as_str())).fetch(&mut *tx);
+        while let Some(row) = stream.try_next().await? {
+            if rows.len() >= MAX_SQL_QUERY_ROWS {
+                anyhow::bail!("SQL query returned more than {} rows", MAX_SQL_QUERY_ROWS);
             }
-            if let Ok(val) = row.try_get::<String, _>(0) {
-                results.push(Value::String(val));
-            } else if let Ok(val) = row.try_get::<i64, _>(0) {
-                results.push(serde_json::json!(val));
-            } else if let Ok(val) = row.try_get::<bool, _>(0) {
-                results.push(Value::Bool(val));
-            }
+            rows.push(row);
         }
-    } else if let Some(p) = pool {
-        let rows = sqlx::query(sql_query).fetch_all(p).await?;
-        for row in rows {
-            if row.is_empty() {
-                continue;
-            }
-            if let Ok(val) = row.try_get::<String, _>(0) {
-                results.push(Value::String(val));
-            } else if let Ok(val) = row.try_get::<i64, _>(0) {
-                results.push(serde_json::json!(val));
-            } else if let Ok(val) = row.try_get::<bool, _>(0) {
-                results.push(Value::Bool(val));
-            }
+    }
+    tx.rollback().await?;
+    conn.close().await.ok();
+
+    for row in rows {
+        if row.is_empty() {
+            continue;
         }
-    } else {
-        return Err(anyhow::anyhow!(
-            "No connection and no system pool available"
-        ));
+        if let Ok(val) = row.try_get::<String, _>(0) {
+            results.push(Value::String(val));
+        } else if let Ok(val) = row.try_get::<i64, _>(0) {
+            results.push(serde_json::json!(val));
+        } else if let Ok(val) = row.try_get::<bool, _>(0) {
+            results.push(Value::Bool(val));
+        }
     }
     Ok(results)
 }
@@ -114,13 +135,13 @@ async fn execute_api_query(params: &HashMap<String, String>) -> Result<Vec<Value
         .map(|s| s.to_uppercase())
         .unwrap_or_else(|| "GET".to_string());
 
-    let client = reqwest::Client::new();
+    let (client, url) = stormchaser_model::net_guard::guarded_client(&url).await?;
     let mut req = match method_str.as_str() {
-        "POST" => client.post(&url),
-        "PUT" => client.put(&url),
-        "PATCH" => client.patch(&url),
-        "DELETE" => client.delete(&url),
-        _ => client.get(&url),
+        "POST" => client.post(url),
+        "PUT" => client.put(url),
+        "PATCH" => client.patch(url),
+        "DELETE" => client.delete(url),
+        _ => client.get(url),
     };
 
     if let Some(body) = params.get("body") {
@@ -134,15 +155,16 @@ async fn execute_api_query(params: &HashMap<String, String>) -> Result<Vec<Value
         }
     }
 
-    let response = req
-        .send()
-        .await?
-        .error_for_status()?
-        .json::<Value>()
-        .await?;
+    let res = req.send().await?.error_for_status()?;
+    let body = stormchaser_model::net_guard::read_body_capped(
+        res,
+        stormchaser_model::net_guard::MAX_RESPONSE_BYTES,
+    )
+    .await?;
+    let response: Value = serde_json::from_slice(&body)?;
 
     if let Some(jq_filter_str) = params.get("jq_filter") {
-        apply_jq_filter(jq_filter_str, response)
+        apply_jq_filter(jq_filter_str, response).await
     } else {
         if let Value::Array(arr) = response {
             Ok(arr)
@@ -170,6 +192,7 @@ async fn execute_aws_cloudcontrol_query(
         let config = config_loader.load().await;
 
         let client = if let Some(role_arn) = params.get("assume_role_arn") {
+            crate::aws_guard::ensure_role_allowed(role_arn)?;
             let sts_client = aws_sdk_sts::Client::new(&config);
             let session_name = params
                 .get("role_session_name")
@@ -241,7 +264,7 @@ async fn execute_aws_cloudcontrol_query(
         }
 
         if let Some(jq_filter_str) = params.get("jq_filter") {
-            apply_jq_filter(jq_filter_str, Value::Array(all_resources))
+            apply_jq_filter(jq_filter_str, Value::Array(all_resources)).await
         } else {
             Ok(all_resources)
         }
@@ -252,39 +275,45 @@ async fn execute_aws_cloudcontrol_query(
     }
 }
 
-fn apply_jq_filter(jq_filter_str: &str, input_val: Value) -> Result<Vec<Value>, anyhow::Error> {
-    use jaq_core::load::{Arena, File, Loader};
-    use jaq_core::{Ctx, RcIter};
-    use jaq_json::Val;
+/// Converts a JSON value into a jq value.
+pub(crate) fn json_to_jq_val(value: Value) -> Result<jaq_json::Val, anyhow::Error> {
+    serde_json::from_value(value)
+        .map_err(|e| anyhow::anyhow!("Failed to convert JQ input from JSON: {}", e))
+}
 
-    let loader = Loader::new(jaq_std::defs().chain(jaq_json::defs()));
-    let arena = Arena::default();
-    let program = File {
-        code: jq_filter_str,
-        path: (),
-    };
-
-    let modules = loader
-        .load(&arena, program)
-        .map_err(|e| anyhow::anyhow!("Failed to parse jq filter: {:?}", e))?;
-
-    let filter = jaq_core::Compiler::default()
-        .with_funs(jaq_std::funs().chain(jaq_json::funs()))
-        .compile(modules)
-        .map_err(|e| anyhow::anyhow!("Failed to compile jq filter: {:?}", e))?;
-
-    let input = Val::from(input_val);
-    let inputs = RcIter::new(core::iter::empty());
-    let out = filter.run((Ctx::new([], &inputs), input));
-
-    let mut results = Vec::new();
-    for res in out {
-        match res {
-            Ok(v) => results.push(Value::from(v)),
-            Err(e) => return Err(anyhow::anyhow!("JQ execution error: {:?}", e)),
-        }
+/// Converts a single jq output (or exception) back into a JSON value.
+///
+/// A `halt` raised by the program is reported as an error rather than being
+/// allowed to terminate the process.
+pub(crate) fn jq_output_to_json(
+    output: jaq_core::ValX<jaq_json::Val>,
+) -> Result<Value, anyhow::Error> {
+    match output {
+        Ok(v) => serde_json::from_str(&v.to_string())
+            .map_err(|e| anyhow::anyhow!("JQ output is not valid JSON: {}", e)),
+        Err(exn) => match exn.get_err() {
+            Ok(e) => Err(anyhow::anyhow!("JQ execution error: {:?}", e)),
+            Err(_) => Err(anyhow::anyhow!("JQ execution error: program halted")),
+        },
     }
-    Ok(results)
+}
+
+/// Native jq functions available to workflow-supplied programs.
+///
+/// `env` is left out: it would return the engine's whole process environment.
+pub(crate) fn jq_funs(
+) -> impl Iterator<Item = jaq_core::native::Fun<jaq_core::data::JustLut<jaq_json::Val>>> {
+    jaq_core::funs()
+        .chain(jaq_std::funs())
+        .chain(jaq_json::funs())
+        .filter(|(name, _, _)| *name != "env")
+}
+
+async fn apply_jq_filter(
+    jq_filter_str: &str,
+    input_val: Value,
+) -> Result<Vec<Value>, anyhow::Error> {
+    crate::jq_sandbox::evaluate(jq_filter_str, input_val).await
 }
 
 #[cfg(test)]
@@ -293,17 +322,25 @@ mod tests {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    /// The mock servers listen on loopback, which the SSRF guard blocks by default.
+    fn allow_loopback() {
+        std::env::set_var(stormchaser_model::net_guard::ALLOWED_HOSTS_ENV, "127.0.0.1");
+    }
+
     #[tokio::test]
     async fn test_execute_query_mock() {
         let mut params = HashMap::new();
         params.insert("items".to_string(), "a,b,c".to_string());
-        let res = execute_query("mock", &params, None, None).await.unwrap();
+        let res = execute_query("mock", &params, None, None, None)
+            .await
+            .unwrap();
         assert_eq!(res.len(), 3);
         assert_eq!(res[0], serde_json::json!("a"));
     }
 
     #[tokio::test]
     async fn test_execute_query_api() {
+        allow_loopback();
         let mock_server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/api/options"))
@@ -317,13 +354,16 @@ mod tests {
             format!("{}/api/options", mock_server.uri()),
         );
 
-        let res = execute_query("api", &params, None, None).await.unwrap();
+        let res = execute_query("api", &params, None, None, None)
+            .await
+            .unwrap();
         assert_eq!(res.len(), 2);
         assert_eq!(res[0], serde_json::json!("x"));
     }
 
     #[tokio::test]
     async fn test_execute_query_api_with_jq_filter() {
+        allow_loopback();
         let mock_server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/api/complex"))
@@ -348,7 +388,9 @@ mod tests {
             ".ResourceDescriptions[].Identifier".to_string(),
         );
 
-        let res = execute_query("api", &params, None, None).await.unwrap();
+        let res = execute_query("api", &params, None, None, None)
+            .await
+            .unwrap();
         assert_eq!(res.len(), 2);
         assert_eq!(res[0], serde_json::json!("Resource1"));
         assert_eq!(res[1], serde_json::json!("Resource2"));
@@ -357,6 +399,7 @@ mod tests {
     #[tokio::test]
     async fn test_execute_query_api_post() {
         use wiremock::matchers::{body_json, header};
+        allow_loopback();
         let mock_server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/api/complex"))
@@ -380,7 +423,9 @@ mod tests {
             "my-secret-token".to_string(),
         );
 
-        let res = execute_query("api", &params, None, None).await.unwrap();
+        let res = execute_query("api", &params, None, None, None)
+            .await
+            .unwrap();
         assert_eq!(res.len(), 2);
         assert_eq!(res[0], serde_json::json!("result1"));
         assert_eq!(res[1], serde_json::json!("result2"));
@@ -388,8 +433,50 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_query_unsupported() {
-        let res = execute_query("unknown", &HashMap::new(), None, None).await;
+        let res = execute_query("unknown", &HashMap::new(), None, None, None).await;
         let err = res.unwrap_err();
         assert!(err.to_string().contains("Unsupported query protocol"));
+    }
+
+    #[tokio::test]
+    async fn test_execute_query_sql_requires_connection() {
+        let mut params = HashMap::new();
+        params.insert("query".to_string(), "SELECT 1".to_string());
+
+        let err = execute_query("sql", &params, None, None, None)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("require a 'connection'"));
+    }
+
+    #[tokio::test]
+    async fn test_jq_filter_cannot_read_process_env() {
+        let err = apply_jq_filter("env", serde_json::json!(null))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Failed to compile jq program"));
+
+        // The rest of the standard library is still available.
+        let res = apply_jq_filter(
+            "[.[] | ascii_upcase] | length",
+            serde_json::json!(["a", "b"]),
+        )
+        .await
+        .unwrap();
+        assert_eq!(res, vec![serde_json::json!(2)]);
+    }
+
+    #[tokio::test]
+    async fn test_execute_query_api_refuses_internal_addresses() {
+        let mut params = HashMap::new();
+        params.insert(
+            "url".to_string(),
+            "http://169.254.169.254/latest/meta-data/".to_string(),
+        );
+
+        let err = execute_query("api", &params, None, None, None)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("restricted address"));
     }
 }

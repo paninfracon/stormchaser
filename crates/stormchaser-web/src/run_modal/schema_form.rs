@@ -6,7 +6,7 @@ use leptos::task::spawn_local;
 pub fn SchemaForm(
     base_schema: Option<serde_json::Value>,
     initial_inputs: serde_json::Value,
-    queries: Option<serde_json::Value>,
+    source: crate::models::HydrationSource,
     inputs_view: Option<stormchaser_model::dsl::InputView>,
     on_submit: Callback<serde_json::Value>,
     on_back: Callback<()>,
@@ -22,17 +22,17 @@ pub fn SchemaForm(
 
     // Auto-hydrate on mount
     let schema_clone = base_schema.clone();
-    let queries_clone = queries.clone();
+    let source_clone = source.clone();
 
     Effect::new(move |_| {
         let current_inputs = inputs.get();
         let schema_val = schema_clone.clone();
-        let q_val = queries_clone.clone();
+        let source = source_clone.clone();
 
         spawn_local(async move {
             set_hydration_status.set("Hydrating...".to_string());
             if let Some(schema) = schema_val {
-                match hydrate_schema_complete(schema, current_inputs, q_val).await {
+                match hydrate_schema_complete(schema, current_inputs, source).await {
                     Ok((new_schema, status, errors)) => {
                         set_hydrated_schema.set(new_schema);
                         set_hydration_status.set(status);

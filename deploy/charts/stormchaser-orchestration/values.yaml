@@ -4,14 +4,51 @@ global:
   image:
     repository: stormchaser
     pullPolicy: IfNotPresent
-    tag: "latest"
+    # Empty means the release this chart belongs to (v<appVersion>)
+    tag: ""
   database:
-    url: "postgres://stormchaser:stormchaser@postgres:5432/stormchaser"
+    # postgres://<user>:<password>@<host>:5432/<database>. Better, name a Secret holding
+    # it in existingSecret. A URL given here is kept in a Secret the chart creates.
+    url: ""
     existingSecret: ""
     existingSecretKey: "DATABASE_URL"
     ssl: true
   nats:
     url: "nats://nats:4222"
+    # Name of a Secret with `user` and `password` keys for NATS authentication.
+    # Leave empty only if the NATS server accepts unauthenticated clients.
+    # The engine uses this one.
+    authSecret: ""
+    # Secrets of the same shape for the API and the query service, which should have
+    # NATS users of their own with far narrower permissions than the engine's (see
+    # docs/nats.md). Left empty, each falls back to authSecret.
+    apiAuthSecret: ""
+    queryAuthSecret: ""
+  # The key the API signs its own session tokens with (STORMCHASER_JWT_SECRET). Without
+  # it no one can log in. Name a Secret holding at least 32 random characters; the
+  # umbrella chart creates `stormchaser-jwt`.
+  jwt:
+    existingSecret: ""
+    existingSecretKey: "jwt-secret"
+  # Approval emails can carry links that approve or reject a step without logging in.
+  # They are sealed with a key of their own, given to both the engine and the API.
+  # Leave existingSecret empty to send no links.
+  approvalLinks:
+    # Name of a Secret holding the key (at least 32 characters).
+    existingSecret: ""
+    existingSecretKey: "approval-link-key"
+  # Internal hosts that workflow-driven HTTP requests (RestApi, WebhookInvoke, api
+  # queries, Slack/Teams, WASM downloads) may reach. Requests to private, loopback,
+  # link-local and metadata addresses are refused unless the host is listed here.
+  # Entries are hostnames, IP literals, or "*.suffix".
+  ssrfAllowedHosts: []
+  aws:
+    # Role ARNs the engine and query service may assume when a workflow, query or
+    # S3 connection names one. A trailing "*" matches a prefix. Empty refuses all.
+    allowedRoleArns: []
+    # Lambda function names or ARNs the engine may invoke with its own credentials
+    # (a LambdaInvoke step with no assume_role_arn). A trailing "*" matches a prefix.
+    allowedLambdaFunctions: []
   loki:
     url: "http://loki:3100"
   grafana:
@@ -22,7 +59,16 @@ global:
     issuer: "http://dex:5556/dex"
     externalIssuer: ""
     clientId: "stormchaser-cli"
-    clientSecret: "stormchaser-cli-secret"
+    # Scopes to ask for at login besides openid, profile, email and offline_access.
+    # Policy's admin_groups, author_groups and group approvers need the user's groups
+    # in the ID token; Dex sends them only for the `groups` scope. Leave empty for a
+    # provider that refuses scopes it does not know.
+    extraScopes: []
+    # The client secret the API uses to exchange login codes. There is no default:
+    # name a Secret (preferred) or set clientSecret, or browser login is unavailable.
+    existingSecret: ""
+    existingSecretKey: "client-secret"
+    clientSecret: ""
   otel:
     endpoint: "http://alloy:4317"
   tls:
@@ -31,16 +77,67 @@ global:
     certPath: "/etc/stormchaser/certs/tls.crt"
     keyPath: "/etc/stormchaser/certs/tls.key"
     existingSecret: "stormchaser-tls-certs"
+    # The API, the query service and the web tier serve HTTPS themselves with the
+    # certificate above, and the web tier calls the other two over HTTPS, trusting the
+    # CA above. The certificate must name the three Services
+    # (<release>-stormchaser-orchestration-api, -query and -web, or whatever the
+    # chart's fullname gives); the umbrella chart generates one that does.
+    # An ingress in front must talk HTTPS to its backend: the chart sets
+    # nginx.ingress.kubernetes.io/backend-protocol: HTTPS on its own Ingresses; other
+    # controllers need their equivalent.
+    # Set to false only where a mesh or the network itself protects pod traffic.
+    listen: true
+
+# The API, query service, web tier and engine run as an unprivileged user with no
+# capabilities. fsGroup makes the engine's git cache volume writable by that user,
+# including one an earlier release filled as root.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
 
 api:
   image:
     repository: stormchaser-api
     pullPolicy: IfNotPresent
-    tag: "latest"
+    # Empty means the release this chart belongs to (v<appVersion>)
+    tag: ""
   replicaCount: 1
   rustLog: "stormchaser_api=info"
+  # Cron workflows: `kubernetes` creates a CronJob per schedule in the release's
+  # namespace, which calls the API's trigger URL; `none` only stores the schedule and
+  # shows its token once, for a scheduler of your own.
+  cron:
+    engine: kubernetes
+  # The API's ServiceAccount. With the kubernetes cron engine it is given a Role that
+  # allows creating and deleting CronJobs and creating Secrets, in this namespace only.
+  serviceAccount:
+    create: true
+    name: ""
+  # Serve Swagger UI and the OpenAPI document, without authentication, at
+  # /swagger-ui and /api-docs/openapi.json. The page loads Swagger UI from cdnjs
+  # (pinned, integrity-checked), so the browser needs to reach it.
+  docs: false
+  # Each client gets a bucket of rateLimitBurstSize requests that refills at
+  # rateLimitPerSecond.
   rateLimitPerSecond: 5
   rateLimitBurstSize: 10
+  # Addresses or CIDR ranges of the ingress or load balancer in front of the API.
+  # Only requests arriving from these have X-Forwarded-For believed; without them
+  # every client behind the proxy shares one rate-limit bucket.
+  trustedProxies: []
+  # Comma-separated Host header values the MCP server accepts in addition to
+  # loopback names and the API_BASE_URL host, e.g. "stormchaser.example.com".
+  mcpAllowedHosts: ""
   service:
     type: ClusterIP
     port: 3000
@@ -62,21 +159,32 @@ api:
         repository: openpolicyagent/opa
         tag: 0.62.1
       resources: {}
-      policy: |
-        package stormchaser
-
-        default allow := false
-
-        # Allow all requests for local development
-        allow := true if {
-            true
-        }
+      # Settings read by the shipped policy (files/opa/policy.rego, a link to
+      # deploy/opa/policy.rego so that there is one copy).
+      settings:
+        # Emails or subject ids that may act on any object.
+        admins: []
+        # Values of the token's `groups` claim that make a user an admin.
+        adminGroups: []
+        # When true, whoever started a run may not approve its steps.
+        separationOfDuties: false
+        # Values of the token's `groups` claim whose members may write workflows.
+        # Empty means everyone may. When set, everyone else can only run workflows
+        # from repositories that an author or admin has registered as a connection:
+        # they may not start direct runs, hydrate a form from pasted workflow text,
+        # or create or change connections.
+        authorGroups: []
+      # Replaces the shipped policy when set. It must define `stormchaser.allow` and
+      # answer the request, resource, engine and approval questions described in
+      # docs/opa-rbac.md.
+      policy: ""
 
 query:
   image:
     repository: stormchaser-query
     pullPolicy: IfNotPresent
-    tag: "latest"
+    # Empty means the release this chart belongs to (v<appVersion>)
+    tag: ""
   replicaCount: 1
   rustLog: "stormchaser_query=info"
   service:
@@ -92,7 +200,8 @@ web:
   image:
     repository: stormchaser-web
     pullPolicy: IfNotPresent
-    tag: "latest"
+    # Empty means the release this chart belongs to (v<appVersion>)
+    tag: ""
   replicaCount: 1
   rustLog: "stormchaser_web=info"
   externalApiUrl: "http://localhost:3000"
@@ -116,7 +225,8 @@ engine:
   image:
     repository: stormchaser-engine
     pullPolicy: IfNotPresent
-    tag: "latest"
+    # Empty means the release this chart belongs to (v<appVersion>)
+    tag: ""
   replicaCount: 1
   rustLog: "stormchaser_engine=info"
   gitCacheDir: "/tmp/stormchaser/git-cache"

@@ -1,9 +1,13 @@
+import base64
+import hashlib
+import secrets
 import urllib.request
 import urllib.parse
 import urllib.error
 import json
 import sys
 import os
+import ssl
 
 class ConditionalRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -11,7 +15,12 @@ class ConditionalRedirectHandler(urllib.request.HTTPRedirectHandler):
             return None
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
-opener = urllib.request.build_opener(ConditionalRedirectHandler())
+# An API serving HTTPS from a private CA (as the Helm chart's does) is verified against
+# STORMCHASER_CA_CERT, as the CLI does.
+ssl_context = ssl.create_default_context(cafile=os.environ.get("STORMCHASER_CA_CERT") or None)
+opener = urllib.request.build_opener(
+    ConditionalRedirectHandler(), urllib.request.HTTPSHandler(context=ssl_context)
+)
 urllib.request.install_opener(opener)
 
 def get_token():
@@ -19,6 +28,22 @@ def get_token():
     host_api = os.environ.get("HOST_API", "127.0.0.1")
     port_dex = os.environ.get("PORT_DEX", "5556")
     port_api = os.environ.get("PORT_API", "3000")
+    # API_URL (for example https://localhost:13000) wins over HOST_API and PORT_API
+    api_url = os.environ.get("API_URL") or f"http://{host_api}:{port_api}"
+
+    def exchange(final_url):
+        query = urllib.parse.urlparse(final_url).query
+        code = urllib.parse.parse_qs(query).get('code', [''])[0]
+
+        api_data = json.dumps({
+            'sso_token': code,
+            'callback_url': 'http://localhost:8080/callback',
+            'code_verifier': code_verifier
+        }).encode('utf-8')
+        api_req = urllib.request.Request(f"{api_url}/api/v1/auth/exchange", data=api_data, method='POST')
+        api_req.add_header('Content-Type', 'application/json')
+        api_resp = urllib.request.urlopen(api_req)
+        print(json.loads(api_resp.read())['access_token'])
 
     def get_password(username):
         try:
@@ -30,7 +55,13 @@ def get_token():
             pass
         return "password"
 
-    auth_url = f"http://{host_dex}:{port_dex}/dex/auth?client_id=stormchaser-cli&redirect_uri=http://localhost:8080/callback&response_type=code&scope=openid+profile+email"
+    # The API redeems a code only with the PKCE verifier its login was started with
+    code_verifier = secrets.token_urlsafe(48)
+    code_challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(code_verifier.encode('ascii')).digest()
+    ).decode('ascii').rstrip('=')
+
+    auth_url = f"http://{host_dex}:{port_dex}/dex/auth?client_id=stormchaser-cli&redirect_uri=http://localhost:8080/callback&response_type=code&scope=openid+profile+email&code_challenge={code_challenge}&code_challenge_method=S256"
     req1 = urllib.request.Request(auth_url)
     try:
         resp1 = urllib.request.urlopen(req1)
@@ -66,35 +97,11 @@ def get_token():
             else:
                 final_url = resp2.geturl()
 
-            query = urllib.parse.urlparse(final_url).query
-            code = urllib.parse.parse_qs(query).get('code', [''])[0]
-
-            api_data = json.dumps({
-                'sso_token': code,
-                'callback_url': 'http://localhost:8080/callback'
-            }).encode('utf-8')
-            api_req = urllib.request.Request(f"http://{host_api}:{port_api}/api/v1/auth/exchange", data=api_data, method='POST')
-            api_req.add_header('Content-Type', 'application/json')
-            api_resp = urllib.request.urlopen(api_req)
-            access_token = json.loads(api_resp.read())['access_token']
-
-            print(access_token)
+            exchange(final_url)
 
         except urllib.error.HTTPError as e:
             if e.code in [302, 303] and "localhost:8080/callback" in e.headers.get('Location', ''):
-                final_url = e.headers['Location']
-                query = urllib.parse.urlparse(final_url).query
-                code = urllib.parse.parse_qs(query).get('code', [''])[0]
-
-                api_data = json.dumps({
-                    'sso_token': code,
-                    'callback_url': 'http://localhost:8080/callback'
-                }).encode('utf-8')
-                api_req = urllib.request.Request(f"http://{host_api}:{port_api}/api/v1/auth/exchange", data=api_data, method='POST')
-                api_req.add_header('Content-Type', 'application/json')
-                api_resp = urllib.request.urlopen(api_req)
-                access_token = json.loads(api_resp.read())['access_token']
-                print(access_token)
+                exchange(e.headers['Location'])
             else:
                 print("HTTP Error:", e.code, e.headers.get('Location', ''), file=sys.stderr)
                 sys.exit(1)

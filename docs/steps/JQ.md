@@ -13,6 +13,8 @@ The `spec` block for `JQ` supports the following fields:
 
 *Note: You must provide either `input` or `input_file`.*
 
+Programs are evaluated with [jaq](https://github.com/01mf02/jaq) 3. A program that raises an error or calls `halt`/`halt_error` fails the step.
+
 ## Example (Inline Variables)
 
 ```hcl
@@ -43,3 +45,11 @@ step "transform_file" "JQ" {
   }
 }
 ```
+
+## Limits
+
+A program runs in a separate process with no access to the engine's environment
+(the `env` function and `$ENV` are not available). It is stopped after 10
+seconds (`STORMCHASER_JQ_TIMEOUT_SECS`) or if it uses more than 512 MiB
+(`STORMCHASER_JQ_MAX_MEMORY_MB`), and it may return at most 10 MiB. A program
+that is stopped fails the step.

@@ -40,6 +40,7 @@ pub async fn try_dispatch(
                     run_id,
                     step_id,
                     fencing_token,
+                    completion_token: crate::db::step_completion_token(&pool, step_id).await,
                     event_type: EventType::Step(StepEventType::Failed),
                     error: format!("SqlExecute failed: {:?}", e),
                     runner_id: Some("intrinsic-sql".to_string()),
@@ -101,6 +102,7 @@ async fn handle_sql_execute(
     >(&pool, &spec.connection)
     .await?
     .context(format!("Connection {} not found", spec.connection))?;
+    crate::authz::ensure_run_may_use(&pool, run_id, &conn).await?;
 
     let url = conn
         .config
@@ -117,16 +119,18 @@ async fn handle_sql_execute(
         "run": { "id": run_id.to_string() }
     });
 
-    let query = {
-        use minijinja::Environment;
-        let env = Environment::new();
-        env.render_str(&spec.query, &template_ctx)
-            .map_err(|e| anyhow::anyhow!("Failed to render SQL query template: {:?}", e))?
-    };
+    let query = crate::templating::render_str(&spec.query, &template_ctx)
+        .map_err(|e| anyhow::anyhow!("Failed to render SQL query template: {:?}", e))?;
 
     let rows_affected = match conn.connection_type {
         stormchaser_model::connections::ConnectionType::Postgres => {
-            execute_sql_query(&conn.connection_type, url, &query).await?
+            execute_sql_query(
+                &conn.connection_type,
+                url,
+                &query,
+                spec.params.as_deref().unwrap_or_default(),
+            )
+            .await?
         }
         stormchaser_model::connections::ConnectionType::Mysql => {
             anyhow::bail!("MySQL support is not compiled into the engine");
@@ -147,6 +151,7 @@ async fn handle_sql_execute(
         run_id,
         step_id,
         fencing_token,
+        completion_token: crate::db::step_completion_token(&pool, step_id).await,
         event_type: EventType::Step(StepEventType::Completed),
         runner_id: Some("intrinsic-sql".to_string()),
         exit_code: Some(0),
@@ -175,6 +180,7 @@ async fn execute_sql_query(
     connection_type: &stormchaser_model::connections::ConnectionType,
     url: &str,
     query: &str,
+    params: &[Value],
 ) -> Result<u64> {
     match connection_type {
         stormchaser_model::connections::ConnectionType::Postgres => {
@@ -206,7 +212,22 @@ async fn execute_sql_query(
                 }
             };
 
-            let result = sqlx::query(query).execute(&mut conn).await?;
+            // The statement is the workflow author's own SqlExecute query, executed as
+            // written. Values reach it only as bound parameters.
+            let mut statement = sqlx::query(sqlx::AssertSqlSafe(query));
+            for param in params {
+                statement = match param {
+                    Value::Null => statement.bind(None::<String>),
+                    Value::Bool(b) => statement.bind(*b),
+                    Value::Number(n) => match n.as_i64() {
+                        Some(i) => statement.bind(i),
+                        None => statement.bind(n.as_f64()),
+                    },
+                    Value::String(s) => statement.bind(s.clone()),
+                    other => statement.bind(sqlx::types::Json(other.clone())),
+                };
+            }
+            let result = statement.execute(&mut conn).await?;
             let affected = result.rows_affected();
             Ok(affected)
         }
@@ -220,6 +241,7 @@ async fn execute_sql_query(
 #[cfg(test)]
 mod tests {
     use super::execute_sql_query;
+    use serde_json::{json, Value};
     use stormchaser_model::connections::ConnectionType;
 
     fn database_url_from_env() -> String {
@@ -238,7 +260,7 @@ mod tests {
     #[tokio::test]
     async fn execute_sql_query_supports_postgres_success() {
         let database_url = database_url_from_env();
-        let result = execute_sql_query(&ConnectionType::Postgres, &database_url, "SELECT 1")
+        let result = execute_sql_query(&ConnectionType::Postgres, &database_url, "SELECT 1", &[])
             .await
             .expect("postgres query should execute successfully");
         assert_eq!(result, 1);
@@ -250,6 +272,7 @@ mod tests {
             &ConnectionType::HttpApi,
             "https://paninfracon.net",
             "SELECT 1",
+            &[],
         )
         .await
         .expect_err("unsupported connection types should fail");
@@ -257,5 +280,37 @@ mod tests {
             err.to_string().contains("not supported"),
             "expected unsupported connection error, got: {err}"
         );
+    }
+
+    #[tokio::test]
+    async fn params_are_bound_with_their_types_and_never_read_as_sql() {
+        let database_url = database_url_from_env();
+        let matched = execute_sql_query(
+            &ConnectionType::Postgres,
+            &database_url,
+            "SELECT 1 WHERE $1 = 'it''s' AND $2 = 42 AND $3 AND $4 ->> 'a' = 'b' \
+             AND $5::text IS NULL AND $6 > 1.4",
+            &[
+                json!("it's"),
+                json!(42),
+                json!(true),
+                json!({"a": "b"}),
+                Value::Null,
+                json!(1.5),
+            ],
+        )
+        .await
+        .unwrap();
+        assert_eq!(matched, 1);
+
+        let injected = execute_sql_query(
+            &ConnectionType::Postgres,
+            &database_url,
+            "SELECT 1 WHERE $1 = 'expected'",
+            &[json!("x' OR '1'='1")],
+        )
+        .await
+        .unwrap();
+        assert_eq!(injected, 0);
     }
 }

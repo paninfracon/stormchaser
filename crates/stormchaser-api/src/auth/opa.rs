@@ -1,7 +1,7 @@
 use crate::AppState;
 use anyhow::Result;
 use axum::{
-    extract::{Request, State},
+    extract::{OriginalUri, Request, State},
     http::{header, StatusCode},
     middleware::Next,
     response::Response,
@@ -20,7 +20,17 @@ pub async fn opa_middleware(
         return Ok(next.run(request).await);
     }
 
-    let path = request.uri().path().to_string();
+    // The path the client asked for. Inside the nested `/api/v1` router the request's
+    // own URI has that prefix stripped, and policies are written against the full path.
+    // It is percent-decoded, as handlers see it, so that a policy matching
+    // `/api/v1/runs/direct` also matches `/api/v1/runs/dire%63t`.
+    let raw_path = request
+        .extensions()
+        .get::<OriginalUri>()
+        .map(|original| original.0.path().to_string())
+        .unwrap_or_else(|| request.uri().path().to_string());
+    let path =
+        String::from_utf8_lossy(&urlencoding::decode_binary(raw_path.as_bytes())).into_owned();
     let method = request.method().to_string();
 
     // Extract token manually from headers if present

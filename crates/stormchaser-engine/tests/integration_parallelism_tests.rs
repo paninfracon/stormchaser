@@ -28,7 +28,7 @@ async fn test_dynamic_parallelism_with_batching() {
         .unwrap();
 
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
     let opa_client = Arc::new(OpaClient::new(None, None));
 
     let run_id = RunId::new_v4();
@@ -124,7 +124,8 @@ async fn test_dynamic_parallelism_with_batching() {
         "run_id": run_id,
         "step_id": generate_id,"event_type": "StepCompletedEvent", "fencing_token": fencing_token,
         "timestamp": Utc::now(),
-        "exit_code": 0
+        "exit_code": 0,
+        "runner_id": keyed_runner(&pool).await
     });
     let log_backend = Arc::new(None);
     handler::handle_step_completed(
@@ -195,7 +196,8 @@ async fn test_dynamic_parallelism_with_batching() {
         "run_id": run_id,
         "step_id": process_instances[0].id,"event_type": "StepCompletedEvent", "fencing_token": fencing_token,
         "timestamp": Utc::now(),
-        "exit_code": 0
+        "exit_code": 0,
+        "runner_id": keyed_runner(&pool).await
     });
     handler::handle_step_completed(
         serde_json::from_value(completed_payload).unwrap(),
@@ -234,4 +236,14 @@ async fn test_dynamic_parallelism_with_batching() {
         .await
         .unwrap();
     assert_eq!(it3.status, StepStatus::WaitingForEvent);
+}
+
+/// A runner the engine has issued a key to, reporting on the test's steps as a runner
+/// would. A runner-owned step takes a result only from such a runner.
+async fn keyed_runner(pool: &sqlx::PgPool) -> String {
+    let id = format!("test-runner-{}", uuid::Uuid::new_v4());
+    stormchaser_engine::db::store_runner_session(pool, &id, &[5u8; 32])
+        .await
+        .unwrap();
+    id
 }

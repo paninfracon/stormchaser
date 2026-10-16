@@ -6,6 +6,13 @@ tracing.
 
 ## Stack Components
 
+The components below are bundled with docker-compose and the umbrella Helm
+chart so that the quickstart works out of the box. They are not a production
+logging or monitoring stack: Loki there has no authentication, and Grafana lets
+anonymous visitors view dashboards. In production, send logs, metrics and traces
+to your existing platform; see the
+[production prerequisites](environments.md#cluster-prerequisites).
+
 * **Prometheus**: Stores time-series metrics.
 * **Grafana Loki**: Stores and indexes logs from the control plane and runners.
 * **Grafana Tempo**: Provides distributed tracing to visualize the lifecycle of

@@ -2,41 +2,85 @@ use crate::job_machine::{crypto, JobMetadata};
 use anyhow::Result;
 use k8s_openapi::api::batch::v1::{Job, JobSpec};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
-use std::collections::BTreeMap;
 
 use super::*;
+
+/// The name of a step's Job: `storm-`, as much of the step's name as fits, and the
+/// step's full id. Kubernetes limits Job names to 63 characters; the id is what keeps
+/// them apart, so it is never shortened.
+pub fn job_name(step_name: &str, step_id: uuid::Uuid) -> String {
+    let readable: String = step_name
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .take(20)
+        .collect();
+    let readable = readable.trim_matches('-');
+    if readable.is_empty() {
+        format!("storm-{step_id}")
+    } else {
+        format!("storm-{readable}-{step_id}")
+    }
+}
 
 pub fn do_build_job_spec(
     job_name: &str,
     metadata: &JobMetadata,
     agent_image: Option<String>,
     sfs_pvc_name: Option<String>,
-) -> Result<Job> {
-    let step_spec = parse_step_spec(metadata)?;
+) -> Result<(Job, StepSecret)> {
+    let mut step_spec = parse_step_spec(metadata)?;
+    let mut secrets = StepSecret::new(job_name);
 
-    let (volumes, volume_mounts) = build_k8s_volumes(
-        agent_image.is_some(),
+    // What the runner allows any one step, whatever its workflow asks for
+    let limits = stormchaser_model::dsl::limits::StepLimits::from_env();
+    step_spec.resources = apply_step_limits(step_spec.resources, &limits)?;
+    limits.check_parallelism(step_spec.parallelism, step_spec.completions)?;
+    let timeout = limits.timeout(metadata.step_dsl.timeout.as_deref())?;
+    // A deadline the step set on the Job itself stands if it is the shorter
+    let active_deadline = step_spec
+        .active_deadline
+        .filter(|seconds| *seconds > 0)
+        .map_or(timeout.as_secs() as i64, |seconds| {
+            seconds.min(timeout.as_secs() as i64)
+        });
+    StepPolicy::from_env().check(&step_spec)?;
+
+    // Helper containers mount the step's volumes at the paths the step chose
+    for mount in &step_spec.storage_mounts {
+        stormchaser_model::dsl::ensure_mount_path_clear_of_helpers(&mount.mount_path)?;
+    }
+
+    let agent_present = agent_image.is_some();
+    let (mut volumes, volume_mounts) = build_k8s_volumes(
+        uses_in_step_agent(agent_present, metadata),
         sfs_pvc_name.as_deref(),
         metadata,
         &step_spec,
     );
+    if let Some(plan) = plan_sidecar(agent_present, sfs_pvc_name.as_deref(), metadata, &step_spec) {
+        volumes.extend(sidecar_volumes(job_name, plan.push_auth));
+    }
 
-    let k8s_env = build_k8s_env_vars(metadata, &step_spec, sfs_pvc_name.as_deref());
+    let k8s_env = build_k8s_env_vars(metadata, &step_spec, &mut secrets);
 
-    let (container, init_containers) = build_k8s_containers(
+    let (containers, init_containers) = build_k8s_containers(
         agent_image,
         sfs_pvc_name.as_deref(),
         metadata,
         &step_spec,
         k8s_env,
         volume_mounts,
+        &mut secrets,
     );
 
     let pod_template =
-        build_k8s_pod_spec(container, init_containers, volumes, metadata, &step_spec);
+        build_k8s_pod_spec(containers, init_containers, volumes, metadata, &step_spec);
 
-    // Job Labels
-    let mut labels = BTreeMap::from([
+    // Job Labels. Author-supplied entries go in first so they can never replace the
+    // ones Stormchaser relies on to find, attribute and reap its jobs.
+    let mut labels = step_spec.extra_labels.unwrap_or_default();
+    labels.extend([
         ("managed-by".to_string(), "stormchaser".to_string()),
         (
             "stormchaser-run-id".to_string(),
@@ -51,37 +95,43 @@ pub fn do_build_job_spec(
             metadata.fencing_token.to_string(),
         ),
     ]);
-    if let Some(el) = step_spec.extra_labels {
-        labels.extend(el);
-    }
 
-    // Job Annotations
-    let step_dsl_json = serde_json::to_string(&metadata.step_dsl).unwrap_or_default();
-    let step_dsl_val = if let Some(key) = &metadata.encryption_key {
-        crypto::encrypt_state(&step_dsl_json, key)?
-    } else {
-        step_dsl_json
+    // Job Annotations. The step's definition is kept so that a restarted runner can pick
+    // the step up again. Encrypted, it is kept whole; in clear, it is kept without the
+    // values that are secret, which picking a step up does not need.
+    let step_dsl_val = match &metadata.encryption_key {
+        Some(key) => crypto::encrypt_state(
+            &serde_json::to_string(&metadata.step_dsl).unwrap_or_default(),
+            key,
+        )?,
+        None => {
+            serde_json::to_string(&metadata.step_dsl.without_secret_values()).unwrap_or_default()
+        }
     };
 
-    let mut annotations = BTreeMap::from([
+    let mut annotations = step_spec.extra_annotations.unwrap_or_default();
+    annotations.extend([
         (
             "stormchaser.v1.io/received-at".to_string(),
             metadata.received_at.to_rfc3339(),
         ),
         ("stormchaser.v1.io/step-dsl".to_string(), step_dsl_val),
     ]);
-    if let Some(ea) = step_spec.extra_annotations {
-        annotations.extend(ea);
-    }
 
     if metadata.encryption_key.is_some() {
         annotations.insert(
             "stormchaser.v1.io/state-encrypted".to_string(),
             "true".to_string(),
         );
+    } else {
+        annotations.remove("stormchaser.v1.io/state-encrypted");
     }
 
-    Ok(Job {
+    // A Job that depends on Secrets is created suspended, so that no pod exists until
+    // the runner has created them (they are owned by the Job, so the Job comes first).
+    let suspend = (!secrets.is_empty() || metadata.registry_auth.is_some()).then_some(true);
+
+    let job = Job {
         metadata: ObjectMeta {
             name: Some(job_name.to_string()),
             labels: Some(labels),
@@ -100,10 +150,32 @@ pub fn do_build_job_spec(
             })),
             completions: Some(step_spec.completions.unwrap_or(1)),
             parallelism: Some(step_spec.parallelism.unwrap_or(1)),
-            active_deadline_seconds: step_spec.active_deadline,
+            // Kubernetes ends the Job, and its pods, when this runs out
+            active_deadline_seconds: Some(active_deadline.max(1)),
             ttl_seconds_after_finished: Some(step_spec.ttl_seconds_after_finished.unwrap_or(3600)),
+            suspend,
             ..Default::default()
         }),
         ..Default::default()
-    })
+    };
+    Ok((job, secrets))
+}
+
+#[cfg(test)]
+mod job_name_tests {
+    use super::job_name;
+
+    #[test]
+    fn job_names_carry_the_whole_step_id_and_fit_kubernetes_limits() {
+        let id = uuid::Uuid::new_v4();
+        assert_eq!(job_name("Build_App", id), format!("storm-build-app-{id}"));
+        let long = job_name(&"x".repeat(200), id);
+        assert!(long.len() <= 63, "{long}");
+        assert!(long.ends_with(&id.to_string()));
+        assert_eq!(job_name("__", id), format!("storm-{id}"));
+        // Two steps whose ids share a prefix still get different Jobs
+        let a = uuid::Uuid::parse_str("12345678-0000-4000-8000-000000000001").unwrap();
+        let b = uuid::Uuid::parse_str("12345678-0000-4000-8000-000000000002").unwrap();
+        assert_ne!(job_name("s", a), job_name("s", b));
+    }
 }

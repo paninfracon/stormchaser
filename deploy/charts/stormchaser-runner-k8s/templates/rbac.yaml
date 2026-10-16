@@ -3,26 +3,33 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: {{ include "stormchaser-runner-k8s.fullname" . }}-job-manager
+  namespace: {{ include "stormchaser-runner-k8s.stepNamespace" . }}
   labels:
     {{- include "stormchaser-runner-k8s.labels" . | nindent 4 }}
 rules:
+  # patch: a Job that needs Secrets is created suspended and resumed once they exist.
   - apiGroups: ["batch"]
     resources: ["jobs"]
-    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+    verbs: ["create", "get", "list", "watch", "patch", "delete"]
+  # patch: the runner tells a step pod's agent sidecar, through a pod annotation, that the
+  # step's container has finished.
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get", "list", "watch", "patch"]
   - apiGroups: [""]
     resources: ["pods/log"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get"]
+  # Only the per-step image pull and artifact push secrets the runner writes itself; it
+  # never reads secrets.
   - apiGroups: [""]
-    resources: ["secrets", "configmaps"]
-    verbs: ["create", "get", "list", "watch", "patch"]
+    resources: ["secrets"]
+    verbs: ["create", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: {{ include "stormchaser-runner-k8s.fullname" . }}-job-manager
+  namespace: {{ include "stormchaser-runner-k8s.stepNamespace" . }}
   labels:
     {{- include "stormchaser-runner-k8s.labels" . | nindent 4 }}
 roleRef:

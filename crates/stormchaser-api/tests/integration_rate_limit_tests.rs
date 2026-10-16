@@ -19,7 +19,7 @@ async fn test_rate_limiting() {
     std::env::set_var("API_RATE_LIMIT_BURST_SIZE", "2");
 
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = async_nats::connect(nats_url)
+    let nats_client = stormchaser_model::nats::connect(nats_url)
         .await
         .expect("Failed to connect to NATS");
     let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
@@ -43,10 +43,10 @@ async fn test_rate_limiting() {
         jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
         api_base_url: "http://localhost:3000".to_string(),
+        mcp_allowed_hosts: Vec::new(),
     });
 
-    let mut rng = rand::thread_rng();
-    let ip_last_octet = rand::Rng::gen_range(&mut rng, 10..250);
+    let ip_last_octet = rand::RngExt::random_range(&mut rand::rng(), 10..250);
     let addr = SocketAddr::from(([127, 0, 0, ip_last_octet], 12345));
 
     // We configured: per_second(1), burst_size(2)

@@ -11,6 +11,9 @@ pub mod workflow;
 /// A parser for translating Stormchaser HCL DSL into an executable Workflow model.
 pub struct StormchaserParser;
 
+/// Largest workflow file accepted.
+pub const MAX_WORKFLOW_BYTES: usize = 1024 * 1024;
+
 impl Default for StormchaserParser {
     fn default() -> Self {
         Self::new()
@@ -24,7 +27,32 @@ impl StormchaserParser {
     }
 
     /// Parses the provided HCL DSL string and returns a `Workflow` instance.
+    /// Parses a workflow.
+    ///
+    /// Workflow text comes from whoever can write a workflow, so it is held to a size,
+    /// refused if it could nest further than the parser can safely follow, and parsed
+    /// on a stack sized for it (see `stormchaser_model::hcl_guard`). What comes back
+    /// nests no deeper than `hcl_guard::MAX_VALUE_DEPTH`.
     pub fn parse(&self, dsl: &str) -> Result<Workflow> {
+        use stormchaser_model::hcl_guard;
+
+        if dsl.len() > MAX_WORKFLOW_BYTES {
+            anyhow::bail!(
+                "Workflow is {} bytes; the limit is {}",
+                dsl.len(),
+                MAX_WORKFLOW_BYTES
+            );
+        }
+        hcl_guard::guarded(dsl, hcl_guard::file_limit(), || {
+            let workflow = self.parse_unguarded(dsl)?;
+            // Checked here, where there is room to drop a workflow that is too deep
+            hcl_guard::ensure_shallow(serde_json::to_value(&workflow)?)?;
+            Ok(workflow)
+        })
+        .context("Workflow rejected")
+    }
+
+    fn parse_unguarded(&self, dsl: &str) -> Result<Workflow> {
         let body: Body = hcl::from_str(dsl)?;
 
         let mut dsl_version = String::new();

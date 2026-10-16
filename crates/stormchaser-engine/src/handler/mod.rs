@@ -23,7 +23,7 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use stormchaser_model::workflow::{RunContext, RunQuotas, WorkflowRun};
 use stormchaser_tls::TlsReloader;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 #[tracing::instrument(skip(executor), fields(run_id = %run_id))]
 /// Fetch outputs.
@@ -158,6 +158,26 @@ pub async fn dispatch_pending_steps(
         // 3. Enforce CPU and Memory quotas before dispatching
         let req =
             crate::resource_utils::get_step_resource_requirements(&step.step_type, &inst_data.0);
+
+        // A step that asks for more than its run may use in all can never be dispatched:
+        // waiting for capacity would leave it pending until the run times out.
+        if (max_cpu > 0.0 && req.cpu > max_cpu) || (max_mem > 0 && req.memory > max_mem) {
+            let error = format!(
+                "Step {} asks for {} CPU and {} bytes of memory, more than its run may use in all ({} CPU, {} memory). Raise the workflow's quotas or lower the step's request.",
+                step.step_name, req.cpu, req.memory, quotas.max_cpu, quotas.max_memory
+            );
+            warn!("Run {}: {}", run_id, error);
+            crate::handler::integrations::utils::publish_step_failed_event(
+                run_id,
+                step.id,
+                0,
+                error,
+                &pool,
+                nats_client.clone(),
+            )
+            .await?;
+            continue;
+        }
 
         let can_dispatch = if max_cpu > 0.0 || max_mem > 0 {
             let mut conn = pool.acquire().await?;

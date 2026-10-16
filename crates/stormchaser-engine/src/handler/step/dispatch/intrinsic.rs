@@ -15,8 +15,13 @@ pub(crate) async fn apply_intrinsic_mutations(
     resolved_spec: &mut Value,
     pool: &PgPool,
 ) -> Result<()> {
-    crate::handler::step::intrinsic::git_checkout::mutate(step_type, resolved_spec, Some(pool))
-        .await?;
+    crate::handler::step::intrinsic::git_checkout::mutate(
+        step_type,
+        resolved_spec,
+        Some(pool),
+        Some(run_id),
+    )
+    .await?;
     crate::handler::step::intrinsic::jq::mutate_if_has_files(step_type, resolved_spec);
     crate::handler::step::intrinsic::terraform::mutate_if_terraform(
         run_id.into_inner(),
@@ -34,14 +39,14 @@ pub(crate) async fn apply_intrinsic_mutations(
         if let Ok(mut spec) =
             serde_json::from_value::<dsl::CommonContainerSpec>(resolved_spec.clone())
         {
-            inject_connection_env_vars(&spec.connections, &mut spec.env, pool).await?;
+            inject_connection_env_vars(&spec.connections, &mut spec.env, pool, run_id).await?;
             if let Ok(new_spec) = serde_json::to_value(spec) {
                 *resolved_spec = new_spec;
             }
         }
     } else if step_type == "RunK8sJob" {
         if let Ok(mut spec) = serde_json::from_value::<dsl::K8sJobSpec>(resolved_spec.clone()) {
-            inject_connection_env_vars(&spec.connections, &mut spec.env, pool).await?;
+            inject_connection_env_vars(&spec.connections, &mut spec.env, pool, run_id).await?;
             if let Ok(new_spec) = serde_json::to_value(spec) {
                 *resolved_spec = new_spec;
             }
@@ -55,6 +60,7 @@ pub(crate) async fn inject_connection_env_vars(
     connections: &Option<Vec<String>>,
     env: &mut Option<Vec<dsl::EnvVar>>,
     pool: &PgPool,
+    run_id: RunId,
 ) -> Result<()> {
     let Some(connection_names) = connections else {
         return Ok(());
@@ -68,6 +74,7 @@ pub(crate) async fn inject_connection_env_vars(
         >(pool, conn_name)
         .await?
         {
+            crate::authz::ensure_run_may_use(pool, run_id, &conn).await?;
             let prefix = format!(
                 "STORMCHASER_CONN_{}_",
                 conn_name.to_uppercase().replace("-", "_")
@@ -85,6 +92,8 @@ pub(crate) async fn inject_connection_env_vars(
                 });
             }
             if let Some(creds) = &conn.encrypted_credentials {
+                // The step can print it; the API masks it wherever it turns up
+                crate::db::add_sensitive_values(pool, run_id, std::slice::from_ref(creds)).await?;
                 envs.push(dsl::EnvVar {
                     name: format!("{}PASSWORD", prefix),
                     value: creds.to_string(),

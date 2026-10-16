@@ -82,6 +82,7 @@ pub async fn test_connection(
 
 #[server(input = Json, output = Json)]
 pub async fn delete_connection(id: String) -> Result<(), ServerFnError> {
+    let id = super::parse_id(&id)?;
     let cookie = require_auth().await?;
     let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
     let client = super::http_client();

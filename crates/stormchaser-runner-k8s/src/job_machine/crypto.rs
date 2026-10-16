@@ -3,7 +3,7 @@
 //! Provides functions to encrypt and decrypt sensitive state data.
 
 use aes_gcm::{
-    aead::{Aead, AeadCore, KeyInit, OsRng},
+    aead::{Aead, Generate, KeyInit},
     Aes256Gcm, Nonce,
 };
 use anyhow::Result;
@@ -18,7 +18,7 @@ pub fn encrypt_state(data: &str, key_str: &str) -> Result<String> {
 
     let cipher = Aes256Gcm::new_from_slice(&key_bytes)
         .map_err(|e| anyhow::anyhow!("Invalid key length: {}", e))?;
-    let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+    let nonce = Nonce::generate();
     let ciphertext = cipher
         .encrypt(&nonce, data.as_bytes())
         .map_err(|e| anyhow::anyhow!("Encryption failed: {}", e))?;
@@ -41,12 +41,13 @@ pub fn decrypt_state(encoded: &str, key_str: &str) -> Result<String> {
     }
 
     let (nonce_bytes, ciphertext) = combined.split_at(12);
-    let nonce = Nonce::from_slice(nonce_bytes);
+    let nonce =
+        Nonce::try_from(nonce_bytes).map_err(|_| anyhow::anyhow!("Invalid encrypted data"))?;
     let cipher = Aes256Gcm::new_from_slice(&key_bytes)
         .map_err(|e| anyhow::anyhow!("Invalid key length: {}", e))?;
 
     let plaintext = cipher
-        .decrypt(nonce, ciphertext)
+        .decrypt(&nonce, ciphertext)
         .map_err(|e| anyhow::anyhow!("Decryption failed: {}", e))?;
 
     Ok(String::from_utf8(plaintext)?)

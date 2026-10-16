@@ -17,26 +17,49 @@ spec:
         {{- include "stormchaser-orchestration.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: engine
     spec:
+      # It never talks to the Kubernetes API (IRSA projects its own token)
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: engine
-          image: "{{ .Values.engine.image.repository }}:{{ .Values.engine.image.tag | default .Chart.AppVersion }}"
+          image: "{{ .Values.engine.image.repository }}:{{ .Values.engine.image.tag | default (printf "v%s" .Chart.AppVersion) }}"
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
           imagePullPolicy: {{ .Values.engine.image.pullPolicy }}
           env:
             - name: BINARY
               value: "stormchaser-engine"
-            - name: DATABASE_URL
-              {{- if .Values.global.database.existingSecret }}
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.global.database.existingSecret }}
-                  key: {{ .Values.global.database.existingSecretKey }}
-              {{- else }}
-              value: {{ .Values.global.database.url | quote }}
-              {{- end }}
+            {{- include "stormchaser-orchestration.databaseUrlEnv" . | nindent 12 }}
             - name: STORMCHASER_DB_SSL
               value: {{ .Values.global.database.ssl | quote }}
             - name: NATS_URL
               value: {{ .Values.global.nats.url | quote }}
+            {{- with .Values.global.nats.authSecret }}
+            - name: NATS_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: user
+            - name: NATS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: password
+            {{- end }}
+            {{- with .Values.global.approvalLinks.existingSecret }}
+            - name: STORMCHASER_APPROVAL_LINK_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: {{ $.Values.global.approvalLinks.existingSecretKey }}
+            {{- end }}
+            - name: STORMCHASER_SSRF_ALLOWED_HOSTS
+              value: {{ join "," .Values.global.ssrfAllowedHosts | quote }}
+            - name: STORMCHASER_AWS_ALLOWED_ROLE_ARNS
+              value: {{ join "," .Values.global.aws.allowedRoleArns | quote }}
+            - name: STORMCHASER_AWS_ALLOWED_LAMBDA_FUNCTIONS
+              value: {{ join "," .Values.global.aws.allowedLambdaFunctions | quote }}
             - name: RUST_LOG
               value: {{ .Values.engine.rustLog | quote }}
             - name: GIT_CACHE_DIR
@@ -69,7 +92,9 @@ spec:
               mountPath: /etc/stormchaser/certs
               readOnly: true
             {{- end }}
+        {{- include "stormchaser-orchestration.opaSidecar" . | nindent 8 }}
       volumes:
+        {{- include "stormchaser-orchestration.opaPolicyVolume" . | nindent 8 }}
         - name: git-cache
           {{- if .Values.engine.persistence.enabled }}
           persistentVolumeClaim:
