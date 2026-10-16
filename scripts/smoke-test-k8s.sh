@@ -10,7 +10,14 @@ REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." &> /dev/null && pwd)
 cd "$REPO_ROOT"
 
 echo -e "${BLUE}>>> Generating test token...${NC}"
-TOKEN=$(python3 "$REPO_ROOT/scripts/generate_dev_token.py")
+# The cluster's API checks tokens with the key the chart generated (stormchaser-jwt),
+# not the one in .env
+JWT_KEY=$(microk8s kubectl get secret -n "${K8S_NAMESPACE:-stormchaser}" stormchaser-jwt -o jsonpath='{.data.jwt-secret}' | base64 -d)
+if [ -z "$JWT_KEY" ]; then
+    echo -e "${RED}>>> Could not read the API's key from the stormchaser-jwt secret${NC}"
+    exit 1
+fi
+TOKEN=$(STORMCHASER_JWT_SECRET="$JWT_KEY" python3 "$REPO_ROOT/scripts/generate_dev_token.py")
 
 echo -e "${BLUE}>>> Discovering API and Query endpoints...${NC}"
 # shellcheck source=scripts/k8s-api-access.sh
