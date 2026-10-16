@@ -179,7 +179,7 @@ pub async fn delete_webhook(pool: &PgPool, id: WebhookId) -> Result<(), sqlx::Er
 
 /// Inserts a new webhook.
 pub async fn insert_webhook(
-    pool: &PgPool,
+    pool: impl sqlx::PgExecutor<'_>,
     id: WebhookId,
     name: &str,
     description: &Option<String>,

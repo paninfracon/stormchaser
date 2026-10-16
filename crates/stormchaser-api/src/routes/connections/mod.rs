@@ -71,10 +71,10 @@ pub async fn create_connection(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
+    authz::record_owner(&mut *tx, Kind::Connection, id.into_inner(), &caller).await?;
     tx.commit()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    authz::record_owner(&state.pool, Kind::Connection, id.into_inner(), &caller).await?;
 
     Ok((StatusCode::CREATED, Json(serde_json::json!({ "id": id }))))
 }

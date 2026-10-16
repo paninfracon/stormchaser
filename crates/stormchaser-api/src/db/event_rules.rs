@@ -11,7 +11,7 @@ use stormchaser_model::event;
 #[allow(clippy::too_many_arguments)]
 /// Create event rule.
 pub async fn create_event_rule(
-    pool: &PgPool,
+    pool: impl sqlx::PgExecutor<'_>,
     id: RuleId,
     name: &str,
     description: &Option<String>,

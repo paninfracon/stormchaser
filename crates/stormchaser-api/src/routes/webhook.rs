@@ -59,8 +59,12 @@ pub async fn create_webhook(
     }
 
     let id = stormchaser_model::WebhookId::new_v4();
+    let mut tx = state.pool.begin().await.map_err(|e| {
+        tracing::error!("Failed to start a transaction: {:?}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
     db::insert_webhook(
-        &state.pool,
+        &mut *tx,
         id,
         &payload.name,
         &payload.description,
@@ -72,7 +76,10 @@ pub async fn create_webhook(
         tracing::error!("Failed to create webhook: {:?}", e);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
-    authz::record_owner(&state.pool, Kind::Webhook, id.into_inner(), &caller).await?;
+    authz::record_owner(&mut *tx, Kind::Webhook, id.into_inner(), &caller).await?;
+    tx.commit()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok((StatusCode::CREATED, Json(serde_json::json!({ "id": id }))))
 }

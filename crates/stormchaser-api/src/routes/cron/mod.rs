@@ -74,9 +74,13 @@ pub async fn create_cron_workflow(
     let external_job_id =
         register_external_cron(id, &payload.name, &payload.cronspec, &secret_token).await?;
 
-    // 2. Save to database
+    // 2. Save to database, with its owner
+    let mut tx = state.pool.begin().await.map_err(|e| {
+        tracing::error!("Failed to start a transaction: {:?}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
     db::insert_cron_workflow(
-        &state.pool,
+        &mut *tx,
         id,
         &payload,
         &repo_url,
@@ -88,7 +92,10 @@ pub async fn create_cron_workflow(
         tracing::error!("Failed to create cron workflow: {:?}", e);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
-    authz::record_owner(&state.pool, Kind::CronWorkflow, id.into_inner(), &caller).await?;
+    authz::record_owner(&mut *tx, Kind::CronWorkflow, id.into_inner(), &caller).await?;
+    tx.commit()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(CronWorkflowResponse {
         id,

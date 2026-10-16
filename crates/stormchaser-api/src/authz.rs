@@ -200,9 +200,11 @@ pub async fn owner_of(pool: &PgPool, kind: Kind, id: Uuid) -> Option<String> {
         .flatten()
 }
 
-/// Records `caller` as the owner of an object they have just created.
+/// Records `caller` as the owner of an object they have just created. Run it in the
+/// transaction that creates the object: committed without an owner, the object is
+/// unowned, which policy lets everyone read and, until admins are configured, change.
 pub async fn record_owner(
-    pool: &PgPool,
+    executor: impl sqlx::PgExecutor<'_>,
     kind: Kind,
     id: Uuid,
     caller: &Caller,
@@ -213,7 +215,7 @@ pub async fn record_owner(
     sqlx::query(statement)
         .bind(caller.owner_key())
         .bind(id)
-        .execute(pool)
+        .execute(executor)
         .await
         .map_err(|e| {
             tracing::error!(
