@@ -570,17 +570,36 @@ mod tests {
             ]
         );
     }
+    use bollard::query_parameters::CreateImageOptions;
     use bollard::Docker;
     use stormchaser_model::dsl::Step;
 
     #[tokio::test]
     async fn registry_config_reaches_the_helper_without_showing_in_its_definition() {
-        let docker = Docker::connect_with_local_defaults().unwrap();
+        let Ok(docker) = Docker::connect_with_local_defaults() else {
+            return;
+        };
+        if docker.ping().await.is_err() {
+            return;
+        }
         let name = format!("regcfg-test-{}", Uuid::new_v4());
         let config =
             serde_json::json!({"auths": {"r.example.com": {"registrytoken": "s3cr3t-token"}}});
 
-        // The same image the runner's helpers use; it prints the file and its mode
+        // Any image with a shell, run as root as the runner runs its helpers; it prints
+        // the file and its mode. (The agent image is not built where the tests run.)
+        let image = "alpine:3";
+        let mut pull = docker.create_image(
+            Some(CreateImageOptions {
+                from_image: Some(image.to_string()),
+                ..Default::default()
+            }),
+            None,
+            None,
+        );
+        while let Some(progress) = pull.next().await {
+            progress.unwrap();
+        }
         docker
             .create_container(
                 Some(CreateContainerOptions {
@@ -588,7 +607,7 @@ mod tests {
                     ..Default::default()
                 }),
                 ContainerCreateBody {
-                    image: Some(crate::container_machine::agent_image()),
+                    image: Some(image.to_string()),
                     entrypoint: Some(vec!["/bin/sh".to_string(), "-c".to_string()]),
                     cmd: Some(vec![format!(
                         "stat -c %a {p} && cat {p}",
