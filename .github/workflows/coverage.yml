@@ -101,6 +101,11 @@ jobs:
           npx playwright install --with-deps
 
       - name: Generate coverage report
+        # Without DATABASE_URL the tests fall back to loading .env, whose
+        # STORMCHASER_JWT_SECRET (there for docker compose) the API would then check
+        # their tokens against
+        env:
+          DATABASE_URL: postgres://stormchaser:${{ env.STORMCHASER_DEV_PASSWORD }}@localhost:5432/stormchaser
         run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
 
       - name: Upload coverage to Codecov
