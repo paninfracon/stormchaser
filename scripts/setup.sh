@@ -397,7 +397,15 @@ fi
 echo -e "${BLUE}>>> Registering Local Storage (S3)...${NC}"
 if command -v python3 >/dev/null 2>&1 && [ -f "$REPO_ROOT/scripts/generate_dev_token.py" ]; then
     echo -e "${BLUE}>>> Generating authentication token...${NC}"
-    STORMCHASER_TOKEN=$(python3 "$REPO_ROOT/scripts/generate_dev_token.py")
+    if [[ "$MODE" == "microk8s" ]]; then
+        # The cluster's API checks tokens with the key the chart generated
+        # (stormchaser-jwt), not the one in .env. It goes to the token script through
+        # the environment.
+        STORMCHASER_TOKEN=$(STORMCHASER_JWT_SECRET="$(microk8s kubectl get secret -n "$NAMESPACE" stormchaser-jwt -o jsonpath='{.data.jwt-secret}' | base64 -d)" \
+            python3 "$REPO_ROOT/scripts/generate_dev_token.py")
+    else
+        STORMCHASER_TOKEN=$(python3 "$REPO_ROOT/scripts/generate_dev_token.py")
+    fi
     export STORMCHASER_TOKEN
 
     if [ -n "$STORMCHASER_TOKEN" ]; then
