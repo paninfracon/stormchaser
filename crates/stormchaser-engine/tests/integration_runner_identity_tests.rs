@@ -491,7 +491,8 @@ async fn a_signature_holds_only_on_the_subject_it_was_made_for() {
             &signed,
             chrono::Utc::now().timestamp()
         )
-        .await,
+        .await
+        .unwrap(),
         None
     );
     // The same message, published again on the subject that takes a runner offline
@@ -503,6 +504,7 @@ async fn a_signature_holds_only_on_the_subject_it_was_made_for() {
         chrono::Utc::now().timestamp()
     )
     .await
+    .unwrap()
     .is_some());
 
     clean_up(&pool, RunId::new_v4(), &[&runner]).await;
@@ -530,7 +532,8 @@ async fn the_engines_verdict_on_a_lost_runner_needs_no_signature() {
             &payload,
             chrono::Utc::now().timestamp()
         )
-        .await,
+        .await
+        .unwrap(),
         None
     );
     // Any other unsigned failure naming that runner is still refused
@@ -543,6 +546,7 @@ async fn the_engines_verdict_on_a_lost_runner_needs_no_signature() {
         chrono::Utc::now().timestamp()
     )
     .await
+    .unwrap()
     .is_some());
 
     clean_up(&pool, run_id, &[&gone]).await;
@@ -593,4 +597,22 @@ async fn a_fresh_key_cannot_be_taken_and_the_engines_ids_cannot_be_had() {
         .execute(&pool)
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn a_message_that_cannot_be_checked_is_not_refused() {
+    use stormchaser_engine::runner_auth::{refusal, Sender};
+    let pool = pool().await;
+    // The database cannot be read: the message must be tried again, not dropped
+    pool.close().await;
+    let payload = json!({"run_id": RunId::new_v4(), "step_id": StepInstanceId::new_v4(), "runner_id": "anyone"});
+    assert!(refusal(
+        &pool,
+        Sender::RunnerOrControlPlane,
+        "stormchaser.v1.step.completed",
+        &payload,
+        chrono::Utc::now().timestamp()
+    )
+    .await
+    .is_err());
 }

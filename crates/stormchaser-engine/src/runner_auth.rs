@@ -37,20 +37,21 @@ pub fn sender_of(subject: &str) -> Option<Sender> {
 
 /// Checks that a message naming a runner, received on `subject`, was signed with that
 /// runner's key for that subject, at about `published_at` (Unix seconds: when the
-/// server received it). Returns why it is refused, if it is.
+/// server received it). Returns why it is refused, if it is, or an error if that could
+/// not be decided (the database could not be read), in which case the message should be
+/// looked at again later rather than dropped.
 pub async fn refusal(
     pool: &PgPool,
     sender: Sender,
     subject: &str,
     payload: &Value,
     published_at: i64,
-) -> Option<String> {
+) -> Result<Option<String>> {
     let runner_id = payload.get("runner_id").and_then(Value::as_str);
     let key = match runner_id {
-        Some(id) => match crate::db::get_runner_session_key(pool, id).await {
-            Ok(key) => key,
-            Err(e) => return Some(format!("could not look up the key of runner {id}: {e}")),
-        },
+        Some(id) => crate::db::get_runner_session_key(pool, id)
+            .await
+            .with_context(|| format!("could not look up the key of runner {id}"))?,
         None => None,
     };
 
@@ -61,26 +62,26 @@ pub async fn refusal(
     if sender == Sender::RunnerOrControlPlane
         && payload.get("error").and_then(Value::as_str) == Some("lost_zombie")
     {
-        return None;
+        return Ok(None);
     }
 
     if let (Some(key), Some(id)) = (&key, runner_id) {
-        return verify_payload_at(payload, key, subject, published_at)
+        return Ok(verify_payload_at(payload, key, subject, published_at)
             .err()
-            .map(|e| format!("not signed by runner {id}: {e:#}"));
+            .map(|e| format!("not signed by runner {id}: {e:#}")));
     }
 
     // No key on record for whoever this claims to be
     let names_a_runner = match (sender, runner_id) {
         (Sender::Runner, _) => true,
         // The engine and the API name no registered runner when they finish a step
-        (Sender::RunnerOrControlPlane, Some(id)) => {
-            crate::db::runner_is_known(pool, id).await.unwrap_or(true)
-        }
+        (Sender::RunnerOrControlPlane, Some(id)) => crate::db::runner_is_known(pool, id)
+            .await
+            .with_context(|| format!("could not look up runner {id}"))?,
         (Sender::RunnerOrControlPlane, None) => false,
     };
     if !names_a_runner {
-        return None;
+        return Ok(None);
     }
     if !signatures_required() && runner_id.is_some() {
         tracing::warn!(
@@ -88,13 +89,13 @@ pub async fn refusal(
             runner_id,
             stormchaser_model::runner_auth::SIGNATURES_ENV
         );
-        return None;
+        return Ok(None);
     }
-    Some(format!(
+    Ok(Some(format!(
         "runner {:?} has no key from this engine; runners must be upgraded with it, or set {}=optional while they are",
         runner_id,
         stormchaser_model::runner_auth::SIGNATURES_ENV
-    ))
+    )))
 }
 
 /// Answers a runner's request for its key.

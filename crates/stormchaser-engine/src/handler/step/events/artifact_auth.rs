@@ -118,7 +118,7 @@ pub async fn artifact_push_auth(payload: &Value, pool: &PgPool) -> Result<Value>
         payload,
         chrono::Utc::now().timestamp(),
     )
-    .await
+    .await?
     {
         bail!("{}", reason);
     }

@@ -274,12 +274,23 @@ pub async fn handle_message(
             .info()
             .map(|info| info.published.unix_timestamp())
             .unwrap_or_else(|_| chrono::Utc::now().timestamp());
-        if let Some(reason) =
-            crate::runner_auth::refusal(&pool, sender, subject, &payload, published_at).await
-        {
-            tracing::warn!("Ignoring {}: {}", subject, reason);
-            let _ = message.double_ack().await;
-            return;
+        match crate::runner_auth::refusal(&pool, sender, subject, &payload, published_at).await {
+            Ok(None) => {}
+            Ok(Some(reason)) => {
+                tracing::warn!("Ignoring {}: {}", subject, reason);
+                let _ = message.double_ack().await;
+                return;
+            }
+            // Not known to be bad: the stream delivers it again
+            Err(e) => {
+                tracing::warn!("Could not check {}, retrying later: {:#}", subject, e);
+                let _ = message
+                    .ack_with(async_nats::jetstream::AckKind::Nak(Some(
+                        std::time::Duration::from_secs(5),
+                    )))
+                    .await;
+                return;
+            }
         }
     }
 
