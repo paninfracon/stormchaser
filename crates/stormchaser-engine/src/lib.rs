@@ -33,6 +33,8 @@ pub mod query;
 /// Short-lived registry credentials for artifact pushes.
 pub mod registry_token;
 pub mod resource_utils;
+/// Which handler errors are worth delivering the event again for.
+pub mod retry;
 /// Issues runners their keys and checks what they sign.
 /// Ceilings on the quotas a run may give itself.
 pub mod run_limits;

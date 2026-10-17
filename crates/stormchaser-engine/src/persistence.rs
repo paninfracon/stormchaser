@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use stormchaser_model::step::{StepInstance, StepStatus};
 use stormchaser_model::workflow::WorkflowRun;
 
@@ -17,16 +17,10 @@ pub async fn persist_run(run: &mut WorkflowRun, executor: &mut sqlx::PgConnectio
     )
     .await;
 
-    let res = match result {
-        Ok(r) => r,
-        Err(e) => {
-            return Err(anyhow::anyhow!(
-                "Failed to persist workflow run state for {}: {:?}",
-                run.id,
-                e
-            ))
-        }
-    };
+    // The database error stays in the chain, so a caller can tell a lost connection
+    // from a bad update
+    let res =
+        result.with_context(|| format!("Failed to persist workflow run state for {}", run.id))?;
 
     if res.rows_affected() == 0 {
         anyhow::bail!(

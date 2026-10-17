@@ -1,11 +1,77 @@
 use crate::git_cache;
 use crate::handler;
+use crate::retry;
+use async_nats::jetstream::message::Message;
+use async_nats::jetstream::AckKind;
 use serde_json::Value;
+use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 use stormchaser_model::auth;
 use stormchaser_model::LogBackend;
 use stormchaser_tls::TlsReloader;
 use uuid::Uuid;
+
+/// How often a handler that is still running tells the stream so. Well inside
+/// JetStream's default 30 s ack wait, after which it would deliver the event again.
+const PROGRESS_INTERVAL: Duration = Duration::from_secs(10);
+
+/// Handles an event in its own task. The event is acknowledged once handled, or once
+/// it has failed in a way another try would not change; after a transient failure the
+/// stream delivers it again, later.
+fn spawn_handler<F>(message: Message, what: String, handler: F)
+where
+    F: Future<Output = anyhow::Result<()>> + Send + 'static,
+{
+    tokio::spawn(async move {
+        let result = with_progress(&message, handler).await;
+        settle(&message, &what, result).await;
+    });
+}
+
+async fn with_progress<F: Future>(message: &Message, handler: F) -> F::Output {
+    tokio::pin!(handler);
+    let mut ticks = tokio::time::interval(PROGRESS_INTERVAL);
+    // The first tick is immediate
+    ticks.tick().await;
+    loop {
+        tokio::select! {
+            output = &mut handler => return output,
+            _ = ticks.tick() => {
+                let _ = message.ack_with(AckKind::Progress).await;
+            }
+        }
+    }
+}
+
+fn deliveries(message: &Message) -> i64 {
+    message
+        .info()
+        .map(|info| info.delivered)
+        .unwrap_or(retry::MAX_DELIVERIES)
+}
+
+async fn settle(message: &Message, what: &str, result: anyhow::Result<()>) {
+    let Err(e) = result else {
+        let _ = message.double_ack().await;
+        return;
+    };
+    let delivered = deliveries(message);
+    if retry::is_transient(&e) && delivered < retry::MAX_DELIVERIES {
+        let delay = retry::backoff(delivered);
+        tracing::warn!(
+            "Failed to handle {} (delivery {}), retrying in {:?}: {:#}",
+            what,
+            delivered,
+            delay,
+            e
+        );
+        let _ = message.ack_with(AckKind::Nak(Some(delay))).await;
+    } else {
+        tracing::error!("Failed to handle {}: {:?}", what, e);
+        let _ = message.double_ack().await;
+    }
+}
 
 #[allow(clippy::too_many_arguments)]
 async fn handle_run_events(
@@ -35,59 +101,46 @@ async fn handle_run_events(
 
     match subject {
         "stormchaser.v1.run.queued" => {
-            tokio::spawn(async move {
-                if let Err(e) = handler::handle_workflow_queued(
-                    stormchaser_model::RunId::new(run_id),
-                    payload,
-                    pool,
-                    git_cache,
-                    opa_client,
-                    nats_client,
-                    tls_reloader,
-                )
-                .await
-                {
-                    tracing::error!(
-                        "Failed to handle workflow queued event for {}: {:?}",
-                        run_id,
-                        e
-                    );
-                }
-                let _ = message.double_ack().await;
-            });
+            spawn_handler(
+                message,
+                format!("workflow queued event for {}", run_id),
+                async move {
+                    handler::handle_workflow_queued(
+                        stormchaser_model::RunId::new(run_id),
+                        payload,
+                        pool,
+                        git_cache,
+                        opa_client,
+                        nats_client,
+                        tls_reloader,
+                    )
+                    .await
+                },
+            );
         }
         "stormchaser.v1.run.direct" => {
-            tokio::spawn(async move {
-                if let Err(e) =
+            spawn_handler(
+                message,
+                format!("workflow direct event for {}", run_id),
+                async move {
                     handler::handle_workflow_direct(payload, pool, opa_client, nats_client).await
-                {
-                    tracing::error!(
-                        "Failed to handle workflow direct event for {}: {:?}",
-                        run_id,
-                        e
-                    );
-                }
-                let _ = message.double_ack().await;
-            });
+                },
+            );
         }
         "stormchaser.v1.run.start_pending" => {
-            tokio::spawn(async move {
-                if let Err(e) = handler::handle_workflow_start_pending(
-                    stormchaser_model::RunId::new(run_id),
-                    pool,
-                    nats_client,
-                    tls_reloader,
-                )
-                .await
-                {
-                    tracing::error!(
-                        "Failed to handle workflow start_pending event for {}: {:?}",
-                        run_id,
-                        e
-                    );
-                }
-                let _ = message.double_ack().await;
-            });
+            spawn_handler(
+                message,
+                format!("workflow start_pending event for {}", run_id),
+                async move {
+                    handler::handle_workflow_start_pending(
+                        stormchaser_model::RunId::new(run_id),
+                        pool,
+                        nats_client,
+                        tls_reloader,
+                    )
+                    .await
+                },
+            );
         }
         _ => {
             let _ = message.double_ack().await;
@@ -103,27 +156,18 @@ async fn handle_runner_events(
 ) {
     match subject {
         "stormchaser.v1.runner.register" => {
-            tokio::spawn(async move {
-                if let Err(e) = handler::handle_runner_registration(payload, pool).await {
-                    tracing::error!("Failed to handle runner registration: {:?}", e);
-                }
-                let _ = message.double_ack().await;
+            spawn_handler(message, "runner registration".to_string(), async move {
+                handler::handle_runner_registration(payload, pool).await
             });
         }
         "stormchaser.v1.runner.heartbeat" => {
-            tokio::spawn(async move {
-                if let Err(e) = handler::handle_runner_heartbeat(payload, pool).await {
-                    tracing::error!("Failed to handle runner heartbeat: {:?}", e);
-                }
-                let _ = message.double_ack().await;
+            spawn_handler(message, "runner heartbeat".to_string(), async move {
+                handler::handle_runner_heartbeat(payload, pool).await
             });
         }
         "stormchaser.v1.runner.offline" => {
-            tokio::spawn(async move {
-                if let Err(e) = handler::handle_runner_offline(payload, pool).await {
-                    tracing::error!("Failed to handle runner offline: {:?}", e);
-                }
-                let _ = message.double_ack().await;
+            spawn_handler(message, "runner offline".to_string(), async move {
+                handler::handle_runner_offline(payload, pool).await
             });
         }
         _ => {
@@ -144,27 +188,20 @@ async fn handle_step_events(
 ) {
     match subject {
         "stormchaser.v1.step.register_wasm" => {
-            tokio::spawn(async move {
-                if let Err(e) = handler::handle_wasm_registration(payload, pool).await {
-                    tracing::error!("Failed to handle WASM step registration: {:?}", e);
-                }
-                let _ = message.double_ack().await;
+            spawn_handler(message, "WASM step registration".to_string(), async move {
+                handler::handle_wasm_registration(payload, pool).await
             });
         }
         "stormchaser.v1.step.unpacking_sfs" => {
-            tokio::spawn(async move {
-                if let Err(e) = handler::handle_step_unpacking_sfs(payload, pool).await {
-                    tracing::error!("Failed to handle step unpacking_sfs event: {:?}", e);
-                }
-                let _ = message.double_ack().await;
-            });
+            spawn_handler(
+                message,
+                "step unpacking_sfs event".to_string(),
+                async move { handler::handle_step_unpacking_sfs(payload, pool).await },
+            );
         }
         "stormchaser.v1.step.packing_sfs" => {
-            tokio::spawn(async move {
-                if let Err(e) = handler::handle_step_packing_sfs(payload, pool).await {
-                    tracing::error!("Failed to handle step packing_sfs event: {:?}", e);
-                }
-                let _ = message.double_ack().await;
+            spawn_handler(message, "step packing_sfs event".to_string(), async move {
+                handler::handle_step_packing_sfs(payload, pool).await
             });
         }
         "stormchaser.v1.step.initializing" => {
@@ -177,11 +214,8 @@ async fn handle_step_events(
                         return;
                     }
                 };
-            tokio::spawn(async move {
-                if let Err(e) = handler::handle_step_initializing(event, pool).await {
-                    tracing::error!("Failed to handle step initializing event: {:?}", e);
-                }
-                let _ = message.double_ack().await;
+            spawn_handler(message, "step initializing event".to_string(), async move {
+                handler::handle_step_initializing(event, pool).await
             });
         }
         "stormchaser.v1.step.running" => {
@@ -194,11 +228,8 @@ async fn handle_step_events(
                         return;
                     }
                 };
-            tokio::spawn(async move {
-                if let Err(e) = handler::handle_step_running(event, pool).await {
-                    tracing::error!("Failed to handle step running event: {:?}", e);
-                }
-                let _ = message.double_ack().await;
+            spawn_handler(message, "step running event".to_string(), async move {
+                handler::handle_step_running(event, pool).await
             });
         }
         "stormchaser.v1.step.completed" => {
@@ -211,19 +242,9 @@ async fn handle_step_events(
                         return;
                     }
                 };
-            tokio::spawn(async move {
-                if let Err(e) = handler::handle_step_completed(
-                    event,
-                    pool,
-                    nats_client,
-                    log_backend,
-                    tls_reloader,
-                )
-                .await
-                {
-                    tracing::error!("Failed to handle step completed event: {:?}", e);
-                }
-                let _ = message.double_ack().await;
+            spawn_handler(message, "step completed event".to_string(), async move {
+                handler::handle_step_completed(event, pool, nats_client, log_backend, tls_reloader)
+                    .await
             });
         }
         "stormchaser.v1.step.failed" => {
@@ -236,13 +257,8 @@ async fn handle_step_events(
                         return;
                     }
                 };
-            tokio::spawn(async move {
-                if let Err(e) =
-                    handler::handle_step_failed(event, pool, nats_client, tls_reloader).await
-                {
-                    tracing::error!("Failed to handle step failed event: {:?}", e);
-                }
-                let _ = message.double_ack().await;
+            spawn_handler(message, "step failed event".to_string(), async move {
+                handler::handle_step_failed(event, pool, nats_client, tls_reloader).await
             });
         }
         _ => {
@@ -265,6 +281,20 @@ pub async fn handle_message(
 ) {
     let normalized_subject = stormchaser_model::runner_auth::normalize_subject(subject);
     let subject = normalized_subject.as_str();
+
+    // An event delivered this often keeps failing without saying so: its handler panics,
+    // or the engine dies handling it
+    let delivered = deliveries(&message);
+    if delivered > retry::MAX_DELIVERIES {
+        tracing::error!(
+            "Giving up on {} after {} deliveries: {}",
+            subject,
+            delivered,
+            payload
+        );
+        let _ = message.double_ack().await;
+        return;
+    }
 
     // What a runner reports must be signed with the key the engine issued it, for the
     // subject it arrived on. Its signature is timed against when the stream received
