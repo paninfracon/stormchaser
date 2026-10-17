@@ -9,6 +9,7 @@ use stormchaser_dsl::ast;
 use stormchaser_dsl::ast::Workflow;
 use stormchaser_model::events::WorkflowRunningEvent;
 use stormchaser_model::events::{EventSource, EventType, WorkflowEventType};
+use stormchaser_model::workflow::RunStatus;
 use stormchaser_model::RunId;
 use stormchaser_tls::TlsReloader;
 use tracing::{debug, error, info};
@@ -39,6 +40,14 @@ pub async fn handle_workflow_start_pending(
 
     // 1. Fetch WorkflowRun and RunContext
     let run = fetch_run(run_id, &mut *tx).await?;
+    // The stream can deliver this event again after the run has started
+    if run.status != RunStatus::StartPending {
+        debug!(
+            "Run {} is {:?}, not start_pending; skipping its start_pending event",
+            run_id, run.status
+        );
+        return Ok(());
+    }
     let context = fetch_run_context(run_id, &mut *tx).await?;
 
     // 2. Parse AST from context

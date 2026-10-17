@@ -63,6 +63,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A run's events, delivered again, no longer run it again. JetStream delivers an event again when the engine is slow to acknowledge it, which a cold git clone easily is. A second `run.queued` resolved a run that was already running, or already failed, and a second `run.start_pending` scheduled its first steps again; a second `run.direct` ran the workflow's queries again before failing. Each handler now does nothing for a run that has moved on. The engine also no longer moves a run to running itself straight after resolving it, leaving that to `start_pending`; the two raced, and one failed its version check.
+
 - NATS passwords are generated to start with a letter. NATS reads its passwords from the environment as unquoted configuration values, so a generated password that happened to start with `-` or look like a number (`12e4…`) stopped the server. `scripts/setup.sh`, the umbrella chart, the test environment and CI could all generate one now and then; CI failed this way. A password you set yourself must also start with a letter (`docs/nats.md`). Passwords already generated are kept.
 
 - The test environment's NATS users get random passwords, generated on first use and kept, readable by you alone, until `scripts/test-env-down.sh`. The fixed passwords in `scripts/test-env.sh` let anyone who could reach the published test port use the broker. `scripts/test-env-up.sh` starts the stack again when its passwords change, and gives docker compose placeholders for the settings of services the test stack does not run.

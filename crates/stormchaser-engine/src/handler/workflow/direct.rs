@@ -22,6 +22,14 @@ pub async fn handle_workflow_direct(
     let run_id_str = payload["run_id"].as_str().context("Missing run_id")?;
     let run_id = uuid::Uuid::parse_str(run_id_str).map(RunId::new)?;
     tracing::Span::current().record("run_id", tracing::field::display(run_id));
+
+    // The stream can deliver this event again after the run was created; its queries
+    // and checks must not run a second time
+    if crate::db::workflow_run_exists(&pool, run_id).await? {
+        debug!("Direct run {} already exists, skipping", run_id);
+        return Ok(());
+    }
+
     let workflow_content = payload["dsl"].as_str().context("Missing dsl content")?;
     let initiating_user = payload["initiating_user"]
         .as_str()

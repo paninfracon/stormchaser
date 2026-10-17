@@ -8,6 +8,7 @@ use stormchaser_dsl::StormchaserParser;
 use stormchaser_model::auth::{EngineOpaContext, OpaClient};
 use stormchaser_model::events::WorkflowStartPendingEvent;
 use stormchaser_model::events::{EventSource, EventType, SchemaVersion, WorkflowEventType};
+use stormchaser_model::workflow::RunStatus;
 use stormchaser_model::RunId;
 use stormchaser_tls::TlsReloader;
 use tracing::{debug, error, info};
@@ -27,6 +28,14 @@ pub async fn handle_workflow_queued(
 
     // 1. Fetch WorkflowRun from DB
     let run = fetch_run(run_id, &pool).await?;
+    // The stream can deliver this event again, after the run has moved on or failed
+    if run.status != RunStatus::Queued {
+        debug!(
+            "Run {} is {:?}, not queued; skipping its queued event",
+            run_id, run.status
+        );
+        return Ok(());
+    }
     let machine = WorkflowMachine::<state::Queued>::new(run);
 
     // 2. Transition to Resolving
@@ -370,8 +379,9 @@ pub async fn handle_workflow_queued(
     .await
     .with_context(|| format!("Failed to update run context for {}", run_id))?;
 
-    // 8. Transition to StartPending
-    let machine = machine.start_pending(&mut *tx).await?;
+    // 8. Transition to StartPending. The start_pending handler schedules the first
+    // steps and moves the run to Running.
+    let _ = machine.start_pending(&mut *tx).await?;
 
     // Emit event for transition to StartPending
     let event = WorkflowStartPendingEvent {
@@ -395,11 +405,8 @@ pub async fn handle_workflow_queued(
 
     tx.commit().await?;
 
-    // 8. Transition to Running
-    let _ = machine.start(&mut *pool.acquire().await?).await?;
-
     info!(
-        "Successfully resolved and parsed workflow file, started run {}",
+        "Successfully resolved and parsed workflow file for run {}",
         run_id
     );
 

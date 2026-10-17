@@ -233,6 +233,22 @@ where
         .await
 }
 
+/// Whether a run with this id exists, running or archived.
+pub async fn workflow_run_exists<'a, E>(executor: E, id: RunId) -> Result<bool, sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    sqlx::query_scalar(
+        r#"
+        SELECT EXISTS (SELECT 1 FROM workflow_runs WHERE id = $1)
+            OR EXISTS (SELECT 1 FROM archived_workflow_runs WHERE id = $1)
+        "#,
+    )
+    .bind(id)
+    .fetch_one(executor)
+    .await
+}
+
 #[allow(clippy::too_many_arguments)]
 /// Update workflow run status.
 pub async fn update_workflow_run_status<'a, E>(
