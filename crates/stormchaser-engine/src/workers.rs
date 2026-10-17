@@ -271,10 +271,19 @@ pub fn start_outbox_relay_worker(
                                 }
                             }
 
-                            match js
+                            // The relay publishes an event again when it dies before
+                            // deleting its row; the stream drops the second copy
+                            headers.insert("Nats-Msg-Id", event.id.to_string().as_str());
+
+                            // Published once the stream has stored it, not once sent
+                            let published = match js
                                 .publish_with_headers(event.subject, headers, event.payload.into())
                                 .await
                             {
+                                Ok(ack) => ack.await.map(|_| ()).map_err(anyhow::Error::from),
+                                Err(e) => Err(anyhow::Error::from(e)),
+                            };
+                            match published {
                                 Ok(_) => {
                                     if let Err(error) =
                                         db::outbox::delete_outbox_event(&mut *tx, event.id).await

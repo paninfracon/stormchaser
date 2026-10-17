@@ -63,6 +63,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The outbox relay deletes an event only once the stream has stored it, and the stream keeps one copy of an event the relay publishes twice. The relay took a message as published once it was sent, so an event the stream then refused was deleted and lost. A relay that died after publishing a batch, before its deletions were committed, published it again, and each event was handled twice; events now carry their outbox id as `Nats-Msg-Id`, which the stream deduplicates within its 2-minute window.
+
 - The chart's engine upgrades without getting stuck on its git cache. The cache is a ReadWriteOnce volume by default, and a rolling update starts the new pod before stopping the old one, so a new pod scheduled on another node waited for the volume forever. With a ReadWriteOnce cache the engine is now replaced, not rolled (events wait in the stream meanwhile), and `engine.replicaCount` above 1 fails to render with it: more replicas need `engine.persistence.accessMode: ReadWriteMany`, or `engine.persistence.enabled: false` for a cache per pod.
 
 - A run whose archive failed is archived when its last step's result is delivered again. The engine archives a finished run after saving its last step's result; when archiving failed, the result's next delivery stopped at the step being finished already, so the run stayed unarchived.
