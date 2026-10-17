@@ -17,7 +17,6 @@ use stormchaser_tls::TlsReloader;
 
 use crate::router::handle_message;
 use crate::setup::*;
-use crate::workers::*;
 
 pub async fn setup_nats_consumers(
     nats_client: &async_nats::Client,
@@ -381,13 +380,8 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
         std::env::var("STORMCHASER_ASSIGNED_SHARDS").unwrap_or_else(|_| "0".to_string());
     let assigned_shards = parse_assigned_shards(&assigned_shards_env)?;
 
-    if assigned_shards.contains(&0) {
-        start_liveness_worker(pool.clone(), nats_client.clone());
-        start_timeout_worker(pool.clone(), nats_client.clone(), tls_reloader.clone());
-        start_resolver_crash_recovery_worker(pool.clone(), nats_client.clone());
-        let _outbox_relay_worker = start_outbox_relay_worker(pool.clone(), nats_client.clone());
-        start_task_message_purge_worker(pool.clone(), nats_client.clone());
-    }
+    // Whatever its shards, one replica at a time runs the background workers
+    crate::leader::start_leader_election(pool.clone(), nats_client.clone(), tls_reloader.clone());
 
     let (messages, query_messages) = setup_nats_consumers(&nats_client, &assigned_shards).await?;
 

@@ -9,7 +9,10 @@ use stormchaser_model::RunId;
 use stormchaser_tls::TlsReloader;
 use uuid::Uuid;
 
-pub fn start_liveness_worker(pool: sqlx::PgPool, _nats_client: async_nats::Client) {
+pub fn start_liveness_worker(
+    pool: sqlx::PgPool,
+    _nats_client: async_nats::Client,
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(15));
         loop {
@@ -109,14 +112,14 @@ pub fn start_liveness_worker(pool: sqlx::PgPool, _nats_client: async_nats::Clien
                 }
             }
         }
-    });
+    })
 }
 
 pub fn start_timeout_worker(
     pool: sqlx::PgPool,
     nats_client: async_nats::Client,
     tls_reloader: Arc<TlsReloader>,
-) {
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(30));
         loop {
@@ -180,10 +183,13 @@ pub fn start_timeout_worker(
                 Err(e) => tracing::error!("Failed to fetch runs for timeout check: {:?}", e),
             }
         }
-    });
+    })
 }
 
-pub fn start_resolver_crash_recovery_worker(pool: sqlx::PgPool, _nats_client: async_nats::Client) {
+pub fn start_resolver_crash_recovery_worker(
+    pool: sqlx::PgPool,
+    _nats_client: async_nats::Client,
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(60));
         loop {
@@ -238,7 +244,7 @@ pub fn start_resolver_crash_recovery_worker(pool: sqlx::PgPool, _nats_client: as
                 Err(e) => tracing::error!("Failed to fetch stalled resolving runs: {:?}", e),
             }
         }
-    });
+    })
 }
 
 pub fn start_outbox_relay_worker(
@@ -376,7 +382,10 @@ pub async fn purge_finished_task_messages(
     Ok(cleared)
 }
 
-pub fn start_task_message_purge_worker(pool: sqlx::PgPool, nats_client: async_nats::Client) {
+pub fn start_task_message_purge_worker(
+    pool: sqlx::PgPool,
+    nats_client: async_nats::Client,
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(30));
         let js = async_nats::jetstream::new(nats_client);
@@ -386,7 +395,7 @@ pub fn start_task_message_purge_worker(pool: sqlx::PgPool, nats_client: async_na
                 tracing::warn!("Task message purge failed: {:?}", e);
             }
         }
-    });
+    })
 }
 
 #[cfg(test)]

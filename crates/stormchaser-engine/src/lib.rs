@@ -23,6 +23,8 @@ pub mod hitl;
 pub mod jq_sandbox;
 /// JUnit test report parsing and aggregation.
 pub mod junit;
+/// Chooses the one engine replica that runs the background workers.
+pub mod leader;
 /// NATS JetStream integration for pub/sub events.
 pub mod nats;
 /// Database persistence for workflow and step models.
