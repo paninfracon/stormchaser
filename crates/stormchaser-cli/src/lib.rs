@@ -5,7 +5,7 @@
 pub mod commands;
 pub mod utils;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use reqwest_middleware::ClientBuilder;
 use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
@@ -27,9 +27,15 @@ pub struct Cli {
     #[arg(short, long, env = "STORMCHASER_URL")]
     pub url: Option<String>,
 
-    /// The authentication token for the API.
-    #[arg(short, long, env = "STORMCHASER_TOKEN")]
+    /// The authentication token for the API. Prefer the STORMCHASER_TOKEN environment
+    /// variable or a profile: other users on the host can read a command's arguments.
+    #[arg(short, long, env = "STORMCHASER_TOKEN", hide_env_values = true)]
     pub token: Option<String>,
+
+    /// A PEM file of CA certificates to trust as well as the system's, for an API
+    /// whose certificate a private CA signed.
+    #[arg(long, env = "STORMCHASER_CA_CERT")]
+    pub ca_cert: Option<PathBuf>,
 }
 
 /// Available CLI subcommands.
@@ -40,7 +46,8 @@ pub enum Commands {
         /// Path to the .storm file
         file: PathBuf,
 
-        /// Input parameters in key=value format
+        /// Input parameters in key=value format, or key=@path to read the value from a
+        /// file (for secrets, which would otherwise show in the process list)
         #[arg(short, long)]
         input: Vec<String>,
 
@@ -107,13 +114,34 @@ pub enum Commands {
 
     /// Interactive browser-based login
     Login {
-        /// The OIDC issuer URL.
-        #[arg(long, default_value = "http://localhost:5556/dex")]
-        issuer: String,
-        /// The OIDC client ID.
-        #[arg(long, default_value = "stormchaser-cli")]
-        client_id: String,
+        /// Loopback port the browser is sent back to. It must be one of the redirect
+        /// URLs registered with the identity provider.
+        #[arg(long, default_value_t = 8080)]
+        callback_port: u16,
+        /// Print the token instead of storing it in a profile.
+        #[arg(long)]
+        print_token: bool,
+        /// No longer used: the API knows its own identity provider.
+        #[arg(long, hide = true)]
+        issuer: Option<String>,
+        /// No longer used: the API knows its own client.
+        #[arg(long, hide = true)]
+        client_id: Option<String>,
     },
+}
+
+/// The HTTP client, trusting the CA certificates in `ca_cert` as well as the system's.
+pub fn http_client(ca_cert: Option<&std::path::Path>) -> Result<reqwest::Client> {
+    let mut builder = reqwest::Client::builder();
+    if let Some(path) = ca_cert {
+        let pem = std::fs::read(path)
+            .with_context(|| format!("cannot read the CA certificate {}", path.display()))?;
+        let certs = reqwest::Certificate::from_pem_bundle(&pem)
+            .with_context(|| format!("{} is not a PEM bundle", path.display()))?;
+        anyhow::ensure!(!certs.is_empty(), "{} holds no certificate", path.display());
+        builder = builder.tls_certs_merge(certs);
+    }
+    Ok(builder.build()?)
 }
 
 /// Executes the specified CLI command.
@@ -122,7 +150,7 @@ pub enum Commands {
 /// to the appropriate handler based on the parsed CLI options.
 pub async fn run_cli(cli: Cli) -> Result<()> {
     let retry_policy = ExponentialBackoff::builder().build_with_max_retries(3);
-    let http_client = ClientBuilder::new(reqwest::Client::new())
+    let http_client = ClientBuilder::new(http_client(cli.ca_cert.as_deref())?)
         .with(RetryTransientMiddleware::new_with_policy(retry_policy))
         .build();
 
@@ -130,11 +158,16 @@ pub async fn run_cli(cli: Cli) -> Result<()> {
     let mut final_token = cli.token.clone();
 
     if let Ok(Some(profile)) = commands::auth_profiles::get_active_profile() {
+        // A profile's token belongs to that profile's server: never send it to a URL
+        // given on the command line that points somewhere else
+        let same_server = final_url
+            .as_deref()
+            .is_none_or(|url| url.trim_end_matches('/') == profile.url.trim_end_matches('/'));
+        if final_token.is_none() && same_server {
+            final_token = profile.token;
+        }
         if final_url.is_none() {
             final_url = Some(profile.url);
-        }
-        if final_token.is_none() {
-            final_token = profile.token;
         }
     }
 
@@ -192,8 +225,16 @@ pub async fn run_cli(cli: Cli) -> Result<()> {
             auth::handle(&resolved_url, &http_client, command).await?;
         }
 
-        Commands::Login { issuer, client_id } => {
-            auth::handle_login(&resolved_url, &issuer, &client_id, &http_client).await?;
+        Commands::Login {
+            callback_port,
+            print_token,
+            issuer,
+            client_id,
+        } => {
+            if issuer.is_some() || client_id.is_some() {
+                eprintln!("--issuer and --client-id are ignored: login goes through the API.");
+            }
+            auth::handle_login(&resolved_url, callback_port, print_token, &http_client).await?;
         }
     }
 

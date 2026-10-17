@@ -5,6 +5,10 @@
 
 /// Artifact management and backend integrations.
 pub mod artifact;
+/// Operator allow-lists for AWS roles and Lambda functions.
+/// Policy checks on connection use.
+pub mod authz;
+pub mod aws_guard;
 /// Database interaction layer.
 pub mod db;
 /// Git caching and cloning utilities.
@@ -15,6 +19,8 @@ pub mod handler;
 pub mod hcl_eval;
 /// Human-In-The-Loop (HITL) manual approval handling.
 pub mod hitl;
+/// Runs workflow-supplied jq programs in a child process that can be stopped.
+pub mod jq_sandbox;
 /// JUnit test report parsing and aggregation.
 pub mod junit;
 /// NATS JetStream integration for pub/sub events.
@@ -24,7 +30,13 @@ pub mod persistence;
 /// Dynamic queries for schemas.
 pub mod query;
 /// Utilities for parsing resources like CPU and Memory.
+/// Short-lived registry credentials for artifact pushes.
+pub mod registry_token;
 pub mod resource_utils;
+/// Issues runners their keys and checks what they sign.
+/// Ceilings on the quotas a run may give itself.
+pub mod run_limits;
+pub mod runner_auth;
 /// S3 backend storage implementation.
 pub mod s3;
 /// Secrets management interfaces and backends.
@@ -34,6 +46,8 @@ pub mod stdlib;
 pub mod step_machine;
 /// OpenTelemetry tracing and metrics initialization.
 pub mod telemetry;
+/// Rendering of workflow authors' Jinja templates, within fuel and output limits.
+pub mod templating;
 /// WebAssembly module execution utilities.
 pub mod wasm;
 /// State machine for full workflow runs.

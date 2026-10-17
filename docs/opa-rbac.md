@@ -28,6 +28,44 @@ into the policy evaluation under the `input` document:
 
 The `token` is the raw JWT access token provided by the client (if available).
 
+The same entrypoint (`stormchaser/allow`) is also asked three other kinds of
+question, and a policy has to answer all four. They are told apart by the fields
+present in `input`:
+
+| Question | Fields | Asked by |
+| :--- | :--- | :--- |
+| Request | `method`, `path`, `token` | API, for every protected request |
+| Resource | `action`, `resource`, `subject`, `token` | API, when a request names an object; engine and query service, before using a connection |
+| Engine | `run_id`, `initiating_user`, `workflow_ast`, `inputs` | Engine, before a run starts |
+| Approval | `run_id`, `initiating_user`, `step_ast`, `inputs`, `run_outputs`, `approver`, `token` | API, when a step is approved or rejected |
+
+A resource question looks like this:
+
+```json
+{
+  "action": "delete",
+  "resource": { "type": "webhook", "id": "6f1c...", "owner": "alice@example.com" },
+  "subject": { "sub": "auth0|123", "email": "bob@example.com" },
+  "token": "eyJhbGc..."
+}
+```
+
+`action` is `read`, `update`, `delete`, `use` or `make_default`. `make_default` is
+asked when a request makes a connection the default storage backend
+(`is_default_sfs`), which receives the files, artifacts and test reports of every
+run that names no backend of its own; grant it to admins only. The shipped policy
+does, once any admin is configured. `resource.type` is `run`,
+`connection`, `webhook`, `event_rule` or `cron_workflow`. `resource.owner` is
+`null` for objects created before ownership was recorded. `subject` is the
+identity the API verified; when the engine asks on a run's behalf, both of its
+fields hold the run's user and `token` is `null`.
+
+The policy Stormchaser ships, `deploy/opa/policy.rego`, answers all four and is the
+best starting point for your own. Its tests are in `deploy/opa/policy_test.rego`
+(`opa test deploy/opa`). A policy written before the resource question existed
+that denies by default will refuse every per-object request until it gains a rule
+for it.
+
 > 💡 **Tip:** The fastest way to learn and debug Rego policies is the
 > [Rego Playground](https://play.openpolicyagent.org/). You can paste your policy
 > there, supply a mock `input` JSON, and instantly see what evaluates to true
@@ -153,6 +191,25 @@ allow if {
 }
 ```
 
+**Run-only users**
+The shipped policy has this built in: set `author_groups` in its settings (Helm:
+`api.opa.sidecar.settings.authorGroups`) and users outside those groups can run
+workflows from registered repositories but cannot supply workflow text or change
+connections. In a policy of your own, the requests to refuse are the non-read
+methods on these paths, which the API and the query service both ask about:
+
+```rego
+author_only_request if input.path in {"/api/v1/runs/direct", "/api/v1/schema/hydrate-direct"}
+author_only_request if input.path == "/api/v1/connections"
+author_only_request if startswith(input.path, "/api/v1/connections/")
+
+request_denied if {
+    author_only_request
+    not input.method in {"GET", "HEAD", "OPTIONS"}
+    not "workflow-authors" in token_payload.groups
+}
+```
+
 **Approval Separation of Duties (SoD)**
 Prevent the person who initiated a run from approving their own manual steps.
 
@@ -182,6 +239,10 @@ modules directly.
 > managed RBAC solutions or in environments where policies may change
 > frequently, as it allows policies to be updated without restarting the
 > Stormchaser services.
+>
+> **Unsupported builtins:** The embedded WASM runtime does not provide the
+> YAML builtins (`yaml.marshal`, `yaml.unmarshal`, `yaml.is_valid`). Policies
+> that call them must be evaluated over HTTP via `OPA_URL` instead.
 
 ### Compile the Rego Policy
 

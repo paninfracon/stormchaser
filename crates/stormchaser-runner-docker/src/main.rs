@@ -16,7 +16,6 @@ use tokio::sync::watch;
 use tokio::time;
 use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use uuid::Uuid;
 
 use stormchaser_model::{dsl, APPLICATION_JSON};
 
@@ -26,7 +25,7 @@ pub mod parsing;
 pub mod reaper;
 pub mod traits;
 
-use crate::handler::{handle_task, scan_for_orphans};
+use crate::handler::{handle_cancel, handle_task, scan_for_orphans};
 use crate::reaper::run_reaper;
 
 /// Configuration for the Stormchaser Docker Runner.
@@ -48,7 +47,8 @@ impl Config {
         V: AsRef<str>,
     {
         let mut nats_url = "nats://localhost:4222".to_string();
-        let mut runner_id = Uuid::new_v4().to_string();
+        let mut explicit_runner_id = None;
+        let mut hostname = None;
         let mut encryption_key = None;
         let mut loki_url = None;
         let mut rust_log = "stormchaser_runner_docker=info".to_string();
@@ -56,13 +56,26 @@ impl Config {
         for (k, v) in env {
             match k.as_ref() {
                 "NATS_URL" => nats_url = v.as_ref().to_string(),
-                "RUNNER_ID" => runner_id = v.as_ref().to_string(),
-                "STORMCHASER_STATE_ENCRYPTION_KEY" => encryption_key = Some(v.as_ref().to_string()),
+                "RUNNER_ID" => explicit_runner_id = Some(v.as_ref().to_string()),
+                "HOSTNAME" => hostname = Some(v.as_ref().to_string()),
+                // Empty, as compose passes it when no key was generated, means none
+                "STORMCHASER_STATE_ENCRYPTION_KEY" if !v.as_ref().is_empty() => {
+                    encryption_key = Some(v.as_ref().to_string())
+                }
                 "LOKI_URL" => loki_url = Some(v.as_ref().to_string()),
                 "RUST_LOG" => rust_log = v.as_ref().to_string(),
                 _ => {}
             }
         }
+
+        // Stable across restarts of this runner, so it comes back as itself
+        let runner_id = stormchaser_model::runner::runner_id(
+            "docker",
+            explicit_runner_id.as_deref(),
+            hostname
+                .or_else(stormchaser_model::runner::kernel_hostname)
+                .as_deref(),
+        );
 
         Self {
             nats_url,
@@ -158,7 +171,10 @@ pub async fn run_runner(config: Config) -> Result<()> {
     });
 
     // 2. Connect to NATS
-    let nats_options = async_nats::ConnectOptions::new().retry_on_initial_connect();
+    let nats_options = stormchaser_model::nats::apply_auth_from_env(
+        async_nats::ConnectOptions::new().retry_on_initial_connect(),
+    )
+    .await?;
     let nats_client = async_nats::connect_with_options(nats_url, nats_options)
         .await
         .context("Failed to connect to NATS")?;
@@ -167,8 +183,12 @@ pub async fn run_runner(config: Config) -> Result<()> {
     let nats_subject = format!("stormchaser.v1.runner.docker.{}", runner_id);
 
     // Generate JSON Schema for our supported step type
-    let common_schema = schemars::schema_for!(dsl::CommonContainerSpec);
+    let common_schema =
+        stormchaser_model::schema_gen::draft07_schema_for::<dsl::CommonContainerSpec>();
     let common_schema_json = serde_json::to_value(common_schema)?;
+
+    // A key of this runner's own, which signs everything it reports from here on
+    stormchaser_model::runner_auth::obtain_session(&nats_client, &runner_id).await?;
 
     let registration_payload = RunnerRegisterEvent {
         runner_id: runner_id.clone(),
@@ -197,7 +217,10 @@ pub async fn run_runner(config: Config) -> Result<()> {
         .time(chrono::Utc::now())
         .data(
             APPLICATION_JSON,
-            serde_json::to_value(registration_payload).unwrap(),
+            stormchaser_model::runner_auth::sign_if_runner(
+                serde_json::to_value(registration_payload).unwrap(),
+                "stormchaser.v1.runner.register",
+            ),
         )
         .build()
         .context("Failed to build CloudEvent")?;
@@ -229,18 +252,14 @@ pub async fn run_runner(config: Config) -> Result<()> {
 
     // 5. Subscribe to task subjects
     let js = async_nats::jetstream::new(nats_client.clone());
-    info!("Ensuring JetStream stream 'stormchaser' exists...");
-    let stream = js
-        .get_or_create_stream(async_nats::jetstream::stream::Config {
-            name: "stormchaser".to_string(),
-            subjects: vec!["stormchaser.>".to_string()],
-            ..Default::default()
-        })
-        .await
-        .context("Failed to ensure JetStream stream")?;
+    info!("Waiting for the JetStream stream 'stormchaser'...");
+    let stream = stormchaser_model::nats::wait_for_stream(&js).await;
 
     let runner_consumer = stream
         .create_consumer(async_nats::jetstream::consumer::pull::Config {
+            // Named so the create request carries the filter in its subject, which lets
+            // NATS permissions limit runners to consumers on their own task subjects.
+            name: Some(format!("runner-docker-{}", runner_id)),
             filter_subject: nats_subject.clone(),
             ..Default::default()
         })
@@ -252,27 +271,25 @@ pub async fn run_runner(config: Config) -> Result<()> {
         .await
         .context("Failed to get runner-specific consumer messages")?;
 
-    info!("Creating durable consumer for docker-runner...");
-    let consumer = stream
-        .get_or_create_consumer(
-            "docker-runner",
-            async_nats::jetstream::consumer::pull::Config {
-                durable_name: Some("docker-runner".to_string()),
-                filter_subject: "stormchaser.v1.*.step.scheduled.runcontainer".to_string(),
-                ..Default::default()
-            },
-        )
-        .await
-        .context("Failed to create JetStream consumer")?;
+    use stormchaser_model::runner::{CONTAINER_TASKS_CONSUMER, CONTAINER_TASKS_SUBJECT};
+    let consumer = stormchaser_model::runner::task_consumer(
+        &stream,
+        CONTAINER_TASKS_CONSUMER,
+        CONTAINER_TASKS_SUBJECT,
+    )
+    .await?;
 
     let mut task_messages = consumer
         .messages()
         .await
         .context("Failed to get consumer messages")?;
 
+    // Cancellations of runs, which every runner reads for itself
+    let mut cancel_messages = stormchaser_model::run_cancel::subscribe(&stream).await?;
+
     info!(
-        "Listening for tasks on {} and JetStream subject stormchaser.v1.*.step.scheduled.runcontainer",
-        nats_subject
+        "Listening for tasks on {} and {} (consumer {})",
+        nats_subject, CONTAINER_TASKS_SUBJECT, CONTAINER_TASKS_CONSUMER
     );
 
     // 6. Main event loop
@@ -300,6 +317,21 @@ pub async fn run_runner(config: Config) -> Result<()> {
                     .await
                 {
                     error!("Failed to publish heartbeat: {:?}", e);
+                }
+            }
+            message = cancel_messages.next() => {
+                match message {
+                    Some(Ok(msg)) => {
+                        tokio::spawn(handle_cancel(msg, docker.clone()));
+                    }
+                    Some(Err(e)) => {
+                        error!("Run cancellation consumer error: {:?}", e);
+                        time::sleep(Duration::from_secs(1)).await;
+                    }
+                    None => {
+                        error!("Run cancellation consumer closed");
+                        break;
+                    }
                 }
             }
             message = runner_task_messages.next() => {

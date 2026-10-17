@@ -1,0 +1,50 @@
+{{- /*
+The certificate the API, the query service, the web tier and the engine serve and
+present, signed by a CA of its own. Generated on first install and kept across
+upgrades, so that what trusts the CA keeps trusting it. It names the Services as the
+orchestration chart calls them. For a certificate from your own CA or cert-manager,
+set tlsCerts.generate=false and create the Secret (ca.crt, tls.crt, tls.key) yourself.
+*/ -}}
+{{- $orchestration := index .Values "stormchaser-orchestration" }}
+{{- $tls := $orchestration.global.tls | default dict }}
+{{- if and .Values.tlsCerts.generate (ne ($tls.enabled | toString) "false") }}
+{{- $secretName := $tls.existingSecret | default "stormchaser-tls-certs" }}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $secretName }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secretName }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/resource-policy: keep
+type: Opaque
+data:
+{{- if and $existing $existing.data (index $existing.data "tls.crt") }}
+  {{- range $key := list "ca.crt" "tls.crt" "tls.key" }}
+  {{ $key }}: {{ index $existing.data $key }}
+  {{- end }}
+{{- else }}
+  {{- $fullname := "" }}
+  {{- if $orchestration.fullnameOverride }}
+  {{- $fullname = $orchestration.fullnameOverride | trunc 63 | trimSuffix "-" }}
+  {{- else }}
+  {{- $name := $orchestration.nameOverride | default "stormchaser-orchestration" }}
+  {{- if contains $name .Release.Name }}
+  {{- $fullname = .Release.Name | trunc 63 | trimSuffix "-" }}
+  {{- else }}
+  {{- $fullname = printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
+  {{- end }}
+  {{- end }}
+  {{- $names := list "localhost" }}
+  {{- range $component := list "api" "query" "web" "engine" }}
+  {{- $service := printf "%s-%s" $fullname $component }}
+  {{- $names = concat $names (list $service (printf "%s.%s" $service $.Release.Namespace) (printf "%s.%s.svc" $service $.Release.Namespace) (printf "%s.%s.svc.cluster.local" $service $.Release.Namespace)) }}
+  {{- end }}
+  {{- $ca := genCA "Stormchaser CA" (int .Values.tlsCerts.days) }}
+  {{- $cert := genSignedCert (printf "%s-api" $fullname) (list "127.0.0.1") $names (int .Values.tlsCerts.days) $ca }}
+  ca.crt: {{ $ca.Cert | b64enc }}
+  tls.crt: {{ $cert.Cert | b64enc }}
+  tls.key: {{ $cert.Key | b64enc }}
+{{- end }}
+{{- end }}

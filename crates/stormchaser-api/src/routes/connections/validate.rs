@@ -1,131 +1,107 @@
 use super::TestConnectionRequest;
 use aws_config::Region;
-use std::net::IpAddr;
 use std::time::Duration;
 
 const HTTP_TEST_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// True if `ip` is in a range Stormchaser must never connect to — loopback,
-/// private (RFC-1918), link-local (169.254.0.0/16, incl. the 169.254.169.254
-/// cloud-metadata address), unspecified/broadcast, multicast (IPv4 224.0.0.0/4,
-/// IPv6 ff00::/8), and the IPv6 equivalents.
-/// IPv4-mapped IPv6 (`::ffff:a.b.c.d`) is unwrapped so it can't smuggle a
-/// restricted v4 address past the v6 checks.
-fn is_blocked_ip(ip: IpAddr) -> bool {
-    if ip.is_multicast() {
-        return true;
+/// Host and port a repository URL connects to. The URL has already passed
+/// `validate_repo_url`, so it is `scheme://…` or scp-like `user@host:path`.
+fn git_host_port(repo_url: &str) -> Result<(String, u16), String> {
+    if repo_url.contains("://") {
+        let parsed = url::Url::parse(repo_url).map_err(|e| format!("Invalid URL: {}", e))?;
+        let host = parsed
+            .host_str()
+            .ok_or_else(|| "Repository URL has no host".to_string())?
+            .to_string();
+        let port = parsed
+            .port_or_known_default()
+            .unwrap_or(if parsed.scheme() == "ssh" { 22 } else { 443 });
+        return Ok((host, port));
     }
-    match ip {
-        IpAddr::V4(v4) => {
-            v4.is_loopback()
-                || v4.is_private()
-                || v4.is_link_local()
-                || v4.is_unspecified()
-                || v4.is_broadcast()
-        }
-        IpAddr::V6(v6) => {
-            if let Some(v4) = v6.to_ipv4_mapped() {
-                return is_blocked_ip(IpAddr::V4(v4));
-            }
-            let o = v6.octets();
-            v6.is_loopback()
-                || v6.is_unspecified()
-                || (o[0] == 0xfe && (o[1] & 0xc0) == 0x80) // link-local fe80::/10
-                || (o[0] & 0xfe == 0xfc) // unique-local fc00::/7
-        }
+    let (user_host, _path) = repo_url
+        .split_once(':')
+        .ok_or_else(|| "Repository URL has no host".to_string())?;
+    let host = user_host.rsplit_once('@').map_or(user_host, |(_, h)| h);
+    Ok((host.to_string(), 22))
+}
+
+/// Refuses a repository the engine would not clone, or one on an internal address.
+async fn check_git_target(repo_url: &str) -> Result<(), String> {
+    stormchaser_engine::git_cache::validate_repo_url(repo_url).map_err(|e| e.to_string())?;
+    let (host, port) = git_host_port(repo_url)?;
+    stormchaser_model::net_guard::validate_host_safe(&host, port)
+        .await
+        .map(|_| ())
+}
+
+/// Parses a Postgres URL and refuses Unix sockets and internal addresses. The returned
+/// options connect to the address that was checked, except under `verify-full`, where
+/// the server must prove the name anyway.
+async fn check_postgres_target(url: &str) -> Result<sqlx::postgres::PgConnectOptions, String> {
+    use sqlx::postgres::{PgConnectOptions, PgSslMode};
+    use std::str::FromStr;
+
+    // Not echoed back: the parse error can quote the URL, password included
+    let options =
+        PgConnectOptions::from_str(url).map_err(|_| "Invalid Postgres URL".to_string())?;
+    // A URL without a host makes the driver look for a local socket or use PGHOST
+    let names_host = url::Url::parse(url)
+        .ok()
+        .is_some_and(|u| u.host_str().is_some_and(|h| !h.is_empty()));
+    if !names_host || options.get_socket().is_some() || options.get_host().starts_with('/') {
+        return Err("Postgres URL must name a network host".to_string());
+    }
+    let addrs =
+        stormchaser_model::net_guard::validate_host_safe(options.get_host(), options.get_port())
+            .await?;
+    if matches!(options.get_ssl_mode(), PgSslMode::VerifyFull) {
+        return Ok(options);
+    }
+    match addrs.first() {
+        Some(addr) => Ok(options.host(&addr.ip().to_string())),
+        None => Err("Host did not resolve to any address".to_string()),
     }
 }
 
-/// Validate that a URL is safe to connect to (SSRF protection).
+/// Refuses an S3 test that would use the API's own AWS identity, or an endpoint on an
+/// internal address.
 ///
-/// Allows only `http`/`https`, then **resolves the host via DNS** and rejects
-/// the URL if ANY resolved address is restricted (see `is_blocked_ip`). This
-/// prevents connecting to internal IP addresses.
-async fn validate_url_safe(raw_url: &str) -> Result<(url::Url, String, u16, Vec<IpAddr>), String> {
-    let parsed = url::Url::parse(raw_url).map_err(|e| format!("Invalid URL: {}", e))?;
-
-    match parsed.scheme() {
-        "http" | "https" => {}
-        s => {
-            return Err(format!(
-                "Disallowed URL scheme '{}': only http and https are permitted",
-                s
-            ))
+/// Without keys of its own the test would run as the API: any user could probe buckets
+/// the API can reach, or have it assume any role that trusts it.
+async fn check_s3_target(
+    has_keys: bool,
+    role_arn: Option<&str>,
+    endpoint: Option<&str>,
+) -> Result<(), String> {
+    match role_arn {
+        Some(role_arn) => stormchaser_engine::aws_guard::ensure_role_allowed(role_arn)
+            .map_err(|e| e.to_string())?,
+        None if !has_keys => {
+            return Err(
+                "An S3 connection test needs access_key and secret_key, or an allow-listed role"
+                    .to_string(),
+            )
         }
+        None => {}
     }
-
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| "URL has no host".to_string())?
-        .to_string();
-
-    let port = parsed.port_or_known_default().unwrap_or(443);
-
-    // Reject well-known loopback hostnames up front (before resolution).
-    let host_lower = host.to_lowercase();
-    if host_lower == "localhost" || host_lower.ends_with(".localhost") {
-        return Err(format!(
-            "Disallowed host '{}': localhost is not permitted",
-            host
-        ));
+    if let Some(endpoint) = endpoint {
+        stormchaser_model::net_guard::validate_url_safe(endpoint).await?;
     }
-
-    // Resolve the host and reject if ANY resolved IP is restricted. This is the
-    // key SSRF gate: it catches hostnames that resolve to internal/metadata IPs
-    // (incl. DNS-rebinding-style inputs) and bare IPs alike.
-    let addrs = tokio::net::lookup_host((host.as_str(), port))
-        .await
-        .map_err(|e| format!("Could not resolve host '{}': {}", host, e))?;
-
-    let mut resolved_any = false;
-    let mut resolved_ips = Vec::new();
-    for addr in addrs {
-        resolved_any = true;
-        let ip = addr.ip();
-        if is_blocked_ip(ip) {
-            return Err(format!(
-                "Disallowed host '{}': resolves to a restricted address ({})",
-                host, ip
-            ));
-        }
-        resolved_ips.push(ip);
-    }
-    if !resolved_any {
-        return Err(format!("Host '{}' did not resolve to any address", host));
-    }
-
-    Ok((parsed, host, port, resolved_ips))
+    Ok(())
 }
 
 pub async fn validate_connection(payload: &TestConnectionRequest) -> (bool, String) {
     match payload.connection_type {
         stormchaser_model::connections::ConnectionType::HttpApi => {
             if let Some(base_url) = payload.config.get("base_url").and_then(|v| v.as_str()) {
-                let (parsed_url, host, port, resolved_ips) = match validate_url_safe(base_url).await
-                {
-                    Ok(validated) => validated,
-                    Err(reason) => return (false, reason),
-                };
-
-                let resolved_addrs = resolved_ips
-                    .into_iter()
-                    .map(|ip| std::net::SocketAddr::new(ip, port))
-                    .collect::<Vec<_>>();
-
-                let client = match reqwest::Client::builder()
-                    .timeout(HTTP_TEST_TIMEOUT)
-                    // Do not follow redirects: a 30x to an internal host would
-                    // otherwise bypass validate_url_safe (SSRF via redirect).
-                    .redirect(reqwest::redirect::Policy::none())
-                    // Resolve DNS queries to the exact IPs we just validated to
-                    // prevent TOCTOU DNS rebinding attacks.
-                    .resolve_to_addrs(&host, &resolved_addrs)
-                    .build()
-                {
-                    Ok(c) => c,
-                    Err(e) => return (false, format!("Failed to build client: {}", e)),
-                };
-                let mut req = client.get(parsed_url);
+                // Refuses internal addresses, pins the validated ones and does not follow
+                // redirects (see `net_guard`).
+                let (client, parsed_url) =
+                    match stormchaser_model::net_guard::guarded_client(base_url).await {
+                        Ok(guarded) => guarded,
+                        Err(reason) => return (false, reason.to_string()),
+                    };
+                let mut req = client.get(parsed_url).timeout(HTTP_TEST_TIMEOUT);
                 if let Some(headers) = payload.config.get("headers").and_then(|v| v.as_object()) {
                     for (k, v) in headers {
                         if let Some(s) = v.as_str() {
@@ -164,6 +140,9 @@ pub async fn validate_connection(payload: &TestConnectionRequest) -> (bool, Stri
                 .or_else(|| payload.config.get("repo").and_then(|v| v.as_str()))
                 .or_else(|| payload.config.get("repo_url").and_then(|v| v.as_str()))
             {
+                if let Err(reason) = check_git_target(url).await {
+                    return (false, reason);
+                }
                 let url = url.to_string();
                 // git2 network I/O is blocking; run it on a dedicated thread pool so it
                 // does not block the async Tokio runtime.
@@ -190,9 +169,14 @@ pub async fn validate_connection(payload: &TestConnectionRequest) -> (bool, Stri
         }
         stormchaser_model::connections::ConnectionType::Postgres => {
             if let Some(url) = payload.config.get("url").and_then(|v| v.as_str()) {
+                let options = match check_postgres_target(url).await {
+                    Ok(options) => options,
+                    Err(reason) => return (false, reason),
+                };
                 match sqlx::postgres::PgPoolOptions::new()
+                    .max_connections(1)
                     .acquire_timeout(std::time::Duration::from_secs(5))
-                    .connect(url)
+                    .connect_with(options)
                     .await
                 {
                     Ok(pool) => {
@@ -224,6 +208,20 @@ pub async fn validate_connection(payload: &TestConnectionRequest) -> (bool, Stri
                     .get("region")
                     .and_then(|v| v.as_str())
                     .unwrap_or("us-east-1");
+                let role_arn = payload
+                    .aws_assume_role_arn
+                    .as_deref()
+                    .filter(|v| !v.is_empty());
+                let endpoint = payload.config.get("endpoint").and_then(|v| v.as_str());
+                if let Err(reason) = check_s3_target(
+                    access_key.is_some() && secret_key.is_some(),
+                    role_arn,
+                    endpoint,
+                )
+                .await
+                {
+                    return (false, reason);
+                }
                 let mut loader = aws_config::defaults(aws_config::BehaviorVersion::latest())
                     .region(Region::new(region.to_string()));
                 if let (Some(access_key), Some(secret_key)) = (access_key, secret_key) {
@@ -237,11 +235,7 @@ pub async fn validate_connection(payload: &TestConnectionRequest) -> (bool, Stri
                 }
 
                 let mut sdk_config = loader.load().await;
-                if let Some(role_arn) = payload
-                    .aws_assume_role_arn
-                    .as_deref()
-                    .filter(|v| !v.is_empty())
-                {
+                if let Some(role_arn) = role_arn {
                     let sts_client = aws_sdk_sts::Client::new(&sdk_config);
                     match sts_client
                         .assume_role()
@@ -280,7 +274,7 @@ pub async fn validate_connection(payload: &TestConnectionRequest) -> (bool, Stri
                 }
 
                 let mut config = aws_sdk_s3::config::Builder::from(&sdk_config);
-                if let Some(endpoint) = payload.config.get("endpoint").and_then(|v| v.as_str()) {
+                if let Some(endpoint) = endpoint {
                     config = config.endpoint_url(endpoint);
                 }
                 if payload
@@ -309,53 +303,97 @@ pub async fn validate_connection(payload: &TestConnectionRequest) -> (bool, Stri
 
 #[cfg(test)]
 mod tests {
-    use super::is_blocked_ip;
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-
-    fn ip(s: &str) -> IpAddr {
-        s.parse().unwrap()
-    }
+    use super::*;
 
     #[test]
-    fn blocks_loopback_private_linklocal_metadata_and_mapped() {
-        for s in [
-            "127.0.0.1",
-            "10.0.0.1",
-            "192.168.1.1",
-            "172.16.0.1",
-            "169.254.169.254", // cloud metadata (link-local)
-            "0.0.0.0",
-            "::1",
-            "fe80::1",                // IPv6 link-local
-            "fc00::1",                // IPv6 unique-local
-            "::ffff:127.0.0.1",       // IPv4-mapped loopback
-            "::ffff:169.254.169.254", // IPv4-mapped metadata
+    fn finds_the_host_a_repository_url_connects_to() {
+        for (url, host, port) in [
+            ("https://github.com/org/repo.git", "github.com", 443),
+            (
+                "https://user:pw@git.example.com:8443/r.git",
+                "git.example.com",
+                8443,
+            ),
+            (
+                "ssh://git@git.example.com/org/repo.git",
+                "git.example.com",
+                22,
+            ),
+            (
+                "ssh://git@git.example.com:2222/org/repo.git",
+                "git.example.com",
+                2222,
+            ),
+            ("git@github.com:org/repo.git", "github.com", 22),
+            // The last `@` wins, so a user name cannot pose as the host
+            ("public.example.com@10.0.0.1:repo.git", "10.0.0.1", 22),
         ] {
-            assert!(is_blocked_ip(ip(s)), "expected {} to be blocked", s);
+            assert_eq!(
+                git_host_port(url).unwrap(),
+                (host.to_string(), port),
+                "{url}"
+            );
         }
     }
 
-    #[test]
-    fn blocks_ipv4_multicast() {
-        assert!(is_blocked_ip(IpAddr::V4(Ipv4Addr::new(224, 0, 0, 1))));
-    }
-
-    #[test]
-    fn blocks_ipv6_multicast() {
-        assert!(is_blocked_ip(IpAddr::V6(Ipv6Addr::new(
-            0xff00, 0, 0, 0, 0, 0, 0, 1
-        ))));
-    }
-
-    #[test]
-    fn allows_public_addresses() {
-        for s in [
-            "8.8.8.8",
-            "1.1.1.1",
-            "93.184.216.34",
-            "2606:4700:4700::1111",
+    #[tokio::test]
+    async fn refuses_local_and_internal_repositories() {
+        for url in [
+            "file:///etc",
+            "/var/lib/stormchaser/cache/repo",
+            "https://169.254.169.254/latest/meta-data",
+            "ssh://git@10.0.0.5/org/repo.git",
+            "git@192.168.1.10:org/repo.git",
+            "https://[::1]/repo.git",
         ] {
-            assert!(!is_blocked_ip(ip(s)), "expected {} to be allowed", s);
+            assert!(check_git_target(url).await.is_err(), "{url} was accepted");
         }
+    }
+
+    #[tokio::test]
+    async fn refuses_sockets_and_internal_postgres_hosts() {
+        for url in [
+            "postgres://u:p@10.0.0.5/db",
+            "postgres://u:p@169.254.169.254:5432/db",
+            "postgres://u:p@[fd00::1]/db",
+            "postgres:///db",
+            "postgres:///db?host=/var/run/postgresql",
+            "postgres://u:p@%2Fvar%2Frun%2Fpostgresql/db",
+            "not a url",
+        ] {
+            assert!(
+                check_postgres_target(url).await.is_err(),
+                "{url} was accepted"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_public_postgres_host_is_pinned_to_the_checked_address() {
+        let options = check_postgres_target("postgres://u:p@93.184.216.34:6543/db")
+            .await
+            .unwrap();
+        assert_eq!(options.get_host(), "93.184.216.34");
+        assert_eq!(options.get_port(), 6543);
+    }
+
+    #[tokio::test]
+    async fn s3_tests_never_run_as_the_api() {
+        // No keys and no role: the API's own identity would be used
+        assert!(check_s3_target(false, None, None).await.is_err());
+        // A role the operator has not listed
+        assert!(check_s3_target(
+            true,
+            Some("arn:aws:iam::111111111111:role/unlisted-m6"),
+            None
+        )
+        .await
+        .is_err());
+        // Explicit keys, public endpoint
+        assert!(check_s3_target(true, None, None).await.is_ok());
+        // Explicit keys, internal endpoint
+        assert!(check_s3_target(true, None, Some("http://169.254.169.254/"))
+            .await
+            .is_err());
     }
 }

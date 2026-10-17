@@ -11,6 +11,12 @@ stormchaser_dsl_version = "v1"
 workflow "dogfood" {
   description = "Stormchaser dogfooding workflow: Build, Test, Image, Deploy"
 
+  # Without quotas a run may use 1 CPU and 4Gi in all, less than the build step asks for
+  quotas {
+    max_cpu    = "8"
+    max_memory = "16Gi"
+  }
+
   # Connection variables pointing to the target infrastructure (MicroK8s and supporting services)
   inputs {
     type = "object"
@@ -28,6 +34,12 @@ workflow "dogfood" {
       db_password {
         type        = "string"
         description = "Database password"
+        secret      = true
+        minLength   = 8
+      }
+      nats_password {
+        type        = "string"
+        description = "Password of the NATS control-plane user"
         secret      = true
         minLength   = 8
       }
@@ -76,7 +88,7 @@ workflow "dogfood" {
         maximum = 65535
       }
     }
-    required = ["repo_url", "host_ip", "db_password", "kubeconfig", "port_api", "port_db", "port_nats", "port_loki", "port_dex", "port_s3", "port_reg", "port_opa"]
+    required = ["repo_url", "host_ip", "db_password", "nats_password", "kubeconfig", "port_api", "port_db", "port_nats", "port_loki", "port_dex", "port_s3", "port_reg", "port_opa"]
   }
 
   # The main workspace volume shared across steps. It provisions the source code
@@ -117,6 +129,10 @@ workflow "dogfood" {
     # This runs in a clean rust:nightly container.
     step "build" "RunContainer" {
       image = "rustlang/rust:nightly"
+      # A release build of the workspace needs more than the default step limits
+      # (1 CPU, 2Gi): rustc is OOM-killed at 2Gi
+      cpu    = "8"
+      memory = "16Gi"
       storage_mounts = [
         { name = "workspace", mount_path = "/app" }
       ]
@@ -145,7 +161,9 @@ workflow "dogfood" {
     # volume at the end of this step, it only keeps the specific files needed for the
     # subsequent steps, discarding the massive intermediate `target/` compilation objects.
     step "test" "RunContainer" {
-      image = "rustlang/rust:nightly"
+      image  = "rustlang/rust:nightly"
+      cpu    = "8"
+      memory = "16Gi"
       storage_mounts = [
         {
           name       = "workspace",
@@ -155,7 +173,9 @@ workflow "dogfood" {
       ]
       env = [
         { name = "DATABASE_URL", value = "postgres://stormchaser:${inputs.db_password}@${inputs.host_ip}:${inputs.port_db}/stormchaser" },
-        { name = "NATS_URL", value = "nats://${inputs.host_ip}:${inputs.port_nats}" }
+        { name = "NATS_URL", value = "nats://${inputs.host_ip}:${inputs.port_nats}" },
+        { name = "NATS_USER", value = "stormchaser" },
+        { name = "NATS_PASSWORD", value = inputs.nats_password }
       ]
       command = ["/bin/sh", "-c"]
       args = [<<-EOF
@@ -195,6 +215,9 @@ workflow "dogfood" {
         set -eo pipefail
         cd /app
         rm -f .dockerignore
+        # Dockerfile.prebuilt copies target/sit[e] so that only the web image gets site
+        # assets. Docker copies nothing when the pattern matches nothing; buildah fails.
+        mkdir -p target/site
         buildah bud --storage-driver vfs -t ${inputs.host_ip}:${inputs.port_reg}/stormchaser-api:dogfood -f Dockerfile.prebuilt --build-arg BINARY=stormchaser-api .
         buildah push --storage-driver vfs --tls-verify=false ${inputs.host_ip}:${inputs.port_reg}/stormchaser-api:dogfood
       EOF
@@ -212,11 +235,13 @@ workflow "dogfood" {
         { name = "workspace", mount_path = "/app" }
       ]
       env = [
-        { name = "KUBECONFIG_DATA", value = inputs.kubeconfig }
+        { name = "KUBECONFIG_DATA", value = inputs.kubeconfig },
+        { name = "NATS_PASSWORD", value = inputs.nats_password }
       ]
       command = ["/bin/sh", "-c"]
       args = [<<-EOF
         set -eo pipefail
+        umask 077
         mkdir -p ~/.kube
         echo "$KUBECONFIG_DATA" > ~/.kube/config
         export KUBECONFIG=~/.kube/config
@@ -224,6 +249,9 @@ workflow "dogfood" {
         kubectl get secret stormchaser-tls-certs -n stormchaser -o yaml \
           | grep -v -E '^( +namespace:| +uid:| +resourceVersion:| +creationTimestamp:)' \
           | kubectl apply -n stormchaser-dogfood -f -
+        kubectl create secret generic stormchaser-nats-control -n stormchaser-dogfood \
+          --from-literal=user=stormchaser --from-literal=password="$NATS_PASSWORD" \
+          --dry-run=client -o yaml | kubectl apply -f -
       EOF
       ]
       next = ["deploy"]
@@ -239,11 +267,15 @@ workflow "dogfood" {
         { name = "workspace", mount_path = "/app" }
       ]
       env = [
-        { name = "KUBECONFIG_DATA", value = inputs.kubeconfig }
+        { name = "KUBECONFIG_DATA", value = inputs.kubeconfig },
+        # The password reaches the script through the environment: spliced into it, a
+        # password with shell syntax in it (the chart default's `<`) breaks the script
+        { name = "DB_PASSWORD", value = inputs.db_password }
       ]
       command = ["/bin/sh", "-c"]
       args = [<<-EOF
         set -eo pipefail
+        umask 077
         mkdir -p ~/.kube
         echo "$KUBECONFIG_DATA" > ~/.kube/config
         export KUBECONFIG=~/.kube/config
@@ -252,8 +284,9 @@ workflow "dogfood" {
           --set global.image.repository=${inputs.host_ip}:${inputs.port_reg}/stormchaser-api \
           --set global.image.tag=dogfood \
           --set global.database.ssl=false \
-          --set global.database.url=postgres://stormchaser:${inputs.db_password}@${inputs.host_ip}:${inputs.port_db}/stormchaser \
+          --set "global.database.url=postgres://stormchaser:$DB_PASSWORD@${inputs.host_ip}:${inputs.port_db}/stormchaser" \
           --set global.nats.url=nats://${inputs.host_ip}:${inputs.port_nats} \
+          --set global.nats.authSecret=stormchaser-nats-control \
           --set global.loki.url=http://${inputs.host_ip}:${inputs.port_loki} \
           --set global.opa.url=http://${inputs.host_ip}:${inputs.port_opa}/v1/data/stormchaser/allow \
           --set global.oidc.issuer=http://${inputs.host_ip}:${inputs.port_dex}/dex

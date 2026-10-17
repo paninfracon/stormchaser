@@ -1,13 +1,19 @@
 use crate::handler::fetch_step_instance;
+use crate::step_machine::{state, StepMachine};
 use anyhow::{Context, Result};
 use serde_json::Value;
 use sqlx::PgPool;
+use stormchaser_model::step::StepStatus;
 use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
 use tracing::info;
 
 #[tracing::instrument(skip(payload, pool), fields(run_id = tracing::field::Empty, step_id = tracing::field::Empty))]
 /// Handle step unpacking sfs.
+///
+/// Only a step that has not started running moves to unpacking, and only for the runner
+/// that holds it (or, before any does, the runner that signed this report). Otherwise any
+/// runner could name itself the holder of any step, including one that had finished.
 pub async fn handle_step_unpacking_sfs(payload: Value, pool: PgPool) -> Result<()> {
     let run_id_str = payload["run_id"].as_str().context("Missing run_id")?;
     let run_id = uuid::Uuid::parse_str(run_id_str).map(RunId::new)?;
@@ -17,21 +23,43 @@ pub async fn handle_step_unpacking_sfs(payload: Value, pool: PgPool) -> Result<(
     let span = tracing::Span::current();
     span.record("run_id", tracing::field::display(run_id));
     span.record("step_id", tracing::field::display(step_id));
-    let runner_id = payload["runner_id"].as_str().unwrap_or("unknown");
+    let reporter = payload["runner_id"].as_str();
+
+    let instance = fetch_step_instance(step_id, &pool).await?;
+    if !super::helpers::step_belongs_to_run(&instance, run_id)
+        || !super::helpers::reporter_holds_step(&instance, reporter)
+        || crate::db::step_completion_token(&pool, step_id)
+            .await
+            .is_some()
+    {
+        return Ok(());
+    }
+    let Some(runner_id) = reporter else {
+        return Ok(());
+    };
 
     info!(
         "Step {} (Run {}) is now unpacking SFS on runner {}",
         step_id, run_id, runner_id
     );
 
-    let instance = fetch_step_instance(step_id, &pool).await?;
-    let machine =
-        crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::from_instance(
-            instance,
-        );
-    let _ = machine
-        .start_unpacking(runner_id.to_string(), &mut *pool.acquire().await?)
-        .await?;
+    let mut conn = pool.acquire().await?;
+    match instance.status {
+        StepStatus::Pending => {
+            StepMachine::<state::Pending>::from_instance(instance)
+                .start_unpacking(runner_id.to_string(), &mut conn)
+                .await?;
+        }
+        StepStatus::Initializing => {
+            StepMachine::<state::Initializing>::from_instance(instance)
+                .start_unpacking(runner_id.to_string(), &mut conn)
+                .await?;
+        }
+        status => info!(
+            "Step {} is {:?}, not waiting to start; ignoring its unpacking report",
+            step_id, status
+        ),
+    }
 
     Ok(())
 }

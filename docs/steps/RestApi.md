@@ -6,7 +6,8 @@ The `RestApi` step makes an HTTP/HTTPS call to an external service. It is a powe
 
 The `spec` block for `RestApi` supports the following fields:
 
-* `url` (string, required): The endpoint to send the request to.
+* `url` (string, required): The endpoint to send the request to. With a `connection`, a path such as `/invoices` is appended to the connection's `base_url`.
+* `connection` (string, optional): The name of an `http_api` connection whose headers and bearer token are added to the request. See [Using a connection](#using-a-connection).
 * `method` (string, optional): The HTTP method to use (e.g., "GET", "POST", "PUT"). Defaults to "GET".
 * `headers` (object, optional): Key-value pairs of HTTP headers.
 * `body` (string, optional): The request body. Supports MiniJinja template rendering with access to `inputs`, `steps`, and `run`.
@@ -30,6 +31,21 @@ If no extractors are provided, or regardless of the extractors, the entire parse
 
 > [!WARNING]
 > The `response` output always includes the full parsed body and is not automatically marked sensitive. If the response may include secrets, avoid persisting/printing `response` directly and use `extractors` with `sensitive = true` for the specific fields that need to flow to later steps.
+
+## Using a connection
+
+An `http_api` connection supplies a `base_url`, optional `headers` and an optional bearer token, so the workflow does not have to carry the credential itself.
+
+The connection's headers and token are only sent to the connection's own server. The request URL must be a path relative to `base_url`, or an absolute URL with the same scheme, host and port as `base_url`; any other URL fails the step before a request is made. A connection that has headers or a token but no `base_url` cannot be used by this step. A connection with neither places no restriction on the URL.
+
+```hcl
+step "list_invoices" "RestApi" {
+  spec = {
+    connection = "billing-api"
+    url        = "/invoices?status=open"
+  }
+}
+```
 
 ## Example
 

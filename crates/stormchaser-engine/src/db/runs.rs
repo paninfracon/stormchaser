@@ -388,3 +388,28 @@ where
         .fetch_optional(executor)
         .await
 }
+
+/// Adds values to those the API masks in what it returns about a run: secrets fetched
+/// while the run's expressions were evaluated, and credentials handed to its steps.
+pub async fn add_sensitive_values<'a, E>(
+    executor: E,
+    run_id: RunId,
+    values: &[String],
+) -> Result<(), sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    if values.is_empty() {
+        return Ok(());
+    }
+    sqlx::query(
+        r#"UPDATE run_contexts
+           SET sensitive_values = ARRAY(SELECT DISTINCT unnest(sensitive_values || $2::text[]))
+           WHERE run_id = $1"#,
+    )
+    .bind(run_id)
+    .bind(values)
+    .execute(executor)
+    .await?;
+    Ok(())
+}

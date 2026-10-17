@@ -1,0 +1,47 @@
+{{- $sa := .Values.api.serviceAccount }}
+{{- $name := $sa.name | default (printf "%s-api" (include "stormchaser-orchestration.fullname" .)) }}
+{{- if $sa.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "stormchaser-orchestration.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+{{- end }}
+{{- if eq .Values.api.cron.engine "kubernetes" }}
+---
+# What cron registration does: create a CronJob and the Secret that holds its token
+# (deleted with the CronJob, which owns it), and delete the CronJob again. The API
+# never reads Secrets.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}-cron
+  labels:
+    {{- include "stormchaser-orchestration.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+rules:
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["create", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-cron
+  labels:
+    {{- include "stormchaser-orchestration.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}-cron
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

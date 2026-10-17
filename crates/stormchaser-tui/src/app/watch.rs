@@ -46,7 +46,7 @@ impl<'a> App<'a> {
 
                 tokio::spawn(async move {
                     if let Some(token) = token {
-                        let client = reqwest::Client::new();
+                        let client = crate::http::client();
                         if let Ok(res) = client
                             .get(format!(
                                 "{}/api/v1/runs/{}/steps/{}/logs?limit=5000",
@@ -104,7 +104,7 @@ impl<'a> App<'a> {
         let token_status = token.clone();
         let status_handle = tokio::spawn(async move {
             if let Some(token) = token_status {
-                let client = reqwest::Client::new();
+                let client = crate::http::client();
                 if let Ok(res) = client
                     .get(&status_url)
                     .header(AUTHORIZATION, format!("Bearer {}", token))
@@ -160,7 +160,7 @@ impl<'a> App<'a> {
         let token_log = token.clone();
         let log_handle = tokio::spawn(async move {
             if let Some(token) = token_log {
-                let client = reqwest::Client::new();
+                let client = crate::http::client();
                 if let Ok(res) = client
                     .get(&log_url)
                     .header(AUTHORIZATION, format!("Bearer {}", token))

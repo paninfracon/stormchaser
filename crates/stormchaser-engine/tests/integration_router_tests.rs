@@ -54,11 +54,13 @@ async fn test_router_end_to_end() -> Result<()> {
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
     config.nats_url = nats_url.clone();
     config.rust_log = "debug".to_string();
+    // The test database offers no TLS
+    config.db_ssl = Some(false);
 
     std::env::set_var("STORMCHASER_ASSIGNED_SHARDS", "999");
     std::env::set_var("RUST_LOG", "debug");
 
-    let nats_client = async_nats::connect(&nats_url).await?;
+    let nats_client = stormchaser_model::nats::connect(&nats_url).await?;
 
     // Spawn the engine in the background
     tokio::spawn(async move {

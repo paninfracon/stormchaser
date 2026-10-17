@@ -16,6 +16,9 @@ pub mod connections;
 /// Cron scheduling definitions.
 pub mod cron;
 /// Domain-Specific Language (DSL) abstract syntax tree and types.
+#[cfg(not(target_arch = "wasm32"))]
+/// How services connect to PostgreSQL over TLS.
+pub mod db_tls;
 pub mod dsl;
 /// System event and correlation models.
 pub mod event;
@@ -25,14 +28,31 @@ pub mod event_rules;
 pub mod events;
 /// HCL expression evaluation models.
 pub mod hcl_eval;
+/// Keeps workflow-supplied HCL from overflowing the stack.
+pub mod hcl_guard;
 /// Logging configuration and log streaming types.
 pub mod logging;
+/// Browser login pieces shared by the CLI and the TUI.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod login_flow;
 /// NATS helpers.
 pub mod nats;
+/// SSRF protection for outbound HTTP requests.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod net_guard;
 /// Outbox pattern models for reliable message publishing.
 pub mod outbox;
+/// Matching container images to registry credentials.
+pub mod registry;
+/// How runners hear that a run has ended and its steps must stop.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod run_cancel;
 /// Execution runner definitions and status models.
 pub mod runner;
+
+/// Runner identity: per-runner keys issued by the engine, and signed runner messages.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod runner_auth;
 /// Schema cache for OCI schemas.
 pub mod schema_cache;
 /// Schema generation functions.

@@ -10,9 +10,13 @@ core engine logic or testing features locally.
 The Docker-only setup includes:
 
 * **Stormchaser API & Engine**: Core orchestration services.
-* **PostgreSQL**: Database for state and configuration.
+* **PostgreSQL**: Database for state and configuration. It is not encrypted
+  at rest; do not store real credentials in this environment.
 * **NATS JetStream**: Message broker and persistent event store for service
-  communication and task queuing.
+  communication and task queuing. It requires passwords, which `setup.sh`
+  generates into `.env` (`STORMCHASER_NATS_PASSWORD` for the control plane,
+  `STORMCHASER_NATS_RUNNER_PASSWORD` for runners), but has no TLS; see
+  [NATS: Quickstart and Production](nats.md).
 * **Dex (OIDC)**: Identity provider for authentication.
 * **Open Policy Agent (OPA)**: Authorization engine.
 * **Stormchaser Docker Runner**: Executes container-based steps locally on
@@ -63,11 +67,15 @@ authenticate via the local Dex Identity Provider.
 **Using the CLI:**
 
 ```bash
-stormchaser login --issuer http://dex:5556/dex --client-id stormchaser-cli
+stormchaser --url http://localhost:3000 login
 ```
 
-This command automatically opens your default browser. Enter the credentials
-above.
+This command opens your default browser. Enter the credentials above. The
+token is stored in a profile for that URL (readable only by you) and used by
+later commands; pass `--print-token` to print it instead. The CLI listens on
+`http://localhost:8080/callback` for the browser to return; `--callback-port`
+changes the port, which must match a redirect URL registered with the
+identity provider.
 
 **Using the TUI:**
 

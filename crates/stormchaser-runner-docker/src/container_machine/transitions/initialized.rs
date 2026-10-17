@@ -1,13 +1,13 @@
-use crate::container_machine::{state, DockerContainerMachine, StartResult};
+use crate::container_machine::{state, DockerContainerMachine, StartResult, AGENT_USER};
 use anyhow::{Context, Result};
-use bollard::container::{
-    Config, CreateContainerOptions, StartContainerOptions, WaitContainerOptions,
+use bollard::models::ContainerCreateBody;
+use bollard::models::VolumeCreateRequest;
+use bollard::models::{HostConfig, Mount, MountType};
+use bollard::query_parameters::CreateImageOptions;
+use bollard::query_parameters::{
+    CreateContainerOptions, StartContainerOptions, WaitContainerOptions,
 };
-use bollard::image::CreateImageOptions;
-use bollard::service::{HostConfig, Mount, MountTypeEnum};
-use bollard::volume::CreateVolumeOptions;
 use chrono::Utc;
-use cloudevents::EventBuilder;
 use futures::StreamExt;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
@@ -15,8 +15,7 @@ use stormchaser_model::dsl::{CommonContainerSpec, StorageMount};
 use stormchaser_model::events::{EventSource, EventType, SchemaVersion, StepEventType};
 use stormchaser_model::nats::publish_cloudevent;
 use stormchaser_model::nats::NatsSubject;
-use stormchaser_model::step::StepStatus;
-use stormchaser_model::{RunId, StepInstanceId, APPLICATION_JSON};
+use stormchaser_model::{RunId, StepInstanceId};
 use tokio::{fs, time::sleep};
 use tracing::{error, info};
 use uuid::Uuid;
@@ -26,6 +25,8 @@ struct UnparkParams<'a> {
     volume_mount_path: &'a str,
     destination_path: &'a str,
     get_url: &'a str,
+    /// SHA-256 the archive must have: the one the parking helper reported for it.
+    expected_hash: Option<&'a str>,
     no_extract: bool,
     mode: Option<&'a str>,
     is_bind_mount: bool,
@@ -58,6 +59,18 @@ impl DockerContainerMachine<state::Initialized> {
         Ok(())
     }
 
+    /// Fails once the engine has cancelled this step's run.
+    fn ensure_run_not_cancelled(&self) -> Result<()> {
+        if stormchaser_model::run_cancel::is_cancelled(self.metadata.run_id) {
+            anyhow::bail!(
+                "Run {} was cancelled; not starting step {}",
+                self.metadata.run_id,
+                self.metadata.step_id
+            );
+        }
+        Ok(())
+    }
+
     /// Starts a new Docker container, pulling images and unparking storage as necessary.
     pub async fn start(self) -> Result<StartResult> {
         let is_shared = self
@@ -70,12 +83,12 @@ impl DockerContainerMachine<state::Initialized> {
             == Some("shared");
 
         let container_name = if is_shared {
-            format!("storm-shared-{}", &self.metadata.run_id.to_string()[..8])
+            format!("storm-shared-{}", self.metadata.run_id)
         } else {
             format!(
                 "storm-{}-{}",
                 self.metadata.step_dsl.name.to_lowercase().replace('_', "-"),
-                &self.metadata.step_id.to_string()[..8]
+                self.metadata.step_id
             )
         };
 
@@ -104,6 +117,8 @@ impl DockerContainerMachine<state::Initialized> {
         if !container_exists {
             info!("Pulling image {}", spec.image);
             self.pull_image(&spec.image).await?;
+            // A pull can take longer than the cancellation's sweeps wait for
+            self.ensure_run_not_cancelled()?;
 
             let network_mode = self.get_network_mode().await;
 
@@ -130,7 +145,7 @@ impl DockerContainerMachine<state::Initialized> {
             self.docker
                 .create_container(
                     Some(CreateContainerOptions {
-                        name: container_name.clone(),
+                        name: Some(container_name.clone()),
                         ..Default::default()
                     }),
                     config,
@@ -139,8 +154,19 @@ impl DockerContainerMachine<state::Initialized> {
 
             info!("Starting container {}", container_name);
             self.docker
-                .start_container(&container_name, None::<StartContainerOptions<String>>)
+                .start_container(&container_name, None::<StartContainerOptions>)
                 .await?;
+
+            // A cancellation that arrived since the check above may have swept before this
+            // container existed; one that arrives after this check will find it running.
+            if stormchaser_model::run_cancel::is_cancelled(self.metadata.run_id) {
+                crate::container_machine::cancel::stop_run_containers(
+                    &self.docker,
+                    self.metadata.run_id,
+                )
+                .await;
+            }
+            self.ensure_run_not_cancelled()?;
         }
 
         let mut exec_id = None;
@@ -223,7 +249,7 @@ impl DockerContainerMachine<state::Initialized> {
 
     async fn unpark_storage(&self, params: UnparkParams<'_>) -> Result<()> {
         let volume_name = params.source_name;
-        let agent_image = "stormchaser-agent:v1";
+        let agent_image = crate::container_machine::agent_image();
         let unpark_container_name = format!("unpark-{}", Uuid::new_v4());
 
         let mut cmd = vec![
@@ -234,6 +260,10 @@ impl DockerContainerMachine<state::Initialized> {
             "--destination".to_string(),
             params.destination_path.to_string(),
         ];
+        if let Some(hash) = params.expected_hash {
+            cmd.push("--expected-hash".to_string());
+            cmd.push(hash.to_string());
+        }
         if params.no_extract {
             cmd.push("--no-extract".to_string());
         }
@@ -242,17 +272,20 @@ impl DockerContainerMachine<state::Initialized> {
             cmd.push(m.to_string());
         }
 
-        let config = Config {
+        let config = ContainerCreateBody {
             image: Some(agent_image.to_string()),
+            // Root, whatever the image says: it writes into the step's volume, whose
+            // files belong to whoever the step ran as.
+            user: Some(AGENT_USER.to_string()),
             cmd: Some(cmd),
             host_config: Some(HostConfig {
                 mounts: Some(vec![Mount {
                     target: Some(params.volume_mount_path.to_string()),
                     source: Some(params.source_name.to_string()),
                     typ: Some(if params.is_bind_mount {
-                        MountTypeEnum::BIND
+                        MountType::BIND
                     } else {
-                        MountTypeEnum::VOLUME
+                        MountType::VOLUME
                     }),
                     ..Default::default()
                 }]),
@@ -265,7 +298,7 @@ impl DockerContainerMachine<state::Initialized> {
         self.docker
             .create_container(
                 Some(CreateContainerOptions {
-                    name: unpark_container_name.clone(),
+                    name: Some(unpark_container_name.clone()),
                     ..Default::default()
                 }),
                 config,
@@ -273,16 +306,13 @@ impl DockerContainerMachine<state::Initialized> {
             .await?;
 
         self.docker
-            .start_container(
-                &unpark_container_name,
-                None::<StartContainerOptions<String>>,
-            )
+            .start_container(&unpark_container_name, None::<StartContainerOptions>)
             .await?;
 
         let mut wait_stream = self.docker.wait_container(
             &unpark_container_name,
             Some(WaitContainerOptions {
-                condition: "not-running",
+                condition: "not-running".to_string(),
             }),
         );
 
@@ -344,38 +374,28 @@ impl DockerContainerMachine<state::Initialized> {
         source_name: &str,
         is_bind_mount: bool,
         get_url: &str,
+        expected_hash: &str,
     ) -> Result<()> {
         info!(
             "Unparking storage '{}' (resume state) for volume '{}'",
             mount.name, source_name
         );
         if let Some(nats) = &self.nats {
-            let unpacking_event = serde_json::json!({
-                "run_id": self.metadata.run_id,
-                "step_id": self.metadata.step_id,
-                "status": StepStatus::UnpackingSfs,
-                "timestamp": Utc::now(),
-            });
-            if let Ok(ce) = cloudevents::EventBuilderV10::new()
-                .id(Uuid::new_v4().to_string())
-                .ty("stormchaser.v1.step.unpacking_sfs")
-                .source("/stormchaser/runner")
-                .time(Utc::now())
-                .data(APPLICATION_JSON, unpacking_event)
-                .build()
-            {
-                if let Ok(payload_bytes) = serde_json::to_vec(&ce) {
-                    let _ = nats
-                        .publish("stormchaser.v1.step.unpacking_sfs", payload_bytes.into())
-                        .await;
-                }
-            }
+            let _ = stormchaser_model::nats::announce_step_storage(
+                nats,
+                self.metadata.run_id,
+                self.metadata.step_id,
+                &self.metadata.runner_id,
+                false,
+            )
+            .await;
         }
         self.unpark_storage(UnparkParams {
             source_name,
             volume_mount_path: &mount.mount_path,
             destination_path: &mount.mount_path,
             get_url,
+            expected_hash: Some(expected_hash),
             no_extract: false,
             mode: None,
             is_bind_mount,
@@ -400,26 +420,14 @@ impl DockerContainerMachine<state::Initialized> {
                     mount.name, url, dest
                 );
                 if let Some(nats) = &self.nats {
-                    let unpacking_event = serde_json::json!({
-                        "run_id": self.metadata.run_id,
-                        "step_id": self.metadata.step_id,
-                        "status": StepStatus::UnpackingSfs,
-                        "timestamp": Utc::now(),
-                    });
-                    if let Ok(ce) = cloudevents::EventBuilderV10::new()
-                        .id(Uuid::new_v4().to_string())
-                        .ty("stormchaser.v1.step.unpacking_sfs")
-                        .source("/stormchaser/runner")
-                        .time(Utc::now())
-                        .data(APPLICATION_JSON, unpacking_event)
-                        .build()
-                    {
-                        if let Ok(payload_bytes) = serde_json::to_vec(&ce) {
-                            let _ = nats
-                                .publish("stormchaser.v1.step.unpacking_sfs", payload_bytes.into())
-                                .await;
-                        }
-                    }
+                    let _ = stormchaser_model::nats::announce_step_storage(
+                        nats,
+                        self.metadata.run_id,
+                        self.metadata.step_id,
+                        &self.metadata.runner_id,
+                        false,
+                    )
+                    .await;
                 }
                 let mut full_dest = PathBuf::from(&mount.mount_path);
                 if dest != "/" && !dest.is_empty() {
@@ -459,6 +467,7 @@ impl DockerContainerMachine<state::Initialized> {
                     volume_mount_path: &mount.mount_path,
                     destination_path: &full_dest_str,
                     get_url: url,
+                    expected_hash: None,
                     no_extract: !is_extract,
                     mode: prov_mode.as_deref(),
                     is_bind_mount,
@@ -486,13 +495,13 @@ impl DockerContainerMachine<state::Initialized> {
             let volume_name = format!(
                 "sfs-{}-{}",
                 mount.name.to_lowercase().replace('_', "-"),
-                &self.metadata.run_id.to_string()[..8]
+                self.metadata.run_id
             );
 
             info!("Ensuring Docker volume exists: {}", volume_name);
             self.docker
-                .create_volume(CreateVolumeOptions {
-                    name: volume_name.clone(),
+                .create_volume(VolumeCreateRequest {
+                    name: Some(volume_name.clone()),
                     ..Default::default()
                 })
                 .await?;
@@ -505,9 +514,9 @@ impl DockerContainerMachine<state::Initialized> {
             target: Some(mount.mount_path.clone()),
             source: Some(source_name.clone()),
             typ: Some(if is_bind_mount {
-                MountTypeEnum::BIND
+                MountType::BIND
             } else {
-                MountTypeEnum::VOLUME
+                MountType::VOLUME
             }),
             read_only: mount.read_only,
             ..Default::default()
@@ -515,17 +524,23 @@ impl DockerContainerMachine<state::Initialized> {
 
         if let Some(storage_data) = &self.metadata.storage {
             if let Some(urls) = storage_data.get(&mount.name) {
-                let has_state = urls.get("expected_hash").and_then(|h| h.as_str()).is_some();
+                let expected_hash = urls.get("expected_hash").and_then(|h| h.as_str());
 
-                if has_state {
+                if let Some(expected_hash) = expected_hash {
                     if is_bind_mount {
                         info!(
                             "Skipping unpark for storage '{}' due to STORMCHASER_SFS_HOST_PATH",
                             mount.name
                         );
                     } else if let Some(get_url) = urls.get("get_url").and_then(|u| u.as_str()) {
-                        self.resume_storage(mount, &source_name, is_bind_mount, get_url)
-                            .await?;
+                        self.resume_storage(
+                            mount,
+                            &source_name,
+                            is_bind_mount,
+                            get_url,
+                            expected_hash,
+                        )
+                        .await?;
                     }
                 } else if let Some(provision) = urls.get("provision").and_then(|p| p.as_array()) {
                     self.provision_storage(mount, &source_name, is_bind_mount, provision)
@@ -589,6 +604,10 @@ impl DockerContainerMachine<state::Initialized> {
         let mut volumes_to_cleanup = Vec::new();
 
         if let Some(storage_mounts) = &spec.storage_mounts {
+            // Before any volume is created
+            for mount in storage_mounts {
+                stormchaser_model::dsl::ensure_mount_path_clear_of_helpers(&mount.mount_path)?;
+            }
             for mount in storage_mounts {
                 self.setup_single_mount(
                     mount,
@@ -619,30 +638,44 @@ impl DockerContainerMachine<state::Initialized> {
             }
         };
 
-        let credentials =
-            self.metadata
-                .registry_auth
-                .as_ref()
-                .map(|auth| bollard::auth::DockerCredentials {
-                    username: auth
-                        .get("username")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    password: auth
-                        .get("password")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    serveraddress: auth
-                        .get("url")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    ..Default::default()
-                });
+        // Docker sends these to whichever registry the image names, so they are only
+        // attached when that is the registry they were issued for.
+        let credentials = self
+            .metadata
+            .registry_auth
+            .as_ref()
+            .filter(|auth| {
+                let url = auth.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                let matches = stormchaser_model::registry::image_is_on_registry(image, url);
+                if !matches {
+                    tracing::warn!(
+                        "Not sending registry credentials for {} with image {}: different registry",
+                        stormchaser_model::registry::registry_url_host(url),
+                        image
+                    );
+                }
+                matches
+            })
+            .map(|auth| bollard::auth::DockerCredentials {
+                username: auth
+                    .get("username")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                password: auth
+                    .get("password")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                serveraddress: auth
+                    .get("url")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                ..Default::default()
+            });
 
         let mut pull_stream = self.docker.create_image(
             Some(CreateImageOptions {
-                from_image: from_image.to_string(),
-                tag: tag.to_string(),
+                from_image: Some(from_image.to_string()),
+                tag: Some(tag.to_string()),
                 ..Default::default()
             }),
             None,
@@ -720,6 +753,19 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_step_of_a_cancelled_run_is_not_started() {
+        let docker = Docker::connect_with_local_defaults().unwrap();
+        let metadata = create_test_metadata_with_mounts();
+        let run_id = metadata.run_id;
+        let machine = DockerContainerMachine::new(docker, metadata, None);
+
+        machine.ensure_run_not_cancelled().unwrap();
+        stormchaser_model::run_cancel::mark_cancelled(run_id);
+        let err = machine.ensure_run_not_cancelled().unwrap_err();
+        assert!(err.to_string().contains("was cancelled"), "{err}");
+    }
+
     #[tokio::test]
     async fn test_setup_storage_mounts_named_volume() {
         let docker = Docker::connect_with_local_defaults().unwrap();
@@ -741,15 +787,17 @@ mod tests {
 
         let mount = &mounts[0];
         assert_eq!(mount.target.as_deref(), Some("/workspace"));
-        assert_eq!(mount.typ, Some(MountTypeEnum::VOLUME));
+        assert_eq!(mount.typ, Some(MountType::VOLUME));
 
         let source = mount.source.as_ref().unwrap();
         assert!(source.starts_with("sfs-workspace-"));
-        assert!(source.contains(&run_id.to_string()[..8]));
+        assert!(source.contains(&run_id.to_string()));
 
         // Cleanup
         for vol in volumes_to_cleanup {
-            let _ = docker.remove_volume(&vol, None).await;
+            let _ = docker
+                .remove_volume(&vol, None::<bollard::query_parameters::RemoveVolumeOptions>)
+                .await;
         }
     }
 
@@ -778,7 +826,7 @@ mod tests {
 
         let mount = &mounts[0];
         assert_eq!(mount.target.as_deref(), Some("/workspace"));
-        assert_eq!(mount.typ, Some(MountTypeEnum::BIND));
+        assert_eq!(mount.typ, Some(MountType::BIND));
 
         let expected_source = host_path.path().join(run_id.to_string()).join("workspace");
         assert!(expected_source.is_dir());

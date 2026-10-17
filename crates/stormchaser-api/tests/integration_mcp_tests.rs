@@ -32,13 +32,20 @@ fn init_test() {
 }
 
 async fn setup_app() -> Option<axum::Router> {
+    setup_app_with("http://localhost:3000", Vec::new()).await
+}
+
+async fn setup_app_with(
+    api_base_url: &str,
+    mcp_allowed_hosts: Vec<String>,
+) -> Option<axum::Router> {
     init_test();
     env::set_var("CRON_ENGINE", "none");
     env::set_var("API_RATE_LIMIT_PER_SECOND", "1000");
     env::set_var("API_RATE_LIMIT_BURST_SIZE", "1000");
 
     let nats_url = env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = async_nats::connect(nats_url).await.ok()?;
+    let nats_client = stormchaser_model::nats::connect(nats_url).await.ok()?;
 
     let db_url = env::var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
@@ -61,7 +68,8 @@ async fn setup_app() -> Option<axum::Router> {
         oidc_config: None,
         jwks: Arc::new(RwLock::new(HashMap::new())),
         log_backend: None,
-        api_base_url: "http://localhost:3000".to_string(),
+        api_base_url: api_base_url.to_string(),
+        mcp_allowed_hosts,
     }))
 }
 
@@ -70,6 +78,7 @@ fn get_token() -> String {
         sub: "test-user".to_string(),
         email: Some("test-user@paninfracon.net".to_string()),
         exp: (Utc::now() + Duration::hours(1)).timestamp() as usize,
+        groups: Vec::new(),
     };
     encode(
         &Header::default(),
@@ -175,4 +184,82 @@ async fn test_mcp_authenticated_post_returns_session_response() {
 
     // With a valid token, we expect the request to be accepted by the handler and return 200 OK
     assert_eq!(status, StatusCode::OK);
+}
+
+/// Sends an MCP `initialize` request carrying the given `Host` header.
+async fn initialize_with_host(app: axum::Router, host: &str) -> StatusCode {
+    let request_body = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": { "name": "test-client", "version": "1.0.0" }
+        }
+    });
+
+    app.oneshot(
+        Request::builder()
+            .method("POST")
+            .uri("/api/v1/mcp")
+            .header(header::HOST, host)
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::ACCEPT, "application/json, text/event-stream")
+            .extension(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 12345))))
+            .body(Body::from(serde_json::to_vec(&request_body).unwrap()))
+            .unwrap(),
+    )
+    .await
+    .unwrap()
+    .status()
+}
+
+#[tokio::test]
+async fn test_mcp_rejects_unlisted_host() {
+    let app = match setup_app().await {
+        Some(a) => a,
+        None => return,
+    };
+
+    assert_eq!(
+        initialize_with_host(app, "stormchaser.paninfracon.net").await,
+        StatusCode::FORBIDDEN
+    );
+}
+
+#[tokio::test]
+async fn test_mcp_accepts_configured_host() {
+    let allowed = vec!["stormchaser.paninfracon.net".to_string()];
+    let app = match setup_app_with("http://localhost:3000", allowed).await {
+        Some(a) => a,
+        None => return,
+    };
+
+    assert_eq!(
+        initialize_with_host(app.clone(), "stormchaser.paninfracon.net:8443").await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        initialize_with_host(app.clone(), "localhost").await,
+        StatusCode::OK,
+        "loopback hosts stay allowed alongside configured ones"
+    );
+    assert_eq!(
+        initialize_with_host(app, "other.paninfracon.net").await,
+        StatusCode::FORBIDDEN
+    );
+}
+
+#[tokio::test]
+async fn test_mcp_accepts_api_base_url_host() {
+    let app = match setup_app_with("https://api.paninfracon.net", Vec::new()).await {
+        Some(a) => a,
+        None => return,
+    };
+
+    assert_eq!(
+        initialize_with_host(app, "api.paninfracon.net").await,
+        StatusCode::OK
+    );
 }

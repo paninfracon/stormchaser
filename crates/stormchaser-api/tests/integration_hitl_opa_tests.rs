@@ -31,7 +31,7 @@ async fn mock_state(mock_server_uri: String) -> AppState {
         .unwrap();
 
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats = async_nats::connect(nats_url).await.unwrap();
+    let nats = stormchaser_model::nats::connect(nats_url).await.unwrap();
 
     AppState {
         pool,
@@ -47,6 +47,7 @@ async fn mock_state(mock_server_uri: String) -> AppState {
         jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
         api_base_url: "http://localhost:3000".to_string(),
+        mcp_allowed_hosts: Vec::new(),
     }
 }
 
@@ -92,6 +93,7 @@ async fn test_hitl_opa_integration() {
             sub: "test-user-123".to_string(),
             email: Some("test-user-123@paninfracon.net".to_string()),
             exp: 0,
+            groups: Vec::new(),
         }),
         axum::http::HeaderMap::new(),
         Path((run_id, step_id)),

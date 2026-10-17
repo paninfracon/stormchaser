@@ -12,8 +12,8 @@ The `spec` block for `RunContainer` maps to the `CommonContainerSpec` and suppor
 * `env` (list of objects, optional): Environment variables to set in the container.
 * `cpu` (string, optional): CPU limit (e.g., "500m").
 * `memory` (string, optional): Memory limit (e.g., "512Mi").
-* `privileged` (boolean, optional): Whether to run the container in privileged mode.
-* `storage_mounts` (list of objects, optional): Volumes to mount.
+* `privileged` (boolean, optional): Whether to run the container in privileged mode. Runners reject privileged steps unless the operator starts them with `STORMCHASER_ALLOW_PRIVILEGED=true`.
+* `storage_mounts` (list of objects, optional): Volumes to mount. `mount_path` must be absolute and must not be a system location; see [Mounting Storage in Steps](../workflow_dsl.md).
 
 ## Example
 

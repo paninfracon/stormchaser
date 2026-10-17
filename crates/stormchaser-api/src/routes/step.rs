@@ -70,11 +70,15 @@ pub async fn stream_step_logs_api(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    let stream = tokio_stream::wrappers::ReceiverStream::new(rx).flat_map(|res| match res {
+    let redactor = crate::redact::RunRedactor::load(&state.pool, run_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx).flat_map(move |res| match res {
         Ok(log_line) => {
             let events: Vec<_> = log_line
                 .lines()
-                .map(|line| Ok(format_log_event(line)))
+                .map(|line| Ok(format_log_event(&redactor.text(line))))
                 .collect();
             tokio_stream::iter(events)
         }
@@ -133,7 +137,11 @@ pub async fn get_step_logs_api(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    Ok(Json(logs))
+    let redactor = crate::redact::RunRedactor::load(&state.pool, run_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(logs.iter().map(|line| redactor.text(line)).collect()))
 }
 
 /// Streams run logs.
@@ -164,6 +172,12 @@ pub async fn stream_run_logs_api(
         None => return Err(StatusCode::NOT_IMPLEMENTED),
     };
 
+    require_run(&state.pool, run_id).await?;
+
+    let redactor = crate::redact::RunRedactor::load(&state.pool, run_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
     let (tx, rx) = mpsc::channel(100);
 
     let pool = state.pool.clone();
@@ -172,9 +186,15 @@ pub async fn stream_run_logs_api(
         tracing::debug!("Started run log stream task for run {}", run_id);
 
         loop {
-            let status = db::get_workflow_run_status(&pool, run_id)
-                .await
-                .unwrap_or(None);
+            // The client has gone, or the run has: nothing left to poll for
+            if tx.is_closed() {
+                break;
+            }
+            let status = match db::get_workflow_run_status(&pool, run_id).await {
+                Ok(None) => break,
+                Ok(status) => status,
+                Err(_) => None,
+            };
 
             let is_terminal = matches!(
                 status,
@@ -212,7 +232,16 @@ pub async fn stream_run_logs_api(
                                 "Successfully connected to log stream for step {}",
                                 step_name_clone
                             );
-                            while let Some(log_res) = step_rx.recv().await {
+                            loop {
+                                // A quiet step must not keep its stream open after the
+                                // client has disconnected
+                                let log_res = tokio::select! {
+                                    _ = tx_clone.closed() => return,
+                                    log_res = step_rx.recv() => match log_res {
+                                        Some(log_res) => log_res,
+                                        None => break,
+                                    },
+                                };
                                 match log_res {
                                     Ok(line) => {
                                         // SSE data cannot contain newlines. Split and send multiple events.
@@ -256,11 +285,11 @@ pub async fn stream_run_logs_api(
         }
     });
 
-    let stream = tokio_stream::wrappers::ReceiverStream::new(rx).flat_map(|res| match res {
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx).flat_map(move |res| match res {
         Ok(log_line) => {
             let events: Vec<_> = log_line
                 .lines()
-                .map(|line| Ok(format_log_event(line)))
+                .map(|line| Ok(format_log_event(&redactor.text(line))))
                 .collect();
             tokio_stream::iter(events)
         }
@@ -297,6 +326,8 @@ pub async fn stream_run_status_api(
     >,
     StatusCode,
 > {
+    require_run(&state.pool, run_id).await?;
+
     let (tx, rx) = mpsc::channel::<Result<Event, std::convert::Infallible>>(100);
     let pool = state.pool.clone();
 
@@ -306,10 +337,15 @@ pub async fn stream_run_status_api(
             HashMap::new();
 
         loop {
-            // Check workflow run status
-            let current_run_status = db::get_combined_run_status(&pool, run_id)
-                .await
-                .unwrap_or(None);
+            // The client has gone, or the run has: nothing left to poll for
+            if tx.is_closed() {
+                break;
+            }
+            let current_run_status = match db::get_combined_run_status(&pool, run_id).await {
+                Ok(None) => break,
+                Ok(status) => status,
+                Err(_) => None,
+            };
 
             let is_terminal = matches!(
                 current_run_status,
@@ -369,6 +405,18 @@ pub async fn stream_run_status_api(
     });
 
     Ok(axum::response::sse::Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default()))
+}
+
+/// 404 for a run that does not exist, so a stream is never opened to poll for one.
+async fn require_run(pool: &sqlx::PgPool, run_id: RunId) -> Result<(), StatusCode> {
+    match db::get_combined_run_status(pool, run_id).await {
+        Ok(Some(_)) => Ok(()),
+        Ok(None) => Err(StatusCode::NOT_FOUND),
+        Err(e) => {
+            tracing::error!("Failed to look up run {}: {:?}", run_id, e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
 }
 
 #[cfg(test)]

@@ -1,10 +1,179 @@
 use crate::job_machine::JobMetadata;
 use k8s_openapi::api::core::v1::{Container, EnvVar as K8sEnvVar, VolumeMount};
-use serde_json::Value;
 use std::path::PathBuf;
 
 use super::*;
 
+/// True when the agent binary is copied into the step's own container to collect the
+/// test reports the step declares. Reports are files the step wrote anywhere in its own
+/// filesystem, so only something inside that container can read them; what it uploads is
+/// the author's own data either way.
+pub(crate) fn uses_in_step_agent(agent_present: bool, metadata: &JobMetadata) -> bool {
+    agent_present && !metadata.step_dsl.reports.is_empty()
+}
+
+/// Environment variable through which a helper init container is given the presigned URL
+/// it downloads from.
+const FETCH_URL_ENV: &str = "STORMCHASER_FETCH_URL";
+
+/// The command and arguments of the init container that restores a volume's parked state.
+///
+/// The archive must have the hash the parking helper reported for it; anything else fails
+/// the pod rather than starting the step on missing or altered state. The agent checks
+/// the hash itself; without an agent image, `alpine:latest`'s BusyBox does.
+pub(crate) fn restore_state_command(
+    agent_present: bool,
+    mount_path: &str,
+    expected_hash: &str,
+) -> (Vec<String>, Vec<String>) {
+    let hash_is_valid =
+        expected_hash.len() == 64 && expected_hash.bytes().all(|b| b.is_ascii_hexdigit());
+    if !hash_is_valid {
+        let script =
+            "echo 'The parked state has no valid hash; refusing to restore it' >&2; exit 1";
+        return (
+            vec!["/bin/sh".to_string()],
+            vec!["-c".to_string(), script.to_string()],
+        );
+    }
+    if agent_present {
+        return (
+            vec!["/usr/local/bin/stormchaser-agent".to_string()],
+            vec![
+                "unpark".to_string(),
+                "--url".to_string(),
+                format!("$({})", FETCH_URL_ENV),
+                "--expected-hash".to_string(),
+                expected_hash.to_string(),
+                "--destination".to_string(),
+                mount_path.to_string(),
+            ],
+        );
+    }
+    let script = format!(
+        "set -e; mkdir -p \"{dir}\"; wget -qO /tmp/state.tar.gz \"${url}\"; \
+         echo '{hash}  /tmp/state.tar.gz' | sha256sum -c -; \
+         tar -xzf /tmp/state.tar.gz -C \"{dir}\"; rm -f /tmp/state.tar.gz",
+        dir = mount_path,
+        url = FETCH_URL_ENV,
+        hash = expected_hash,
+    );
+    (vec!["/bin/sh".to_string()], vec!["-c".to_string(), script])
+}
+
+/// Environment variables through which a provisioning init container is told where to
+/// put what it downloads, and the file mode to give an artifact. They come from the
+/// workflow, so they are never written into the script.
+const PROVISION_DEST_ENV: &str = "STORMCHASER_PROVISION_DEST";
+const PROVISION_MODE_ENV: &str = "STORMCHASER_PROVISION_MODE";
+
+/// The command, arguments and extra environment of the init container that provisions
+/// one resource into a storage volume before the step runs.
+///
+/// A `download` is a gzipped tarball unpacked into its destination; an `artifact` is a
+/// file written to its destination as it is. Nothing is fetched when the destination is
+/// already there, as on a shared volume an earlier step provisioned. A destination that
+/// would leave the volume, or a download that fails, fails the pod: the step does not
+/// start without what it was promised.
+pub(crate) fn provision_command(
+    agent_present: bool,
+    mount_path: &str,
+    destination: &str,
+    resource_type: Option<&str>,
+    mode: Option<&str>,
+) -> (Vec<String>, Vec<String>, Vec<(String, String)>) {
+    let shell = |script: String| (vec!["/bin/sh".to_string()], vec!["-c".to_string(), script]);
+
+    let relative = destination.trim_start_matches('/');
+    let escapes = std::path::Path::new(relative).components().any(|c| {
+        !matches!(
+            c,
+            std::path::Component::Normal(_) | std::path::Component::CurDir
+        )
+    });
+    let mode = mode.filter(|m| !m.is_empty());
+    let mode_is_valid =
+        mode.is_none_or(|m| m.len() <= 4 && m.bytes().all(|b| (b'0'..=b'7').contains(&b)));
+    if escapes || !mode_is_valid {
+        let (command, args) = shell(
+            "echo 'Refusing a provision whose destination leaves its volume or whose mode is not octal' >&2; exit 1"
+                .to_string(),
+        );
+        return (command, args, Vec::new());
+    }
+
+    let mut full_dest = PathBuf::from(mount_path);
+    if !relative.is_empty() {
+        full_dest.push(relative);
+    }
+    let mut env = vec![(
+        PROVISION_DEST_ENV.to_string(),
+        full_dest.to_string_lossy().into_owned(),
+    )];
+    if let Some(m) = mode {
+        env.push((PROVISION_MODE_ENV.to_string(), m.to_string()));
+    }
+
+    let is_file = resource_type == Some("artifact");
+    let skip = format!(
+        "if [ -n \"$(ls -A \"${dest}\" 2>/dev/null)\" ]; then exit 0; fi; ",
+        dest = PROVISION_DEST_ENV
+    );
+    let script = if agent_present {
+        format!(
+            "set -e; {skip}exec /usr/local/bin/stormchaser-agent unpark --url \"${url}\" --destination \"${dest}\"{no_extract}{mode}",
+            url = FETCH_URL_ENV,
+            dest = PROVISION_DEST_ENV,
+            no_extract = if is_file { " --no-extract" } else { "" },
+            mode = if mode.is_some() { format!(" --mode \"${}\"", PROVISION_MODE_ENV) } else { String::new() },
+        )
+    } else if is_file {
+        format!(
+            "set -e; {skip}mkdir -p \"$(dirname \"${dest}\")\"; wget -qO \"${dest}\" \"${url}\"{mode}",
+            url = FETCH_URL_ENV,
+            dest = PROVISION_DEST_ENV,
+            mode = if mode.is_some() { format!("; chmod \"${m}\" \"${d}\"", m = PROVISION_MODE_ENV, d = PROVISION_DEST_ENV) } else { String::new() },
+        )
+    } else {
+        format!(
+            "set -eo pipefail; {skip}mkdir -p \"${dest}\"; wget -qO- \"${url}\" | tar -xz -C \"${dest}\"",
+            url = FETCH_URL_ENV,
+            dest = PROVISION_DEST_ENV,
+        )
+    };
+    let (command, args) = shell(script);
+    (command, args, env)
+}
+
+/// Pull policy for the image a step names: `Always` (the default), `IfNotPresent` or
+/// `Never`.
+pub const STEP_IMAGE_PULL_POLICY_ENV: &str = "STORMCHASER_STEP_IMAGE_PULL_POLICY";
+
+/// The pull policy for a step's own image.
+///
+/// With `IfNotPresent` (Kubernetes' default for a tag other than `latest`) a node starts
+/// an image it already holds without asking the registry, so a step without credentials
+/// for a private image could run it once another user's run had pulled it onto the same
+/// node. `Always` makes the kubelet check with the registry, using this step's own pull
+/// secrets, every time; layers already on the node are not downloaded again. An operator
+/// who preloads step images onto nodes can choose `IfNotPresent` or `Never`.
+pub(crate) fn step_image_pull_policy(configured: Option<&str>) -> String {
+    match configured.map(str::trim) {
+        None | Some("") | Some("Always") => "Always".to_string(),
+        Some(policy @ ("IfNotPresent" | "Never")) => policy.to_string(),
+        Some(other) => {
+            tracing::warn!(
+                "Ignoring {}={:?}: expected Always, IfNotPresent or Never",
+                STEP_IMAGE_PULL_POLICY_ENV,
+                other
+            );
+            "Always".to_string()
+        }
+    }
+}
+
+/// Builds the pod's containers (the step's own first, then the agent sidecar if there is
+/// storage to park) and its init containers.
 pub(crate) fn build_k8s_containers(
     agent_image: Option<String>,
     sfs_pvc_name: Option<&str>,
@@ -12,16 +181,19 @@ pub(crate) fn build_k8s_containers(
     step_spec: &StepSpec,
     k8s_env: Vec<K8sEnvVar>,
     volume_mounts: Vec<VolumeMount>,
-) -> (Container, Vec<Container>) {
+    secrets: &mut StepSecret,
+) -> (Vec<Container>, Vec<Container>) {
     let mut init_containers = Vec::new();
+    let in_step_agent = uses_in_step_agent(agent_image.is_some(), metadata);
 
     // Agent injection
-    if let Some(agent_img) = &agent_image {
+    if let Some(agent_img) = agent_image.as_ref().filter(|_| in_step_agent) {
         init_containers.push(Container {
             name: "inject-agent".to_string(),
             image: Some(agent_img.clone()),
             image_pull_policy: if agent_img.contains("stormchaser-agent") { Some("IfNotPresent".to_string()) } else { None },
             command: Some(vec!["/bin/sh".to_string(), "-c".to_string(), "cp /usr/local/bin/stormchaser-agent /stormchaser/agent/stormchaser-agent && chmod +x /stormchaser/agent/stormchaser-agent".to_string()]),
+            security_context: Some(agent_security_context()),
             volume_mounts: Some(vec![VolumeMount {
                 name: "storm-agent".to_string(),
                 mount_path: "/stormchaser/agent".to_string(),
@@ -42,18 +214,35 @@ pub(crate) fn build_k8s_containers(
 
                 if has_state && sfs_pvc_name.is_none() {
                     if let Some(get_url) = urls.get("get_url").and_then(|u| u.as_str()) {
+                        let expected_hash = urls
+                            .get("expected_hash")
+                            .and_then(|h| h.as_str())
+                            .unwrap_or_default();
+                        let (command, args) = restore_state_command(
+                            agent_image.is_some(),
+                            &mount.mount_path,
+                            expected_hash,
+                        );
                         init_containers.push(Container {
                             name: normalize_resource_name(&mount.name, "unpark"),
-                            image: Some(agent_image.clone().unwrap_or_else(|| "alpine:latest".to_string())),
-                            image_pull_policy: agent_image.as_ref().and_then(|img| if img.contains("stormchaser-agent") { Some("IfNotPresent".to_string()) } else { None }),
-                            command: Some(vec!["/bin/sh".to_string()]),
-                            args: Some(vec![
-                                "-c".to_string(),
-                                format!(
-                                    "mkdir -p \"{}\" && curl -sL \"{}\" | tar -xz -C \"{}\" || true",
-                                    mount.mount_path, get_url, mount.mount_path
-                                ),
-                            ]),
+                            image: Some(
+                                agent_image
+                                    .clone()
+                                    .unwrap_or_else(|| "alpine:latest".to_string()),
+                            ),
+                            security_context: Some(agent_security_context()),
+                            image_pull_policy: agent_image.as_ref().and_then(|img| {
+                                if img.contains("stormchaser-agent") {
+                                    Some("IfNotPresent".to_string())
+                                } else {
+                                    None
+                                }
+                            }),
+                            // The presigned URL is read from the step's Secret, not
+                            // written into the pod
+                            command: Some(command),
+                            args: Some(args),
+                            env: Some(vec![secrets.env_var(FETCH_URL_ENV, get_url.to_string())]),
                             volume_mounts: Some(vec![VolumeMount {
                                 name: vol_name.clone(),
                                 mount_path: mount.mount_path.clone(),
@@ -69,25 +258,42 @@ pub(crate) fn build_k8s_containers(
                             prov.get("url").and_then(|u| u.as_str()),
                             prov.get("destination").and_then(|d| d.as_str()),
                         ) {
-                            let mut full_dest = PathBuf::from(&mount.mount_path);
-                            if dest != "/" && !dest.is_empty() {
-                                let relative_dest = dest.trim_start_matches('/').replace('/', "");
-                                full_dest.push(relative_dest);
-                            }
-                            let dest_str = full_dest.to_str().unwrap_or(&mount.mount_path);
+                            let (command, args, extra_env) = provision_command(
+                                agent_image.is_some(),
+                                &mount.mount_path,
+                                dest,
+                                prov.get("resource_type").and_then(|r| r.as_str()),
+                                prov.get("mode").and_then(|m| m.as_str()),
+                            );
+                            let mut env = vec![secrets.env_var(FETCH_URL_ENV, url.to_string())];
+                            env.extend(extra_env.into_iter().map(|(name, value)| K8sEnvVar {
+                                name,
+                                value: Some(value),
+                                ..Default::default()
+                            }));
 
                             init_containers.push(Container {
-                                name: format!("{}-{}", normalize_resource_name(&mount.name, "prov"), prov_idx),
-                                image: Some(agent_image.clone().unwrap_or_else(|| "alpine:latest".to_string())),
-                            image_pull_policy: agent_image.as_ref().and_then(|img| if img.contains("stormchaser-agent") { Some("IfNotPresent".to_string()) } else { None }),
-                                command: Some(vec!["/bin/sh".to_string()]),
-                                args: Some(vec![
-                                    "-c".to_string(),
-                                    format!(
-                                        "if [ -z \"$(ls -A \\\"{}\\\" 2>/dev/null)\" ]; then mkdir -p \"{}\" && curl -sL \"{}\" | tar -xz -C \"{}\" || true; fi",
-                                        dest_str, dest_str, url, dest_str
-                                    ),
-                                ]),
+                                name: format!(
+                                    "{}-{}",
+                                    normalize_resource_name(&mount.name, "prov"),
+                                    prov_idx
+                                ),
+                                image: Some(
+                                    agent_image
+                                        .clone()
+                                        .unwrap_or_else(|| "alpine:latest".to_string()),
+                                ),
+                                security_context: Some(agent_security_context()),
+                                image_pull_policy: agent_image.as_ref().and_then(|img| {
+                                    if img.contains("stormchaser-agent") {
+                                        Some("IfNotPresent".to_string())
+                                    } else {
+                                        None
+                                    }
+                                }),
+                                command: Some(command),
+                                args: Some(args),
+                                env: Some(env),
                                 volume_mounts: Some(vec![VolumeMount {
                                     name: vol_name.clone(),
                                     mount_path: mount.mount_path.clone(),
@@ -108,43 +314,69 @@ pub(crate) fn build_k8s_containers(
     let final_command = cmd_info.command;
     let final_args = cmd_info.args;
 
-    let mut container_volume_mounts = volume_mounts;
-    if agent_image.is_some()
-        && !step_spec.storage_mounts.is_empty()
-        && !container_volume_mounts
-            .iter()
-            .any(|m| m.mount_path == "/stormchaser/agent")
-    {
-        container_volume_mounts.push(VolumeMount {
-            name: "storm-agent".to_string(),
-            mount_path: "/stormchaser/agent".to_string(),
-            ..Default::default()
-        });
-    }
+    let container_volume_mounts = volume_mounts;
 
     let container = Container {
-        name: "worker".to_string(),
+        name: WORKER_CONTAINER.to_string(),
         image: Some(final_image.clone()),
-        image_pull_policy: if final_image.contains("stormchaser-agent") {
-            Some("IfNotPresent".to_string())
-        } else {
-            None
-        },
+        image_pull_policy: Some(step_image_pull_policy(
+            std::env::var(STEP_IMAGE_PULL_POLICY_ENV).ok().as_deref(),
+        )),
         command: final_command,
         args: final_args,
         env: Some(k8s_env),
         resources: Some(step_spec.resources.clone()),
         volume_mounts: Some(container_volume_mounts),
-        security_context: step_spec.privileged.map(|p| {
-            k8s_openapi::api::core::v1::SecurityContext {
-                privileged: Some(p),
-                ..Default::default()
-            }
-        }),
+        security_context: Some(step_security_context(step_spec.privileged)),
         ..Default::default()
     };
 
-    (container, init_containers)
+    let mut containers = vec![container];
+    if let (Some(agent_img), Some(plan)) = (
+        agent_image.as_ref(),
+        plan_sidecar(agent_image.is_some(), sfs_pvc_name, metadata, step_spec),
+    ) {
+        containers.push(build_agent_sidecar(
+            agent_img,
+            plan,
+            storage_volume_mounts(sfs_pvc_name, metadata, step_spec),
+            secrets,
+        ));
+    }
+
+    (containers, init_containers)
+}
+
+/// How a step's own container runs. A privileged step (which the runner has already
+/// checked it may run) is left as it asked. Any other gets the runtime's default seccomp
+/// profile, cannot gain privileges through setuid binaries, and loses `NET_RAW`, which
+/// lets it forge packets on the pod network. It keeps the image's user and the other
+/// default capabilities, which ordinary images that run as root (package installs,
+/// `chown`) need. These fit the `baseline` Pod Security level the chart sets on the
+/// steps namespace.
+pub(crate) fn step_security_context(
+    privileged: Option<bool>,
+) -> k8s_openapi::api::core::v1::SecurityContext {
+    use k8s_openapi::api::core::v1::{Capabilities, SeccompProfile, SecurityContext};
+    if privileged == Some(true) {
+        return SecurityContext {
+            privileged: Some(true),
+            ..Default::default()
+        };
+    }
+    SecurityContext {
+        privileged: Some(false),
+        allow_privilege_escalation: Some(false),
+        capabilities: Some(Capabilities {
+            drop: Some(vec!["NET_RAW".to_string()]),
+            ..Default::default()
+        }),
+        seccomp_profile: Some(SeccompProfile {
+            type_: "RuntimeDefault".to_string(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
 }
 
 pub(crate) struct ContainerCommandInfo {
@@ -167,8 +399,7 @@ pub(crate) fn wrap_main_command(
     }
 
     let step_name = &metadata.step_dsl.name;
-    let needs_agent = agent_present
-        && (!step_spec.storage_mounts.is_empty() || !metadata.step_dsl.reports.is_empty());
+    let needs_agent = uses_in_step_agent(agent_present, metadata);
 
     if original_cmd.is_empty() {
         return ContainerCommandInfo {
@@ -179,41 +410,12 @@ pub(crate) fn wrap_main_command(
     }
 
     let wrapped_script = if needs_agent {
-        let mut parking_urls = serde_json::Map::new();
-        let mut mount_paths = serde_json::Map::new();
-        let mut artifact_urls = serde_json::Map::new();
-
-        if let Some(storage_data) = &metadata.storage {
-            for (name, urls) in storage_data {
-                if urls.get("put_url").is_some() {
-                    parking_urls.insert(name.clone(), urls.clone());
-                }
-                if let Some(mount) = step_spec.storage_mounts.iter().find(|x| x.name == *name) {
-                    mount_paths.insert(name.clone(), Value::String(mount.mount_path.clone()));
-                }
-                if let Some(artifacts) = urls.get("artifacts").and_then(|a| a.as_object()) {
-                    for (art_name, art_data) in artifacts {
-                        artifact_urls.insert(art_name.clone(), art_data.clone());
-                    }
-                }
-            }
-        }
-
-        let parking_urls_json =
-            serde_json::to_string(&parking_urls).unwrap_or_else(|_| "{}".to_string());
-        let mount_paths_json =
-            serde_json::to_string(&mount_paths).unwrap_or_else(|_| "{}".to_string());
-        let artifact_urls_json =
-            serde_json::to_string(&artifact_urls).unwrap_or_else(|_| "{}".to_string());
-
-        let mut agent_cmd = format!(
-            "/stormchaser/agent/stormchaser-agent run --parking-urls '{}' --mount-paths '{}'",
-            parking_urls_json, mount_paths_json
-        );
-
-        if !artifact_urls.is_empty() {
-            agent_cmd.push_str(&format!(" --artifact-urls '{}'", artifact_urls_json));
-        }
+        // Here the agent only collects test reports (named in its environment). Storage
+        // and artifacts are parked by the sidecar, so it is given nothing to upload them
+        // with. Inside the step's own container it can read nothing the step cannot, so
+        // reports may lie anywhere in the step's filesystem.
+        let agent_cmd = "/stormchaser/agent/stormchaser-agent run --parking-urls '{}' \
+                         --mount-paths '{}' --reports-anywhere";
 
         format!(
             "echo '========================================'; \
@@ -251,5 +453,38 @@ pub(crate) fn wrap_main_command(
         image: step_spec.image.clone(),
         command: Some(vec!["/bin/sh".to_string()]),
         args: Some(new_args),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{step_image_pull_policy, step_security_context};
+
+    #[test]
+    fn a_step_image_is_checked_with_the_registry_unless_the_operator_says_otherwise() {
+        assert_eq!(step_image_pull_policy(None), "Always");
+        assert_eq!(step_image_pull_policy(Some("")), "Always");
+        assert_eq!(step_image_pull_policy(Some("IfNotPresent")), "IfNotPresent");
+        assert_eq!(step_image_pull_policy(Some("Never")), "Never");
+        assert_eq!(step_image_pull_policy(Some("sometimes")), "Always");
+    }
+
+    #[test]
+    fn steps_cannot_gain_privileges_or_forge_packets() {
+        let context = step_security_context(None);
+        assert_eq!(context.allow_privilege_escalation, Some(false));
+        assert_eq!(context.privileged, Some(false));
+        assert_eq!(
+            context.capabilities.unwrap().drop,
+            Some(vec!["NET_RAW".to_string()])
+        );
+        assert_eq!(context.seccomp_profile.unwrap().type_, "RuntimeDefault");
+    }
+
+    #[test]
+    fn a_privileged_step_is_left_as_it_asked() {
+        let context = step_security_context(Some(true));
+        assert_eq!(context.privileged, Some(true));
+        assert!(context.allow_privilege_escalation.is_none());
     }
 }

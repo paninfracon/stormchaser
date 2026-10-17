@@ -25,6 +25,7 @@ fn get_token() -> String {
         sub: "test-user".to_string(),
         email: Some("test-user@paninfracon.net".to_string()),
         exp: (Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
+        groups: Vec::new(),
     };
     encode(
         &Header::default(),
@@ -39,7 +40,7 @@ async fn test_storage_backend_crud() {
     std::env::set_var("API_RATE_LIMIT_PER_SECOND", "1000");
     std::env::set_var("API_RATE_LIMIT_BURST_SIZE", "1000");
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = match async_nats::connect(nats_url).await {
+    let nats_client = match stormchaser_model::nats::connect(nats_url).await {
         Ok(c) => c,
         Err(_) => return,
     };
@@ -68,6 +69,7 @@ async fn test_storage_backend_crud() {
         jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
         api_base_url: "http://localhost:3000".to_string(),
+        mcp_allowed_hosts: Vec::new(),
     };
 
     let app = app(state.clone());
@@ -81,8 +83,10 @@ async fn test_storage_backend_crud() {
         "connection_type": ConnectionType::S3,
         "config": {
             "bucket": "test-bucket",
-            "endpoint": "http://localhost:9000"
+            "endpoint": "http://localhost:9000",
+            "secret_key": "s3-secret-value"
         },
+        "encrypted_credentials": "bearer-credential",
         "is_default_sfs": false
     });
 
@@ -128,13 +132,25 @@ async fn test_storage_backend_crud() {
     let backends: Vec<Value> = serde_json::from_slice(&body).unwrap();
     assert!(backends.iter().any(|b| b["name"] == "test-s3"));
 
-    let connection_id = backends.iter().find(|b| b["name"] == "test-s3").unwrap()["id"]
-        .as_str()
-        .unwrap();
+    let listed = backends.iter().find(|b| b["name"] == "test-s3").unwrap();
+    let connection_id = listed["id"].as_str().unwrap();
 
-    // 3. Update
+    // Stored secrets never come back in a response.
+    let listed_text = listed.to_string();
+    assert!(!listed_text.contains("s3-secret-value"));
+    assert!(!listed_text.contains("bearer-credential"));
+    assert_eq!(listed["config"]["secret_key"], "********");
+    assert_eq!(listed["encrypted_credentials"], "********");
+    assert_eq!(listed["config"]["bucket"], "test-bucket");
+
+    // 3. Update, the way a client does after loading the connection: it changes one
+    // field and sends the masked values it was given back unchanged.
+    let mut edited_config = listed["config"].clone();
+    edited_config["bucket"] = json!("renamed-bucket");
     let update_payload = json!({
-        "description": "Updated Description"
+        "description": "Updated Description",
+        "config": edited_config,
+        "encrypted_credentials": listed["encrypted_credentials"]
     });
 
     let response = app
@@ -156,6 +172,17 @@ async fn test_storage_backend_crud() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
+
+    // The masks were not written over the real secrets.
+    let (stored_config, stored_credentials): (Value, Option<String>) =
+        sqlx::query_as("SELECT config, encrypted_credentials FROM connections WHERE id = $1::uuid")
+            .bind(connection_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(stored_config["bucket"], "renamed-bucket");
+    assert_eq!(stored_config["secret_key"], "s3-secret-value");
+    assert_eq!(stored_credentials.as_deref(), Some("bearer-credential"));
 
     // 4. Delete
     let response = app
@@ -180,7 +207,7 @@ async fn test_artifact_listing() {
     std::env::set_var("API_RATE_LIMIT_PER_SECOND", "1000");
     std::env::set_var("API_RATE_LIMIT_BURST_SIZE", "1000");
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = match async_nats::connect(nats_url).await {
+    let nats_client = match stormchaser_model::nats::connect(nats_url).await {
         Ok(c) => c,
         Err(_) => return,
     };
@@ -209,6 +236,7 @@ async fn test_artifact_listing() {
         jwks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         log_backend: None,
         api_base_url: "http://localhost:3000".to_string(),
+        mcp_allowed_hosts: Vec::new(),
     };
 
     let app = app(state.clone());

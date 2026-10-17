@@ -20,20 +20,41 @@ Access to the Stormchaser API is secured using **JSON Web Tokens (JWT)**. All pr
 To facilitate integration with external Identity Providers (IdPs), Stormchaser provides a token exchange endpoint:
 
 * **Endpoint**: `POST /api/v1/auth/exchange`
-* **Mechanism**: A user provides a short-lived SSO token (OIDC `id_token`) from a trusted provider. Stormchaser validates this token's signature cryptographically against the Identity Provider's JSON Web Key Set (JWKS) and issues a signed Stormchaser JWT for subsequent API calls.
+* **Mechanism**: A client sends the authorization code the provider returned, with the redirect URI and the PKCE `code_verifier` of its login. The API redeems the code with the provider (adding the client secret itself), receives an OIDC `id_token`, validates this token's signature cryptographically against the Identity Provider's JSON Web Key Set (JWKS) and issues a signed Stormchaser JWT for subsequent API calls.
 * **Dynamic JWKS Fetching**: Stormchaser actively fetches and caches public keys from the IdP. If an incoming token specifies a Key ID (`kid`) that is not in the local cache, Stormchaser will proactively reach out to the IdP to fetch the latest keys. This ensures zero downtime during regular key rotations by the IdP (such as Dex).
 * **User Identity**: The user's identity (ID or Email) is extracted from the SSO claims and embedded in the `sub` field of the resulting JWT.
+* **PKCE**: `GET /api/v1/auth/login` refuses a login without an S256 `code_challenge`, and the exchange refuses a request without a `code_verifier`. The exchange needs no token and adds the client secret, so without PKCE an authorization code would be worth the user's tokens to whoever saw it first, for example in a proxy's access log of the web UI's callback URL. The web UI keeps its verifier in an HttpOnly cookie; the CLI and TUI keep theirs in memory. `STORMCHASER_OIDC_REQUIRE_PKCE=false` accepts logins and exchanges without it, for clients that cannot send one.
 
 ## 2. Authorization (Open Policy Agent)
 
-Stormchaser uses **Open Policy Agent (OPA)** to enforce fine-grained, decoupled authorization policies. Authorization occurs at two distinct stages of the workflow lifecycle.
+Stormchaser uses **Open Policy Agent (OPA)** to enforce fine-grained, decoupled authorization policies. Policy is asked four kinds of question, all at the same entrypoint and told apart by the shape of the input: about a request, about an object, about a run that is starting, and about an approval.
+
+> **Without OPA there is no isolation between users.** If no policy engine is configured (`OPA_URL` unset), every one of these checks is skipped: any authenticated user can read, change and delete every run, connection, webhook, rule and schedule. That is intended for single-user development only.
+
+The policy Stormchaser ships (`deploy/opa/policy.rego`, also packaged in the Helm chart) refuses anything it does not recognise, and by default:
+
+* lets any authenticated user call any endpoint and start any workflow;
+* lets users read and change only the runs, webhooks, event rules and cron schedules they created, and lets admins do anything;
+* shares connections: everyone may see them (credentials are always masked) and every run may use them, but only the creator or an admin may change or delete one;
+* lets only admins make a connection the default storage backend (`is_default_sfs`), once any admin is configured. Every run that names no storage backend keeps its files, artifacts and test reports there, so whoever owns it could read and replace other users' data. Until an admin is configured, the connection's creator may, as with any other change;
+* leaves objects that predate ownership readable by everyone, and changeable by everyone until an admin is configured, by admins only after that.
+
+Settings for it live in `deploy/opa/settings.json` (Helm: `api.opa.sidecar.settings`): `admins` (emails or subject ids), `admin_groups` (values of the token's `groups` claim), `separation_of_duties` (when true, whoever started a run may not approve its steps) and `author_groups`.
+
+**Groups.** Group settings match the `groups` claim of the user's identity provider. The API copies it from the provider's verified ID token into the token it issues at login and on each refresh, so a change of membership takes effect within the hour a token lasts. Many providers only include groups when asked: list the scope in `STORMCHASER_OIDC_EXTRA_SCOPES` (space or comma separated; Helm: `global.oidc.extraScopes`), `groups` for Dex. The bundled compose stack and umbrella chart ask for it; the orchestration chart on its own does not, because some providers refuse a login that asks for a scope they do not know. Without groups, group settings simply match no one.
+
+**Authors and run-only users.** By default every user may write workflows. Set `author_groups` (Helm: `authorGroups`) to the groups whose members may, and everyone else becomes run-only: they can run, and fill in the forms of, workflows held in repositories that an author or admin has registered as a connection, and nothing else. Specifically they may not start a direct run from workflow text, have a run form hydrated from workflow text (`/api/v1/schema/hydrate-direct`), or create, change, test or delete connections. Those are the three ways a user could otherwise choose what a run does or which queries a form executes. Admins count as authors. The repositories themselves need protecting where they live: whoever can push to a registered repository is an author in practice.
+
+OPA's own HTTP API is restricted (`deploy/opa/authz.rego`, with `--authorization=basic`) to evaluating the policy, so that nothing which can reach OPA's port can replace the policy or its data.
+
+In the Helm charts, the API, the engine and the query service each run their own OPA sidecar, listening on `127.0.0.1` only. Policy questions carry the user's bearer token, so they never leave the pod, and nothing else in the cluster can ask the policy anything.
 
 ### Tier 1: API Level (Request Authorization)
 
 The first check occurs at the API gateway before a request is processed.
 
 * **Context Sent to OPA**:
-  * `path`: The requested URL path (e.g., `/api/v1/runs`).
+  * `path`: The requested URL path, including the `/api/v1` prefix (e.g., `/api/v1/runs`).
   * `method`: The HTTP method (e.g., `POST`).
   * `token`: The raw bearer token (if provided).
 * **Purpose**: To determine if the user is allowed to access specific API endpoints or perform certain actions (e.g., "Can this user trigger *any* workflow?").
@@ -52,6 +73,35 @@ The second check occurs in the Orchestration Engine immediately after the workfl
   * "Workflows that use 'privileged' containers require 'Admin' group membership."
   * "Workflows cannot be triggered with a `timeout` parameter greater than 4 hours unless approved."
 
+### Per-object authorization (ownership)
+
+For every request whose path names a run, connection, webhook, event rule or cron schedule by id, the API looks the object up and asks policy whether this caller may act on it. Lists and the runs stream are filtered the same way, so a list never shows what fetching the object would refuse.
+
+* **Context Sent to OPA**:
+  * `action`: `read`, `update`, `delete` or `use`.
+  * `resource`: `{ "type": "run" | "connection" | "webhook" | "event_rule" | "cron_workflow", "id": "...", "owner": "alice@example.com" | null }`.
+  * `subject`: `{ "sub": "...", "email": "..." }`, the identity the API verified from the token.
+  * `token`: the raw bearer token, for policies that read further claims such as groups.
+* **Owner**: whoever created the object: their email, or their subject id when the token carries no email. An identity provider's token that names an email is accepted only with `"email_verified": true`, since an unverified address would let a user act as whoever really owns it; `STORMCHASER_OIDC_REQUIRE_EMAIL_VERIFIED=false` turns this off for a provider that only issues verified addresses but omits the claim. For a run it is whoever started it. A run started by a webhook rule or a cron schedule acts as whoever created that rule or schedule. Objects created before ownership was recorded have no owner (`null`).
+* **Connection use**: before the engine or the query service uses a connection on a run's behalf, it asks with `action: "use"` and the run's user as the subject (and no token).
+* **Not covered**: approving or rejecting a step is decided by the approval question below, since approvers are by nature not the owner. Completing a `Wait` step through `POST /api/v1/events/correlate` is governed by request-level policy only. The runs list is filtered after paging, so a page can hold fewer than `limit` entries.
+
+### Approvals
+
+When a user approves or rejects a step, policy is asked with `run_id`, `initiating_user`, `step_ast`, `inputs`, `run_outputs`, the `approver` (`{ "sub", "email" }`, as verified) and the raw `token`.
+
+### Approval links
+
+An approval email can carry links that approve or reject the step without logging in. A link is a credential for one decision on one step, so:
+
+* Links are sealed with a key of their own, `STORMCHASER_APPROVAL_LINK_KEY` (at least 32 characters; Helm: `global.approvalLinks.existingSecret`), set to the same value on the engine and the API. There is no default: without it the engine sends emails with no links and the API refuses every link.
+* A link expires after `STORMCHASER_APPROVAL_LINK_TTL_HOURS` (default 72).
+* Opening a link (GET) only shows a confirmation page. The decision is recorded when that page's form is submitted (POST), so mail scanners and link previews cannot approve anything by fetching the URL.
+* The decision is recorded against the addresses the email was sent to. When that is one address, it is the `approver` in the approval policy question, so separation of duties applies; an email sent to several people carries one shared link and no single approver.
+* The link's token is left out of the API's request logs and traces.
+
+Anyone who obtains a link before it expires can use it. Send approval emails to individuals, keep the lifetime short, and prefer the UI or CLI where the approver's identity matters.
+
 ## 3. Transport Security (mTLS)
 
 Stormchaser supports **mutual TLS (mTLS)** for all server-to-server communications. This ensures that only authorized components (Engine, API, Runners, NATS, Postgres) can communicate with each other, and that all data in transit is encrypted.
@@ -61,9 +111,90 @@ Stormchaser supports **mutual TLS (mTLS)** for all server-to-server communicatio
 The Orchestration Engine and API support mounting certificates (e.g., from `cert-manager` in Kubernetes) and dynamically reloading them without a restart.
 
 * **Certificate Watching**: The `stormchaser-tls` crate uses the `notify` crate to watch for file modifications in the certificate directory. When certificates are rotated (e.g., by Vault or Let's Encrypt), the system automatically swaps the `rustls` configuration in memory.
-* **mTLS for NATS**: All NATS connections are configured to use client certificates for authentication and encryption.
-* **mTLS for Postgres**: Database connections use `sqlx` with `rustls` to verify the server certificate and provide a client certificate for mutual authentication.
+* **mTLS for NATS**: The API and Engine present their client certificate to NATS, and it is enforced only when the NATS server is configured with TLS and `verify: true`. The runners do not present a client certificate; they authenticate with NATS credentials. The bundled quickstart NATS has no TLS. See [NATS: Quickstart and Production](nats.md).
+* **TLS for Postgres**: The API, the query service and the engine connect with `verify-full` by default: the database's certificate must chain to `TLS_CA_CERT_PATH` (or, with none set, to a public authority) and carry the host name in `DATABASE_URL`. The component's own certificate is offered as a client certificate if its files exist. A deployment can choose otherwise: an `sslmode` written in `DATABASE_URL` is used as written, `STORMCHASER_DB_SSL=false` with no `sslmode` in the URL connects without TLS, and `STORMCHASER_DB_SSL=true` insists on `verify-full` whatever the URL says. The service logs a warning at start whenever the connection is not verified.
 * **mTLS for OPA**: Outbound requests to the OPA server can be configured to use mTLS certificates.
+
+### The API, query service and web tier listeners
+
+Browsers, the CLI, the TUI and cron triggers connect to the API (port 3000), the
+query service (port 3001) and the web tier, and the web tier calls the other two.
+Every request carries a bearer token or a session. They serve HTTPS with the certificate
+and key at `TLS_CERT_PATH` and `TLS_KEY_PATH` unless the deployment switches TLS
+off with `STORMCHASER_LISTEN_TLS=false` (Helm: `global.tls.listen=false`). A
+service that should serve TLS and cannot read its certificate refuses to start
+rather than fall back to plain HTTP, and a value other than `true` or `false` is
+refused rather than read as off. The certificate is re-read when the files
+change, so renewal needs no restart.
+
+Switch TLS off only where an ingress or a service mesh terminates it in front of
+the services and the network behind is trusted. A service started that way logs
+a warning saying so. The docker-compose stack does it, because it is for one
+machine.
+
+What has to line up:
+
+* The certificate must name whatever clients call the service by: the Kubernetes
+  Service names for calls inside the cluster, and any host name an ingress
+  forwards with. The umbrella chart generates a CA and a certificate that name
+  the Services (`tlsCerts.generate`, on by default) and keeps them across
+  upgrades. To use your own, from cert-manager for example, turn that off and
+  create the Secret named in `global.tls.existingSecret` with `ca.crt`,
+  `tls.crt` and `tls.key`.
+* These listeners do not ask for a client certificate. Callers are identified by
+  their token, as before.
+* The web tier trusts `TLS_CA_CERT_PATH` in addition to the system's
+  authorities, and the Helm chart sets it and points `API_URL` and `QUERY_URL`
+  at `https`.
+* An ingress in front has to speak HTTPS to its backend. The chart sets
+  `nginx.ingress.kubernetes.io/backend-protocol: HTTPS` on its own Ingresses;
+  other controllers need their equivalent.
+* Cron triggers on Kubernetes call `SYSTEM_URL`. If that is an `https` address
+  with a certificate from a private CA, set `STORMCHASER_CRON_CA_FILE` to the CA
+  file; the chart does this.
+* The CLI and TUI trust the system's certificate store, plus the CA file given
+  with `--ca-cert` (or `STORMCHASER_CA_CERT`) for a certificate from a private
+  CA.
+
+### API documentation
+
+Swagger UI (`/swagger-ui`) and the OpenAPI document (`/api-docs/openapi.json`)
+need no token, so they are off unless `STORMCHASER_API_DOCS=true` (Helm:
+`api.docs`). The quickstart turns them on.
+
+The API serves the document and a small page; the page loads Swagger UI 5.29.1
+from cdnjs, which the browser checks against the release's published hashes
+(subresource integrity). Its content security policy allows scripts only from
+those two places and no inline code. A browser that cannot reach cdnjs gets an
+empty page; point another OpenAPI viewer at the document instead.
+
+### Cron triggers on Kubernetes
+
+A cron workflow is fired by a CronJob that calls the API with a token that
+starts that one workflow. The token is kept in a Secret owned by the CronJob,
+and the trigger reads it from a mounted file, so it does not appear in the
+CronJob, its Jobs or its pods. The trigger image is pinned by digest
+(`STORMCHASER_CRON_IMAGE` replaces it), runs as a non-root user with no
+capabilities and a read-only root filesystem, and is given no service account
+token. The API's service account needs `create` and `delete` on `cronjobs`
+(`batch`) and `create` on `secrets` in its own namespace; it needs no permission
+to read Secrets; the Helm chart creates that Role and points `SYSTEM_URL` at the
+API's Service. With `CRON_ENGINE=none` (the Docker quickstart) schedules are
+stored and each token is shown once, for a scheduler of your own to call
+`POST /api/v1/cron-trigger/<id>` with. Keep it where you keep other credentials.
+
+**Known limitation: the CronJob permission reaches every Secret in the API's
+namespace.** RBAC cannot limit what a CronJob's pods mount, so whoever controls the
+API's service account (a compromise of the API pod, or of the OPA sidecar, which
+shares its token) can create a CronJob that mounts any Secret in that namespace and
+read it, including the engine's NATS password, the JWT signing key and the database
+URL, though it has no permission to read Secrets directly. Until cron jobs live in
+a namespace of their own that holds nothing else, either:
+
+* install Stormchaser into a namespace whose other Secrets you can accept the API
+  being able to read, keeping the engine's credentials elsewhere where possible; or
+* use `CRON_ENGINE=none` and fire `POST /api/v1/cron-trigger/<id>` from a scheduler
+  you run yourself, and drop the Role.
 
 ### External Endpoint mTLS
 
@@ -86,23 +217,370 @@ Stormchaser follows a strict **Fail-Closed** security philosophy regarding OPA:
 
 | Variable | Description | Security Impact |
 | :--- | :--- | :--- |
-| `DATABASE_URL` | Connection string for Postgres. | Core data security. |
+| `DATABASE_URL` | Connection string for Postgres. Helm: name a Secret in `global.database.existingSecret`; a URL given as `global.database.url` is kept in a Secret the chart creates, never in the pod spec. The orchestration chart has no default and refuses the password `stormchaser` and the umbrella chart's old placeholder. The umbrella chart generates the bundled PostgreSQL's passwords and URL into the Secret `stormchaser-postgresql`. | Core data security. |
 | `NATS_URL` | Connection string for NATS. | Message integrity. |
+| `NATS_CREDS_FILE`, `NATS_USER` / `NATS_PASSWORD`, `NATS_TOKEN` | NATS credentials (see [nats.md](nats.md)). | **Who may schedule and report on steps.** |
+| `NATS_CA_FILE`, `NATS_TLS_REQUIRED` | Verify the NATS server and refuse plaintext. | Protects credentials and events in transit. |
 | `OPA_URL` | URL of the remote OPA server. | **Enables Authorization Enforcement.** |
-| `JWT_SECRET` | Secret key for signing/verifying JWTs. | **Must be kept highly secure.** |
+| `STORMCHASER_APPROVAL_LINK_KEY` | Engine and API: key that seals approve and reject links in approval emails (32+ characters, same on both). Unset by default. | Whoever has it can forge approvals. Links are disabled without it. |
+| `STORMCHASER_APPROVAL_LINK_TTL_HOURS` | Engine: lifetime of an approval link. Default `72`. | Bounds how long a leaked link is usable. |
+| `STORMCHASER_OCI_ALLOW_STATIC_CREDENTIALS` | Engine: send an OCI artifact backend's stored credentials to runner helpers when its registry cannot issue scoped tokens. Default `false`. | Long-lived registry credentials leave the engine. |
+| `STORMCHASER_NATS_STREAM_MAX_AGE_HOURS` | Engine and runners: maximum age of messages in the NATS stream. Default `168`. | Bounds how long any message stays readable. |
+| `VAULT_TOKEN` | Engine: token for `secret()` lookups. No default; lookups are disabled without it. | Everything the token can read is within reach of the paths below. |
+| `STORMCHASER_VAULT_ALLOWED_PATHS` | Engine: secret paths workflows may read with `secret()` (comma-separated, trailing `*` for a prefix). Empty by default. | Limits which secrets a workflow author can read. |
+| `STORMCHASER_TRUSTED_PROXIES` | API: addresses or CIDR ranges of the reverse proxies in front of it. Empty by default. | `X-Forwarded-For` is believed only from these; anything else could pick its own rate-limit bucket. |
+| `API_RATE_LIMIT_PER_SECOND`, `API_RATE_LIMIT_BURST_SIZE` | API: refill rate and size of each client's request bucket. Defaults `5` and `10`. | Bounds request floods and credential guessing per client. |
+| `STORMCHASER_QUERY_MAX_HYDRATIONS`, `STORMCHASER_QUERY_MAX_HYDRATIONS_PER_USER` | Query service: form hydrations in flight in all, and per user. Defaults `64` and `4`; one more is refused with `429`. Each hydration runs at most 8 of its queries at once. | Bounds the repository reads and SQL, HTTP and cloud queries one user can have the service run. |
+| `STORMCHASER_JWT_SECRET` | API: the key it signs and checks its own session tokens with (HS256). Required by a release build; `scripts/setup.sh` generates it into `.env`, and the umbrella chart generates the Secret `stormchaser-jwt` (orchestration chart: `global.jwt.existingSecret`). | **Must be kept highly secure.** Anyone with it can sign a token for any user. |
+| `STORMCHASER_LISTEN_TLS` | API, query service and web tier: serve HTTPS with `TLS_CERT_PATH` and `TLS_KEY_PATH`. Default `true`; a service that cannot read its certificate does not start. | Set to `false`, tokens and secrets cross the network to the pod in clear unless something else encrypts them. |
+| `STORMCHASER_DB_SSL` | API, query service and engine: `true` insists on `verify-full`; `false` uses the `sslmode` in `DATABASE_URL`, or none. Unset, the URL's `sslmode` is used if it names one, and `verify-full` otherwise. | Without a verified connection, nothing proves the service reached its own database. |
+| `STORMCHASER_CA_CERT` | CLI and TUI (`--ca-cert`): a PEM file of CA certificates to trust as well as the system's. Unset by default. | Lets them verify an API whose certificate a private CA signed, instead of turning verification off. |
+| `STORMCHASER_API_DOCS` | API: serve Swagger UI and the OpenAPI document without authentication. Default `false`. | Describes every route to anyone who can reach the listener. |
+| `STORMCHASER_CRON_IMAGE` | API: image of Kubernetes cron triggers. Default is a `curl` image pinned by digest. | It runs with the trigger token. |
+| `STORMCHASER_GIT_IMAGE` | Engine: image `GitCheckout` steps run in. Default is `alpine/git` pinned by digest. | It holds the Git connection's credentials. |
+| `STORMCHASER_TERRAFORM_IMAGE` | Engine: image Terraform steps run in. Default is `hashicorp/terraform` pinned by digest. | It may hold an assumed AWS role's credentials. |
+| `STORMCHASER_AGENT_IMAGE` | Runners: image of the agent container beside each step. Docker runner default: `stormchaser-agent:v1`; Kubernetes chart: `global.agent.image`. Pin it by digest in production. | It parks storage and publishes artifacts with the step's credentials. |
+| `STORMCHASER_RUNNER_SIGNATURES` | Engine: `required` (default) or `optional`, which accepts unsigned reports from runners that have no key, for a rolling upgrade. | `optional` lets any holder of the runner credential report for such a runner. |
+| `STORMCHASER_CRON_CA_FILE` | API: CA file that Kubernetes cron triggers trust when calling `SYSTEM_URL`. Unset by default. | Lets triggers verify an API that serves TLS from a private CA. |
 | `TLS_CA_CERT_PATH` | Path to the CA certificate file. | Trust root for mTLS. |
 | `TLS_CERT_PATH` | Path to the component's client certificate. | Component identity for mTLS. |
 | `TLS_KEY_PATH` | Path to the component's private key. | Component identity for mTLS. |
 | `TLS_SERVER_NAME` | Expected TLS server name (optional). | Prevents MITM attacks. |
+| `MCP_ALLOWED_HOSTS` | Extra `Host` header values the MCP server accepts (optional, comma-separated). | Limits DNS rebinding exposure; list only hostnames you serve. |
 
 ## 5. Encryption at rest
 
-There are two main areas to consider for encryption at rest:
+Stormchaser does not encrypt data itself before storing it. Protecting data at
+rest is the responsibility of whoever operates the data stores: this section
+states what must be protected and what Stormchaser expects; the database
+administrator implements it.
 
-1. Postgres DB - standard techniques are well documented for this
-2. NATS Jetstream - NATS documentation notes that whilst NATS supports at rest encryption, host native file system encryption is preferred
+### PostgreSQL
+
+**Encryption at rest is required for any deployment that handles real
+credentials.** Stormchaser writes secrets to PostgreSQL in the clear and
+relies on the database being encrypted underneath it.
+
+What the database administrator must provide:
+
+* **Encryption of everything PostgreSQL writes to disk**: the data directory,
+  write-ahead log, temporary files, replicas, and every backup and snapshot.
+  Core PostgreSQL has no transparent data encryption, so this is done at the
+  storage layer (LUKS/dm-crypt, an encrypted volume or storage class, or the
+  encryption built into a managed PostgreSQL service) or with a PostgreSQL
+  distribution that offers it.
+* **TLS for connections from Stormchaser.** The API, engine and query service
+  verify the server certificate by default: give them the CA that signed it in
+  `TLS_CA_CERT_PATH` unless a public authority did, and a host name in
+  `DATABASE_URL` that the certificate carries.
+* **A dedicated, least-privileged database role** for Stormchaser, and control
+  over who else can query the database or restore its backups. Storage
+  encryption does not protect against anyone who can connect and read tables.
+* **No statement parameters in server logs.** Secrets are sent as query
+  parameters; leave parameter logging off (`log_parameter_max_length = 0`) and
+  avoid `log_statement = 'all'` on this database.
+* **Key management and rotation** for whichever encryption is used.
+
+Stormchaser does not use `pgcrypto` or any other column-level encryption, and
+none should be layered on from the application side: the database is the
+single place this is handled.
+
+So the administrator can judge what is at stake, these are the places secrets
+are stored:
+
+| Table | Columns | Contents |
+| :--- | :--- | :--- |
+| `run_contexts`, `archived_run_contexts` | `secrets`, `sensitive_values`, `inputs` | Decrypted SOPS secrets for a run, the list of secret values used for redaction, and workflow inputs, including those declared secret |
+| `step_instances`, `archived_step_instances` | `spec`, `params` | Resolved step definitions, with secrets already substituted in |
+| `step_instances` | `completion_token` | A per-step secret that authorises finishing an approval or other engine-handled step |
+| `step_outputs` and archived copy | `value` | Step outputs, which may contain secrets a step emitted |
+| `outbox_events` | `payload` | Task messages waiting to be published, with the same content as a resolved step |
+| `connections` | `config`, `encrypted_credentials`, `client_key` | Credentials for storage, registries, databases, Git and HTTP APIs. Despite its name, `encrypted_credentials` is stored exactly as supplied |
+| `webhooks` | `secret_token`, `client_key` | Webhook signing secrets and mTLS client keys |
+| `cron_workflows` | `secret_token` | Trigger tokens for scheduled workflows |
+| `runner_sessions` | `session_key` | The key the engine issued each runner, which the runner signs its reports with |
+
+The API masks these values in its responses (see the relevant endpoints), but
+that is independent of how they are stored.
+
+A connection's `config` is free-form, so the API cannot know which of its keys
+hold credentials. It therefore shows only the values of keys known to say where
+a connection points or who it connects as (for example `url`, `endpoint`,
+`bucket`, `region`, `registry`, `username`, `access_key`, `port`) and returns
+`********` for everything else, whatever the key is called. Within `headers`
+only descriptive headers such as `Accept` and `Content-Type` are shown. In a
+URL, the password and every query parameter that is not a known setting (such
+as `sslmode`) are masked. Sending `********` back in an update keeps the stored
+value, so a connection can be loaded, edited and saved without re-entering its
+secrets.
+
+Run details get the same treatment. A run's decrypted secrets and its
+`secret = true` inputs are replaced with `********` wherever they appear in the
+step specs, parameters, outputs, errors and log lines the API returns, and an
+output marked sensitive is masked whole. This works by matching known values,
+so it does not catch a secret that a step transforms (for example
+base64-encodes) before printing it, a value fetched with `secret()` from
+Vault, or a value shorter than four characters.
+
+The PostgreSQL bundled with docker-compose and the umbrella Helm chart is for
+evaluation: it has no encryption at rest and, in the chart, connects with
+`sslmode=disable`. Do not store real credentials in it.
+
+### NATS JetStream
+
+Task messages held in JetStream contain the same secrets as a resolved step.
+NATS supports encryption at rest, but its documentation recommends
+file-system encryption of the store directory instead; that is what
+Stormchaser assumes. See [NATS: Quickstart and Production](nats.md).
 
 ## 6. Runner Security Considerations
+
+Workflow steps run images chosen by workflow authors, so both runners keep them
+away from the control plane:
+
+* **Kubernetes Runner:** steps run in a dedicated namespace, never the
+  runner's own. The chart applies a NetworkPolicy there that blocks cluster-internal
+  addresses and the cloud metadata endpoint, step pods get no API token, and
+  ServiceAccounts, Secrets and ConfigMaps are only attachable when the operator
+  allow-lists them. The chart labels the namespace with Pod Security `baseline`
+  (enforced) and `restricted` (warned), so not even a holder of the runner's
+  credentials can start a privileged or host-mounting pod there (`privileged` is
+  enforced instead when `config.allowPrivileged` is set). A step's container runs
+  with the runtime's default seccomp profile, no privilege escalation and without
+  `NET_RAW`.
+* **Docker Runner:** steps join the network named by `STORMCHASER_STEP_NETWORK`
+  instead of the runner's own, run with `no-new-privileges` and without `NET_RAW`.
+  The runner still needs the Docker socket and is therefore root on its host; use
+  dedicated hosts. The umbrella chart does not deploy it unless
+  `runnerDocker.enabled` is set; its chart takes the step network as
+  `config.stepNetwork`, which must exist on every node.
+* **Privileged steps** are refused unless the runner is started with
+  `STORMCHASER_ALLOW_PRIVILEGED=true`.
+
+`scripts/setup.sh` relaxes the network isolation and the privileged setting for
+local development; see [NATS: Quickstart and Production](nats.md).
+
+### Runner identity
+
+Every runner connects to NATS with the same credential, so a message cannot show by
+its sender which runner it comes from. Each runner therefore asks the engine for a
+key of its own when it starts (`stormchaser.rpc.runner.session`). The engine sends
+the key sealed to a one-off public key the runner made for the request, so another
+holder of the runner credential who sees the reply cannot read it, and keeps it in
+`runner_sessions`. The runner signs everything it reports with it: registration,
+heartbeats, going offline, a step's progress, result and failure, and its requests
+for artifact push tokens. The engine ignores such a message unless it is signed, less
+than five minutes ago, with the key of the runner it names, for the subject it arrived
+on: a signed report published again on another subject does not verify.
+
+* The engine will not issue a key for an id whose runner is still sending
+  heartbeats, or that was given a key in the last 30 seconds. A runner that restarts
+  without saying it is going offline waits up to 30 seconds before it can register
+  again. `intrinsic-sql` and `engine-intrinsic`, the ids the engine reports its own
+  steps under, are never issued.
+* A report that a step has started, or is unpacking or packing its storage, moves
+  the step only from a state where that makes sense, and only for the runner that
+  holds it (before any runner does, the one that signed the report).
+* Each NATS user may read only its own inbox prefix (see `docs/nats.md`), so no
+  other user can read the engine's deliveries of runner reports or the answers it
+  sends. Runners share a user and so a prefix; the registry push token in an answer
+  is sealed with the asking runner's key.
+* The engine and the API still finish steps they run themselves (approvals, waits,
+  built-in steps) without a runner's signature; those need the step's completion
+  token instead.
+* What this does not stop: a holder of the runner credential can still pull tasks
+  from the shared queues, which carry the step's resolved secrets, and can take the
+  id of a runner that has stopped.
+* Runners must be upgraded with the engine. While older runners are still running,
+  `STORMCHASER_RUNNER_SIGNATURES=optional` on the engine accepts unsigned reports from
+  runners that have no key; signed reports are always checked.
+
+### The runners' own pods
+
+* **Kubernetes Runner:** runs as an unprivileged user (65532) with no capabilities,
+  no privilege escalation, the runtime's default seccomp profile and a read-only
+  filesystem, with CPU and memory limits (`podSecurityContext`, `securityContext`,
+  `resources`). Its Role, in the step namespace only, allows what it does and no
+  more: create, watch, patch (to resume a suspended Job) and delete Jobs; watch and
+  annotate pods and read their logs; create and delete the per-step Secrets it
+  writes. It cannot read Secrets, start pods directly, or touch any other namespace.
+* **Docker Runner:** whatever else is restricted, the Docker socket is root on the
+  node, since it can start a container that mounts the host. A socket proxy that
+  filters API endpoints would not change that, because a container's options are in
+  the request body, so the chart ships none. The runner has no capabilities, no
+  privilege escalation, no Kubernetes API token, a read-only filesystem and
+  resource limits. It runs as root, which owns the socket, unless
+  `dockerSocketGroup` names the group that does, in which case it runs as an
+  unprivileged user in that group.
+
+### What one step may use
+
+A step's CPU, memory, run time and parallelism come from its workflow. Each
+runner holds them to limits the operator sets, so that one workflow cannot
+starve a shared host or namespace. A step that asks for more than the maximum is
+refused before anything is started; a step that asks for nothing gets the
+default, not everything there is.
+
+| Limit | Default | Setting (Helm: `config.stepLimits.*`) |
+| :--- | :--- | :--- |
+| CPU for a step that asks for none | `1` | `STORMCHASER_STEP_DEFAULT_CPU` |
+| Memory for a step that asks for none | `2Gi` | `STORMCHASER_STEP_DEFAULT_MEMORY` |
+| Most CPU a step may ask for | `8` | `STORMCHASER_STEP_MAX_CPU` |
+| Most memory a step may ask for | `16Gi` | `STORMCHASER_STEP_MAX_MEMORY` |
+| Run time of a step with no `timeout` | `24h` | `STORMCHASER_STEP_DEFAULT_TIMEOUT` |
+| Longest `timeout` a step may set | `24h` | `STORMCHASER_STEP_MAX_TIMEOUT` |
+| Processes in a step's container (Docker) | 4096 | `STORMCHASER_STEP_PIDS_LIMIT` |
+| Pods one step's Job may run or complete (Kubernetes) | 10 | `STORMCHASER_STEP_MAX_PARALLELISM` |
+
+A step's `timeout` is enforced by the runner. On Kubernetes it becomes the Job's
+`activeDeadlineSeconds` (or the step's own, if that is shorter), and Kubernetes
+ends the Job and its pods when it runs out. On Docker the runner stops the
+container. Either way the step fails with a message saying it timed out. On
+Docker, memory is limited with no swap on top. A step that runs with `exec` in
+a container shared with other steps is reported as timed out but its process
+cannot be killed through the Docker API. Resources other than CPU and memory
+that a `RunK8sJob` step names (GPUs, ephemeral storage) are passed through as
+written; use a `ResourceQuota` and `LimitRange` on the step namespace for
+those, and as a second line of defence for the rest.
+
+### What one run may give itself
+
+A workflow's `quotas` block (and, for a run started through the API, the
+`overrides.timeout` of the request) is chosen by whoever writes or starts the
+run, so the engine and API hold it to ceilings the operator sets. A run that
+asks for more gets the ceiling, and a warning is logged.
+
+| Ceiling | Default | Setting (engine; the API reads the timeout) |
+| :--- | :--- | :--- |
+| Steps of one run running at once | 50 | `STORMCHASER_RUN_MAX_CONCURRENCY` |
+| CPU one run's steps may claim together | `64` | `STORMCHASER_RUN_MAX_CPU` |
+| Memory one run's steps may claim together | `256Gi` | `STORMCHASER_RUN_MAX_MEMORY` |
+| Longest a run may last | `24h` | `STORMCHASER_RUN_MAX_TIMEOUT` |
+
+A step that names no CPU or memory counts as none against its run's CPU and
+memory quota (it still gets the runner's defaults when it runs). The number of
+such steps is bounded by the run's concurrency. There is no limit on how many
+runs one user may have at once; on a shared installation, use a
+`ResourceQuota` on the step namespace as well.
+
+### Private step images on Kubernetes
+
+The Kubernetes runner sets `imagePullPolicy: Always` on a step's own container.
+With Kubernetes' default for a tagged image, `IfNotPresent`, a node starts an
+image it already holds without asking the registry, so a step with no
+credentials for a private image could run it once another user's run had pulled
+it onto the same node, and read whatever the image contains. `Always` makes the
+kubelet check with the registry, using the step's own pull secret, each time;
+layers already on the node are not downloaded again. The Docker runner always
+pulls, so it is not affected.
+
+If step images are preloaded onto nodes rather than pulled, set
+`STORMCHASER_STEP_IMAGE_PULL_POLICY` (Helm: `config.stepImagePullPolicy`) to
+`IfNotPresent` or `Never`. That reopens the gap above, unless the kubelet
+re-checks credentials for cached images itself (the
+`KubeletEnsureSecretPulledImages` feature, KEP-2535, where your Kubernetes
+version offers it).
+
+### When a run ends early
+
+A run that fails or is aborted while steps are still on runners no longer leaves
+them running. The engine publishes a cancellation for the run, and every runner
+stops what it holds for it: the Docker runner stops and removes the run's
+containers, including a container shared by several steps, and the Kubernetes
+runner deletes the run's Jobs, which takes their pods and Secrets with them.
+Containers get ten seconds to exit before they are killed. A task for a
+cancelled run that reaches a runner late is dropped, and a runner that was down
+when the cancellation was sent reads the last hour of cancellations when it
+starts.
+
+A cancellation is trusted because of where it arrives. It is published on
+`stormchaser.v1.runner.cancel`, which the NATS permissions in
+[NATS Authentication](#10-nats-authentication) let only the engine's account
+publish to; runners can read it and neither they nor the API can write it. A
+deployment that gives every component the same NATS account has no such
+guarantee: there, anything that can publish can stop any run's steps.
+
+Cancellation is not a substitute for a step's `timeout`. A runner that stays
+down for more than an hour misses it, and the step then runs until its own
+deadline.
+
+### Where a step's secrets are on a runner
+
+A step's environment carries the secrets its workflow resolved and the
+credentials of the connections it uses, and its helper containers are handed
+presigned URLs for the run's storage. A runner has to give those to the step
+without leaving them where others can read them.
+
+**Kubernetes.** Each step that has anything to protect gets one Secret,
+`<job name>-env`, in the step namespace. The pod's containers read their
+environment values and URLs from it by key, so `kubectl get` or `describe` on
+the Job or the pod shows variable names and never values. The Secret is owned
+by the Job and deleted with it, by the reaper or the Job's TTL. The Job is
+created suspended and resumed once its Secrets exist, so no pod starts without
+them. Reading the step namespace's Secrets is therefore what reading a step's
+secrets takes: grant `get` and `list` on Secrets there as narrowly as you
+would on any namespace that holds credentials, and enable encryption at rest
+for Secrets in the cluster. The runner itself can create and delete Secrets
+there but not read them.
+
+**Docker.** A container's environment is part of its configuration, and anyone
+who can use the Docker socket on a runner host can read it with `docker
+inspect`. That access is root on the host in any case; treat runner hosts
+accordingly. Presigned URLs go to the helper container, not the step's.
+
+**The definition a runner keeps.** So that a restarted runner can pick a step
+up again, each runner stores the step's definition on the Job (an annotation)
+or the container (a label). With `STORMCHASER_STATE_ENCRYPTION_KEY` set (32
+characters; Helm: `config.stateEncryptionSecret`) it is stored whole and
+encrypted. Without the key it is stored in clear with every environment and
+parameter value removed.
+
+**What is still readable.** A step's `command` and `args` are part of the pod
+or container and are stored as written, so a secret interpolated into a
+command line can be read there and in the process list. Pass secrets to steps
+through `env`, never on the command line.
+
+### What a step reports about itself
+
+Test reports, storage hashes and artifact metadata are produced inside the step,
+so the engine treats them as the workflow author's claims, not as facts:
+
+* A test report is stored only if the step declares it. The engine works out
+  where an uploaded report lives from the run, the step and the report name; it
+  does not read a location, format or checksum from the step's result. Report
+  archives are limited to 32 MiB compressed, 64 MiB unpacked and 1,000 files.
+* A storage hash is recorded only for a volume the workflow declares.
+* Storage is parked and artifacts are published by a helper the step's code does
+  not share: a separate container on the Docker runner, an agent sidecar in the pod
+  on the Kubernetes runner. Both runners read storage hashes and artifact metadata
+  from that helper's output only, never from the step's, and refuse storage mount
+  paths that would cover the helper's system directories (see
+  [Mounting Storage in Steps](workflow_dsl.md)).
+* Test reports are files anywhere in the step's own filesystem, so on Kubernetes
+  they are still collected inside the step's container, with upload URLs for that
+  step's own reports only.
+
+### Credentials for artifact registries
+
+The username and password of an OCI artifact backend stay in the engine. They are
+not in task messages, pod specs, container arguments or environment variables.
+When a step's command has finished, the runner asks the engine for push
+credentials, and the engine answers with a token it has just obtained from the
+registry's token endpoint for that run's repositories only. The engine answers
+only for a step that is with a runner at that moment. The runner hands the token
+to the helper alone: written into the helper container's filesystem on Docker, in
+a Secret only the sidecar mounts on Kubernetes (deleted with the step's Job).
+
+* The step's own container holds no upload URLs and no registry credentials.
+* Only the runner that has the step gets the token: the request must be signed
+  with that runner's key (see [Runner identity](#runner-identity)).
+* The token's lifetime is the registry's (often five minutes). A push that
+  outlasts it fails; raise the token lifetime at the registry for large artifacts.
+* A registry that cannot issue per-repository tokens gets no credentials unless
+  the engine runs with `STORMCHASER_OCI_ALLOW_STATIC_CREDENTIALS=true`. The stored
+  username and password then go to the helper, still not to the step.
+* The Kubernetes runner needs `patch` on pods in the step namespace (to signal the
+  sidecar) in addition to `create` on secrets. The chart grants both.
 
 When using the **Docker Runner** with the `STORMCHASER_SFS_HOST_PATH` optimization enabled, the runner creates direct bind mounts from the host file system into step containers.
 
@@ -110,13 +588,182 @@ When using the **Docker Runner** with the `STORMCHASER_SFS_HOST_PATH` optimizati
 * **Path Traversal:** The runner sanitizes `provision` destination paths to prevent traversal attacks (`../`) that might attempt to write outside the run's isolated subdirectory.
 * **Data Remnants:** Host bind mounts are not automatically garbage collected by the runner. System administrators must ensure secure, automated cleanup (e.g., via cron) to prevent sensitive workflow data from accumulating on the host disk.
 
-## 7. MCP Server Security
+## 7. Outbound Request Protection (SSRF)
+
+Workflow authors choose the URLs that `RestApi` and `WebhookInvoke` steps, `api`
+queries, Slack and Teams notifications and WASM module downloads connect to, and
+they can read the responses. To stop a workflow from reaching the control plane
+or a cloud metadata endpoint, the engine, API and query service refuse any such
+URL that:
+
+* uses a scheme other than `http` or `https`, or
+* resolves to a loopback, private, link-local, carrier-grade NAT, reserved or
+  multicast address (including IPv6 forms that embed one of those).
+
+The connection is pinned to the addresses that were checked, and redirects are
+not followed, so a `30x` response is returned to the workflow as-is.
+
+Operators can permit specific internal hosts with
+`STORMCHASER_SSRF_ALLOWED_HOSTS` (Helm: `global.ssrfAllowedHosts`), a
+comma-separated list of hostnames, IP literals or `*.suffix` patterns, for
+example `vault.internal,*.svc.cluster.local`. The list is empty by default.
+Response bodies are limited to 10 MiB (64 MiB for WASM modules).
+
+The connection test (`POST /api/v1/connections/test`) applies the same address
+rules to every connection type it probes. A Git URL must use a scheme the
+engine would clone over and a host that is not internal; a Postgres URL must
+name a network host (no Unix sockets) that is not internal; an S3 `endpoint` is
+checked like any other URL. An S3 test never runs as the API itself: it needs
+`access_key` and `secret_key`, or a role listed in
+`STORMCHASER_AWS_ALLOWED_ROLE_ARNS`.
+
+### Credentials the engine attaches
+
+A workflow author chooses where a step connects, but some credentials belong to
+someone else. The engine only sends those to the server they were issued for:
+
+* **`http_api` connections.** A `RestApi` step that names a connection gets the
+  connection's headers and token only when the request goes to the scheme, host
+  and port of the connection's `base_url`. Any other URL fails the step.
+* **Engine SMTP login.** `SMTP_USERNAME` and `SMTP_PASSWORD` are used only with
+  the engine's own `SMTP_SERVER` and `SMTP_PORT`. An email step that names
+  another server must supply its own credentials.
+
+* **Registry connections.** A step's `registry_connection` is used only when
+  the step's `image` is on that connection's registry (the host and port of its
+  `url`; an empty `url` means Docker Hub). Any other image fails the step, and
+  the Docker runner checks again before it pulls. On Kubernetes the per-step
+  pull secret is owned by the step's Job and is deleted with it.
+* **The engine's AWS identity.** The engine assumes a role named by a workflow
+  step, a query, a SOPS setting or an S3 connection only if the role is listed
+  in `STORMCHASER_AWS_ALLOWED_ROLE_ARNS` (Helm: `global.aws.allowedRoleArns`).
+  A `LambdaInvoke` step with no role runs as the engine itself, and its
+  function must be listed in `STORMCHASER_AWS_ALLOWED_LAMBDA_FUNCTIONS` (Helm:
+  `global.aws.allowedLambdaFunctions`). Both are comma-separated, a trailing
+  `*` matches a prefix, and both are empty by default, which refuses every
+  role and every function. Only the default storage backend, which only an
+  admin chooses, may sign with the engine's own identity; any other S3
+  connection needs `access_key` and `secret_key` or a listed role, or the
+  steps that use it fail. Scope the engine's own IAM policy as well: these
+  lists do not limit SES sending or `aws_cloudcontrol` queries made without a
+  role.
+
+WASM modules run with no host imports, a time limit and a memory cap; see
+[the Wasm step](steps/Wasm.md#limits).
+
+### Git repositories
+
+Workflow files are read from repositories named by Git connections, which any
+API user can create. To keep a repository from being used to read files off
+the API or engine host:
+
+* Workflow and included files are read from the git object database, never
+  the working tree, so a symbolic link committed to a repository is refused
+  rather than followed.
+* Repository URLs must use `https` or `ssh` (including the
+  `git@host:org/repo.git` form). Local paths and `file://`, `git://`, `http://`
+  and `ext::` URLs are rejected. Operators can change the list with
+  `STORMCHASER_GIT_ALLOWED_SCHEMES` (comma-separated, for example
+  `https,ssh,http`).
+* A SOPS file named in a run request must be a regular file inside the
+  repository; paths with `..`, absolute paths and symbolic links are refused.
+
+## 8. Limits on What a Workflow Can Cost
+
+A workflow's text, its expressions and the programs it embeds are written by
+whoever can write a workflow, and are run by services every tenant shares. Each
+is bounded so that one workflow cannot stop or exhaust them.
+
+| What | Limit | Setting |
+| :--- | :--- | :--- |
+| Workflow file size | 1 MiB | fixed |
+| Nesting in a workflow file | 16,384 brackets and operators in the file; no value nested deeper than 100 levels | `STORMCHASER_DSL_MAX_COMPLEXITY` |
+| Nesting in one expression or template | 8,192 brackets and operators; no result nested deeper than 100 levels | `STORMCHASER_EXPR_MAX_COMPLEXITY` |
+| `jq` program run time (`JQ` steps and a query's `jq_filter`) | 10 seconds | `STORMCHASER_JQ_TIMEOUT_SECS` |
+| `jq` program memory | 512 MiB | `STORMCHASER_JQ_MAX_MEMORY_MB` |
+| `jq` program output | 10 MiB | fixed |
+| Items in one `iterate` | 1,000 | `STORMCHASER_MAX_ITERATIONS` |
+| WASM modules running at once | 4 | `STORMCHASER_WASM_MAX_CONCURRENT` |
+| WASM module run time and memory | 30 seconds, 256 MiB | see [Wasm](steps/Wasm.md) |
+| API request body | 2 MiB | fixed (the web framework's default) |
+
+Two of these work in ways worth knowing:
+
+* **Nesting.** The parser for workflow text and expressions calls itself once
+  for every level of nesting and every link in a chain of operators, and has no
+  limit of its own; text nested a few hundred levels deep would overflow the
+  stack, which ends the process. Stormchaser counts the characters that can
+  nest (opening brackets and operator characters) without interpreting the
+  text, refuses text that counts over the limit, and parses the rest on a stack
+  sized for its count. Because nothing is interpreted, brackets and operators
+  inside literal text such as an embedded shell script count too. Raise the
+  setting if a legitimate workflow is refused as "too complex".
+* **`jq`.** A `jq` program cannot be interrupted from outside, so it is run in a
+  child process (the service's own executable in a worker mode) that is given
+  none of the service's environment, has a memory ceiling, and is killed when
+  its time is up.
+
+## 9. Inbound Webhooks
+
+A webhook's URL is not a secret, and a delivery can start workflows, so every
+webhook must have a secret and a delivery that cannot prove it knows the secret
+is refused. A webhook has one of three source types:
+
+| `source_type` | How a delivery is authenticated | Replays |
+| :--- | :--- | :--- |
+| `github` | `X-Hub-Signature-256`: HMAC-SHA256 of the body, as GitHub sends it. | Ignored for 24 hours, recognised by a hash of the signed body. |
+| `signed` | [Standard Webhooks](https://www.standardwebhooks.com/): `webhook-id`, `webhook-timestamp` and `webhook-signature` (`v1,` followed by the base64 HMAC-SHA256 of `<id>.<timestamp>.<body>`). The timestamp must be within five minutes of the API's clock. | Ignored for 24 hours, recognised by the signed `webhook-id`; refused outright once the timestamp is too old. |
+| `generic` | `Authorization: Bearer <secret>`. | **Not detected.** |
+
+Prefer `signed` for anything you control. With a signature the secret never
+travels with the delivery, a captured delivery cannot be altered or relabelled,
+and it stops being accepted after five minutes. A `generic` webhook sends the
+secret itself on every delivery, so whoever captures one can send anything they
+like for as long as the secret stands; it remains for senders that can do
+nothing better.
+
+For `signed` webhooks:
+
+* A secret of the form `whsec_<base64>` is used as the decoded bytes, as the
+  Standard Webhooks libraries do. Any other secret is used as written.
+* Several space-separated signatures may be sent, which lets a sender sign with
+  the old and the new secret while one is being rotated. One valid signature is
+  enough.
+* The event type that rules match on is the payload's `type` field, or
+  `generic` if there is none.
+
+A repeated delivery is answered with `200` and `"status": "duplicate"` and
+triggers nothing, so a sender that retries is not told to retry again. GitHub's
+own delivery id (`X-GitHub-Delivery`) is not used because GitHub does not sign
+it. The window is `STORMCHASER_WEBHOOK_DEDUPE_HOURS` (default `24`).
+
+Rule expressions do not see the `Authorization`, `Cookie` or signature headers
+of a delivery.
+
+## 10. NATS Authentication
+
+NATS carries every task and every result, so anyone who can publish to it can
+schedule containers on runners and report on other users' steps. All components
+authenticate to NATS with credentials read from the environment. Only the
+engine should be able to publish a task: runners, the API and the query service
+each get a NATS user of their own, limited to what that component does, so that
+a compromise of one of the user-facing services cannot schedule containers or
+read the secrets in task messages.
+
+The bundled NATS (docker-compose and the umbrella Helm chart) requires
+passwords and restricts the runner, API and query users, but it is a single node without TLS
+and is meant for evaluation. [NATS: Quickstart and Production](nats.md) lists
+what the quickstart provides, the exact permissions each role needs, and the
+requirements for a hardened production server.
+
+## 11. MCP Server Security
 
 The Model Context Protocol (MCP) server, which exposes the OpenAPI specification as tools for AI agents, is integrated with the same OPA enforcement as the rest of the system:
 
-* **MCP Endpoint Access**: In the default policy, read-only requests remain permitted without a token. This means `GET /api/v1/mcp/sse` and `POST /api/v1/mcp/messages` are allowed to support MCP transport bootstrap and JSON-RPC messaging.
+* **MCP Endpoint Access**: The MCP server is a single Streamable HTTP endpoint mounted at `/api/v1/mcp`, and the same handler answers every path below it. In the default policy, read-only requests remain permitted without a token, and `POST` and `DELETE` on `/api/v1/mcp` are allowed so clients can exchange JSON-RPC messages and end sessions.
+* **Host Restriction**: As protection against DNS rebinding, the MCP transport only accepts requests whose `Host` header is a loopback name, the host of `API_BASE_URL`, or a host listed in `MCP_ALLOWED_HOSTS`, and rejects others with `403 Forbidden`. See [MCP Server](mcp-server.md#allowed-hosts).
 * **Tool Call Proxying**: The MCP server dynamically invokes local API endpoints as requested by the AI agent. Because these generated internal HTTP calls do not inherently proxy the user's Bearer token, they arrive unauthenticated. *(Note: This is currently the recommended "conformant" way to use `rmcp-openapi`, but they are working on standardizing authorization passthrough in the near future).*
 * **OPA Protection**: The default `deploy/opa/policy.rego` includes explicit rules to handle MCP security:
   * Unauthenticated calls initiated by MCP tooling are blocked when they are non-read-only (`POST`, `PATCH`, `DELETE`, etc.), except for explicit protocol/auth endpoints that must accept unauthenticated traffic.
-  * Direct calls to the MCP endpoint itself that attempt non-read-only operations are blocked, except for `POST` requests to `/api/v1/mcp/messages` (which is necessary for the MCP JSON-RPC protocol to function).
+  * Direct calls to the MCP endpoint itself that attempt non-read-only operations are blocked, except for the `POST` and `DELETE` requests the transport itself needs on `/api/v1/mcp` (and on the legacy `/api/v1/mcp/messages` path).
 * **Fail-Closed Integration for Writes**: If an AI agent attempts to invoke an MCP tool that performs a state-modifying action (e.g., `POST`, `DELETE`) without explicit authorization handling, the internal API call will be denied by OPA with a `403 Forbidden` response.

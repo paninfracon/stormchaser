@@ -12,7 +12,10 @@ use tracing::{error, info};
 
 use crate::handler::step::quota::release_step_quota_for_instance;
 
-use super::helpers::{is_terminal_step_status, persist_step_test_reports};
+use super::helpers::{
+    completion_authorized, declared_test_reports, is_terminal_step_status,
+    persist_step_test_reports, reporter_is_assigned_runner, step_belongs_to_run,
+};
 
 #[tracing::instrument(skip(event, pool, nats_client, tls_reloader), fields(run_id = tracing::field::Empty, step_id = tracing::field::Empty))]
 /// Handle step failed.
@@ -58,9 +61,33 @@ pub async fn handle_step_failed(
     }
 
     let instance = fetch_step_instance(step_id, &mut *tx).await?;
+    if !step_belongs_to_run(&instance, run_id) {
+        return Ok(());
+    }
 
     // Ensure we don't process duplicate completion events
     if is_terminal_step_status(&instance.status) {
+        return Ok(());
+    }
+
+    if !completion_authorized(&mut tx, &instance, event.completion_token.as_deref()).await {
+        return Ok(());
+    }
+    if !reporter_is_assigned_runner(&mut tx, &instance, event.runner_id.as_deref()).await {
+        return Ok(());
+    }
+
+    // "lost_zombie" is the engine's own verdict on a step whose runner has gone. The
+    // event arrives over NATS like any other, so check the verdict still holds: a runner
+    // credential cannot use it to end someone else's step, and a step that another runner
+    // adopted after the verdict was queued keeps running.
+    let lost_zombie = error_msg == "lost_zombie";
+    if lost_zombie && !crate::db::steps::step_runner_is_lost(&mut *tx, step_id).await? {
+        tracing::warn!(
+            "Ignoring lost_zombie event for run {} step {}: its runner is alive",
+            run_id,
+            step_id
+        );
         return Ok(());
     }
 
@@ -71,7 +98,7 @@ pub async fn handle_step_failed(
             instance.clone(),
         );
 
-    if error_msg == "lost_zombie" {
+    if lost_zombie {
         let _ = machine.zombify(&mut *tx).await?;
     } else {
         let _ = machine
@@ -79,6 +106,7 @@ pub async fn handle_step_failed(
             .await?;
     }
 
+    let step_name = instance.step_name.clone();
     let attributes = [
         KeyValue::new("step_name", instance.step_name),
         KeyValue::new("step_type", instance.step_type),
@@ -109,7 +137,18 @@ pub async fn handle_step_failed(
     }
 
     // Persist test reports even on failure
-    persist_step_test_reports(event.test_reports.as_ref(), &mut tx, run_id, step_id, &pool).await?;
+    if event.test_reports.is_some() {
+        let declared_reports = declared_test_reports(&mut tx, run_id, &step_name).await;
+        persist_step_test_reports(
+            event.test_reports.as_ref(),
+            &declared_reports,
+            &mut tx,
+            run_id,
+            step_id,
+            &pool,
+        )
+        .await?;
+    }
 
     let run = fetch_run(run_id, &mut *tx).await?;
     let run_machine = WorkflowMachine::<state::Running>::new_from_run(run.clone());

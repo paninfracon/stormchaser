@@ -39,7 +39,10 @@ async fn test_artifact_persistence_on_completion() {
     )
     .bind(connection_id)
     .bind(&backend_name)
-    .bind(json!({"bucket": "test-bucket", "endpoint": "http://localhost:9000"}))
+    .bind(json!({
+        "bucket": "test-bucket", "endpoint": "http://localhost:9000",
+        "access_key": "test", "secret_key": "test"
+    }))
     .execute(&pool)
     .await
     .unwrap();
@@ -56,6 +59,10 @@ async fn test_artifact_persistence_on_completion() {
                     path = "bin/app"
                     retention = "7d"
                 }}
+                artifact "app-debug" {{
+                    path = "bin/app.debug"
+                    retention = "7d"
+                }}
             }}
             steps {{
                 step "build" "RunContainer" {{
@@ -63,6 +70,7 @@ async fn test_artifact_persistence_on_completion() {
                     storage_mounts = [
                         {{ name = "workspace", mount_path = "/workspace" }}
                     ]
+                    artifacts = ["app-bin"]
                 }}
             }}
         }}
@@ -71,7 +79,7 @@ async fn test_artifact_persistence_on_completion() {
     );
 
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
     let opa_client = Arc::new(OpaClient::new(None, None));
 
     // 2. Initialize workflow
@@ -107,6 +115,11 @@ async fn test_artifact_persistence_on_completion() {
     .unwrap();
 
     // 3. Mock completion with artifacts
+    // The completion below stands in for a runner's report, so mark the step as handed
+    // to one (dispatch does this in production).
+    stormchaser_engine::db::clear_step_completion_token(&pool, step.id)
+        .await
+        .unwrap();
     let fencing_token: i64 =
         sqlx::query_scalar("SELECT fencing_token FROM workflow_runs WHERE id = $1")
             .bind(run_id)
@@ -120,10 +133,17 @@ async fn test_artifact_persistence_on_completion() {
         "timestamp": Utc::now(),
         "status": StepStatus::Succeeded,
         "exit_code": 0,
+        "runner_id": keyed_runner(&pool).await,
         "artifacts": {
             "app-bin": {
                 "hash": "abc123hash",
                 "size": 1024,
+                "content_type": "application/octet-stream"
+            },
+            // Declared on the storage, but not in the step's `artifacts` list
+            "app-debug": {
+                "hash": "def456hash",
+                "size": 2048,
                 "content_type": "application/octet-stream"
             }
         }
@@ -155,6 +175,7 @@ async fn test_artifact_persistence_on_completion() {
         "Artifact should have been registered in archived_artifact_registry"
     );
 
+    // Only what the step publishes is recorded
     let artifact: (String, Uuid, String) = sqlx::query_as(
         "SELECT artifact_name, connection_id, remote_path FROM archived_artifact_registry WHERE run_id = $1",
     )
@@ -206,7 +227,7 @@ async fn test_test_report_persistence_on_completion() {
     "#;
 
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
     let opa_client = Arc::new(OpaClient::new(None, None));
 
     // 1. Initialize workflow
@@ -242,6 +263,11 @@ async fn test_test_report_persistence_on_completion() {
     .unwrap();
 
     // 2. Mock completion with test reports
+    // The completion below stands in for a runner's report, so mark the step as handed
+    // to one (dispatch does this in production).
+    stormchaser_engine::db::clear_step_completion_token(&pool, step.id)
+        .await
+        .unwrap();
     let fencing_token: i64 =
         sqlx::query_scalar("SELECT fencing_token FROM workflow_runs WHERE id = $1")
             .bind(run_id)
@@ -255,6 +281,7 @@ async fn test_test_report_persistence_on_completion() {
         "timestamp": Utc::now(),
         "status": StepStatus::Succeeded,
         "exit_code": 0,
+        "runner_id": keyed_runner(&pool).await,
         "test_reports": {
             "unit-tests_results.xml": {
                 "name": "unit-tests",
@@ -303,5 +330,20 @@ async fn test_test_report_persistence_on_completion() {
     assert_eq!(report.0, "unit-tests");
     assert_eq!(report.1, "results.xml");
     assert_eq!(report.2, "junit");
-    assert_eq!(report.3, "hash123");
+    // The checksum is the engine's own, not the one the step reported
+    use sha2::{Digest, Sha256};
+    assert_eq!(
+        report.3,
+        hex::encode(Sha256::digest(b"<testsuite>...</testsuite>"))
+    );
+}
+
+/// A runner the engine has issued a key to, reporting on the test's steps as a runner
+/// would. A runner-owned step takes a result only from such a runner.
+async fn keyed_runner(pool: &sqlx::PgPool) -> String {
+    let id = format!("test-runner-{}", uuid::Uuid::new_v4());
+    stormchaser_engine::db::store_runner_session(pool, &id, &[5u8; 32])
+        .await
+        .unwrap();
+    id
 }

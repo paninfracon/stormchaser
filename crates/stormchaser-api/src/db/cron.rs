@@ -85,7 +85,7 @@ pub async fn delete_cron_workflow(pool: &PgPool, id: CronWorkflowId) -> Result<(
 
 /// Inserts a new cron workflow.
 pub async fn insert_cron_workflow(
-    pool: &PgPool,
+    pool: impl sqlx::PgExecutor<'_>,
     id: CronWorkflowId,
     payload: &crate::routes::CreateCronWorkflowRequest,
     repo_url: &str,

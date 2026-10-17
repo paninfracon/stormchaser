@@ -16,7 +16,7 @@ use stormchaser_model::workflow::RunStatus;
 pub(crate) fn render_runs_tab(f: &mut Frame, area: Rect, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(30), Constraint::Percentage(70)].as_ref())
+        .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
         .split(area);
 
     let list_border_color = if app.active_pane == crate::app::Pane::RunsList {
@@ -122,7 +122,7 @@ pub(crate) fn render_run_detail(
 
     let right_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)].as_ref())
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(inner_area);
 
     let status_text: String = run.detail.status.clone().into();
@@ -401,7 +401,7 @@ pub(crate) fn render_test_results(
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(8), Constraint::Min(0)].as_ref())
+        .constraints([Constraint::Length(8), Constraint::Min(0)])
         .split(inner_area);
 
     // 1. Summary

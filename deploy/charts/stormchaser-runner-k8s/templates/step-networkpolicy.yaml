@@ -1,0 +1,55 @@
+{{- if .Values.networkPolicy.enabled -}}
+{{- /*
+Workflow steps run images chosen by workflow authors. This policy keeps every pod in the
+step namespace away from cluster-internal services (NATS, PostgreSQL, the Kubernetes API,
+other tenants) and the cloud metadata endpoint, while leaving the public internet
+reachable. It only takes effect on a CNI that enforces NetworkPolicy.
+*/ -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "stormchaser-runner-k8s.fullname" . }}-steps
+  namespace: {{ include "stormchaser-runner-k8s.stepNamespace" . }}
+  labels:
+    {{- include "stormchaser-runner-k8s.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  # Nothing needs to connect to a step.
+  ingress: []
+  egress:
+    # Cluster DNS
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Everything outside the blocked ranges
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              {{- toYaml .Values.networkPolicy.blockedCidrs | nindent 14 }}
+    {{- range .Values.networkPolicy.allowReleaseNamespace }}
+    # Selected pods in the release namespace
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $.Release.Namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .podLabels | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .port }}
+    {{- end }}
+    {{- with .Values.networkPolicy.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

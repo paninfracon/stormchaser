@@ -32,6 +32,24 @@ pub enum LogBackend {
     },
 }
 
+/// The `job_name` label a runner gives a step's logs.
+///
+/// The name goes into a log query, and a step name is whatever the workflow author
+/// wrote. Anything outside the characters a runner can use in a container or job name
+/// becomes `-`, so a name cannot close the label matcher and select other steps' logs.
+#[cfg(not(target_arch = "wasm32"))]
+fn log_job_name(step_name: &str, step_id: StepInstanceId) -> String {
+    let name: String = step_name
+        .to_lowercase()
+        .chars()
+        .map(|c| match c {
+            'a'..='z' | '0'..='9' | '-' | '.' => c,
+            _ => '-',
+        })
+        .collect();
+    format!("storm-{}-{}", name, &step_id.to_string()[..8])
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 impl LogBackend {
     pub(crate) fn create_client(&self) -> ClientWithMiddleware {
@@ -50,11 +68,7 @@ impl LogBackend {
         finished_at: Option<chrono::DateTime<chrono::Utc>>,
         limit: Option<usize>,
     ) -> Result<Vec<String>> {
-        let job_name = format!(
-            "storm-{}-{}",
-            step_name.to_lowercase().replace('_', "-"),
-            &step_id.to_string()[..8]
-        );
+        let job_name = log_job_name(step_name, step_id);
 
         match self {
             LogBackend::Loki { url } => {
@@ -82,11 +96,7 @@ impl LogBackend {
         step_id: StepInstanceId,
         start_time: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<mpsc::Receiver<Result<String>>> {
-        let job_name = format!(
-            "storm-{}-{}",
-            step_name.to_lowercase().replace('_', "-"),
-            &step_id.to_string()[..8]
-        );
+        let job_name = log_job_name(step_name, step_id);
 
         match self {
             LogBackend::Loki { url } => loki::stream_loki_logs(url, &job_name, start_time).await,
@@ -102,6 +112,20 @@ impl LogBackend {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_step_name_cannot_break_out_of_the_log_query() {
+        let step_id = StepInstanceId::new_v4();
+        let short = &step_id.to_string()[..8];
+        assert_eq!(
+            log_job_name("Build_Image", step_id),
+            format!("storm-build-image-{short}")
+        );
+        let hostile = log_job_name("x\"} or {job_name=~\".+", step_id);
+        assert!(hostile
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '.'));
+    }
 
     #[tokio::test]
     async fn test_stream_step_logs_elasticsearch_unsupported() {

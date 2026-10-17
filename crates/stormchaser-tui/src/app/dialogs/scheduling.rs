@@ -65,17 +65,15 @@ impl<'a> crate::app::App<'a> {
         &self,
         schema: &serde_json::Value,
         inputs: &serde_json::Value,
-        queries: Option<&serde_json::Value>,
+        dsl: &str,
     ) -> Result<(serde_json::Value, String)> {
-        let payload = if let Some(q) = queries {
-            serde_json::json!({ "schema": schema, "inputs": inputs, "queries": q })
-        } else {
-            serde_json::json!({ "schema": schema, "inputs": inputs })
-        };
+        // The service reads the schema and queries out of the workflow itself; `schema`
+        // is only what to fall back on if it sends nothing.
+        let payload = serde_json::json!({ "dsl": dsl, "inputs": inputs });
         let res = self
             .api_request(
                 reqwest::Method::POST,
-                "/api/v1/schema/hydrate",
+                "/api/v1/schema/hydrate-direct",
                 Some(payload),
             )
             .await?;
@@ -172,9 +170,8 @@ impl<'a> crate::app::App<'a> {
 
                 if let Some(schema_val) = inputs_schema {
                     let initial_inputs = serde_json::json!({});
-                    let queries_val = serde_json::to_value(&workflow.queries).ok();
                     let (hydrated_schema, status) = self
-                        .hydrate_schema_blocking(&schema_val, &initial_inputs, queries_val.as_ref())
+                        .hydrate_schema_blocking(&schema_val, &initial_inputs, &dsl)
                         .await
                         .unwrap_or((schema_val, "".to_string()));
 
@@ -406,7 +403,7 @@ mod tests {
         let sse_body =
             "data: {\"status\": \"Completed\", \"hydrated_schema\": {\"type\": \"string\"}}\n\n";
         Mock::given(method("POST"))
-            .and(path("/api/v1/schema/hydrate"))
+            .and(path("/api/v1/schema/hydrate-direct"))
             .respond_with(ResponseTemplate::new(200).set_body_string(sse_body))
             .mount(&server)
             .await;
@@ -417,7 +414,7 @@ mod tests {
         let schema = json!({"type": "object"});
         let inputs = json!({});
         let (new_schema, status) = app
-            .hydrate_schema_blocking(&schema, &inputs, None)
+            .hydrate_schema_blocking(&schema, &inputs, "workflow \"w\" {}")
             .await
             .unwrap();
         assert_eq!(status, "Completed");

@@ -6,11 +6,11 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs::{self, File};
-use std::io::{copy, Read};
+use std::io::Read;
 use std::path::PathBuf;
 use tar::Builder;
 use tokio::fs::File as AsyncFile;
-use tracing::error;
+use tracing::{error, warn};
 use uuid::Uuid;
 
 struct UploadReportParams<'a> {
@@ -56,7 +56,14 @@ async fn upload_report(
     if res.status().is_success() {
         let mut hasher = Sha256::new();
         let mut f = File::open(&tar_path)?;
-        copy(&mut f, &mut hasher)?;
+        let mut buf = [0u8; 8192];
+        loop {
+            let n = f.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buf[..n]);
+        }
         let hash = hex::encode(hasher.finalize());
 
         collected.insert(
@@ -118,12 +125,16 @@ fn fallback_to_memory(
 }
 
 /// Collects test reports from the filesystem and optionally uploads them.
+///
+/// With `roots`, only files that resolve inside them (the step's storage volumes) are
+/// collected: the agent is then a helper that can read files the step cannot.
 pub async fn collect_test_reports(
     reports: Value,
     urls: Option<Value>,
+    roots: Option<&crate::Roots>,
 ) -> Result<HashMap<String, Value>> {
     let mut collected = HashMap::new();
-    let client = Client::new();
+    let client = crate::http_client()?;
 
     if let Some(report_list) = reports.as_array() {
         for report in report_list {
@@ -136,6 +147,14 @@ pub async fn collect_test_reports(
                 let entries = glob(path)?;
                 let mut matched_files = Vec::new();
                 for p in entries.flatten() {
+                    let p = match roots.map(|r| r.resolve(&p)) {
+                        None => p,
+                        Some(Ok(resolved)) => resolved,
+                        Some(Err(e)) => {
+                            warn!("Not collecting report file: {:#}", e);
+                            continue;
+                        }
+                    };
                     if p.is_file() {
                         matched_files.push(p);
                     }
@@ -208,7 +227,7 @@ mod tests {
             }
         ]);
 
-        let collected = collect_test_reports(reports, None).await.unwrap();
+        let collected = collect_test_reports(reports, None, None).await.unwrap();
         assert_eq!(collected.len(), 1);
         let key = format!(
             "junit_{}",
@@ -248,10 +267,42 @@ mod tests {
             }
         });
 
-        let collected = collect_test_reports(reports, Some(urls)).await.unwrap();
+        let collected = collect_test_reports(reports, Some(urls), None)
+            .await
+            .unwrap();
         assert_eq!(collected.len(), 1);
         assert!(collected.contains_key("api-tests"));
         assert_eq!(collected["api-tests"]["is_claim"], true);
         assert_eq!(collected["api-tests"]["file_name"], "api-tests.tar.gz");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn reports_outside_the_mounts_are_not_collected_by_a_helper() {
+        let mount = tempdir().unwrap();
+        let helper_only = tempdir().unwrap();
+        fs::write(helper_only.path().join("config.json"), "push credentials").unwrap();
+        fs::write(mount.path().join("ok.xml"), "<testsuite></testsuite>").unwrap();
+        std::os::unix::fs::symlink(
+            helper_only.path().join("config.json"),
+            mount.path().join("leak.xml"),
+        )
+        .unwrap();
+
+        let reports = json!([
+            {"name": "inside", "path": mount.path().join("*.xml").to_str().unwrap(), "format": "junit"},
+            {"name": "outside", "path": helper_only.path().join("*").to_str().unwrap(), "format": "junit"}
+        ]);
+        let roots = crate::Roots::from_mount_paths(&json!({"ws": mount.path()}));
+        let collected = collect_test_reports(reports.clone(), None, Some(&roots))
+            .await
+            .unwrap();
+        let all = serde_json::to_string(&collected).unwrap();
+        assert!(!all.contains("push credentials"), "{}", all);
+        assert_eq!(collected.keys().collect::<Vec<_>>(), ["inside_ok.xml"]);
+
+        // An agent inside the step's own container may read anywhere
+        let collected = collect_test_reports(reports, None, None).await.unwrap();
+        assert!(collected.contains_key("outside_config.json"));
     }
 }

@@ -115,68 +115,17 @@ async fn dispatch_jq_internal(
     let jq_spec: Result<dsl::JqSpec, _> = serde_json::from_value(actual_spec.clone());
 
     let result = match jq_spec {
-        Ok(jq) => {
-            use jaq_core::load::{Arena, File, Loader};
-            use jaq_core::{Ctx, RcIter};
-            use jaq_json::Val;
-
-            let input_value = jq.input.unwrap_or(Value::Null);
-
-            let loader = Loader::new(jaq_std::defs().chain(jaq_json::defs()));
-            let arena = Arena::default();
-            let program = File {
-                code: jq.program.as_str(),
-                path: (),
-            };
-
-            let modules = loader.load(&arena, program);
-
-            match modules {
-                Ok(mods) => {
-                    let filter = jaq_core::Compiler::default()
-                        .with_funs(jaq_std::funs().chain(jaq_json::funs()))
-                        .compile(mods);
-
-                    match filter {
-                        Ok(f) => {
-                            let input = Val::from(input_value);
-                            let inputs = RcIter::new(core::iter::empty());
-                            let out = f.run((Ctx::new([], &inputs), input));
-
-                            let mut results = Vec::new();
-                            let mut execution_err = None;
-
-                            for res in out {
-                                match res {
-                                    Ok(v) => {
-                                        results.push(Value::from(v));
-                                    }
-                                    Err(e) => {
-                                        execution_err =
-                                            Some(anyhow::anyhow!("JQ execution error: {:?}", e));
-                                        break;
-                                    }
-                                }
-                            }
-
-                            if let Some(e) = execution_err {
-                                Err(e)
-                            } else {
-                                let final_result = if results.len() == 1 {
-                                    results.remove(0)
-                                } else {
-                                    Value::Array(results)
-                                };
-
-                                Ok(final_result)
-                            }
-                        }
-                        Err(e) => Err(anyhow::anyhow!("JQ compile error: {:?}", e)),
-                    }
+        // In a child process that is killed if the program runs too long or grows too
+        // large (see `jq_sandbox`)
+        Ok(jq) => crate::jq_sandbox::evaluate(&jq.program, jq.input.unwrap_or(Value::Null))
+            .await
+            .map(|mut results| {
+                if results.len() == 1 {
+                    results.remove(0)
+                } else {
+                    Value::Array(results)
                 }
-                Err(e) => Err(anyhow::anyhow!("JQ load/parse error: {:?}", e)),
-            }
-        }
+            }),
         Err(e) => Err(anyhow::anyhow!("Invalid JQ spec: {:?}", e)),
     };
 
@@ -190,6 +139,7 @@ async fn dispatch_jq_internal(
                 run_id,
                 step_id: step_instance_id,
                 fencing_token,
+                completion_token: crate::db::step_completion_token(&pool, step_instance_id).await,
                 event_type: EventType::Step(StepEventType::Completed),
                 runner_id: None,
                 exit_code: Some(0),
@@ -219,6 +169,7 @@ async fn dispatch_jq_internal(
                 run_id,
                 step_id: step_instance_id,
                 fencing_token,
+                completion_token: crate::db::step_completion_token(&pool, step_instance_id).await,
                 event_type: EventType::Step(StepEventType::Failed),
                 error: format!("JQ execution failed: {:?}", e),
                 runner_id: None,

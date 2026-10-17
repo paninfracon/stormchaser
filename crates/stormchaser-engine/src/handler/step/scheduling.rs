@@ -61,8 +61,17 @@ pub async fn schedule_step(
         }
     }
 
+    // Secrets fetched while this step's expressions are evaluated, recorded for the run
+    // so that the API masks them wherever they turn up
+    let mut fetched_secrets = crate::hcl_eval::take_alias_secrets(run_id);
+
     if let Some(condition_expr) = &step_dsl.condition {
-        match crate::hcl_eval::evaluate_raw_expr(condition_expr, hcl_ctx) {
+        let (condition, fetched) = crate::hcl_eval::capturing_secrets(|| {
+            crate::hcl_eval::evaluate_raw_expr(condition_expr, hcl_ctx)
+        });
+        fetched_secrets.extend(fetched);
+        crate::db::add_sensitive_values(&mut *executor, run_id, &fetched_secrets).await?;
+        match condition {
             Ok(Value::Bool(true)) => {}
             Ok(Value::Bool(false)) => {
                 crate::db::insert_step_instance(
@@ -83,11 +92,19 @@ pub async fn schedule_step(
     }
 
     if let Some(iterate_expr) = &step_dsl.iterate {
-        let items = match crate::hcl_eval::evaluate_raw_expr(iterate_expr, hcl_ctx) {
+        let (items, fetched) = crate::hcl_eval::capturing_secrets(|| {
+            crate::hcl_eval::evaluate_raw_expr(iterate_expr, hcl_ctx)
+        });
+        fetched_secrets.extend(fetched);
+        crate::db::add_sensitive_values(&mut *executor, run_id, &fetched_secrets).await?;
+        let items = match items {
             Ok(Value::Array(arr)) => arr,
             Ok(_) => return Err(anyhow::anyhow!("Iterate must evaluate to an array")),
             Err(e) => return Err(e),
         };
+        // Each item becomes a step instance and, in time, a container. The list comes
+        // from the workflow, or from whatever a query or an input put in it.
+        ensure_iteration_count_allowed(&step_dsl.name, items.len())?;
 
         schedule_iterated_steps(
             executor,
@@ -101,8 +118,20 @@ pub async fn schedule_step(
         )
         .await?;
     } else {
-        let _ = crate::hcl_eval::resolve_expressions(&mut resolved_spec, hcl_ctx, true);
-        let _ = crate::hcl_eval::resolve_expressions(&mut resolved_params, hcl_ctx, true);
+        let ((), fetched) = crate::hcl_eval::capturing_secrets(|| {
+            let _ = crate::hcl_eval::resolve_step_spec(&resolved_type, &mut resolved_spec, hcl_ctx);
+            let _ = crate::hcl_eval::resolve_expressions(&mut resolved_params, hcl_ctx, true);
+        });
+        fetched_secrets.extend(fetched);
+        crate::db::add_sensitive_values(&mut *executor, run_id, &fetched_secrets).await?;
+
+        // A Terraform approval is an approval from the moment it exists. Left as its own
+        // type it would start as pending and be handed to a runner, which could then
+        // report it complete without anyone approving.
+        crate::handler::step::intrinsic::terraform::mutate_if_terraform_approval(
+            &mut resolved_type,
+            &mut resolved_spec,
+        );
 
         let step_instance_id = StepInstanceId::new(Uuid::new_v4());
         let initial_status = match resolved_type.as_str() {
@@ -110,10 +139,6 @@ pub async fn schedule_step(
             _ => StepStatus::Pending,
         };
 
-        println!(
-            "inserting step {} with type {}",
-            step_dsl.name, resolved_type
-        );
         let affinity_context = step_dsl.strategy.as_ref().and_then(|s| s.affinity.clone());
 
         let insert_result = crate::db::insert_step_instance_with_spec_on_conflict_do_nothing(
@@ -146,7 +171,7 @@ pub async fn schedule_step(
                     )
                     .await;
                 }
-            } else if step_dsl.r#type == "Approval" {
+            } else if resolved_type == "Approval" {
                 if let Ok(approval_spec) =
                     serde_json::from_value::<dsl::ApprovalSpec>(resolved_spec.clone())
                 {
@@ -212,19 +237,6 @@ async fn schedule_iterated_steps(
 
     for (idx, item) in items.into_iter().enumerate() {
         let step_instance_id = StepInstanceId::new(Uuid::new_v4());
-        let status = match step_dsl.r#type.as_str() {
-            "Approval" | "Wait" => StepStatus::WaitingForEvent,
-            _ => {
-                if (idx as u32) < max_parallel
-                    && current_running_count < quotas.max_concurrency as i64
-                {
-                    StepStatus::Pending
-                } else {
-                    StepStatus::WaitingForEvent
-                }
-            }
-        };
-
         let mut iteration_ctx = crate::hcl_eval::create_context(
             run_context.inputs.clone(),
             run_id,
@@ -237,11 +249,41 @@ async fn schedule_iterated_steps(
         iteration_ctx.declare_var(iter_var_name, crate::hcl_eval::json_to_hcl(item));
 
         let mut resolved_spec_iter = resolved_spec.clone();
-        let _ = crate::hcl_eval::resolve_expressions(&mut resolved_spec_iter, &iteration_ctx, true);
-
         let mut resolved_params_iter = resolved_params.clone();
-        let _ =
-            crate::hcl_eval::resolve_expressions(&mut resolved_params_iter, &iteration_ctx, true);
+        let ((), fetched) = crate::hcl_eval::capturing_secrets(|| {
+            let _ = crate::hcl_eval::resolve_step_spec(
+                resolved_type,
+                &mut resolved_spec_iter,
+                &iteration_ctx,
+            );
+            let _ = crate::hcl_eval::resolve_expressions(
+                &mut resolved_params_iter,
+                &iteration_ctx,
+                true,
+            );
+        });
+        let mut fetched_secrets = crate::hcl_eval::take_alias_secrets(run_id);
+        fetched_secrets.extend(fetched);
+        crate::db::add_sensitive_values(&mut *executor, run_id, &fetched_secrets).await?;
+
+        let mut resolved_type = resolved_type.to_string();
+        crate::handler::step::intrinsic::terraform::mutate_if_terraform_approval(
+            &mut resolved_type,
+            &mut resolved_spec_iter,
+        );
+        let resolved_type = resolved_type.as_str();
+        let status = match resolved_type {
+            "Approval" | "Wait" => StepStatus::WaitingForEvent,
+            _ => {
+                if (idx as u32) < max_parallel
+                    && current_running_count < quotas.max_concurrency as i64
+                {
+                    StepStatus::Pending
+                } else {
+                    StepStatus::WaitingForEvent
+                }
+            }
+        };
 
         let affinity_context = step_dsl.strategy.as_ref().and_then(|s| s.affinity.clone());
 
@@ -278,4 +320,43 @@ async fn schedule_iterated_steps(
     }
 
     Ok(())
+}
+
+/// Most step instances one `iterate` may create. Defaults to 1000.
+pub const MAX_ITERATIONS_ENV: &str = "STORMCHASER_MAX_ITERATIONS";
+
+fn max_iterations() -> usize {
+    std::env::var(MAX_ITERATIONS_ENV)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(1000)
+}
+
+/// Refuses an `iterate` over more items than the operator allows.
+fn ensure_iteration_count_allowed(step_name: &str, count: usize) -> Result<()> {
+    let limit = max_iterations();
+    if count > limit {
+        anyhow::bail!(
+            "Step '{}' iterates over {} items; the limit is {} ({})",
+            step_name,
+            count,
+            limit,
+            MAX_ITERATIONS_ENV
+        );
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod iteration_limit_tests {
+    use super::*;
+
+    #[test]
+    fn an_iteration_over_too_many_items_is_refused() {
+        assert!(ensure_iteration_count_allowed("fan_out", 1000).is_ok());
+        let err = ensure_iteration_count_allowed("fan_out", 1001).unwrap_err();
+        assert!(err.to_string().contains("fan_out"));
+        assert!(err.to_string().contains("1001"));
+    }
 }

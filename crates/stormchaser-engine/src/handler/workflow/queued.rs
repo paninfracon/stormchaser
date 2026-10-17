@@ -3,7 +3,6 @@ use crate::handler::{fetch_inputs, fetch_run};
 use crate::workflow_machine::{state, WorkflowMachine};
 use anyhow::{Context, Result};
 use sqlx::PgPool;
-use std::fs;
 use std::sync::Arc;
 use stormchaser_dsl::StormchaserParser;
 use stormchaser_model::auth::{EngineOpaContext, OpaClient};
@@ -13,7 +12,7 @@ use stormchaser_model::RunId;
 use stormchaser_tls::TlsReloader;
 use tracing::{debug, error, info};
 
-#[tracing::instrument(skip(pool, git_cache, opa_client, _nats_client, _tls_reloader), fields(run_id = %run_id))]
+#[tracing::instrument(skip(payload, pool, git_cache, opa_client, _nats_client, _tls_reloader), fields(run_id = %run_id))]
 /// Handles the event when a workflow is queued and ready for resolution.
 pub async fn handle_workflow_queued(
     run_id: RunId,
@@ -34,11 +33,18 @@ pub async fn handle_workflow_queued(
     let machine = machine.start_resolving(&mut *pool.acquire().await?).await?;
 
     // 3. Resolve the workflow file into cache
-    let repo_path_res = git_cache.ensure_files(
-        &machine.run.repo_url,
-        &machine.run.git_ref,
-        std::slice::from_ref(&machine.run.workflow_path),
-    );
+    // Cloning blocks on the network, so it runs off the async executor
+    let repo_path_res = {
+        let git_cache = git_cache.clone();
+        let repo_url = machine.run.repo_url.clone();
+        let git_ref = machine.run.git_ref.clone();
+        let workflow_path = machine.run.workflow_path.clone();
+        tokio::task::spawn_blocking(move || {
+            git_cache.ensure_files(&repo_url, &git_ref, std::slice::from_ref(&workflow_path))
+        })
+        .await
+        .unwrap_or_else(|e| Err(anyhow::anyhow!("Git resolution task failed: {}", e)))
+    };
 
     let repo_path = match repo_path_res {
         Ok(path) => path,
@@ -68,21 +74,19 @@ pub async fn handle_workflow_queued(
             .await?;
         return Err(anyhow::anyhow!(err_msg));
     }
-    let storm_file_path = repo_path.join(workflow_req_path);
-    if !storm_file_path.exists() {
-        let err_msg = format!(
-            "Workflow file {} not found in repo",
-            machine.run.workflow_path
-        );
-        let _ = machine
-            .fail(err_msg.clone(), &mut *pool.acquire().await?)
-            .await?;
-        return Err(anyhow::anyhow!(err_msg));
-    }
-
-    // 4. Read and Parse the workflow file
-    let workflow_content = fs::read_to_string(&storm_file_path)
-        .with_context(|| format!("Failed to read workflow file at {:?}", storm_file_path))?;
+    // 4. Read and Parse the workflow file. It is read from the git object database, not
+    // the working tree, so a symlink committed to the repository cannot redirect the read.
+    let workflow_content =
+        match crate::git_cache::read_blob_at_head(&repo_path, &machine.run.workflow_path) {
+            Ok(content) => content,
+            Err(e) => {
+                let err_msg = format!("Failed to load workflow file: {}", e);
+                let _ = machine
+                    .fail(err_msg.clone(), &mut *pool.acquire().await?)
+                    .await?;
+                return Err(anyhow::anyhow!(err_msg));
+            }
+        };
 
     debug!(
         "Workflow content loaded for {}: {} bytes",
@@ -129,16 +133,16 @@ pub async fn handle_workflow_queued(
                 .await?;
             return Err(anyhow::anyhow!(err_msg));
         }
-        let inc_path = repo_path.join(req_inc_path);
-        if !inc_path.exists() {
-            let err_msg = format!("Included workflow file {} not found", inc.workflow);
-            let _ = machine
-                .fail(err_msg.clone(), &mut *pool.acquire().await?)
-                .await?;
-            return Err(anyhow::anyhow!(err_msg));
-        }
-
-        let inc_content = fs::read_to_string(&inc_path)?;
+        let inc_content = match crate::git_cache::read_blob_at_head(&repo_path, &inc.workflow) {
+            Ok(content) => content,
+            Err(e) => {
+                let err_msg = format!("Failed to load included workflow: {}", e);
+                let _ = machine
+                    .fail(err_msg.clone(), &mut *pool.acquire().await?)
+                    .await?;
+                return Err(anyhow::anyhow!(err_msg));
+            }
+        };
         let inc_workflow = match parser.parse(&inc_content) {
             Ok(w) => w,
             Err(e) => {
@@ -187,8 +191,35 @@ pub async fn handle_workflow_queued(
     // 5. Schema Validation and Default Value Hydration
     let mut inputs = fetch_inputs(run_id, &pool).await?;
 
+    // OPA Policy Check — runs before any query execution so denied requests cannot
+    // trigger SQL/API/AWS side-effects from DSL-supplied query parameters.
+    let opa_context = EngineOpaContext {
+        run_id,
+        initiating_user: machine.run.initiating_user.clone(),
+        workflow_ast: serde_json::to_value(&parsed_workflow)?,
+        inputs: inputs.clone(),
+    };
+
+    match opa_client.check_context(opa_context).await {
+        Ok(true) => debug!("OPA allowed execution for run {}", run_id),
+        Ok(false) => {
+            let err_msg = "Execution denied by OPA policy".to_string();
+            info!("Run {}: {}", run_id, err_msg);
+            let _ = machine.fail(err_msg, &mut *pool.acquire().await?).await?;
+            return Ok(()); // Handled failure
+        }
+        Err(e) => {
+            let err_msg = format!("OPA check failed: {}", e);
+            error!("Run {}: {}", run_id, err_msg);
+            let _ = machine.fail(err_msg, &mut *pool.acquire().await?).await?;
+            return Err(e);
+        }
+    }
+
     // Evaluate dynamic queries
     let mut query_results = serde_json::Map::new();
+    // Secrets fetched for query parameters, recorded with the run's own below
+    let mut query_secrets = Vec::new();
     for query in &parsed_workflow.queries {
         let hcl_ctx = crate::hcl_eval::create_context(
             inputs.clone(),
@@ -199,7 +230,11 @@ pub async fn handle_workflow_queued(
             None,
         );
         let mut resolved_params = serde_json::to_value(&query.params)?;
-        if let Err(e) = crate::hcl_eval::resolve_expressions(&mut resolved_params, &hcl_ctx, true) {
+        let (resolved, fetched) = crate::hcl_eval::capturing_secrets(|| {
+            crate::hcl_eval::resolve_expressions(&mut resolved_params, &hcl_ctx, true)
+        });
+        query_secrets.extend(fetched);
+        if let Err(e) = resolved {
             let err_msg = format!(
                 "Failed to evaluate parameters for query {}: {}",
                 query.name, e
@@ -219,6 +254,7 @@ pub async fn handle_workflow_queued(
             &resolved_params_map,
             Some(&pool),
             None,
+            Some(&machine.run.initiating_user),
         )
         .await
         {
@@ -289,36 +325,11 @@ pub async fn handle_workflow_queued(
         }
     }
 
-    // 6. OPA Policy Check after Parsing
-    // We send the full context: AST, user, and inputs
-    let opa_context = EngineOpaContext {
-        run_id,
-        initiating_user: machine.run.initiating_user.clone(),
-        workflow_ast: serde_json::to_value(&parsed_workflow)?,
-        inputs: inputs.clone(),
-    };
-
-    match opa_client.check_context(opa_context).await {
-        Ok(true) => debug!("OPA allowed execution for run {}", run_id),
-        Ok(false) => {
-            let err_msg = "Execution denied by OPA policy".to_string();
-            info!("Run {}: {}", run_id, err_msg);
-            let _ = machine.fail(err_msg, &mut *pool.acquire().await?).await?;
-            return Ok(()); // Handled failure
-        }
-        Err(e) => {
-            let err_msg = format!("OPA check failed: {}", e);
-            error!("Run {}: {}", run_id, err_msg);
-            let _ = machine.fail(err_msg, &mut *pool.acquire().await?).await?;
-            return Err(e);
-        }
-    }
-
     let sops_file: Option<String> = serde_json::from_value(payload["sops_file"].clone()).ok();
     let sops_role_arn: Option<String> =
         serde_json::from_value(payload["sops_role_arn"].clone()).ok();
 
-    let (secrets, sensitive_values) = crate::handler::workflow::sops::decrypt_sops_secrets(
+    let (secrets, mut sensitive_values) = crate::handler::workflow::sops::decrypt_sops_secrets(
         &repo_path,
         sops_file.as_deref(),
         sops_role_arn.as_deref(),
@@ -328,6 +339,11 @@ pub async fn handle_workflow_queued(
         error!("Failed to decrypt SOPS secrets for run {}: {:?}", run_id, e);
         (serde_json::json!({}), vec![])
     });
+
+    sensitive_values.extend(query_secrets);
+    sensitive_values.extend(crate::hcl_eval::take_alias_secrets(run_id));
+    sensitive_values.sort();
+    sensitive_values.dedup();
 
     let mut tx = pool.begin().await?;
 

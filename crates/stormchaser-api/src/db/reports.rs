@@ -71,19 +71,21 @@ pub async fn list_run_test_cases(
 /// Get test report.
 pub async fn get_test_report(
     pool: &PgPool,
+    run_id: RunId,
     report_id: TestReportId,
 ) -> Result<Option<String>, sqlx::Error> {
     sqlx::query_scalar(
         r#"
             WITH combined_reports AS (
-                SELECT id, content FROM step_test_reports
+                SELECT id, run_id, content FROM step_test_reports
                 UNION ALL
-                SELECT id, content FROM archived_step_test_reports
+                SELECT id, run_id, content FROM archived_step_test_reports
             )
-            SELECT content FROM combined_reports WHERE id = $1
+            SELECT content FROM combined_reports WHERE id = $1 AND run_id = $2
             "#,
     )
     .bind(report_id)
+    .bind(run_id)
     .fetch_optional(pool)
     .await
 }

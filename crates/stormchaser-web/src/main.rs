@@ -16,35 +16,65 @@ async fn main() {
     let app = Router::new()
         .route("/api/v1/runs/stream", get(proxy_runs_stream_handler))
         .route(
-            "/api/v1/runs/:id/status/stream",
+            "/api/v1/runs/{id}/status/stream",
             get(proxy_run_status_stream_handler),
         )
         .route(
-            "/api/v1/runs/:run_id/steps/:step_id/logs/stream",
+            "/api/v1/runs/{run_id}/steps/{step_id}/logs/stream",
             get(proxy_step_logs_stream_handler),
         )
-        .route("/api/*fn_name", post(leptos_axum::handle_server_fns))
+        .route("/api/{*fn_name}", post(leptos_axum::handle_server_fns))
         .route("/auth/login", get(auth_login_handler))
-        .route("/auth/logout", get(auth_logout_handler))
+        .route("/auth/logout", post(auth_logout_handler))
         .route("/auth/callback", get(auth_callback_handler))
         .leptos_routes(&leptos_options, routes, {
             let leptos_options = leptos_options.clone();
             move || shell(leptos_options.clone())
         })
         .fallback(leptos_axum::file_and_error_handler(shell))
+        .layer(axum::middleware::from_fn(security_headers))
         .with_state(leptos_options);
 
+    let tls = listener_tls().await.unwrap_or_else(|e| panic!("{e:#}"));
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
-    println!("listening on http://{}", &addr);
-    axum::serve(listener, app.into_make_service())
+    println!(
+        "listening on {}://{}",
+        if tls.is_some() { "https" } else { "http" },
+        addr
+    );
+    stormchaser_tls::listener::serve(listener, app, tls, std::future::pending())
         .await
         .unwrap();
+}
+
+/// Loads the listener's certificate unless `STORMCHASER_LISTEN_TLS=false`.
+#[cfg(feature = "ssr")]
+async fn listener_tls() -> anyhow::Result<Option<std::sync::Arc<stormchaser_tls::TlsReloader>>> {
+    use std::env::var;
+    use stormchaser_tls::listener::{listen_tls_setting, tls_for_listener, LISTEN_TLS_VAR};
+    let listen_tls = listen_tls_setting(var(LISTEN_TLS_VAR).ok().as_deref())?;
+    tls_for_listener(
+        listen_tls,
+        stormchaser_tls::TlsConfig {
+            ca_cert_path: var("TLS_CA_CERT_PATH").ok().map(Into::into),
+            cert_path: var("TLS_CERT_PATH")
+                .unwrap_or_else(|_| "/etc/engine/certs/tls.crt".to_string())
+                .into(),
+            key_path: var("TLS_KEY_PATH")
+                .unwrap_or_else(|_| "/etc/engine/certs/tls.key".to_string())
+                .into(),
+            server_name: None,
+        },
+    )
+    .await
 }
 
 #[cfg(feature = "ssr")]
 fn http_client() -> reqwest::Client {
     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-    CLIENT.get_or_init(reqwest::Client::new).clone()
+    CLIENT
+        .get_or_init(stormchaser_web::api::build_http_client)
+        .clone()
 }
 
 #[cfg(feature = "ssr")]
@@ -57,23 +87,34 @@ async fn auth_login_handler() -> impl axum::response::IntoResponse {
     let web_url = std::env::var("WEB_URL").unwrap_or_else(|_| "http://127.0.0.1:3001".to_string());
     let callback = urlencoding::encode(&format!("{}/auth/callback", web_url)).into_owned();
 
-    let state = uuid::Uuid::new_v4().to_string();
+    // The verifier stays in this browser's cookie, so a code seen on its way back (in a
+    // proxy's access log, say) cannot be redeemed without it
+    let attempt = stormchaser_model::login_flow::LoginAttempt::new();
     let state_cookie = format!(
         "oauth_state={}; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=300",
-        state
+        attempt.state
+    );
+    let verifier_cookie = format!(
+        "oauth_verifier={}; Path=/auth/callback; HttpOnly; SameSite=Lax; Secure; Max-Age=300",
+        attempt.code_verifier
     );
 
     let redirect_url = format!(
-        "{}/api/v1/auth/login?callback_url={}&state={}",
+        "{}/api/v1/auth/login?callback_url={}&state={}&code_challenge={}",
         external_api_url,
         callback,
-        urlencoding::encode(&state)
+        urlencoding::encode(&attempt.state),
+        attempt.code_challenge()
     );
 
     let mut headers = axum::http::HeaderMap::new();
     headers.insert(
         header::SET_COOKIE,
         header::HeaderValue::from_str(&state_cookie).unwrap(),
+    );
+    headers.append(
+        header::SET_COOKIE,
+        header::HeaderValue::from_str(&verifier_cookie).unwrap(),
     );
     headers.insert(
         header::LOCATION,
@@ -82,12 +123,71 @@ async fn auth_login_handler() -> impl axum::response::IntoResponse {
     (axum::http::StatusCode::SEE_OTHER, headers).into_response()
 }
 
+/// Adds the response headers every page and endpoint should carry.
+///
+/// Rendered pages bring their own Content-Security-Policy, which names their nonce (see
+/// `shell`). Everything else gets one that allows nothing to run.
 #[cfg(feature = "ssr")]
-async fn auth_logout_handler() -> impl axum::response::IntoResponse {
+async fn security_headers(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::http::{header, HeaderValue};
+
+    let mut res = next.run(req).await;
+    let headers = res.headers_mut();
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    // For browsers that predate frame-ancestors
+    headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    headers.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("same-origin"),
+    );
+    if !headers.contains_key(header::CONTENT_SECURITY_POLICY) {
+        headers.insert(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static("default-src 'none'; frame-ancestors 'none'"),
+        );
+    }
+    if serves_https() {
+        headers.insert(
+            header::STRICT_TRANSPORT_SECURITY,
+            HeaderValue::from_static("max-age=31536000; includeSubDomains"),
+        );
+    }
+    res
+}
+
+/// Whether users reach this site over HTTPS, going by its public URL. HSTS is sent only
+/// then: on a plain-HTTP development site browsers ignore it anyway.
+#[cfg(feature = "ssr")]
+fn serves_https() -> bool {
+    static HTTPS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *HTTPS.get_or_init(|| std::env::var("WEB_URL").is_ok_and(|url| url.starts_with("https://")))
+}
+
+/// Whether a request was sent by another site. Browsers say so in `Sec-Fetch-Site`;
+/// a client that sends no such header is not a browser being steered by a page.
+#[cfg(feature = "ssr")]
+fn is_cross_site(headers: &axum::http::HeaderMap) -> bool {
+    headers
+        .get("sec-fetch-site")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|site| site != "same-origin" && site != "none")
+}
+
+#[cfg(feature = "ssr")]
+async fn auth_logout_handler(headers: axum::http::HeaderMap) -> impl axum::response::IntoResponse {
     use axum::http::header;
     use axum::response::IntoResponse;
-    let cookie =
-        "auth_token=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax";
+    // Another site must not be able to log a user out by posting a form here
+    if is_cross_site(&headers) {
+        return axum::http::StatusCode::FORBIDDEN.into_response();
+    }
+    let cookie = "auth_token=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax; Secure";
     let mut headers = axum::http::HeaderMap::new();
     headers.insert(header::SET_COOKIE, header::HeaderValue::from_static(cookie));
     headers.insert(header::LOCATION, header::HeaderValue::from_static("/"));
@@ -114,11 +214,13 @@ async fn auth_callback_handler(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
     let mut oauth_state_cookie = None;
+    let mut code_verifier = None;
     for part in cookie_str.split(';') {
         let part = part.trim();
         if let Some(state_val) = part.strip_prefix("oauth_state=") {
             oauth_state_cookie = Some(state_val);
-            break;
+        } else if let Some(verifier) = part.strip_prefix("oauth_verifier=") {
+            code_verifier = Some(verifier);
         }
     }
 
@@ -140,7 +242,8 @@ async fn auth_callback_handler(
             .post(format!("{}/api/v1/auth/exchange", api_url))
             .json(&serde_json::json!({
                 "sso_token": code,
-                "callback_url": format!("{}/auth/callback", web_url)
+                "callback_url": format!("{}/auth/callback", web_url),
+                "code_verifier": code_verifier,
             }))
             .send()
             .await
@@ -161,6 +264,11 @@ async fn auth_callback_handler(
                         headers_res.append(
                             header::SET_COOKIE,
                             header::HeaderValue::from_static(clear_state_cookie),
+                        );
+                        let clear_verifier_cookie = "oauth_verifier=; Path=/auth/callback; HttpOnly; SameSite=Lax; Secure; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
+                        headers_res.append(
+                            header::SET_COOKIE,
+                            header::HeaderValue::from_static(clear_verifier_cookie),
                         );
                         headers_res.insert(header::LOCATION, header::HeaderValue::from_static("/"));
                         return (axum::http::StatusCode::SEE_OTHER, headers_res).into_response();
@@ -188,8 +296,6 @@ async fn proxy_runs_stream_handler(
         .get(header::COOKIE)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-
-    tracing::info!("SSE Proxy Hit: Extracted cookies: {}", cookie_str);
 
     let mut auth_token = None;
     for part in cookie_str.split(';') {
@@ -237,7 +343,7 @@ async fn proxy_runs_stream_handler(
 
 #[cfg(feature = "ssr")]
 async fn proxy_run_status_stream_handler(
-    axum::extract::Path(id): axum::extract::Path<String>,
+    axum::extract::Path(id): axum::extract::Path<uuid::Uuid>,
     headers: axum::http::HeaderMap,
 ) -> impl axum::response::IntoResponse {
     use axum::body::Body;
@@ -288,7 +394,7 @@ async fn proxy_run_status_stream_handler(
 
 #[cfg(feature = "ssr")]
 async fn proxy_step_logs_stream_handler(
-    axum::extract::Path((run_id, step_id)): axum::extract::Path<(String, String)>,
+    axum::extract::Path((run_id, step_id)): axum::extract::Path<(uuid::Uuid, uuid::Uuid)>,
     headers: axum::http::HeaderMap,
 ) -> impl axum::response::IntoResponse {
     use axum::body::Body;

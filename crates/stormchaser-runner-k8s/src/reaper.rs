@@ -12,7 +12,7 @@ use tracing::{info, warn};
 
 use crate::cluster::ClusterPool;
 
-pub async fn run_reaper(cluster_pool: Arc<ClusterPool>) -> Result<()> {
+pub async fn run_reaper(cluster_pool: Arc<ClusterPool>, step_namespace: String) -> Result<()> {
     let mut interval = time::interval(Duration::from_secs(3600)); // Check every hour
     loop {
         interval.tick().await;
@@ -20,7 +20,7 @@ pub async fn run_reaper(cluster_pool: Arc<ClusterPool>) -> Result<()> {
 
         for cluster_name in cluster_pool.cluster_names() {
             if let Ok((client, _)) = cluster_pool.get_client(&cluster_name).await {
-                let jobs: Api<Job> = Api::all(client.clone());
+                let jobs: Api<Job> = Api::namespaced(client.clone(), &step_namespace);
                 let lp = ListParams::default().labels("managed-by=stormchaser");
 
                 if let Ok(job_list) = jobs.list(&lp).await {

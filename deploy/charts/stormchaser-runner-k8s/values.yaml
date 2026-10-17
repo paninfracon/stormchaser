@@ -4,9 +4,9 @@ replicaCount: 1
 
 image:
   repository: stormchaser-runner-k8s
-  pullPolicy: Never
-  # Overrides the image tag whose default is the chart appVersion.
-  tag: "v1"
+  pullPolicy: IfNotPresent
+  # Empty means the release this chart belongs to (v<appVersion>)
+  tag: ""
 
 imagePullSecrets: []
 nameOverride: ""
@@ -28,16 +28,21 @@ podAnnotations:
 
 podLabels: {}
 
-podSecurityContext: {}
-  # fsGroup: 2000
+# The runner only talks to NATS and the Kubernetes API, so it runs as an unprivileged
+# user with no capabilities and a read-only filesystem (with an empty /tmp).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
 
-securityContext: {}
-  # capabilities:
-  #   drop:
-  #   - ALL
-  # readOnlyRootFilesystem: true
-  # runAsNonRoot: true
-  # runAsUser: 1000
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
 
 service:
   type: ClusterIP
@@ -54,19 +59,53 @@ ingress:
           pathType: ImplementationSpecific
   tls: []
 
-resources: {}
-  # limits:
-  #   cpu: 100m
-  #   memory: 128Mi
-  # requests:
-  #   cpu: 100m
-  #   memory: 128Mi
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
 
 # Runner Configuration
 config:
   natsUrl: "nats://172.17.0.1:4222"
-  runnerId: "" # If empty, a UUID will be generated on startup
+  # Name of a Secret with `user` and `password` keys for NATS authentication.
+  natsAuthSecret: ""
+  # Name of a Secret holding a 32-character key (under stateEncryptionSecretKey). With it
+  # the runner keeps each step's full definition, encrypted, on the Job it starts,
+  # so a restarted runner picks a step up with everything it had. Without it the runner
+  # keeps the definition with its environment and parameter values removed.
+  stateEncryptionSecret: ""
+  stateEncryptionSecretKey: "key"
+  # What any one step may use, whatever its workflow asks for. A step that asks for
+  # more is refused; one that asks for nothing gets the defaults.
+  stepLimits:
+    defaultCpu: "1"
+    defaultMemory: "2Gi"
+    maxCpu: "8"
+    maxMemory: "16Gi"
+    # A step with no `timeout` of its own is stopped after this long.
+    defaultTimeout: "24h"
+    maxTimeout: "24h"
+    # Most pods one step's Job may run at once, or ask to complete.
+    maxParallelism: 10
+  # Pull policy for the image a step names. `Always` makes the node check with the
+  # registry, with the step's own credentials, before every run (cached layers are
+  # reused), so a step cannot start a private image that another user's run left on the
+  # node. Use `IfNotPresent` or `Never` only if step images are preloaded onto nodes.
+  stepImagePullPolicy: Always
+  # If empty, the runner uses "k8s-<pod name>", which survives a restart of the runner
+  # container. Ids must be unique among running runners.
+  runnerId: ""
   rustLog: "stormchaser_runner_k8s=info"
+  # Permit steps that set `privileged = true`. Such a step is root on the node.
+  allowPrivileged: false
+  # Cluster objects a RunK8sJob step may attach to its pod. Empty lists permit none.
+  # An entry ending in `*` matches any name with that prefix.
+  allowedServiceAccounts: []
+  allowedSecretMounts: []
+  allowedConfigMapMounts: []
 
 nodeSelector: {}
 
@@ -76,13 +115,48 @@ affinity: {}
 
 rbac:
   create: true
-  # If you want to restrict the runner to a specific namespace for Jobs
-  # By default it operates in its own namespace
+  # Namespace workflow step Jobs run in. Defaults to "<release namespace>-steps".
+  # It must differ from the release namespace: steps run workflow authors' images and
+  # may not share a namespace with the runner or the control plane. The runner
+  # refuses to start otherwise.
   targetNamespace: ""
+  # Create that namespace as part of this release. Set to false if it already exists,
+  # and give it the Pod Security labels below yourself.
+  createTargetNamespace: true
+  # Pod Security Admission levels for the step namespace. `baseline` refuses pods that
+  # are privileged, share the node's network, PID or IPC namespaces, mount host paths or
+  # add capabilities, whatever creates them; `restricted` is reported as a warning. With
+  # config.allowPrivileged the enforced level is `privileged`, since such steps could not
+  # start otherwise.
+  stepPodSecurity:
+    enforce: baseline
+    warn: restricted
+
+# Network isolation for the step namespace. Requires a CNI that enforces NetworkPolicy.
+networkPolicy:
+  enabled: true
+  # Ranges step pods may not connect to: the private ranges that cluster-internal
+  # services live in, carrier-grade NAT, and link-local (cloud metadata). Narrow these
+  # to your pod and service CIDRs if steps must reach other private networks.
+  blockedCidrs:
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+    - 100.64.0.0/10
+    - 169.254.0.0/16
+  # Pods in the release namespace that steps may still reach, for example an
+  # in-cluster object store that serves presigned URLs:
+  #   - podLabels: {app.kubernetes.io/name: minio}
+  #     port: 9000
+  allowReleaseNamespace: []
+  # Additional raw NetworkPolicy egress rules.
+  extraEgress: []
 
 global:
   agent:
     image:
       repository: stormchaser-agent
-      tag: latest
-      pullPolicy: Never
+      # Empty means the release this chart belongs to (v<appVersion>). The agent runs
+      # beside every step, so in production name it by digest.
+      tag: ""
+      pullPolicy: IfNotPresent

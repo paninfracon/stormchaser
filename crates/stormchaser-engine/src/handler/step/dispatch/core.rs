@@ -7,7 +7,7 @@ use stormchaser_model::dsl::Step;
 use stormchaser_model::events::{
     EventSource, EventType, SchemaVersion, StepEventType, StepScheduledEvent,
 };
-use stormchaser_model::nats::publish_cloudevent;
+use stormchaser_model::nats::publish_cloudevent_with_sequence;
 use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
 use stormchaser_tls::TlsReloader;
@@ -57,8 +57,15 @@ pub async fn dispatch_step_instance(
     let workflow: dsl::Workflow = serde_json::from_value(run_context.workflow_definition.clone())
         .context("Failed to parse workflow definition from context")?;
 
-    let storage_urls =
-        setup_storage_urls(run_id, &pool, &workflow, &resolved_spec, &run_context).await?;
+    let storage_urls = setup_storage_urls(
+        run_id,
+        &pool,
+        &workflow,
+        step_name,
+        &resolved_spec,
+        &run_context,
+    )
+    .await?;
 
     if try_dispatch_intrinsic(
         run_id,
@@ -95,6 +102,7 @@ pub async fn dispatch_step_instance(
         >(&pool, reg_conn_name)
         .await?
         .with_context(|| format!("Registry connection '{}' not found", reg_conn_name))?;
+        crate::authz::ensure_run_may_use(&pool, run_id, &conn).await?;
 
         if conn.connection_type != stormchaser_model::connections::ConnectionType::Oci
             && conn.connection_type != stormchaser_model::connections::ConnectionType::Jfrog
@@ -103,6 +111,31 @@ pub async fn dispatch_step_instance(
                 "Registry connection '{}' has unsupported type {:?}; expected oci or jfrog",
                 reg_conn_name,
                 conn.connection_type
+            );
+        }
+
+        // The runtime sends pull credentials to whichever registry the image names, so they
+        // only leave the engine with an image on the connection's own registry.
+        let registry_url = conn
+            .config
+            .get("url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let image = resolved_spec
+            .get("image")
+            .and_then(|v| v.as_str())
+            .with_context(|| {
+                format!(
+                    "Registry connection '{}' is set on a step with no image",
+                    reg_conn_name
+                )
+            })?;
+        if !stormchaser_model::registry::image_is_on_registry(image, registry_url) {
+            anyhow::bail!(
+                "Image '{}' is not on the registry of connection '{}' ({}); its credentials are only used for that registry",
+                image,
+                reg_conn_name,
+                stormchaser_model::registry::registry_url_host(registry_url)
             );
         }
 
@@ -127,10 +160,12 @@ pub async fn dispatch_step_instance(
                 )
             })?;
 
+        // The runner pulls with it; a step that gets hold of it must not see it echoed
+        crate::db::add_sensitive_values(&pool, run_id, std::slice::from_ref(&password)).await?;
         registry_auth = Some(serde_json::json!({
             "username": username,
             "password": password,
-            "url": conn.config.get("url").and_then(|v| v.as_str()).unwrap_or(""),
+            "url": registry_url,
         }));
     }
 
@@ -207,7 +242,10 @@ pub async fn dispatch_step_instance(
         }
     }
 
-    publish_cloudevent(
+    // From here the runner owns the step and reports its result without a token.
+    crate::db::clear_step_completion_token(&pool, step_instance_id).await?;
+
+    let stream_seq = publish_cloudevent_with_sequence(
         &js,
         subject,
         EventType::Step(StepEventType::Scheduled),
@@ -217,6 +255,30 @@ pub async fn dispatch_step_instance(
         None,
     )
     .await?;
+
+    // The message holds the step's secrets; remember where it is so it can be erased
+    // from the stream when the step is done.
+    match stream_seq {
+        Some(seq) => {
+            if let Err(e) = crate::db::task_messages::record_task_message(
+                &pool,
+                seq,
+                step_instance_id.into_inner(),
+            )
+            .await
+            {
+                tracing::warn!(
+                    "Could not record the task message of step {}; it stays in the stream until it ages out: {:?}",
+                    step_instance_id,
+                    e
+                );
+            }
+        }
+        None => tracing::warn!(
+            "The stream did not confirm the task message of step {}; it cannot be erased early",
+            step_instance_id
+        ),
+    }
 
     Ok(())
 }

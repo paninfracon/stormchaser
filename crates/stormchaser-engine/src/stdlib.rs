@@ -166,8 +166,25 @@ fn path_join(args: FuncArgs) -> Result<Value, String> {
     }
 }
 
+/// Comma-separated names of the engine environment variables workflows may read with `env()`.
+pub const ENV_ALLOWLIST_VAR: &str = "STORMCHASER_ENV_ALLOWLIST";
+
+/// `env()` runs inside the engine process, whose environment holds the database URL and
+/// signing secrets, so only variables the operator has explicitly listed are readable.
+fn env_var_allowed(name: &str) -> bool {
+    std::env::var(ENV_ALLOWLIST_VAR)
+        .map(|list| list.split(',').any(|allowed| allowed.trim() == name))
+        .unwrap_or(false)
+}
+
 fn env(args: FuncArgs) -> Result<Value, String> {
     if let Some(Value::String(s)) = args.first() {
+        if !env_var_allowed(s) {
+            return Err(format!(
+                "env(): '{}' is not listed in {}",
+                s, ENV_ALLOWLIST_VAR
+            ));
+        }
         match std::env::var(s) {
             Ok(val) => Ok(Value::String(val)),
             Err(_) => Ok(Value::String("".to_string())),
@@ -513,11 +530,19 @@ mod tests {
     #[test]
     fn test_env_function() {
         std::env::set_var("TEST_HCL_ENV_VAR", "my_value");
+        std::env::set_var("TEST_HCL_ENV_VAR_UNLISTED", "hidden");
+        std::env::set_var(ENV_ALLOWLIST_VAR, "TEST_HCL_ENV_VAR, NON_EXISTENT_VAR_123");
         assert_eq!(
             eval_with_stdlib("env(\"TEST_HCL_ENV_VAR\")"),
             json!("my_value")
         );
         assert_eq!(eval_with_stdlib("env(\"NON_EXISTENT_VAR_123\")"), json!(""));
+
+        // Variables the operator has not listed are refused, not silently emptied.
+        let mut ctx = Context::new();
+        register_stdlib(&mut ctx);
+        let err = evaluate_raw_expr("env(\"TEST_HCL_ENV_VAR_UNLISTED\")", &ctx).unwrap_err();
+        assert!(err.to_string().contains(ENV_ALLOWLIST_VAR));
     }
 
     #[test]

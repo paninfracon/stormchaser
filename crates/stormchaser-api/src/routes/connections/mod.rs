@@ -2,6 +2,7 @@ use super::{
     CreateStorageBackendRequest, TestConnectionRequest, TestConnectionResponse,
     UpdateStorageBackendRequest,
 };
+use crate::authz::{self, Caller, Kind};
 use crate::db;
 use crate::{AppState, AuthClaims};
 use axum::{
@@ -31,11 +32,14 @@ use validate::validate_connection;
     tag = "storage"
 )]
 pub async fn create_connection(
-    AuthClaims(_claims): AuthClaims,
+    caller: Caller,
     State(state): State<AppState>,
     Json(payload): Json<CreateStorageBackendRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let id = stormchaser_model::ConnectionId::new_v4();
+    if payload.is_default_sfs {
+        authz::authorize_make_default(&state, &caller, id.into_inner()).await?;
+    }
 
     let mut tx = state
         .pool
@@ -67,6 +71,7 @@ pub async fn create_connection(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
+    authz::record_owner(&mut *tx, Kind::Connection, id.into_inner(), &caller).await?;
     tx.commit()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -87,7 +92,7 @@ pub async fn create_connection(
     tag = "storage"
 )]
 pub async fn list_connections(
-    AuthClaims(_claims): AuthClaims,
+    caller: Caller,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let backends = db::list_connections(&state.pool).await.map_err(|e| {
@@ -95,6 +100,14 @@ pub async fn list_connections(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
+    let backends = authz::filter_readable(&state, &caller, Kind::Connection, backends, |c| {
+        c.id.into_inner()
+    })
+    .await?;
+    let backends: Vec<_> = backends
+        .into_iter()
+        .map(crate::redact::connection)
+        .collect();
     Ok(Json(backends))
 }
 
@@ -121,7 +134,7 @@ pub async fn get_connection(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    Ok(Json(backend))
+    Ok(Json(crate::redact::connection(backend)))
 }
 
 /// Update storage backend.
@@ -138,11 +151,34 @@ pub async fn get_connection(
     tag = "storage"
 )]
 pub async fn update_connection(
-    AuthClaims(_claims): AuthClaims,
+    caller: Caller,
     State(state): State<AppState>,
     Path(id): Path<ConnectionId>,
-    Json(payload): Json<UpdateStorageBackendRequest>,
+    Json(mut payload): Json<UpdateStorageBackendRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
+    if payload.is_default_sfs == Some(true) {
+        authz::authorize_action(
+            &state,
+            &caller,
+            authz::MAKE_DEFAULT,
+            Kind::Connection,
+            id.into_inner(),
+        )
+        .await?;
+    }
+    // Responses mask stored secrets. A client that loads a connection, edits it and saves
+    // it sends those masks back; they mean "unchanged", not a new value.
+    if payload.encrypted_credentials.as_deref() == Some(crate::redact::MASK) {
+        payload.encrypted_credentials = None;
+    }
+    if let Some(config) = payload.config.as_mut() {
+        let stored = db::get_connection(&state.pool, id)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .ok_or(StatusCode::NOT_FOUND)?;
+        crate::redact::restore_masked(config, &stored.config);
+    }
+
     let mut tx = state
         .pool
         .begin()
@@ -317,9 +353,10 @@ pub async fn list_run_test_summaries(
 pub async fn get_test_report(
     AuthClaims(_claims): AuthClaims,
     State(state): State<AppState>,
-    Path((_run_id, report_id)): Path<(RunId, TestReportId)>,
+    Path((run_id, report_id)): Path<(RunId, TestReportId)>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let report = db::get_test_report(&state.pool, report_id)
+    // The run in the path is the one the caller was authorized for
+    let report = db::get_test_report(&state.pool, run_id, report_id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)

@@ -1,6 +1,5 @@
 ---
 source: crates/stormchaser-tui/src/tests.rs
-assertion_line: 409
 expression: terminal.backend()
 ---
 TestBackend {
@@ -12,7 +11,7 @@ TestBackend {
             "  ┌ Workflow Runs ────────────┐┌ Run Detail (T for Tests) ───────────────────────────────────────┐  ",
             "  │       ╭ 📁  File Explorer ───────────────────╮┌ Preview ─────────────────────────────┐       │  ", // hidden by multi-width symbols: [(13, " ")]
             "  │       │ ../../tests/fixtures/file_browser    ││workflow "test" {                     │       │  ",
-            "  │       ╰──────────────────────────────────────╯│  description = "Valid workflow for li│       │  ",
+            "  │       ╰────────────────────────────── v3.0.2 ╯│  description = "Valid workflow for li│       │  ",
             "  │       ╭ Files 1/1 ───────────────────────────╮│  step "hello" {                      │       │  ",
             "  │       │ 📄 test.storm  155 B                 ││    type   = "docker"                 │       │  ", // hidden by multi-width symbols: [(13, " ")]
             "  │       │                                      ││    image  = "alpine"                 │       │  ",
@@ -70,6 +69,8 @@ TestBackend {
             x: 2, y: 5, fg: Yellow, bg: Reset, underline: Reset, modifier: NONE,
             x: 3, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
             x: 10, y: 5, fg: Rgb(80, 200, 255), bg: Reset, underline: Reset, modifier: NONE,
+            x: 41, y: 5, fg: Rgb(120, 120, 130), bg: Reset, underline: Reset, modifier: NONE,
+            x: 49, y: 5, fg: Rgb(80, 200, 255), bg: Reset, underline: Reset, modifier: NONE,
             x: 50, y: 5, fg: Yellow, bg: Reset, underline: Reset, modifier: NONE,
             x: 51, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
             x: 89, y: 5, fg: Yellow, bg: Reset, underline: Reset, modifier: NONE,

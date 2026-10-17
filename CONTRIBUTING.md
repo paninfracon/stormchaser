@@ -43,6 +43,18 @@ Unsure where to begin contributing to Stormchaser? You can start by looking thro
 2. Clone your fork locally: `git clone https://github.com/paninfracon/stormchaser.git`
 3. Create a new branch for your changes: `git checkout -b my-new-feature`
 
+### Prerequisites
+
+* **Rust 1.96 or newer** (the workspace `rust-version`). Install or update it with `rustup update stable`. CI builds and lints with the latest stable toolchain, so run `cargo clippy` on stable before opening a pull request.
+* **Docker** with Docker Compose v2, used by the test scripts to start Postgres and NATS.
+* **`sqlx-cli`** (`cargo install sqlx-cli`), used by the test scripts to apply database migrations.
+* **`cargo-deny`** (`cargo install cargo-deny`), run by the pre-commit hooks to check advisories and licenses.
+* For the Web UI and its end-to-end tests:
+  * the WASM target: `rustup target add wasm32-unknown-unknown`
+  * `cargo-leptos`: `cargo install --locked cargo-leptos`
+  * a `wasm-bindgen` CLI whose version matches the `wasm-bindgen` crate resolved in `Cargo.lock` (check with `cargo tree -i wasm-bindgen --depth 0`, then `cargo install wasm-bindgen-cli --version <that version>`)
+  * Node.js with the Playwright browsers: `cd crates/stormchaser-web/e2e && npm ci && npx playwright install --with-deps`
+
 ### Making changes
 
 * Make your changes to the code.

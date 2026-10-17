@@ -1,3 +1,4 @@
+mod cancel;
 mod cluster;
 mod config;
 mod job_machine;
@@ -27,6 +28,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use stormchaser_model::dsl;
 
+use crate::cancel::handle_cancel;
 use crate::cluster::ClusterPool;
 use crate::config::Config;
 use crate::reaper::run_reaper;
@@ -55,6 +57,8 @@ pub async fn run_runner(config: Config) -> Result<()> {
         .with(tracing_subscriber::EnvFilter::new(&config.rust_log))
         .with(tracing_subscriber::fmt::layer())
         .init();
+
+    let step_namespace = config.resolve_step_namespace()?;
 
     let nats_url = config.nats_url;
     let runner_id = config.runner_id;
@@ -128,7 +132,10 @@ pub async fn run_runner(config: Config) -> Result<()> {
     });
 
     // 2. Connect to NATS
-    let nats_options = async_nats::ConnectOptions::new().retry_on_initial_connect();
+    let nats_options = stormchaser_model::nats::apply_auth_from_env(
+        async_nats::ConnectOptions::new().retry_on_initial_connect(),
+    )
+    .await?;
     let nats_client = async_nats::connect_with_options(nats_url, nats_options)
         .await
         .context("Failed to connect to NATS")?;
@@ -137,10 +144,14 @@ pub async fn run_runner(config: Config) -> Result<()> {
     let nats_subject = format!("stormchaser.v1.runner.k8s.{}", runner_id);
 
     // Generate JSON Schemas for our supported step types
-    let common_schema = schemars::schema_for!(dsl::CommonContainerSpec);
+    let common_schema =
+        stormchaser_model::schema_gen::draft07_schema_for::<dsl::CommonContainerSpec>();
     let common_schema_json = serde_json::to_value(common_schema)?;
-    let k8s_job_schema = schemars::schema_for!(dsl::K8sJobSpec);
+    let k8s_job_schema = stormchaser_model::schema_gen::draft07_schema_for::<dsl::K8sJobSpec>();
     let k8s_job_schema_json = serde_json::to_value(k8s_job_schema)?;
+
+    // A key of this runner's own, which signs everything it reports from here on
+    stormchaser_model::runner_auth::obtain_session(&nats_client, &runner_id).await?;
 
     let registration_payload = RunnerRegisterEvent {
         runner_id: runner_id.clone(),
@@ -174,7 +185,10 @@ pub async fn run_runner(config: Config) -> Result<()> {
         .time(chrono::Utc::now())
         .data(
             stormchaser_model::APPLICATION_JSON,
-            serde_json::to_value(registration_payload).unwrap(),
+            stormchaser_model::runner_auth::sign_if_runner(
+                serde_json::to_value(registration_payload).unwrap(),
+                "stormchaser.v1.runner.register",
+            ),
         )
         .build()
         .context("Failed to build CloudEvent")?;
@@ -190,8 +204,9 @@ pub async fn run_runner(config: Config) -> Result<()> {
 
     // 3.4 Start garbage collection (reaper) loop
     let reaper_pool = cluster_pool.clone();
+    let reaper_namespace = step_namespace.clone();
     tokio::spawn(async move {
-        if let Err(e) = run_reaper(reaper_pool).await {
+        if let Err(e) = run_reaper(reaper_pool, reaper_namespace).await {
             error!("Reaper error: {:?}", e);
         }
     });
@@ -202,6 +217,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
         nats_client.clone(),
         runner_id.clone(),
         encryption_key.clone(),
+        &step_namespace,
     )
     .await;
 
@@ -214,18 +230,14 @@ pub async fn run_runner(config: Config) -> Result<()> {
 
     // 5. Subscribe to task subjects
     let js = async_nats::jetstream::new(nats_client.clone());
-    info!("Ensuring JetStream stream 'stormchaser' exists...");
-    let stream = js
-        .get_or_create_stream(async_nats::jetstream::stream::Config {
-            name: "stormchaser".to_string(),
-            subjects: vec!["stormchaser.>".to_string()],
-            ..Default::default()
-        })
-        .await
-        .context("Failed to ensure JetStream stream")?;
+    info!("Waiting for the JetStream stream 'stormchaser'...");
+    let stream = stormchaser_model::nats::wait_for_stream(&js).await;
 
     let runner_consumer = stream
         .create_consumer(async_nats::jetstream::consumer::pull::Config {
+            // Named so the create request carries the filter in its subject, which lets
+            // NATS permissions limit runners to consumers on their own task subjects.
+            name: Some(format!("runner-k8s-{}", runner_id)),
             filter_subject: nats_subject.clone(),
             ..Default::default()
         })
@@ -237,27 +249,30 @@ pub async fn run_runner(config: Config) -> Result<()> {
         .await
         .context("Failed to get runner-specific consumer messages")?;
 
-    info!("Creating durable consumer for k8s-runner...");
-    let consumer = stream
-        .get_or_create_consumer(
-            "k8s-runner",
-            async_nats::jetstream::consumer::pull::Config {
-                durable_name: Some("k8s-runner".to_string()),
-                filter_subject: "stormchaser.v1.*.step.scheduled.>".to_string(),
-                ..Default::default()
-            },
-        )
-        .await
-        .context("Failed to create JetStream consumer")?;
-
-    let mut task_messages = consumer
+    use stormchaser_model::runner::{
+        task_consumer, CONTAINER_TASKS_CONSUMER, CONTAINER_TASKS_SUBJECT, K8S_JOB_TASKS_CONSUMER,
+        K8S_JOB_TASKS_SUBJECT,
+    };
+    // Container tasks come from the consumer Docker runners share, so each goes to one
+    // runner; Kubernetes jobs only this kind of runner can run.
+    let container_tasks = task_consumer(&stream, CONTAINER_TASKS_CONSUMER, CONTAINER_TASKS_SUBJECT)
+        .await?
         .messages()
         .await
-        .context("Failed to get consumer messages")?;
+        .context("Failed to get container task messages")?;
+    let k8s_job_tasks = task_consumer(&stream, K8S_JOB_TASKS_CONSUMER, K8S_JOB_TASKS_SUBJECT)
+        .await?
+        .messages()
+        .await
+        .context("Failed to get Kubernetes job task messages")?;
+    let mut task_messages = futures::stream::select(container_tasks, k8s_job_tasks);
+
+    // Cancellations of runs, which every runner reads for itself
+    let mut cancel_messages = stormchaser_model::run_cancel::subscribe(&stream).await?;
 
     info!(
-        "Listening for tasks on {} and JetStream subject stormchaser.v1.*.step.scheduled.>",
-        nats_subject
+        "Listening for tasks on {}, {} and {}",
+        nats_subject, CONTAINER_TASKS_SUBJECT, K8S_JOB_TASKS_SUBJECT
     );
 
     // 6. Main event loop with signal handling
@@ -287,6 +302,25 @@ pub async fn run_runner(config: Config) -> Result<()> {
                     error!("Failed to publish heartbeat: {:?}", e);
                 }
             }
+            message = cancel_messages.next() => {
+                match message {
+                    Some(Ok(msg)) => {
+                        tokio::spawn(handle_cancel(
+                            msg,
+                            cluster_pool.clone(),
+                            step_namespace.clone(),
+                        ));
+                    }
+                    Some(Err(e)) => {
+                        error!("Run cancellation consumer error: {:?}", e);
+                        time::sleep(Duration::from_secs(1)).await;
+                    }
+                    None => {
+                        error!("Run cancellation consumer closed");
+                        break;
+                    }
+                }
+            }
             message = runner_task_messages.next() => {
                 match message {
                     Some(Ok(msg)) => {
@@ -296,6 +330,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
                             nats_client.clone(),
                             runner_id.clone(),
                             encryption_key.clone(),
+                            step_namespace.clone(),
                         ));
                     }
                     Some(Err(e)) => {
@@ -317,6 +352,7 @@ pub async fn run_runner(config: Config) -> Result<()> {
                             nats_client.clone(),
                             runner_id.clone(),
                             encryption_key.clone(),
+                            step_namespace.clone(),
                         ));
                     }
                     Some(Err(e)) => {

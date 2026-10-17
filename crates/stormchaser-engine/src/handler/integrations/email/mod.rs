@@ -7,7 +7,6 @@ pub use test_report::handle_test_report_email;
 use anyhow::Result;
 use serde_json::Value;
 use sqlx::PgPool;
-use std::env::var;
 use std::sync::Arc;
 use stormchaser_tls::TlsReloader;
 
@@ -62,9 +61,7 @@ pub async fn handle_email_send(
     });
 
     // 3. Render Body
-    let env = minijinja::Environment::new();
-    let rendered_body = env
-        .render_str(&spec.body, template_ctx)
+    let rendered_body = crate::templating::render_str(&spec.body, &template_ctx)
         .map_err(|e| anyhow::anyhow!("Failed to render email body: {:?}", e))?;
 
     let is_html = spec.html.unwrap_or(false);
@@ -195,32 +192,17 @@ async fn send_via_smtp(
     };
 
     // 5. Send Email
-    let smtp_params = self::smtp::SmtpParams {
-        server: spec
-            .smtp_server
-            .clone()
-            .unwrap_or_else(|| var("SMTP_SERVER").unwrap_or_else(|_| "localhost".to_string())),
-        port: spec.smtp_port.unwrap_or_else(|| {
-            var("SMTP_PORT")
-                .ok()
-                .and_then(|p| p.parse().ok())
-                .unwrap_or(25)
-        }),
-        username: spec
-            .smtp_username
-            .clone()
-            .or_else(|| var("SMTP_USERNAME").ok()),
-        password: spec
-            .smtp_password
-            .clone()
-            .or_else(|| var("SMTP_PASSWORD").ok()),
-        use_tls: spec
-            .smtp_use_tls
-            .unwrap_or_else(|| var("SMTP_USE_TLS").unwrap_or_default() == "true"),
-        use_mtls: spec
-            .smtp_use_mtls
-            .unwrap_or_else(|| var("SMTP_USE_MTLS").unwrap_or_default() == "true"),
-    };
+    let smtp_params = self::smtp::resolve_smtp_params(
+        self::smtp::SmtpOverrides {
+            server: spec.smtp_server.clone(),
+            port: spec.smtp_port,
+            username: spec.smtp_username.clone(),
+            password: spec.smtp_password.clone(),
+            use_tls: spec.smtp_use_tls,
+            use_mtls: spec.smtp_use_mtls,
+        },
+        self::smtp::EngineSmtp::from_env(),
+    );
 
     let mailer = self::smtp::build_smtp_transport(smtp_params)?;
 

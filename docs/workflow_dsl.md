@@ -89,7 +89,8 @@ If the checksum is missing or mismatched, the workflow compilation will fail dur
     inputs { ... }
     outputs { ... }
 
-    // Resource Quotas: Define limits for the entire workflow execution
+    // Resource Quotas: Define limits for the entire workflow execution, held to the
+    // operator's ceilings (see docs/quotas.md)
     quotas {
         // ... (existing quotas)
     }
@@ -161,7 +162,12 @@ inputs {
 
 Stormchaser supports dynamic options populated via external systems (e.g., Rundeck-style). First, define a `query` block with the data source details. Then, reference the query results in your inputs using the `${queries.QUERY_NAME}` interpolator within an `enum` constraint (or using the shorthand type function `enum("${queries.QUERY_NAME}")`).
 
-When the TUI or Web UI requests the schema, the Query microservice (`/api/v1/schema/hydrate`) dynamically resolves these queries and converts the result into an `enum` list, embedding it back into the schema before returning it to the UI.
+When the TUI or Web UI shows a run form, the Query microservice resolves these queries and converts the result into an `enum` list, embedding it back into the schema before returning it to the UI. The UI tells the service which workflow the form is for and the service reads the schema and queries from the workflow itself, so the queries that run are the workflow's and not whatever a client sends:
+
+* `POST /api/v1/schema/hydrate` takes `connection`, `workflow_path`, `git_ref` and `inputs`, and reads the workflow from that Git connection's repository. The caller must be allowed to use the connection.
+* `POST /api/v1/schema/hydrate-direct` takes `dsl` (the workflow text) and `inputs`, for direct runs. Whoever calls it is choosing the queries, so policy can refuse it to users who may run workflows but not write them (see `author_groups` in [OPA RBAC](opa-rbac.md)).
+
+A user may have 4 hydrations in flight and the service 64 in all (`STORMCHASER_QUERY_MAX_HYDRATIONS_PER_USER`, `STORMCHASER_QUERY_MAX_HYDRATIONS`); one more is refused with `429 Too Many Requests`. Each hydration runs at most 8 of its queries at once.
 
 ##### Mock Data
 
@@ -193,6 +199,8 @@ query "db_envs" {
     }
 }
 ```
+
+The query must be a single statement that only reads. It runs in a read-only transaction that is rolled back, is stopped after 30 seconds, and may return at most 10,000 rows; the first column of each row becomes an option. Give the connection a database role that can read only what a form needs: a read-only transaction does not stop a function with side effects.
 
 ##### REST API
 
@@ -356,9 +364,46 @@ step "my_step" "RunContainer" {
     storage_mounts = [
         { name = "workspace", mount_path = "/data", read_only = false }
     ]
+    artifacts = ["binary"] // Optional: the artifacts this step publishes
     command = ["ls", "-la", "/data"]
 }
 ```
+
+A step publishes only the artifacts its `artifacts` list names, and only from
+storage it mounts; without the list it publishes none. Each artifact is then
+published once, by the step that produces it, rather than by every step that
+mounts its storage.
+
+`mount_path` must be an absolute path that is not a system location: `/`,
+`/usr`, `/usr/local`, `/etc`, and anything at, above or inside `/bin`, `/sbin`,
+`/lib*`, `/usr/bin`, `/usr/sbin`, `/usr/lib*`, `/usr/libexec`, `/usr/local/bin`,
+`/proc`, `/sys`, `/dev` and `/stormchaser` are refused. Paths such as
+`/workspace`, `/app`, `/usr/src/app` or `/etc/myapp` are fine.
+
+An artifact's `path` is relative to the root of the storage volume it is
+declared in, wherever a step mounts that volume. Storage is parked and artifacts
+are published by a helper outside the step's own container (a separate container
+on Docker, a sidecar in the pod on Kubernetes), after the step's command has
+exited successfully.
+
+##### OCI registries as artifact backends
+
+A storage block whose `backend` names an `oci` connection publishes its artifacts
+to that registry, as `<registry>/<run id>/<storage name>:<artifact name>`. The
+connection's `config` takes:
+
+| Key | Meaning |
+| :--- | :--- |
+| `registry` | Registry host, optionally followed by a path that every repository starts with (`ghcr.io/my-org`). |
+| `username`, `password` | Credentials allowed to push there. They never leave the engine: at push time it exchanges them for a token limited to that run's repositories. |
+| `plain_http` | `true` for a registry served without TLS. |
+
+The registry must support token authentication (Harbor, GHCR, GitLab, Docker Hub
+and the reference registry with a token service do). For one that only does basic
+authentication, or issues tokens that are not per repository (ECR), artifacts are
+not pushed unless the operator sets `STORMCHASER_OCI_ALLOW_STATIC_CREDENTIALS=true`
+on the engine, which sends the stored username and password to the runner's helper
+instead.
 
 #### 4.4 Using Library Steps
 
@@ -433,6 +478,9 @@ step "fetch_source" "GitCheckout" {
             format = "junit"
         }
     }
+    // Only reports declared here are stored. A report's files may total at most
+    // 32 MiB compressed, 64 MiB unpacked and 1,000 files; a larger report is
+    // dropped and the step's result is unaffected.
 
     // Output Mapping: Extract data from step execution
     outputs {
@@ -578,7 +626,10 @@ step "manual_approval" "Approval" {
             from = "ops@paninfracon.net"
             to   = ["admin@paninfracon.net"]
             subject = "Approval required for run ${run.id}"
-            // The body can use 'approve_link' and 'reject_link' variables
+            // The body can use 'approve_link' and 'reject_link' variables. They are
+            // empty unless the operator has set STORMCHASER_APPROVAL_LINK_KEY. A link
+            // opens a confirmation page, expires (72 hours by default), and records
+            // the decision against the addresses in 'to'.
             body = <<-EOT
                 Hello,
 
@@ -693,6 +744,8 @@ If not provided in the `spec`, the engine will look for the following environmen
 * `SMTP_USERNAME`
 * `SMTP_PASSWORD`
 
+`SMTP_USERNAME` and `SMTP_PASSWORD` are only used with the server and port the engine is configured with. A step that sets `smtp_server` or `smtp_port` to anything else must supply its own `smtp_username` and `smtp_password`; otherwise the message is sent without authentication.
+
 ---
 
 ### 5. Expressions (HCL)
@@ -744,6 +797,19 @@ workflow "Example" {
 * `inputs.replica_count > 5 && env_name == 'prod'` (where 'env_name' is an alias for 'inputs.environment')
 * `has(inputs.optional_flag) && inputs.optional_flag == true`
 
+#### 5.2.1 `${...}` inside Jinja templates
+
+Some fields are MiniJinja templates, rendered when the step runs: the `query` of
+`SqlExecute`, the `template` of `JinjaRender` and `TestReportEmail`, the `body` of
+`RestApi`, `WebhookInvoke` and `EmailSend`, and the `notify.body` of `Approval` and
+`TerraformApproval`. A `${...}` in one of them is still evaluated first, but its value
+goes into the template as text: an input holding `{{ ... }}` or `{% ... %}` is printed
+as written, not run as template code. To work with a value in Jinja itself, refer to it
+there (`{{ inputs.name }}`) rather than splicing it in.
+
+Splicing a value into a `SqlExecute` query puts it in the SQL. Pass values in `params`
+instead; see [SqlExecute](steps/SqlExecute.md).
+
 #### 5.3 Stormchaser Standard Library (HCL)
 
 Stormchaser provides a set of built-in functions extending HCL to handle common workflow tasks.
@@ -794,8 +860,8 @@ Stormchaser provides a set of built-in functions extending HCL to handle common 
 
 **Workflow Context:**
 
-* `env(string)`: **(Planned)** Accesses an environment variable (Equivalent to `${env.NAME}`).
-* `secret(string)`: Performs a dynamic secret lookup from the configured backend (e.g., Vault). Format is `secret("path#key")`.
+* `env(string)`: Reads an environment variable of the engine process. Only names the operator has listed in `STORMCHASER_ENV_ALLOWLIST` (comma-separated) are readable; any other name is an evaluation error. The list is empty by default.
+* `secret(string)`: Performs a dynamic secret lookup from the configured backend (e.g., Vault). Format is `secret("path#key")`. Lookups need `VAULT_TOKEN` to be set on the engine (there is no default token), and only paths the operator has listed in `STORMCHASER_VAULT_ALLOWED_PATHS` (comma-separated; a trailing `*` matches a prefix) are readable. The list is empty by default.
 * `is_retry()`: **(Planned)** Returns `true` if the current step execution is a retry.
 * `retry_count()`: **(Planned)** Returns the number of times the current step has been retried.
 

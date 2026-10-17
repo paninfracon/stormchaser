@@ -6,19 +6,19 @@ description.workspace = true
 repository.workspace = true
 license.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 axum = { workspace = true, optional = true }
-leptos = { version = "0.7" }
-leptos_meta = { version = "0.7" }
-leptos_router = { version = "0.7" }
-leptos_axum = { version = "0.7", optional = true }
+leptos = { version = "0.8" }
+leptos_meta = { version = "0.8" }
+leptos_router = { version = "0.8" }
+leptos_axum = { version = "0.8", optional = true }
 tokio = { workspace = true, optional = true }
 tower = { workspace = true, optional = true }
-tower-http = { workspace = true, optional = true }
 wasm-bindgen = "0.2"
 console_error_panic_hook = "0.1"
 tracing.workspace = true
@@ -33,6 +33,8 @@ urlencoding = "2.1"
 futures = { workspace = true, optional = true }
 stormchaser-dsl = { version = "1.5.1", path = "../stormchaser-dsl", optional = true }
 stormchaser-model = { version = "1.5.1", path = "../stormchaser-model" }
+anyhow = { workspace = true, optional = true }
+stormchaser-tls = { version = "1.5.1", path = "../stormchaser-tls", features = ["listener"], optional = true }
 
 [dependencies.web-sys]
 version = "0.3.72"
@@ -56,12 +58,14 @@ ssr = [
     "dep:axum",
     "dep:tokio",
     "dep:tower",
-    "dep:tower-http",
     "dep:leptos_axum",
+    "dep:stormchaser-tls",
+    "dep:anyhow",
     "dep:reqwest",
     "dep:futures",
     "dep:stormchaser-dsl",
     "leptos/ssr",
+    "leptos/nonce",
     "leptos_meta/ssr",
     "leptos_router/ssr",
 ]
@@ -79,6 +83,9 @@ bin-default-features = false
 lib-features = ["hydrate"]
 lib-default-features = false
 wasm-opt = false
+# The e2e harness serves the SSR binary via plain `cargo run`, which does not set
+# `--cfg erase_components`; keep the WASM build consistent to avoid hydration mismatches.
+disable-erase-components = true
 
 [dev-dependencies]
 wiremock = "0.6"

@@ -68,7 +68,7 @@ impl StepMachine<state::UnpackingSfs> {
         })
     }
 
-    #[tracing::instrument(skip(self, executor), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
+    #[tracing::instrument(skip(self, executor, error), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
     /// Fail.
     pub async fn fail(
         mut self,
@@ -165,7 +165,7 @@ impl StepMachine<state::Running> {
         })
     }
 
-    #[tracing::instrument(skip(self, executor), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
+    #[tracing::instrument(skip(self, executor, error), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
     /// Fail.
     pub async fn fail(
         mut self,
@@ -244,7 +244,7 @@ impl StepMachine<state::PackingSfs> {
         })
     }
 
-    #[tracing::instrument(skip(self, executor), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
+    #[tracing::instrument(skip(self, executor, error), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
     /// Fail.
     pub async fn fail(
         mut self,
@@ -309,7 +309,7 @@ impl StepMachine<state::WaitingForEvent> {
         self.instance
     }
 
-    #[tracing::instrument(skip(self, executor), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
+    #[tracing::instrument(skip(self, executor, error), fields(run_id = %self.instance.run_id, step_id = %self.instance.id))]
     /// Fail.
     pub async fn fail(
         mut self,

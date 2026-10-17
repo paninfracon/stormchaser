@@ -17,9 +17,15 @@ spec:
         {{- include "stormchaser-orchestration.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: query
     spec:
+      # It never talks to the Kubernetes API
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: query
-          image: "{{ .Values.query.image.repository }}:{{ .Values.query.image.tag | default .Chart.AppVersion }}"
+          image: "{{ .Values.query.image.repository }}:{{ .Values.query.image.tag | default (printf "v%s" .Chart.AppVersion) }}"
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
           imagePullPolicy: {{ .Values.query.image.pullPolicy }}
           env:
             - name: BINARY
@@ -28,19 +34,27 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            - name: DATABASE_URL
-              {{- if .Values.global.database.existingSecret }}
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.global.database.existingSecret }}
-                  key: {{ .Values.global.database.existingSecretKey }}
-              {{- else }}
-              value: {{ .Values.global.database.url | quote }}
-              {{- end }}
+            {{- include "stormchaser-orchestration.databaseUrlEnv" . | nindent 12 }}
             - name: STORMCHASER_DB_SSL
               value: {{ .Values.global.database.ssl | quote }}
             - name: NATS_URL
               value: {{ .Values.global.nats.url | quote }}
+            {{- with (.Values.global.nats.queryAuthSecret | default .Values.global.nats.authSecret) }}
+            - name: NATS_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: user
+            - name: NATS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: password
+            {{- end }}
+            - name: STORMCHASER_SSRF_ALLOWED_HOSTS
+              value: {{ join "," .Values.global.ssrfAllowedHosts | quote }}
+            - name: STORMCHASER_AWS_ALLOWED_ROLE_ARNS
+              value: {{ join "," .Values.global.aws.allowedRoleArns | quote }}
             - name: RUST_LOG
               value: {{ .Values.query.rustLog | quote }}
             - name: OIDC_ISSUER
@@ -51,8 +65,6 @@ spec:
             {{- end }}
             - name: OIDC_CLIENT_ID
               value: {{ .Values.global.oidc.clientId | quote }}
-            - name: OIDC_CLIENT_SECRET
-              value: {{ .Values.global.oidc.clientSecret | quote }}
             - name: LOKI_URL
               value: {{ .Values.global.loki.url | quote }}
             - name: GRAFANA_URL
@@ -79,6 +91,8 @@ spec:
             - name: TLS_KEY_PATH
               value: {{ .Values.global.tls.keyPath | quote }}
             {{- end }}
+            - name: STORMCHASER_LISTEN_TLS
+              value: {{ include "stormchaser-orchestration.listenTls" . | quote }}
           ports:
             - name: http
               containerPort: 3001
@@ -87,10 +101,16 @@ spec:
             httpGet:
               path: /healthz
               port: http
+              {{- if eq (include "stormchaser-orchestration.listenTls" .) "true" }}
+              scheme: HTTPS
+              {{- end }}
           readinessProbe:
             httpGet:
               path: /healthz
               port: http
+              {{- if eq (include "stormchaser-orchestration.listenTls" .) "true" }}
+              scheme: HTTPS
+              {{- end }}
           resources:
             {{- toYaml .Values.query.resources | nindent 12 }}
           volumeMounts:
@@ -99,9 +119,13 @@ spec:
               mountPath: /etc/stormchaser/certs
               readOnly: true
             {{- end }}
-      {{- if .Values.global.tls.enabled }}
+        {{- include "stormchaser-orchestration.opaSidecar" . | nindent 8 }}
+      {{- if or .Values.global.tls.enabled .Values.api.opa.sidecar.enabled }}
       volumes:
+        {{- if .Values.global.tls.enabled }}
         - name: certs
           secret:
             secretName: {{ .Values.global.tls.existingSecret }}
+        {{- end }}
+        {{- include "stormchaser-orchestration.opaPolicyVolume" . | nindent 8 }}
       {{- end }}

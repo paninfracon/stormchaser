@@ -1,0 +1,14 @@
+# Keeps the commit SHAs that workflow actions are pinned to current. Each pin carries
+# its version in a comment, which Dependabot updates with it.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  # Base images are pinned by digest with their tag alongside; Dependabot moves the
+  # digest when the tag is rebuilt, which is how they get security updates.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly

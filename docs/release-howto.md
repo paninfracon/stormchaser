@@ -37,6 +37,32 @@ Before cutting a new release tag, ensure the following steps are meticulously fo
     * Integration Tests: `./scripts/test-integration.sh`
     * Test Coverage: `./scripts/coverage.sh` (Verify coverage has not significantly degraded).
 
+## 1.5. Dependency Check and Signatures
+
+The release workflow runs `cargo deny check` before building and stops on any
+advisory, banned crate, licence or source problem. `Cargo.lock` is not committed,
+so this checks exactly the versions the release resolves; the same check runs on
+every pull request (`Check Dependencies` in CI).
+
+Tagged releases are signed with cosign, keyless, through GitHub's OIDC identity:
+each Linux archive has a `.sigstore.json` bundle beside it on the release, and each
+image is signed by digest. To verify:
+
+```bash
+cosign verify-blob --bundle stormchaser-api-x86_64-unknown-linux-gnu.tar.gz.sigstore.json \
+  --certificate-identity-regexp '^https://github.com/paninfracon/stormchaser/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  stormchaser-api-x86_64-unknown-linux-gnu.tar.gz
+
+cosign verify ghcr.io/paninfracon/stormchaser-stormchaser-api:<tag> \
+  --certificate-identity-regexp '^https://github.com/paninfracon/stormchaser/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+The macOS and Windows CLI archives are built and uploaded by
+`taiki-e/upload-rust-binary-action` and are not signed yet. A manual release (below)
+is not signed either.
+
 ## 2. Docker and Vergen Configuration
 
 Stormchaser uses `vergen` to embed Git information into the compiled binaries. When building via Docker, ensure that the `.dockerignore` file allows `vergen` to access the `.git` directory without bloating the build context.
@@ -51,13 +77,17 @@ The `.dockerignore` should include exactly these lines for Git:
 !.git/objects/
 ```
 
-Ensure that `vergen` is listed in `[build-dependencies]` and a `build.rs` executing `vergen::EmitBuilder` exists for all crates that need to embed version info (including runners and the agent).
+Ensure that `vergen-gitcl` is listed in `[build-dependencies]` and a `build.rs` driving `vergen_gitcl::Emitter` exists for all crates that need to embed version info (including runners and the agent).
+
+The builder stage of `Dockerfile` and `Dockerfile.web` must use a Rust image that satisfies the workspace `rust-version` (currently `rust:1.96-slim-bookworm`). Raise both together whenever `rust-version` in the root `Cargo.toml` changes. Base images are pinned by digest beside the tag (`rust:1.96-slim-bookworm@sha256:...`); when changing the tag, take the new digest from `docker buildx imagetools inspect <image>:<tag>`. Dependabot moves the digests as the tags are rebuilt.
 
 ## 3. Manual Release Contingency Plan
 
 If the automated GitHub Actions CI (`release.yml`) fails, follow these steps to manually build, package, and push the release artifacts.
 
 ### Step 1: Build the Release Binaries
+
+These steps need Rust 1.96 or newer (`rustup update stable`).
 
 ```bash
 # 1. Apply UI patches required before building
@@ -67,7 +97,7 @@ If the automated GitHub Actions CI (`release.yml`) fails, follow these steps to 
 SQLX_OFFLINE=true cargo build --release --workspace
 
 # 2.5 Build the Leptos Web UI (Requires cargo-leptos and wasm32-unknown-unknown target)
-# Setup: rustup target add wasm32-unknown-unknown && cargo install cargo-leptos
+# Setup: rustup target add wasm32-unknown-unknown && cargo install --locked cargo-leptos
 SQLX_OFFLINE=true cargo leptos build --release -p stormchaser-web
 
 # 3. Build the statically linked agent (Requires musl tools)

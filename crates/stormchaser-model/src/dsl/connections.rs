@@ -65,3 +65,110 @@ pub struct StorageMount {
     #[serde(default)]
     pub preserve: Option<Vec<String>>,
 }
+
+/// Refuses a storage mount path that would cover part of a runner's helper container.
+///
+/// The helpers that unpack, park and publish a step's storage run the agent image with
+/// the step's volumes mounted at the same paths the step uses. A volume holds whatever
+/// earlier steps wrote to it, so one mounted over the agent binary, a shell, the loader or
+/// its configuration, or over the place the runner puts registry credentials, would run
+/// the workflow author's code as the helper or hand it those credentials.
+pub fn ensure_mount_path_clear_of_helpers(mount_path: &str) -> anyhow::Result<()> {
+    use std::path::{Component, Path};
+
+    /// Directories the helpers execute, load or read credentials from: nothing may be
+    /// mounted on, above or inside them.
+    const HELPER_TREES: &[&str] = &[
+        "/bin",
+        "/sbin",
+        "/lib",
+        "/lib32",
+        "/lib64",
+        "/libx32",
+        "/usr/bin",
+        "/usr/sbin",
+        "/usr/lib",
+        "/usr/lib32",
+        "/usr/lib64",
+        "/usr/libexec",
+        "/usr/local/bin",
+        "/proc",
+        "/sys",
+        "/dev",
+        "/stormchaser",
+    ];
+
+    let path = Path::new(mount_path);
+    let plain = path.is_absolute()
+        && path
+            .components()
+            .all(|c| matches!(c, Component::RootDir | Component::Normal(_)));
+    if !plain {
+        anyhow::bail!(
+            "Storage mount path '{}' must be absolute and free of '..'",
+            mount_path
+        );
+    }
+
+    // `/etc` holds the loader's preload list; mounts below it are harmless
+    let covers_helper = Path::new("/etc").starts_with(path)
+        || HELPER_TREES
+            .iter()
+            .any(|tree| path.starts_with(tree) || Path::new(tree).starts_with(path));
+    if covers_helper {
+        anyhow::bail!(
+            "Storage mount path '{}' is reserved: it would cover system files of the runner's helper containers",
+            mount_path
+        );
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod mount_path_tests {
+    use super::ensure_mount_path_clear_of_helpers;
+
+    #[test]
+    fn storage_mount_paths_that_cover_a_helper_are_refused() {
+        for path in [
+            "/",
+            "/usr",
+            "/usr/local",
+            "/usr/local/bin",
+            "/usr/local/bin/stormchaser-agent",
+            "/bin",
+            "/lib/x86_64-linux-gnu",
+            "/etc",
+            "/dev/shm",
+            "/stormchaser",
+            "/stormchaser/auth",
+            "/workspace/../bin",
+            "relative/path",
+            "",
+        ] {
+            assert!(
+                ensure_mount_path_clear_of_helpers(path).is_err(),
+                "{path:?} should be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn ordinary_storage_mount_paths_are_accepted() {
+        for path in [
+            "/workspace",
+            "/app",
+            "/data/",
+            "/usr/src/app",
+            "/usr/local/share/data",
+            "/etc/myapp",
+            "/binaries",
+            "/tmp/cache",
+        ] {
+            assert!(
+                ensure_mount_path_clear_of_helpers(path).is_ok(),
+                "{path:?} should be accepted"
+            );
+        }
+    }
+}

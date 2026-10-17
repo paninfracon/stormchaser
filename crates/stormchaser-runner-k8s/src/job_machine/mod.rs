@@ -48,6 +48,10 @@ pub struct JobMetadata {
     pub test_report_urls: Option<HashMap<String, Value>>,
     /// Optional private registry authentication details.
     pub registry_auth: Option<Value>,
+    /// Id of the runner executing the step, which it gives the engine when asking for
+    /// the step's registry credentials.
+    #[serde(default)]
+    pub runner_id: Option<String>,
 }
 
 /// Metrics collected after a job execution completes.
@@ -112,6 +116,8 @@ pub mod state {
 pub struct K8sJobMachine<S> {
     /// Kubernetes API client.
     pub client: Client,
+    /// NATS client, used to ask the engine for a step's registry push credentials.
+    pub nats: Option<async_nats::Client>,
     /// Metadata for the job.
     pub metadata: JobMetadata,
     /// Current state of the machine.
@@ -169,8 +175,15 @@ impl K8sJobMachine<state::Initialized> {
     pub fn new(client: Client, metadata: JobMetadata) -> Self {
         Self {
             client,
+            nats: None,
             metadata,
             state: state::Initialized,
         }
+    }
+
+    /// Gives the machine a NATS client to reach the engine with.
+    pub fn with_nats(mut self, nats: async_nats::Client) -> Self {
+        self.nats = Some(nats);
+        self
     }
 }

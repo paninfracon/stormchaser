@@ -19,7 +19,6 @@ pub fn parse_step_from_nats_payload(payload: &Value) -> Result<dsl::Step> {
                 }
                 Err(e) => {
                     tracing::error!("Failed to parse step_dsl from NATS payload: {:?}", e);
-                    tracing::error!("Payload was: {}", dsl_val);
                 }
             }
         }

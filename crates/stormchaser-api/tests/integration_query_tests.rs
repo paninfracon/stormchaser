@@ -60,10 +60,16 @@ async fn test_workflow_run_detail_query() {
     )
     .bind(run_id)
     .bind("1.0")
-    .bind(json!({ "steps": [] }))
+    .bind(json!({
+        "steps": [],
+        "inputs_schema": { "properties": {
+            "param1": { "type": "string" },
+            "db_password": { "type": "string", "secret": true }
+        }}
+    }))
     .bind("workflow { }")
-    .bind(json!({ "param1": "val1" }))
-    .bind(json!({ "secret1": "masked" }))
+    .bind(json!({ "param1": "val1", "db_password": "hunter2" }))
+    .bind(json!({ "secret1": "sops-plaintext" }))
     .bind(Vec::<String>::new())
     .execute(&pool)
     .await
@@ -101,9 +107,62 @@ async fn test_workflow_run_detail_query() {
     assert_eq!(detail.workflow_name, workflow_name);
     assert_eq!(detail.status, RunStatus::Queued);
     assert_eq!(detail.inputs["param1"], "val1");
-    assert_eq!(detail.secrets["secret1"], "masked");
+    // Decrypted secrets are selected by this query but must never be part of the response.
+    let body = serde_json::to_string(&detail).unwrap();
+    assert!(!body.contains("sops-plaintext"));
+    assert!(!body.contains("secret1"));
     assert_eq!(detail.source_code, "workflow { }");
     assert_eq!(detail.dsl_version, "1.0");
+
+    // 4. The functions behind GET /runs and GET /runs/{id} mask secret inputs too.
+    let by_id = stormchaser_api::db::get_workflow_run_detail(&pool, run_id)
+        .await
+        .unwrap()
+        .expect("run should be found");
+    let listed = stormchaser_api::db::list_workflow_runs(
+        &pool,
+        &stormchaser_api::ListRunsQuery {
+            workflow_name: Some(workflow_name.clone()),
+            ..Default::default()
+        },
+        10,
+        0,
+    )
+    .await
+    .unwrap();
+    assert_eq!(listed.len(), 1);
+    for run in [&by_id, &listed[0]] {
+        let body = serde_json::to_string(run).unwrap();
+        assert_eq!(run.inputs["param1"], "val1");
+        assert_eq!(run.inputs["db_password"], "********");
+        assert!(!body.contains("hunter2"));
+        assert!(!body.contains("sops-plaintext"));
+    }
+
+    // 5. The run's secrets are scrubbed from what GET /runs/{id} returns about its steps.
+    let redactor = stormchaser_api::redact::RunRedactor::load(&pool, run_id)
+        .await
+        .unwrap();
+    let mut spec = json!({
+        "env": [{ "name": "PGPASSWORD", "value": "hunter2" }],
+        "args": ["--key", "sops-plaintext", "--name", "val1"]
+    });
+    redactor.value(&mut spec);
+    let body = spec.to_string();
+    assert!(!body.contains("hunter2"));
+    assert!(!body.contains("sops-plaintext"));
+    assert!(body.contains("val1"));
+    assert_eq!(
+        redactor.text("auth failed for password hunter2"),
+        "auth failed for password ********"
+    );
+
+    // A run with no stored context has nothing to scrub.
+    let unknown =
+        stormchaser_api::redact::RunRedactor::load(&pool, stormchaser_model::RunId::new_v4())
+            .await
+            .unwrap();
+    assert_eq!(unknown.text("hunter2"), "hunter2");
 
     // Cleanup
     sqlx::query("DELETE FROM workflow_runs WHERE id = $1")

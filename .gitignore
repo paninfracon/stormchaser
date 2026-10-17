@@ -29,6 +29,8 @@ Thumbs.db
 *.sops.yaml
 
 # Project Specific
+# Describes unfixed vulnerabilities; kept local.
+docs/security-remediation-plan.md
 architecture.png
 mmd_b64.txt
 .t

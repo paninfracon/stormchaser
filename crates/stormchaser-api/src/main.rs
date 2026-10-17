@@ -32,6 +32,7 @@ async fn main() -> anyhow::Result<()> {
 
 /// Run server.
 pub async fn run_server(config: Config) -> anyhow::Result<()> {
+    let tls = stormchaser_api::listener::tls_from_config(&config).await?;
     let state = build_app_state(config).await?;
 
     tracing::info!("Running database migrations...");
@@ -40,15 +41,14 @@ pub async fn run_server(config: Config) -> anyhow::Result<()> {
     let app = app(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
-    tracing::info!("listening on {}", addr);
+    tracing::info!(
+        "listening on {} ({})",
+        addr,
+        if tls.is_some() { "https" } else { "http" }
+    );
     let listener = TcpListener::bind(addr).await?;
 
-    axum::serve(
-        listener,
-        app.into_make_service_with_connect_info::<SocketAddr>(),
-    )
-    .with_graceful_shutdown(shutdown_signal())
-    .await?;
+    stormchaser_api::listener::serve(listener, app, tls, shutdown_signal()).await?;
 
     shutdown_telemetry();
     Ok(())
@@ -104,7 +104,11 @@ mod tests {
         let config = Config::from_env(env).unwrap();
         assert_eq!(config.database_url, "postgres://user:pass@localhost/db");
         assert_eq!(config.tls_server_name.as_deref(), Some("example.com"));
-        assert!(config.db_ssl);
+        assert_eq!(config.db_ssl, Some(true));
+        assert!(
+            config.listen_tls,
+            "the listener serves TLS unless told not to"
+        );
         assert_eq!(config.nats_url, "nats://localhost:4222");
         assert_eq!(config.loki_url.as_deref(), Some("http://loki:3100"));
         assert_eq!(

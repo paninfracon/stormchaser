@@ -23,6 +23,7 @@ impl K8sJobMachine<state::Initialized> {
         );
         K8sJobMachine {
             client: self.client,
+            nats: self.nats,
             metadata: self.metadata.clone(),
             state: state::Running {
                 job_name,
@@ -45,10 +46,15 @@ impl K8sJobMachine<state::Initialized> {
             ..Default::default()
         };
         jobs.delete(job_name, &dp).await?;
-        let secret_name = format!("{}-auth", job_name);
-        if let Err(e) = secrets.delete(&secret_name, &dp).await {
-            if !matches!(e, kube::Error::Api(ref err) if err.code == 404) {
-                return Err(e.into());
+        // Owned by the Job and so collected with it, but there is no reason to wait
+        for secret_name in [
+            format!("{}-auth", job_name),
+            k8s_utils::step_secret_name(job_name),
+        ] {
+            if let Err(e) = secrets.delete(&secret_name, &dp).await {
+                if !matches!(e, kube::Error::Api(ref err) if err.code == 404) {
+                    return Err(e.into());
+                }
             }
         }
         Ok(())
@@ -56,12 +62,7 @@ impl K8sJobMachine<state::Initialized> {
 
     /// Starts the Kubernetes job, transitioning to either Running or Failed state.
     pub async fn start(self) -> Result<StartResult> {
-        let step_id_prefix: String = self.metadata.step_id.to_string().chars().take(8).collect();
-        let job_name = format!(
-            "storm-{}-{}",
-            self.metadata.step_dsl.name.to_lowercase().replace('_', "-"),
-            step_id_prefix
-        );
+        let job_name = k8s_utils::job_name(&self.metadata.step_dsl.name, self.metadata.step_id);
 
         info!(
             "Starting K8s job {} in namespace {}",
@@ -78,6 +79,7 @@ impl K8sJobMachine<state::Initialized> {
                         warn!("Version check failed for {}: {}", job_name, e);
                         return Ok(StartResult::Failed(K8sJobMachine {
                             client: self.client,
+                            nats: self.nats,
                             metadata: self.metadata,
                             state: state::Finished {
                                 result: JobState::Failed(
@@ -93,112 +95,181 @@ impl K8sJobMachine<state::Initialized> {
 
         let agent_image = var("STORMCHASER_AGENT_IMAGE").ok();
         let sfs_pvc_name = var("STORMCHASER_SFS_PVC_NAME").ok();
-        let job =
+        let (job, step_secret) =
             k8s_utils::do_build_job_spec(&job_name, &self.metadata, agent_image, sfs_pvc_name)?;
-
-        if let Some(auth) = &self.metadata.registry_auth {
-            use base64::{engine::general_purpose, Engine as _};
-            use std::collections::BTreeMap;
-
-            let secret_name = format!("{}-auth", job_name);
-            let username = auth.get("username").and_then(|v| v.as_str()).unwrap_or("");
-            let password = auth.get("password").and_then(|v| v.as_str()).unwrap_or("");
-            let url = auth
-                .get("url")
-                .and_then(|v| v.as_str())
-                .unwrap_or("https://index.docker.io/v1/");
-            let url = if url.is_empty() {
-                "https://index.docker.io/v1/"
-            } else {
-                url
-            };
-
-            let auth_string = format!("{}:{}", username, password);
-            let auth_base64 = general_purpose::STANDARD.encode(auth_string);
-
-            let dockerconfigjson = serde_json::json!({
-                "auths": {
-                    url: {
-                        "username": username,
-                        "password": password,
-                        "auth": auth_base64
-                    }
-                }
-            });
-
-            let mut secret = Secret::default();
-            secret.metadata.name = Some(secret_name.clone());
-            secret.type_ = Some("kubernetes.io/dockerconfigjson".to_string());
-            let mut data = BTreeMap::new();
-            data.insert(
-                ".dockerconfigjson".to_string(),
-                k8s_openapi::ByteString(serde_json::to_vec(&dockerconfigjson).unwrap()),
-            );
-            secret.data = Some(data);
-
-            let secrets: Api<Secret> =
-                Api::namespaced(self.client.clone(), &self.metadata.namespace);
-            if let Err(e) = secrets.create(&PostParams::default(), &secret).await {
-                if !matches!(e, kube::Error::Api(ref err) if err.code == 409) {
-                    return Ok(StartResult::Failed(K8sJobMachine {
-                        client: self.client,
-                        metadata: self.metadata,
-                        state: state::Finished {
-                            result: JobState::Failed(
-                                format!(
-                                    "Failed to create image pull secret {}: {}",
-                                    secret_name, e
-                                ),
-                                JobMetrics::default(),
-                            ),
-                        },
-                    }));
-                }
-            }
-        }
+        // Created suspended when it depends on Secrets that have to be owned by it
+        let gated = job.spec.as_ref().and_then(|spec| spec.suspend) == Some(true);
 
         let jobs: Api<Job> = Api::namespaced(self.client.clone(), &self.metadata.namespace);
 
-        match jobs.create(&PostParams::default(), &job).await {
-            Ok(_) => Ok(StartResult::Running(K8sJobMachine {
-                client: self.client,
-                metadata: self.metadata,
-                state: state::Running {
-                    job_name,
-                    dispatched_at: Utc::now(),
-                },
-            })),
+        let created = match jobs.create(&PostParams::default(), &job).await {
+            Ok(created) => created,
             Err(kube::Error::Api(ref err)) if err.code == 409 => {
                 tracing::warn!("Job {} already exists, re-attaching", job_name);
-                Ok(StartResult::Running(K8sJobMachine {
-                    client: self.client,
-                    metadata: self.metadata,
-                    state: state::Running {
-                        job_name,
-                        dispatched_at: Utc::now(),
-                    },
-                }))
+                match jobs.get(&job_name).await {
+                    Ok(existing) => existing,
+                    Err(e) => {
+                        return Ok(self.failed(format!(
+                            "Failed to read existing K8s job {}: {}",
+                            job_name, e
+                        )))
+                    }
+                }
             }
             Err(e) => {
                 error!("Failed to create K8s job {}: {:?}", job_name, e);
-                Ok(StartResult::Failed(K8sJobMachine {
-                    client: self.client,
-                    metadata: self.metadata,
-                    state: state::Finished {
-                        result: JobState::Failed(
-                            format!("K8s API error: {:?}", e),
-                            JobMetrics::default(),
-                        ),
-                    },
-                }))
+                return Ok(self.failed(format!("K8s API error: {:?}", e)));
+            }
+        };
+
+        // The Job's Secrets are created after it so that they can be owned by it: deleting
+        // the Job, by the reaper or its TTL, then removes the step's environment values
+        // and registry credentials too. The Job is suspended until they exist, so its pod
+        // never starts without them. Each step is safe to repeat: after a crash the task
+        // is redelivered and this runs again against the Job that is already there.
+        let mut secrets_to_create = Vec::new();
+        if !step_secret.is_empty() {
+            secrets_to_create.push(step_secret.into_secret(&job_name, &created));
+        }
+        if let Some(auth) = &self.metadata.registry_auth {
+            secrets_to_create.push(build_pull_secret(&job_name, auth, &created));
+        }
+        let secrets: Api<Secret> = Api::namespaced(self.client.clone(), &self.metadata.namespace);
+        for secret in &secrets_to_create {
+            let name = secret.metadata.name.clone().unwrap_or_default();
+            if let Err(e) = secrets.create(&PostParams::default(), secret).await {
+                if !matches!(e, kube::Error::Api(ref err) if err.code == 409) {
+                    self.delete_unstarted_job(&jobs, &job_name).await;
+                    return Ok(self.failed(format!("Failed to create secret {}: {}", name, e)));
+                }
             }
         }
+
+        if gated {
+            let resume = serde_json::json!({ "spec": { "suspend": false } });
+            if let Err(e) = jobs
+                .patch(
+                    &job_name,
+                    &kube::api::PatchParams::default(),
+                    &kube::api::Patch::Merge(&resume),
+                )
+                .await
+            {
+                self.delete_unstarted_job(&jobs, &job_name).await;
+                return Ok(self.failed(format!("Failed to start K8s job {}: {}", job_name, e)));
+            }
+        }
+
+        Ok(StartResult::Running(K8sJobMachine {
+            client: self.client,
+            nats: self.nats,
+            metadata: self.metadata,
+            state: state::Running {
+                job_name,
+                dispatched_at: Utc::now(),
+            },
+        }))
+    }
+
+    /// Removes a Job that could not be given what it needs to run. Its Secrets, being
+    /// owned by it, go with it.
+    async fn delete_unstarted_job(&self, jobs: &Api<Job>, job_name: &str) {
+        let dp = DeleteParams {
+            propagation_policy: Some(PropagationPolicy::Background),
+            ..Default::default()
+        };
+        if let Err(e) = jobs.delete(job_name, &dp).await {
+            error!(
+                "Failed to delete K8s job {} after it could not be started: {:?}",
+                job_name, e
+            );
+        }
+    }
+
+    fn failed(self, reason: String) -> StartResult {
+        StartResult::Failed(K8sJobMachine {
+            client: self.client,
+            nats: self.nats,
+            metadata: self.metadata,
+            state: state::Finished {
+                result: JobState::Failed(reason, JobMetrics::default()),
+            },
+        })
     }
 }
 
+/// An owner reference that makes Kubernetes delete an object together with a step's Job.
+pub(crate) fn job_owner_reference(
+    job_name: &str,
+    owner: &Job,
+) -> Option<Vec<k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference>> {
+    let uid = owner.metadata.uid.as_ref()?;
+    Some(vec![
+        k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference {
+            api_version: "batch/v1".to_string(),
+            kind: "Job".to_string(),
+            name: job_name.to_string(),
+            uid: uid.clone(),
+            controller: Some(false),
+            block_owner_deletion: Some(false),
+        },
+    ])
+}
+
+/// Builds the per-step image pull secret, owned by the step's Job so that Kubernetes
+/// deletes it with the Job.
+pub(crate) fn build_pull_secret(job_name: &str, auth: &serde_json::Value, owner: &Job) -> Secret {
+    use base64::{engine::general_purpose, Engine as _};
+    use std::collections::BTreeMap;
+
+    let username = auth.get("username").and_then(|v| v.as_str()).unwrap_or("");
+    let password = auth.get("password").and_then(|v| v.as_str()).unwrap_or("");
+    let url = auth
+        .get("url")
+        .and_then(|v| v.as_str())
+        .filter(|url| !url.is_empty())
+        .unwrap_or("https://index.docker.io/v1/");
+
+    let auth_base64 = general_purpose::STANDARD.encode(format!("{}:{}", username, password));
+
+    let dockerconfigjson = serde_json::json!({
+        "auths": {
+            url: {
+                "username": username,
+                "password": password,
+                "auth": auth_base64
+            }
+        }
+    });
+
+    let mut secret = Secret::default();
+    secret.metadata.name = Some(format!("{}-auth", job_name));
+    secret.metadata.labels = Some(BTreeMap::from([(
+        "managed-by".to_string(),
+        "stormchaser".to_string(),
+    )]));
+    secret.metadata.owner_references = job_owner_reference(job_name, owner);
+    secret.type_ = Some("kubernetes.io/dockerconfigjson".to_string());
+    secret.data = Some(BTreeMap::from([(
+        ".dockerconfigjson".to_string(),
+        k8s_openapi::ByteString(
+            serde_json::to_vec(&dockerconfigjson).expect("a JSON value always serializes"),
+        ),
+    )]));
+    secret
+}
+
 impl K8sJobMachine<state::Running> {
-    /// Wait.
+    /// Waits for the job to finish, telling its agent sidecars along the way when the
+    /// step's own container is done.
     pub async fn wait(self) -> Result<JobState> {
+        tokio::select! {
+            result = self.wait_for_job() => result,
+            never = self.signal_sidecars() => match never {},
+        }
+    }
+
+    async fn wait_for_job(&self) -> Result<JobState> {
         let job_name = &self.state.job_name;
         let dispatched_at = self.state.dispatched_at;
         let jobs: Api<Job> = Api::namespaced(self.client.clone(), &self.metadata.namespace);
@@ -398,7 +469,8 @@ impl K8sJobMachine<state::Running> {
                 .logs(
                     pod_name,
                     &kube::api::LogParams {
-                        container: Some("worker".to_string()),
+                        // Only the agent sidecar's output: the step cannot write to it
+                        container: Some(k8s_utils::AGENT_SIDECAR_CONTAINER.to_string()),
                         ..Default::default()
                     },
                 )
@@ -433,7 +505,8 @@ impl K8sJobMachine<state::Running> {
                 .logs(
                     pod_name,
                     &kube::api::LogParams {
-                        container: Some("worker".to_string()),
+                        // Only the agent sidecar's output: the step cannot write to it
+                        container: Some(k8s_utils::AGENT_SIDECAR_CONTAINER.to_string()),
                         ..Default::default()
                     },
                 )
@@ -533,6 +606,8 @@ impl<S> K8sJobMachine<S> {
             .collect()
     }
 }
+
+mod sidecar_signal;
 
 #[cfg(test)]
 mod tests;

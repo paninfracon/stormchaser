@@ -193,3 +193,108 @@ where
         .execute(executor)
         .await
 }
+
+/// The key issued to `runner_id`, if it has one.
+pub async fn get_runner_session_key<'a, E>(
+    executor: E,
+    runner_id: &str,
+) -> Result<Option<Vec<u8>>, sqlx::Error>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
+    sqlx::query_scalar("SELECT session_key FROM runner_sessions WHERE runner_id = $1")
+        .bind(runner_id)
+        .fetch_optional(executor)
+        .await
+}
+
+/// Whether a runner registered under `runner_id`, whatever its key.
+pub async fn runner_is_known<'a, E>(executor: E, runner_id: &str) -> Result<bool, sqlx::Error>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
+    sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM runners WHERE id = $1)")
+        .bind(runner_id)
+        .fetch_one(executor)
+        .await
+}
+
+/// Whether a process that holds a key for `runner_id` is still running: online, with a
+/// heartbeat in the last 30 seconds (the same test that decides a runner is lost).
+pub async fn runner_session_is_live<'a, E>(
+    executor: E,
+    runner_id: &str,
+) -> Result<bool, sqlx::Error>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
+    sqlx::query_scalar(
+        r#"
+        SELECT EXISTS (
+            SELECT 1 FROM runner_sessions s JOIN runners r ON r.id = s.runner_id
+            WHERE s.runner_id = $1
+            AND r.status = 'online'
+            AND r.last_heartbeat_at >= NOW() - INTERVAL '30 seconds'
+        )
+        "#,
+    )
+    .bind(runner_id)
+    .fetch_one(executor)
+    .await
+}
+
+/// Records `session_key` as the key of `runner_id`, unless a process may still hold the
+/// id: it is live (see [`runner_session_is_live`]), or it was issued a key in the last 30
+/// seconds and may not have sent its first heartbeat yet. The check and the write are one
+/// statement, so two requests for the same id cannot both succeed. Returns whether the
+/// key was stored.
+pub async fn claim_runner_session<'a, E>(
+    executor: E,
+    runner_id: &str,
+    session_key: &[u8],
+) -> Result<bool, sqlx::Error>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
+    let claimed: Option<String> = sqlx::query_scalar(
+        r#"
+        INSERT INTO runner_sessions (runner_id, session_key, issued_at) VALUES ($1, $2, NOW())
+        ON CONFLICT (runner_id) DO UPDATE SET session_key = EXCLUDED.session_key, issued_at = NOW()
+        WHERE runner_sessions.issued_at < NOW() - INTERVAL '30 seconds'
+        AND NOT EXISTS (
+            SELECT 1 FROM runners r
+            WHERE r.id = runner_sessions.runner_id
+            AND r.status = 'online'
+            AND r.last_heartbeat_at >= NOW() - INTERVAL '30 seconds'
+        )
+        RETURNING runner_id
+        "#,
+    )
+    .bind(runner_id)
+    .bind(session_key)
+    .fetch_optional(executor)
+    .await?;
+    Ok(claimed.is_some())
+}
+
+/// Records the key issued to `runner_id`, replacing any earlier one.
+pub async fn store_runner_session<'a, E>(
+    executor: E,
+    runner_id: &str,
+    session_key: &[u8],
+) -> Result<(), sqlx::Error>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
+    sqlx::query(
+        r#"
+        INSERT INTO runner_sessions (runner_id, session_key, issued_at) VALUES ($1, $2, NOW())
+        ON CONFLICT (runner_id) DO UPDATE SET session_key = EXCLUDED.session_key, issued_at = NOW()
+        "#,
+    )
+    .bind(runner_id)
+    .bind(session_key)
+    .execute(executor)
+    .await?;
+    Ok(())
+}

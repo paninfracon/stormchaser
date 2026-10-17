@@ -12,24 +12,45 @@ stormchaser-orchestration:
   enabled: true
   global:
     database:
-      # If using the built-in postgres, this is generated dynamically via templates or overridden below.
-      url: "postgres://stormchaser:<CHANGE_ME_IN_PRODUCTION>@stormchaser-postgresql:5432/stormchaser?sslmode=disable"
-      existingSecret: ""
+      # The bundled PostgreSQL's URL, with its generated password, is in the Secret this
+      # chart creates (postgresqlAuth.generate). For an external database, name your own
+      # Secret here, or set url and clear existingSecret.
+      # The bundled PostgreSQL has no TLS, so this switches database TLS off. Point
+      # this at an external database and set ssl to true (the orchestration chart's
+      # default) before relying on the install.
+      url: ""
+      existingSecret: "stormchaser-postgresql"
       existingSecretKey: "DATABASE_URL"
       ssl: false
+    # Created by this chart (jwtSecret.generate)
+    jwt:
+      existingSecret: "stormchaser-jwt"
     nats:
       url: "nats://stormchaser-nats:4222"
+      # Secret with `user` and `password` keys. The default is generated for the
+      # bundled NATS; for an external server, point this at your own Secret.
+      authSecret: "stormchaser-nats-control"
+      # The API and the query service have users of their own, limited to what each does.
+      apiAuthSecret: "stormchaser-nats-api"
+      queryAuthSecret: "stormchaser-nats-query"
     loki:
       url: "http://stormchaser-loki:3100"
     grafana:
       url: "http://stormchaser-grafana:80"
     opa:
-      url: "http://stormchaser-stormchaser-orchestration-api:8181/v1/data/stormchaser/allow"
+      # Each of the API, engine and query pods runs its own OPA sidecar on loopback
+      url: "http://127.0.0.1:8181/v1/data/stormchaser/allow"
     oidc:
       issuer: "http://dex:5556/dex"
       externalIssuer: "http://localhost:5556/dex"
       clientId: "stormchaser-cli"
-      clientSecret: "stormchaser-cli-secret"
+      # The bundled Dex sends groups only when asked; see the orchestration chart
+      extraScopes: ["groups"]
+      # The client secret the API uses to exchange login codes. There is no default:
+      # name a Secret (preferred) or set clientSecret, or browser login is unavailable.
+      existingSecret: ""
+      existingSecretKey: "client-secret"
+      clientSecret: ""
     otel:
       endpoint: "http://stormchaser-alloy:4317"
 
@@ -63,10 +84,25 @@ stormchaser-orchestration:
             url: http://stormchaser-tempo:3200
             isDefault: false
 
+# The Docker runner, as a DaemonSet that uses each node's Docker socket. Off: on
+# Kubernetes the K8s runner runs steps, in their own namespace and under its network
+# policy, while the Docker socket is root on the node. Turn it on only for nodes that
+# need it, and give it a step network (stormchaser-runner-docker.config.stepNetwork).
+runnerDocker:
+  enabled: false
+
 stormchaser-runner-k8s:
   enabled: true
   config:
     natsUrl: "nats://stormchaser-nats:4222"
+    # Secret with `user` and `password` keys for the restricted runner user.
+    natsAuthSecret: "stormchaser-nats-runner"
+  networkPolicy:
+    # Steps upload and download through presigned URLs served by the bundled MinIO.
+    allowReleaseNamespace:
+      - podLabels:
+          app.kubernetes.io/name: minio
+        port: 9000
   rbac:
     create: true
 
@@ -78,21 +114,165 @@ stormchaser-runner-k8s:
 
 postgresql:
   enabled: true
+  # Bitnami no longer publishes these tags under bitnami/; they remain, unmaintained,
+  # under bitnamilegacy/. Fine for the quickstart, not for anything you keep.
   image:
-    registry: public.ecr.aws
-    repository: bitnami/postgresql
+    registry: docker.io
+    repository: bitnamilegacy/postgresql
     tag: 16.4.0-debian-12-r14
   auth:
     username: stormchaser
-    password: <CHANGE_ME_IN_PRODUCTION>
     database: stormchaser
+    # Passwords from the Secret this chart generates (postgresqlAuth.generate)
+    existingSecret: stormchaser-postgresql
   primary:
     persistence:
       enabled: false
 
+# Generate the Secret `stormchaser-tls-certs` (global.tls.existingSecret): a CA of its
+# own and a certificate naming the API, query, web and engine Services, which serve
+# HTTPS with it. Kept across upgrades. Set to false to supply your own, for example
+# from cert-manager. Re-issue by deleting the Secret and upgrading.
+tlsCerts:
+  generate: true
+  days: 825
+
+# Generate the Secrets `stormchaser-nats-control` (the engine), `stormchaser-nats-api`,
+# `stormchaser-nats-query` and `stormchaser-nats-runner` for the bundled NATS server.
+# Set to false if you create those Secrets yourself.
+natsAuth:
+  generate: true
+
+# Generate the Secret `stormchaser-jwt`, the key the API signs its session tokens with,
+# on first install, and keep it across upgrades. Set to false and set
+# stormchaser-orchestration.global.jwt.existingSecret to use your own.
+jwtSecret:
+  generate: true
+
+# Generate the Secret `stormchaser-postgresql`: passwords for the bundled PostgreSQL and
+# the DATABASE_URL the services use. Kept across upgrades. An install from before this
+# keeps the passwords its PostgreSQL already has. To change one, change it in PostgreSQL
+# first (ALTER USER), then in this Secret's `password` and `DATABASE_URL`.
+postgresqlAuth:
+  generate: true
+
+# The bundled NATS is a single node for evaluation. It requires authentication and
+# limits what the runner user may do, but it has no TLS and no clustering; see
+# docs/nats.md before using it for anything you care about.
 nats:
   enabled: true
+  # The debug pod would need credentials of its own; leave it off by default.
+  natsBox:
+    enabled: false
+  container:
+    env:
+      NATS_CONTROL_PASSWORD:
+        valueFrom:
+          secretKeyRef:
+            name: stormchaser-nats-control
+            key: password
+      NATS_API_PASSWORD:
+        valueFrom:
+          secretKeyRef:
+            name: stormchaser-nats-api
+            key: password
+      NATS_QUERY_PASSWORD:
+        valueFrom:
+          secretKeyRef:
+            name: stormchaser-nats-query
+            key: password
+      NATS_RUNNER_PASSWORD:
+        valueFrom:
+          secretKeyRef:
+            name: stormchaser-nats-runner
+            key: password
   config:
+    merge:
+      authorization:
+        users:
+          # Keep every user here in step with deploy/nats/nats-server.conf, which
+          # explains each permission.
+          # The engine: unrestricted. Only it may hand tasks to runners.
+          - user: stormchaser
+            password: << $NATS_CONTROL_PASSWORD >>
+          # The API: queue runs, report approvals and waits, watch run events, and
+          # keep its rate-limit buckets. It can neither publish nor read a task.
+          - user: stormchaser-api
+            password: << $NATS_API_PASSWORD >>
+            permissions:
+              publish:
+                allow:
+                  - "stormchaser.v1.*.run.queued"
+                  - "stormchaser.v1.run.direct"
+                  - "stormchaser.v1.*.step.completed"
+                  - "stormchaser.v1.*.step.failed"
+                  - "$JS.API.INFO"
+                  - "$JS.API.STREAM.CREATE.KV_api_rate_limit_buckets"
+                  - "$JS.API.STREAM.INFO.KV_api_rate_limit_buckets"
+                  - "$JS.API.DIRECT.GET.KV_api_rate_limit_buckets.>"
+                  - "$JS.API.STREAM.MSG.GET.KV_api_rate_limit_buckets"
+                  - "$KV.api_rate_limit_buckets.>"
+              subscribe:
+                allow:
+                  # Each user reads only its own inbox prefix (_INBOX_<user>)
+                  - "_INBOX_stormchaser-api.>"
+                  - "stormchaser.v1.run.>"
+                  - "stormchaser.v1.*.run.>"
+          # The query service: connects, and may do nothing else.
+          - user: stormchaser-query
+            password: << $NATS_QUERY_PASSWORD >>
+            permissions:
+              publish:
+                deny:
+                  - ">"
+              subscribe:
+                allow:
+                  - "_INBOX_stormchaser-query.>"
+          # Runners: report on steps and consume their own task subjects only.
+          # Keep in step with deploy/nats/nats-server.conf.
+          - user: stormchaser-runner
+            password: << $NATS_RUNNER_PASSWORD >>
+            permissions:
+              publish:
+                allow:
+                  - "stormchaser.v1.runner.register"
+                  - "stormchaser.v1.global.runner.heartbeat"
+                  - "stormchaser.v1.global.runner.offline"
+                  - "stormchaser.v1.*.step.initializing"
+                  - "stormchaser.v1.*.step.running"
+                  - "stormchaser.v1.*.step.completed"
+                  - "stormchaser.v1.*.step.failed"
+                  - "stormchaser.v1.step.unpacking_sfs"
+                  - "stormchaser.v1.step.packing_sfs"
+                  - "stormchaser.rpc.step.query"
+                  - "stormchaser.rpc.step.artifact_auth"
+                  - "stormchaser.rpc.runner.session"
+                  - "$JS.API.STREAM.INFO.stormchaser"
+                  - "$JS.API.CONSUMER.INFO.stormchaser.*"
+                  - "$JS.API.CONSUMER.CREATE.stormchaser.*.stormchaser.v1.*.step.scheduled.>"
+                  - "$JS.API.CONSUMER.CREATE.stormchaser.*.stormchaser.v1.runner.>"
+                  - "$JS.API.CONSUMER.MSG.NEXT.stormchaser.*"
+                  - "$JS.ACK.stormchaser.>"
+                # The engine's own consumers. Add a shard entry per engine shard.
+                deny:
+                  - "$JS.API.CONSUMER.CREATE.stormchaser.orchestration-engine-global.>"
+                  - "$JS.API.CONSUMER.CREATE.stormchaser.orchestration-engine-legacy-run.>"
+                  - "$JS.API.CONSUMER.CREATE.stormchaser.orchestration-engine-legacy-runner.>"
+                  - "$JS.API.CONSUMER.CREATE.stormchaser.orchestration-engine-legacy-step.>"
+                  - "$JS.API.CONSUMER.CREATE.stormchaser.orchestration-engine-shard-0.>"
+                  - "$JS.API.CONSUMER.MSG.NEXT.stormchaser.orchestration-engine-global"
+                  - "$JS.API.CONSUMER.MSG.NEXT.stormchaser.orchestration-engine-legacy-run"
+                  - "$JS.API.CONSUMER.MSG.NEXT.stormchaser.orchestration-engine-legacy-runner"
+                  - "$JS.API.CONSUMER.MSG.NEXT.stormchaser.orchestration-engine-legacy-step"
+                  - "$JS.API.CONSUMER.MSG.NEXT.stormchaser.orchestration-engine-shard-0"
+                  - "$JS.ACK.stormchaser.orchestration-engine-global.>"
+                  - "$JS.ACK.stormchaser.orchestration-engine-legacy-run.>"
+                  - "$JS.ACK.stormchaser.orchestration-engine-legacy-runner.>"
+                  - "$JS.ACK.stormchaser.orchestration-engine-legacy-step.>"
+                  - "$JS.ACK.stormchaser.orchestration-engine-shard-0.>"
+              subscribe:
+                allow:
+                  - "_INBOX_stormchaser-runner.>"
     jetstream:
       enabled: true
       fileStore:
@@ -106,20 +286,23 @@ nats:
 
 minio:
   enabled: true
+  # Bitnami no longer publishes these tags under bitnami/; they remain, unmaintained,
+  # under bitnamilegacy/. Fine for the quickstart, not for anything you keep.
   image:
-    registry: public.ecr.aws
-    repository: bitnami/minio
+    registry: docker.io
+    repository: bitnamilegacy/minio
     tag: 2024.12.18-debian-12-r1
-  minio:
-    auth:
-      rootUser: "stormchaser"
-    persistence:
-      enabled: false
-    resources:
-      requests:
-        ephemeral-storage: "10Gi"
-      limits:
-        ephemeral-storage: "20Gi"
+  # These sit directly under `minio`, where the MinIO chart reads them. Nested one level
+  # deeper they were ignored, so MinIO's user was the chart default `admin`.
+  auth:
+    rootUser: "stormchaser"
+  persistence:
+    enabled: false
+  resources:
+    requests:
+      ephemeral-storage: "10Gi"
+    limits:
+      ephemeral-storage: "20Gi"
 stormchaser-telemetry:
   enabled: true
   alloy:
@@ -142,6 +325,12 @@ stormchaser-telemetry:
           value: "http://stormchaser-prometheus-server:80"
         - name: TEMPO_URL
           value: "stormchaser-tempo:4317"
+
+# Only pods in the release's namespace may reach the bundled Loki, which has no
+# authentication of its own. Add sources (NetworkPolicy `from` entries) that need it.
+lokiNetworkPolicy:
+  enabled: true
+  extraFrom: []
 
 loki:
   enabled: true

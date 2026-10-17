@@ -29,7 +29,9 @@ data:
           - 'http://localhost:8080/callback'
           - 'http://127.0.0.1:8080/callback'
         name: 'Stormchaser CLI'
-        secret: stormchaser-cli-secret
+        # Read from the DEX_CLIENT_SECRET environment variable, which the Deployment
+        # takes from the stormchaser-oidc-client Secret.
+        secretEnv: DEX_CLIENT_SECRET
         public: false
     staticPasswords:
       - email: "stormchaser-admin@paninfracon.net"

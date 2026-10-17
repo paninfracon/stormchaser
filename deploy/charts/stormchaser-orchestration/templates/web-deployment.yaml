@@ -17,15 +17,21 @@ spec:
         {{- include "stormchaser-orchestration.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: web
     spec:
+      # It never talks to the Kubernetes API
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: web
-          image: "{{ .Values.web.image.repository }}:{{ .Values.web.image.tag | default .Chart.AppVersion }}"
+          image: "{{ .Values.web.image.repository }}:{{ .Values.web.image.tag | default (printf "v%s" .Chart.AppVersion) }}"
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
           imagePullPolicy: {{ .Values.web.image.pullPolicy }}
           env:
             - name: API_URL
-              value: "http://{{ include "stormchaser-orchestration.fullname" . }}-api:{{ .Values.api.service.port }}"
+              value: "{{ include "stormchaser-orchestration.internalScheme" . }}://{{ include "stormchaser-orchestration.fullname" . }}-api:{{ .Values.api.service.port }}"
             - name: QUERY_URL
-              value: "http://{{ include "stormchaser-orchestration.fullname" . }}-query:{{ .Values.query.service.port }}"
+              value: "{{ include "stormchaser-orchestration.internalScheme" . }}://{{ include "stormchaser-orchestration.fullname" . }}-query:{{ .Values.query.service.port }}"
             - name: EXTERNAL_API_URL
               value: {{ .Values.web.externalApiUrl | quote }}
             - name: WEB_URL
@@ -34,9 +40,31 @@ spec:
               value: {{ .Values.web.rustLog | quote }}
             - name: GRAFANA_URL
               value: {{ .Values.global.grafana.url | quote }}
+            - name: STORMCHASER_LISTEN_TLS
+              value: {{ include "stormchaser-orchestration.listenTls" . | quote }}
+            {{- if eq (include "stormchaser-orchestration.listenTls" .) "true" }}
+            # The web tier's own certificate, and the CA that signed the API's and the
+            # query service's
+            - name: TLS_CA_CERT_PATH
+              value: {{ .Values.global.tls.caCertPath | quote }}
+            - name: TLS_CERT_PATH
+              value: {{ .Values.global.tls.certPath | quote }}
+            - name: TLS_KEY_PATH
+              value: {{ .Values.global.tls.keyPath | quote }}
+            {{- end }}
           ports:
             - name: http
               containerPort: 3000
               protocol: TCP
           resources:
             {{- toYaml .Values.web.resources | nindent 12 }}
+          {{- if eq (include "stormchaser-orchestration.listenTls" .) "true" }}
+          volumeMounts:
+            - name: certs
+              mountPath: /etc/stormchaser/certs
+              readOnly: true
+      volumes:
+        - name: certs
+          secret:
+            secretName: {{ .Values.global.tls.existingSecret }}
+          {{- end }}

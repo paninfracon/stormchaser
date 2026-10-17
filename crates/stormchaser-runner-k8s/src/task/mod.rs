@@ -70,8 +70,8 @@ async fn execute_job_on_cluster(
     received_at: chrono::DateTime<chrono::Utc>,
     in_progress_handle: tokio::task::JoinHandle<()>,
     msg: async_nats::jetstream::message::Message,
+    namespace: String,
 ) {
-    let namespace = std::env::var("KUBERNETES_NAMESPACE").unwrap_or_else(|_| "default".to_string());
     let metadata = job_machine::JobMetadata {
         run_id,
         step_id,
@@ -84,11 +84,24 @@ async fn execute_job_on_cluster(
         storage,
         test_report_urls,
         registry_auth,
+        runner_id: Some(runner_id.clone()),
     };
 
-    let machine = job_machine::K8sJobMachine::new(client.clone(), metadata.clone());
+    let machine = job_machine::K8sJobMachine::new(client.clone(), metadata.clone())
+        .with_nats(nats_client.clone());
 
     let result = match machine.start().await {
+        // A cancellation that arrived while the Job was being created may have swept
+        // before it existed; one that arrives after this check will find it
+        Ok(job_machine::StartResult::Running(_))
+            if stormchaser_model::run_cancel::is_cancelled(run_id) =>
+        {
+            crate::job_machine::k8s_utils::stop_run_jobs(&client, &metadata.namespace, run_id)
+                .await;
+            Err(anyhow::anyhow!(
+                "Run {run_id} was cancelled; stopped step {step_id}'s Job"
+            ))
+        }
         Ok(job_machine::StartResult::Running(running_machine)) => {
             // Notify orchestrator that we are actually running
             let running_event = stormchaser_model::events::StepRunningEvent {
@@ -224,6 +237,7 @@ fn build_job_result_event(
                 run_id: RunId::new(run_id),
                 step_id: StepInstanceId::new(step_id),
                 fencing_token,
+                completion_token: None,
                 event_type: event_type.clone(),
                 runner_id: Some(runner_id),
                 exit_code: metrics.exit_code,
@@ -254,6 +268,7 @@ fn build_job_result_event(
                 run_id: RunId::new(run_id),
                 step_id: StepInstanceId::new(step_id),
                 fencing_token,
+                completion_token: None,
                 event_type: event_type.clone(),
                 error: reason,
                 runner_id: Some(runner_id),
@@ -290,6 +305,7 @@ fn build_job_error_event(
         run_id: RunId::new(run_id),
         step_id: StepInstanceId::new(step_id),
         fencing_token,
+        completion_token: None,
         event_type: EventType::Step(StepEventType::Failed),
         error: format!("{:?}", error),
         runner_id: Some(runner_id),
@@ -309,6 +325,7 @@ pub async fn handle_task(
     nats_client: async_nats::Client,
     runner_id: String,
     encryption_key: Option<String>,
+    step_namespace: String,
 ) {
     let received_at = Utc::now();
     tracing::info!("Received task message: {:?}", msg.subject);
@@ -356,6 +373,16 @@ pub async fn handle_task(
             return;
         }
     };
+
+    // The engine has ended this run. A task for it that was already queued is dropped:
+    // nothing would read its result.
+    if stormchaser_model::run_cancel::is_cancelled(run_id) {
+        tracing::warn!("Dropping step {step_id}: run {run_id} was cancelled");
+        if let Err(ack_err) = msg.ack().await {
+            tracing::warn!("Failed to ack a task of a cancelled run: {:?}", ack_err);
+        }
+        return;
+    }
 
     let spec = serde_json::from_value(payload["spec"].clone()).unwrap_or(serde_json::Value::Null);
 
@@ -431,6 +458,7 @@ pub async fn handle_task(
                 received_at,
                 in_progress_handle,
                 msg,
+                step_namespace,
             )
             .await;
         }
@@ -441,6 +469,7 @@ pub async fn handle_task(
                 run_id: RunId::new(run_id),
                 step_id: StepInstanceId::new(step_id),
                 fencing_token,
+                completion_token: None,
                 event_type: EventType::Step(StepEventType::Failed),
                 error: format!("Failed to acquire K8s client: {:?}", e),
                 runner_id: Some(runner_id.clone()),

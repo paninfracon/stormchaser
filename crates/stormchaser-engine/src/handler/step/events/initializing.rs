@@ -24,9 +24,15 @@ pub async fn handle_step_initializing(
 
     // 1. Fetch current instance
     let instance = fetch_step_instance(step_id, &pool).await?;
+    if !super::helpers::step_belongs_to_run(&instance, run_id) {
+        return Ok(());
+    }
 
     // 2. Use state machine to transition
     if instance.status == stormchaser_model::step::StepStatus::Pending {
+        if !super::helpers::reporter_holds_step(&instance, event.runner_id.as_deref()) {
+            return Ok(());
+        }
         let machine =
             crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::from_instance(
                 instance.clone(),

@@ -14,6 +14,8 @@ pub mod runners;
 pub mod runs;
 /// Module for steps.
 pub mod steps;
+/// Task message bookkeeping.
+pub mod task_messages;
 
 pub use archive::*;
 pub use connections::*;

@@ -1,49 +1,139 @@
-use crate::auth::resolve_jwt_secret;
+use crate::auth::Claims;
 use crate::db::insert_approval_registry;
 use crate::AppState;
-use aes_gcm::{
-    aead::{Aead, KeyInit},
-    Aes256Gcm, Nonce,
-};
 use async_nats::jetstream::new as new_jetstream;
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
+    http::{header, StatusCode},
     response::IntoResponse,
 };
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use chrono::Utc;
-use serde_json::Value;
-use sha2::{Digest, Sha256};
+use stormchaser_engine::hitl::{approval_link_key, open_approval_link, LinkError};
 use stormchaser_model::events::{
     EventSource, EventType, SchemaVersion, StepCompletedEvent, StepEventType, StepFailedEvent,
 };
 use stormchaser_model::nats::{publish_cloudevent, NatsSubject};
 use stormchaser_model::EventId;
-use stormchaser_model::RunId;
-use stormchaser_model::StepInstanceId;
 
-use super::{resolve_fencing_token_or_response, verify_step_for_approval};
+use super::{check_approval_opa, resolve_fencing_token_or_response, verify_step_for_approval};
 
-#[derive(serde::Deserialize, serde::Serialize)]
-struct ApprovalLinkPayload {
-    run_id: RunId,
-    step_id: StepInstanceId,
-    action: String,
-    #[serde(default)]
-    inputs: Value,
+/// Why a link cannot be used, as an HTTP answer.
+fn refuse(error: LinkError) -> axum::response::Response {
+    match error {
+        LinkError::Invalid => (StatusCode::BAD_REQUEST, "Invalid approval link").into_response(),
+        LinkError::Expired => (StatusCode::GONE, "This approval link has expired").into_response(),
+    }
 }
-/// Approves a step via an encrypted link.
+
+fn links_disabled() -> axum::response::Response {
+    (StatusCode::NOT_FOUND, "Approval links are not enabled").into_response()
+}
+
+fn escape_html(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+/// Shows what an approval link will do and asks for confirmation.
+///
+/// Opening the link changes nothing. Mail scanners, link previews and browser prefetch
+/// all fetch URLs on their own, so the decision is only recorded when the form on this
+/// page is submitted.
 #[utoipa::path(
     get,
     path = "/api/v1/approve-link/{token}",
     params(
-        ("token" = String, Path, description = "Encrypted approval token")
+        ("token" = String, Path, description = "Sealed approval token")
+    ),
+    responses(
+        (status = 200, description = "Confirmation page"),
+        (status = 400, description = "Invalid token or step state"),
+        (status = 404, description = "Step not found, or approval links are not enabled"),
+        (status = 410, description = "The link has expired")
+    ),
+    tag = "hitl"
+)]
+pub async fn approve_step_link_page(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+) -> impl IntoResponse {
+    approval_link_page(&state, &token, approval_link_key().as_deref()).await
+}
+
+/// [`approve_step_link_page`] with the link key passed in.
+pub async fn approval_link_page(
+    state: &AppState,
+    token: &str,
+    key: Option<&str>,
+) -> axum::response::Response {
+    let Some(key) = key else {
+        return links_disabled();
+    };
+    let link = match open_approval_link(token, key, Utc::now()) {
+        Ok(link) => link,
+        Err(error) => return refuse(error),
+    };
+    let step = match verify_step_for_approval(&state.pool, link.run_id, link.step_id).await {
+        Ok(step) => step,
+        Err(response) => return *response,
+    };
+
+    let verb = if link.action == "approve" {
+        "Approve"
+    } else {
+        "Reject"
+    };
+    let page = format!(
+        r#"<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>{verb} step</title></head>
+<body>
+<h1>{verb} this step?</h1>
+<p>Step <strong>{step}</strong> of run <code>{run}</code> is waiting for a decision.</p>
+<form method="post">
+<button type="submit">{verb}</button>
+</form>
+<p>If you did not mean to open this page, close it. Nothing has been recorded.</p>
+</body>
+</html>
+"#,
+        verb = verb,
+        step = escape_html(&step.step_name),
+        run = link.run_id,
+    );
+
+    (
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-store"),
+            (header::REFERRER_POLICY, "no-referrer"),
+            (header::X_FRAME_OPTIONS, "DENY"),
+            (
+                header::CONTENT_SECURITY_POLICY,
+                "default-src 'none'; form-action 'self'; frame-ancestors 'none'",
+            ),
+        ],
+        page,
+    )
+        .into_response()
+}
+
+/// Approves or rejects a step via a sealed link, once the confirmation page is submitted.
+#[utoipa::path(
+    post,
+    path = "/api/v1/approve-link/{token}",
+    params(
+        ("token" = String, Path, description = "Sealed approval token")
     ),
     responses(
         (status = 200, description = "Step approved or rejected successfully"),
         (status = 400, description = "Invalid token or step state"),
-        (status = 404, description = "Step not found"),
+        (status = 403, description = "Denied by policy"),
+        (status = 404, description = "Step not found, or approval links are not enabled"),
+        (status = 410, description = "The link has expired"),
         (status = 500, description = "Internal server error")
     ),
     tag = "hitl"
@@ -53,58 +143,55 @@ pub async fn approve_step_link(
     State(state): State<AppState>,
     Path(token): Path<String>,
 ) -> impl IntoResponse {
-    // 1. Derive key from configured JWT secret
-    let jwt_secret = match resolve_jwt_secret() {
-        Ok(secret) => secret,
-        Err(error) => {
-            tracing::error!("JWT secret configuration error: {}", error);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "JWT secret configuration error",
-            )
-                .into_response();
-        }
-    };
-    let mut hasher = Sha256::new();
-    hasher.update(jwt_secret.as_slice());
-    let key_bytes = hasher.finalize();
-    let key = aes_gcm::Key::<Aes256Gcm>::from_slice(&key_bytes);
-    let cipher = Aes256Gcm::new(key);
+    use_approval_link(&state, &token, approval_link_key().as_deref()).await
+}
 
-    // 2. Decode base64
-    let decoded = match URL_SAFE_NO_PAD.decode(token) {
-        Ok(d) => d,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid token encoding").into_response(),
+/// [`approve_step_link`] with the link key passed in.
+pub async fn use_approval_link(
+    state: &AppState,
+    token: &str,
+    key: Option<&str>,
+) -> axum::response::Response {
+    let Some(key) = key else {
+        return links_disabled();
+    };
+    let payload = match open_approval_link(token, key, Utc::now()) {
+        Ok(link) => link,
+        Err(error) => return refuse(error),
     };
 
-    if decoded.len() < 12 {
-        return (StatusCode::BAD_REQUEST, "Token too short").into_response();
-    }
-
-    // 3. Decrypt
-    let (nonce_bytes, ciphertext) = decoded.split_at(12);
-    let nonce = Nonce::from_slice(nonce_bytes);
-    let plaintext = match cipher.decrypt(nonce, ciphertext) {
-        Ok(p) => p,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                "Invalid token signature or ciphertext",
-            )
-                .into_response()
-        }
-    };
-
-    // 4. Parse payload
-    let payload: ApprovalLinkPayload = match serde_json::from_slice(&plaintext) {
-        Ok(p) => p,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid token payload").into_response(),
-    };
-
-    // 5. Verify step exists and is WaitingForEvent
-    let _step = match verify_step_for_approval(&state.pool, payload.run_id, payload.step_id).await {
+    // Verify step exists and is WaitingForEvent
+    let step = match verify_step_for_approval(&state.pool, payload.run_id, payload.step_id).await {
         Ok(s) => s,
-        Err(r) => return r,
+        Err(r) => return *r,
+    };
+
+    // The same policy question as an approval made while logged in. The approver is
+    // whoever the link was sent to, when that is one person.
+    let approver = match payload.approvers.as_slice() {
+        [only] => Some(Claims {
+            sub: only.clone(),
+            email: Some(only.clone()),
+            exp: 0,
+            groups: Vec::new(),
+        }),
+        _ => None,
+    };
+    if let Err((status, message)) = check_approval_opa(
+        state,
+        payload.run_id,
+        &step.step_name,
+        approver.as_ref(),
+        None,
+    )
+    .await
+    {
+        return (status, message).into_response();
+    }
+    let recorded_as = if payload.approvers.is_empty() {
+        "system-link".to_string()
+    } else {
+        format!("link:{}", payload.approvers.join(","))
     };
 
     let is_approve = payload.action.to_lowercase() == "approve";
@@ -115,15 +202,15 @@ pub async fn approve_step_link(
         &state.pool,
         EventId::new_v4(),
         payload.step_id,
-        "system-link",
+        &recorded_as,
         status_str,
         &payload.inputs,
     )
     .await;
 
-    let fencing_token = match resolve_fencing_token_or_response(&state, payload.run_id).await {
+    let fencing_token = match resolve_fencing_token_or_response(state, payload.run_id).await {
         Ok(token) => token,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
 
     let publish_result = if is_approve {
@@ -144,6 +231,11 @@ pub async fn approve_step_link(
             run_id: payload.run_id,
             step_id: payload.step_id,
             fencing_token,
+            completion_token: stormchaser_engine::db::step_completion_token(
+                &state.pool,
+                payload.step_id,
+            )
+            .await,
             event_type: EventType::Step(StepEventType::Completed),
             runner_id: None,
             exit_code: Some(0),
@@ -171,6 +263,11 @@ pub async fn approve_step_link(
             run_id: payload.run_id,
             step_id: payload.step_id,
             fencing_token,
+            completion_token: stormchaser_engine::db::step_completion_token(
+                &state.pool,
+                payload.step_id,
+            )
+            .await,
             event_type: EventType::Step(StepEventType::Failed),
             error: "Rejected by human via link".to_string(),
             exit_code: Some(1),

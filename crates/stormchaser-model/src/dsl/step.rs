@@ -124,3 +124,71 @@ pub struct RetryPolicy {
     /// Maximum backoff delay.
     pub max_delay: Option<String>,
 }
+
+impl Step {
+    /// A copy of this step with the values a runner must not leave readable removed:
+    /// environment values and parameter values, which is where resolved secrets and
+    /// injected connection credentials are.
+    ///
+    /// Runners keep a step's definition on the Job or container they start for it, so a
+    /// restarted runner can pick the step up again. That copy can be read by anyone who
+    /// may look at Jobs or containers. Picking a step up needs its name, type, storage,
+    /// reports and artifacts, and none of the values removed here.
+    pub fn without_secret_values(&self) -> Step {
+        let mut step = self.clone();
+        for value in step.params.values_mut() {
+            value.clear();
+        }
+        if let Some(env) = step.spec.get_mut("env").and_then(|env| env.as_array_mut()) {
+            for entry in env {
+                if let Some(value) = entry.get_mut("value") {
+                    *value = serde_json::Value::String(String::new());
+                }
+            }
+        }
+        step
+    }
+}
+
+#[cfg(test)]
+mod redaction_tests {
+    use super::*;
+    use crate::dsl::CommonContainerSpec;
+    use serde_json::json;
+
+    #[test]
+    fn a_persisted_step_keeps_its_shape_and_loses_its_secret_values() {
+        let step: Step = serde_json::from_value(json!({
+            "name": "deploy",
+            "type": "RunContainer",
+            "params": { "db_password": "hunter2" },
+            "spec": {
+                "image": "alpine",
+                "env": [
+                    { "name": "TOKEN", "value": "tok-123" },
+                    { "name": "STORMCHASER_CONN_DB_PASSWORD", "value": "pw-456" }
+                ],
+                "storage_mounts": [{ "name": "ws", "mount_path": "/ws" }]
+            },
+            "aggregation": [],
+            "next": [],
+            "outputs": [],
+            "reports": []
+        }))
+        .unwrap();
+
+        let kept = step.without_secret_values();
+        let text = serde_json::to_string(&kept).unwrap();
+        for secret in ["hunter2", "tok-123", "pw-456"] {
+            assert!(!text.contains(secret), "{secret} survived: {text}");
+        }
+        // Names, and everything a runner needs to pick the step up again, are intact
+        assert_eq!(kept.name, "deploy");
+        assert!(kept.params.contains_key("db_password"));
+        assert_eq!(kept.spec["env"][0]["name"], "TOKEN");
+        assert_eq!(kept.spec["storage_mounts"][0]["mount_path"], "/ws");
+        // And it still parses as the spec it was
+        let spec: CommonContainerSpec = serde_json::from_value(kept.spec).unwrap();
+        assert_eq!(spec.env.unwrap().len(), 2);
+    }
+}

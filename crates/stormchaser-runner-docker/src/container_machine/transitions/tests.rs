@@ -150,8 +150,8 @@ async fn test_clean_up_orphaned_container() {
     use futures::StreamExt;
     let _ = docker
         .create_image(
-            Some(bollard::image::CreateImageOptions {
-                from_image: "ubuntu:latest",
+            Some(bollard::query_parameters::CreateImageOptions {
+                from_image: Some("ubuntu:latest".to_string()),
                 ..Default::default()
             }),
             None,
@@ -162,11 +162,11 @@ async fn test_clean_up_orphaned_container() {
 
     let _ = docker
         .create_container(
-            Some(bollard::container::CreateContainerOptions {
-                name: container_name.as_str(),
+            Some(bollard::query_parameters::CreateContainerOptions {
+                name: Some(container_name.clone()),
                 ..Default::default()
             }),
-            bollard::container::Config {
+            bollard::models::ContainerCreateBody {
                 image: Some("ubuntu:latest".to_string()),
                 cmd: Some(vec!["sleep".to_string(), "1000".to_string()]),
                 ..Default::default()

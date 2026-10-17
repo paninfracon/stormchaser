@@ -11,24 +11,40 @@ use leptos::prelude::*;
 use leptos::server_fn::codec::Json;
 
 #[server(input = Json, output = Json)]
+/// Hydrates a run form. `schema` is what to show if the service sends nothing back; the
+/// service works from the workflow that `source` names, not from anything sent here.
 pub async fn hydrate_schema_complete(
     schema: serde_json::Value,
     inputs: serde_json::Value,
-    queries: Option<serde_json::Value>,
+    source: HydrationSource,
 ) -> Result<(serde_json::Value, String, Vec<String>), ServerFnError> {
     let cookie = require_auth().await?;
     let query_url =
         std::env::var("QUERY_URL").unwrap_or_else(|_| "http://127.0.0.1:3001".to_string());
 
     let client = super::http_client();
-    let payload = if let Some(q) = queries {
-        serde_json::json!({ "schema": schema, "inputs": inputs, "queries": q })
-    } else {
-        serde_json::json!({ "schema": schema, "inputs": inputs })
+    let (path, payload) = match source {
+        HydrationSource::Git {
+            connection,
+            workflow_path,
+            git_ref,
+        } => (
+            "/api/v1/schema/hydrate",
+            serde_json::json!({
+                "connection": connection,
+                "workflow_path": workflow_path,
+                "git_ref": git_ref,
+                "inputs": inputs,
+            }),
+        ),
+        HydrationSource::Direct { dsl } => (
+            "/api/v1/schema/hydrate-direct",
+            serde_json::json!({ "dsl": dsl, "inputs": inputs }),
+        ),
     };
 
     let res = client
-        .post(format!("{}/api/v1/schema/hydrate", query_url))
+        .post(format!("{}{}", query_url, path))
         .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
         .json(&payload)
         .send()

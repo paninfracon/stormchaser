@@ -25,6 +25,17 @@ fn parse_single_step(block: &Block) -> Result<Step> {
         .first()
         .map(|l| l.as_str().to_string())
         .context("Step block must have a name label")?;
+    // The name ends up in container and job names, labels and log queries
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        anyhow::bail!(
+            "Step name '{}' is invalid: use only letters, digits, '_' and '-'",
+            name
+        );
+    }
     let r#type = block
         .labels()
         .get(1)

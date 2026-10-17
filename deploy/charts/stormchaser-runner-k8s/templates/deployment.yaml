@@ -32,11 +32,23 @@ spec:
         - name: {{ .Chart.Name }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default (printf "v%s" .Chart.AppVersion) }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
             - name: NATS_URL
               value: {{ .Values.config.natsUrl | quote }}
+            {{- with .Values.config.natsAuthSecret }}
+            - name: NATS_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: user
+            - name: NATS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: password
+            {{- end }}
             - name: KUBERNETES_NAMESPACE
               valueFrom:
                 fieldRef:
@@ -45,10 +57,43 @@ spec:
             - name: RUNNER_ID
               value: {{ .Values.config.runnerId | quote }}
             {{- end }}
+            {{- with .Values.config.stateEncryptionSecret }}
+            - name: STORMCHASER_STATE_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: {{ $.Values.config.stateEncryptionSecretKey }}
+            {{- end }}
+            - name: STORMCHASER_STEP_DEFAULT_CPU
+              value: {{ .Values.config.stepLimits.defaultCpu | quote }}
+            - name: STORMCHASER_STEP_DEFAULT_MEMORY
+              value: {{ .Values.config.stepLimits.defaultMemory | quote }}
+            - name: STORMCHASER_STEP_MAX_CPU
+              value: {{ .Values.config.stepLimits.maxCpu | quote }}
+            - name: STORMCHASER_STEP_MAX_MEMORY
+              value: {{ .Values.config.stepLimits.maxMemory | quote }}
+            - name: STORMCHASER_STEP_DEFAULT_TIMEOUT
+              value: {{ .Values.config.stepLimits.defaultTimeout | quote }}
+            - name: STORMCHASER_STEP_MAX_TIMEOUT
+              value: {{ .Values.config.stepLimits.maxTimeout | quote }}
+            - name: STORMCHASER_STEP_MAX_PARALLELISM
+              value: {{ .Values.config.stepLimits.maxParallelism | quote }}
+            - name: STORMCHASER_STEP_IMAGE_PULL_POLICY
+              value: {{ .Values.config.stepImagePullPolicy | default "Always" | quote }}
             - name: RUST_LOG
               value: {{ .Values.config.rustLog | quote }}
+            - name: STORMCHASER_STEP_NAMESPACE
+              value: {{ include "stormchaser-runner-k8s.stepNamespace" . | quote }}
+            - name: STORMCHASER_ALLOWED_SERVICE_ACCOUNTS
+              value: {{ join "," .Values.config.allowedServiceAccounts | quote }}
+            - name: STORMCHASER_ALLOWED_SECRET_MOUNTS
+              value: {{ join "," .Values.config.allowedSecretMounts | quote }}
+            - name: STORMCHASER_ALLOWED_CONFIG_MAP_MOUNTS
+              value: {{ join "," .Values.config.allowedConfigMapMounts | quote }}
+            - name: STORMCHASER_ALLOW_PRIVILEGED
+              value: {{ .Values.config.allowPrivileged | quote }}
             - name: STORMCHASER_AGENT_IMAGE
-              value: "{{ .Values.global.agent.image.repository }}:{{ .Values.global.agent.image.tag }}"
+              value: "{{ .Values.global.agent.image.repository }}:{{ .Values.global.agent.image.tag | default (printf "v%s" .Chart.AppVersion) }}"
           ports:
             - name: http
               containerPort: 8080
@@ -63,6 +108,12 @@ spec:
               port: http
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

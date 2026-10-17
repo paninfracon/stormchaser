@@ -12,6 +12,7 @@ use stormchaser_model::CronWorkflowId;
 use stormchaser_model::RunId;
 
 use super::{CreateCronWorkflowRequest, CronWorkflowResponse, EnqueueResponse};
+use crate::authz::{self, Caller, Kind};
 use crate::{AppState, AuthClaims};
 use axum::{
     extract::{Path, State},
@@ -32,7 +33,7 @@ use axum::{
     tag = "cron"
 )]
 pub async fn create_cron_workflow(
-    AuthClaims(_claims): AuthClaims,
+    caller: Caller,
     State(state): State<AppState>,
     Json(payload): Json<CreateCronWorkflowRequest>,
 ) -> Result<Json<CronWorkflowResponse>, StatusCode> {
@@ -50,6 +51,8 @@ pub async fn create_cron_workflow(
             .map_err(|_| StatusCode::NOT_FOUND)?
             .ok_or(StatusCode::NOT_FOUND)?
     };
+
+    authz::authorize_connection_use(&state, &caller, conn.id.into_inner()).await?;
 
     let repo_url = conn
         .config
@@ -71,9 +74,13 @@ pub async fn create_cron_workflow(
     let external_job_id =
         register_external_cron(id, &payload.name, &payload.cronspec, &secret_token).await?;
 
-    // 2. Save to database
+    // 2. Save to database, with its owner
+    let mut tx = state.pool.begin().await.map_err(|e| {
+        tracing::error!("Failed to start a transaction: {:?}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
     db::insert_cron_workflow(
-        &state.pool,
+        &mut *tx,
         id,
         &payload,
         &repo_url,
@@ -85,6 +92,10 @@ pub async fn create_cron_workflow(
         tracing::error!("Failed to create cron workflow: {:?}", e);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
+    authz::record_owner(&mut *tx, Kind::CronWorkflow, id.into_inner(), &caller).await?;
+    tx.commit()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(CronWorkflowResponse {
         id,
@@ -106,13 +117,21 @@ pub async fn create_cron_workflow(
     tag = "cron"
 )]
 pub async fn list_cron_workflows(
-    AuthClaims(_claims): AuthClaims,
+    caller: Caller,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<cron::CronWorkflow>>, StatusCode> {
     let workflows = db::list_cron_workflows(&state.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
+    let workflows = authz::filter_readable(&state, &caller, Kind::CronWorkflow, workflows, |w| {
+        w.id.into_inner()
+    })
+    .await?;
+    let workflows = workflows
+        .into_iter()
+        .map(crate::redact::cron_workflow)
+        .collect();
     Ok(Json(workflows))
 }
 
@@ -213,6 +232,12 @@ pub async fn trigger_cron_workflow(
     tracing::info!(%run_id, "Enqueuing cron workflow: {}", cron.workflow_name);
     let fencing_token = Utc::now().timestamp_nanos_opt().unwrap_or(0);
 
+    // The run acts as whoever created the schedule; schedules that predate ownership
+    // keep the old label, which policy treats as "no owner".
+    let initiating_user = authz::owner_of(&state.pool, Kind::CronWorkflow, id.into_inner())
+        .await
+        .unwrap_or_else(|| "system:cron".to_string());
+
     let mut tx = state
         .pool
         .begin()
@@ -223,7 +248,7 @@ pub async fn trigger_cron_workflow(
         &mut tx,
         run_id,
         &cron.workflow_name,
-        "system:cron",
+        &initiating_user,
         &cron.repo_url,
         &cron.workflow_path,
         &cron.git_ref,

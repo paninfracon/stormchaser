@@ -2,6 +2,7 @@ import base64
 import json
 import hmac
 import hashlib
+import os
 import time
 
 def b64url(b):
@@ -18,7 +19,10 @@ h_b64 = b64url(json.dumps(header, separators=(',', ':')).encode('utf-8'))
 p_b64 = b64url(json.dumps(payload, separators=(',', ':')).encode('utf-8'))
 
 msg = f"{h_b64}.{p_b64}"
-sig = hmac.new(b"stormchaser-secret-dev-only", msg.encode('utf-8'), hashlib.sha256).digest()
+# The API's key: STORMCHASER_JWT_SECRET, which scripts/setup.sh generates into .env.
+# The fixed fallback is only accepted by a debug build of the API.
+secret = os.environ.get("STORMCHASER_JWT_SECRET", "stormchaser-secret-dev-only")
+sig = hmac.new(secret.encode('utf-8'), msg.encode('utf-8'), hashlib.sha256).digest()
 sig_b64 = b64url(sig)
 
 print(f"{msg}.{sig_b64}")

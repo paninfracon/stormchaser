@@ -37,7 +37,7 @@ async fn setup_app_with_pool() -> Option<(axum::Router, sqlx::PgPool)> {
     std::env::set_var("API_RATE_LIMIT_BURST_SIZE", "1000");
 
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = async_nats::connect(nats_url).await.ok()?;
+    let nats_client = stormchaser_model::nats::connect(nats_url).await.ok()?;
 
     let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
@@ -62,6 +62,7 @@ async fn setup_app_with_pool() -> Option<(axum::Router, sqlx::PgPool)> {
             jwks: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
             log_backend: None,
             api_base_url: "http://localhost:3000".to_string(),
+            mcp_allowed_hosts: Vec::new(),
         }),
         pool,
     ))
@@ -76,6 +77,7 @@ fn get_token() -> String {
         sub: "test-user".to_string(),
         email: Some("test-user@paninfracon.net".to_string()),
         exp: (Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
+        groups: Vec::new(),
     };
     encode(
         &Header::default(),
@@ -197,7 +199,8 @@ async fn test_create_webhook() {
                 .body(Body::from(
                     serde_json::to_vec(&json!({
                         "name": name,
-                        "source_type": "generic"
+                        "source_type": "generic",
+                        "secret_token": "a-delivery-secret"
                     }))
                     .unwrap(),
                 ))
@@ -207,6 +210,36 @@ async fn test_create_webhook() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::CREATED);
+}
+
+#[tokio::test]
+async fn test_create_webhook_without_a_secret_is_refused() {
+    let app = match setup_app().await {
+        Some(a) => a,
+        None => return,
+    };
+
+    let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
+    for body in [
+        json!({ "name": format!("no-secret-{}", Uuid::new_v4()), "source_type": "generic" }),
+        json!({ "name": format!("no-secret-{}", Uuid::new_v4()), "source_type": "github", "secret_token": "" }),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/webhooks")
+                    .header("Content-Type", stormchaser_model::APPLICATION_JSON)
+                    .header(AUTHORIZATION, format!("Bearer {}", get_token()))
+                    .extension(ConnectInfo(addr))
+                    .body(Body::from(serde_json::to_vec(&body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
 }
 
 #[tokio::test]
@@ -562,19 +595,37 @@ async fn test_stream_run_logs() {
         .await
         .unwrap();
 
+    // The run does not exist, so with a log backend there is nothing to stream
     let expected_status = if var("LOKI_URL").is_ok() {
-        StatusCode::OK
+        StatusCode::NOT_FOUND
     } else {
         StatusCode::NOT_IMPLEMENTED
     };
 
     assert_eq!(response.status(), expected_status);
-    if expected_status == StatusCode::OK {
-        assert_eq!(
-            response.headers().get("content-type").unwrap(),
-            "text/event-stream"
-        );
-    }
+}
+
+#[tokio::test]
+async fn test_stream_run_status_of_an_unknown_run_is_not_found() {
+    let app = match setup_app().await {
+        Some(a) => a,
+        None => return,
+    };
+
+    let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/runs/{}/status/stream", Uuid::new_v4()))
+                .header(AUTHORIZATION, format!("Bearer {}", get_token()))
+                .extension(ConnectInfo(addr))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
@@ -863,7 +914,7 @@ async fn test_run_from_git() {
     });
     let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = async_nats::connect(nats_url).await.unwrap();
+    let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
 
     let opa_client = std::sync::Arc::new(OpaClient::new(None, None));
     let tls_reloader = std::sync::Arc::new(
@@ -903,6 +954,13 @@ async fn test_run_from_git() {
         }
     }
 
+    // Steps report as a runner the engine has issued a key to: a step no runner has
+    // claimed takes a result only from such a runner
+    let runner_id = format!("test-runner-{}", uuid::Uuid::new_v4());
+    stormchaser_engine::db::store_runner_session(&pool, &runner_id, &[5u8; 32])
+        .await
+        .unwrap();
+
     // Verify the workflow completes successfully.
     let mut success = false;
     for _ in 0..60 {
@@ -937,6 +995,7 @@ async fn test_run_from_git() {
                     "step_id": step_id.to_string(),
                     "fencing_token": fencing_token,
                     "event_type": "StepCompletedEvent",
+                    "runner_id": runner_id,
                     "timestamp": Utc::now(),
                     "outputs": {}
                 }))
@@ -1039,7 +1098,7 @@ async fn test_stream_workflow_runs() {
     );
 
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into());
-    let nats_client = async_nats::connect(&nats_url).await.unwrap();
+    let nats_client = stormchaser_model::nats::connect(&nats_url).await.unwrap();
     let js = async_nats::jetstream::new(nats_client.clone());
 
     // Sleep briefly to ensure the server's SSE task has time to subscribe to NATS
