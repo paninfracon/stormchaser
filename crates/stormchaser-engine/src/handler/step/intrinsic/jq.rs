@@ -98,7 +98,7 @@ async fn dispatch_jq_internal(
     fencing_token: i64,
     spec: Value,
     pool: PgPool,
-    nats_client: async_nats::Client,
+    _nats_client: async_nats::Client,
 ) -> Result<()> {
     // 1. Transition to running
     if let Ok(instance) = fetch_step_instance(step_instance_id, &pool).await {
@@ -149,10 +149,9 @@ async fn dispatch_jq_internal(
                 outputs: Some(outputs_map),
                 timestamp: Utc::now(),
             };
-            let js = async_nats::jetstream::new(nats_client);
             use stormchaser_model::nats::NatsSubject;
-            let _ = stormchaser_model::nats::publish_cloudevent(
-                &js,
+            let _ = crate::db::outbox::insert_outbox_event(
+                &pool,
                 NatsSubject::StepCompleted(Some(stormchaser_model::nats::compute_shard_id(
                     &run_id,
                 ))),
@@ -180,9 +179,8 @@ async fn dispatch_jq_internal(
                 outputs: None,
                 timestamp: Utc::now(),
             };
-            let js = async_nats::jetstream::new(nats_client);
-            let _ = stormchaser_model::nats::publish_cloudevent(
-                &js,
+            let _ = crate::db::outbox::insert_outbox_event(
+                &pool,
                 NatsSubject::StepFailed(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
                 EventType::Step(StepEventType::Failed),
                 EventSource::System,

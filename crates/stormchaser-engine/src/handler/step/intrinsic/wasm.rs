@@ -122,7 +122,7 @@ async fn execute_wasm_step(
     params: Value,
     inputs: Value,
     pool: PgPool,
-    nats_client: async_nats::Client,
+    _nats_client: async_nats::Client,
 ) {
     let executor = crate::wasm::WasmExecutor::new();
     if let Ok(instance) = fetch_step_instance(step_instance_id, &pool).await {
@@ -166,9 +166,8 @@ async fn execute_wasm_step(
                 outputs: Some(outputs_map),
                 timestamp: Utc::now(),
             };
-            let js = async_nats::jetstream::new(nats_client);
-            let _ = stormchaser_model::nats::publish_cloudevent(
-                &js,
+            let _ = crate::db::outbox::insert_outbox_event(
+                &pool,
                 NatsSubject::StepCompleted(Some(stormchaser_model::nats::compute_shard_id(
                     &run_id,
                 ))),
@@ -196,10 +195,9 @@ async fn execute_wasm_step(
                 outputs: None,
                 timestamp: Utc::now(),
             };
-            let js = async_nats::jetstream::new(nats_client);
             use stormchaser_model::nats::NatsSubject;
-            let _ = stormchaser_model::nats::publish_cloudevent(
-                &js,
+            let _ = crate::db::outbox::insert_outbox_event(
+                &pool,
                 NatsSubject::StepFailed(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
                 EventType::Step(StepEventType::Failed),
                 EventSource::System,

@@ -31,6 +31,10 @@ async fn test_direct_run_inserts_quotas() {
     let pool = setup_db().await;
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
+    // Built-in steps report their results through the outbox, which the engine's
+    // relay publishes
+    let _relay =
+        stormchaser_engine::workers::start_outbox_relay_worker(pool.clone(), nats_client.clone());
     let opa_client = Arc::new(OpaClient::new(None, None));
 
     let run_id = RunId::new_v4();
@@ -103,6 +107,10 @@ async fn test_dispatch_pending_steps_column_created_at() {
     let pool = setup_db().await;
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
+    // Built-in steps report their results through the outbox, which the engine's
+    // relay publishes
+    let _relay =
+        stormchaser_engine::workers::start_outbox_relay_worker(pool.clone(), nats_client.clone());
 
     let run_id = RunId::new_v4();
     let workflow_name = format!("test-dispatch-{}", run_id);
@@ -181,6 +189,10 @@ async fn test_workflow_step_completion_dispatches_next_step() {
     let pool = setup_db().await;
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
+    // Built-in steps report their results through the outbox, which the engine's
+    // relay publishes
+    let _relay =
+        stormchaser_engine::workers::start_outbox_relay_worker(pool.clone(), nats_client.clone());
     let _opa_client = Arc::new(OpaClient::new(None, None));
 
     let run_id = RunId::new_v4();
@@ -347,6 +359,10 @@ async fn test_a_step_bigger_than_its_run_quota_fails() {
     let pool = setup_db().await;
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
+    // Built-in steps report their results through the outbox, which the engine's
+    // relay publishes
+    let _relay =
+        stormchaser_engine::workers::start_outbox_relay_worker(pool.clone(), nats_client.clone());
 
     let run_id = RunId::new_v4();
     sqlx::query("INSERT INTO workflow_runs (id, workflow_name, initiating_user, status, fencing_token, repo_url, workflow_path, git_ref) VALUES ($1, $2, 'test', 'running', $3, 'http://example.com', 'test.storm', 'main')")

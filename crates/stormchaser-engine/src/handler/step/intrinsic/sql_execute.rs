@@ -9,7 +9,7 @@ use stormchaser_model::dsl::SqlExecuteSpec;
 use stormchaser_model::events::{
     EventSource, EventType, SchemaVersion, StepCompletedEvent, StepEventType, StepFailedEvent,
 };
-use stormchaser_model::nats::{publish_cloudevent, NatsSubject};
+use stormchaser_model::nats::NatsSubject;
 use stormchaser_model::{RunId, StepInstanceId};
 use tracing::{error, info};
 
@@ -51,8 +51,8 @@ pub async fn try_dispatch(
                     test_reports: None,
                     timestamp: Utc::now(),
                 };
-                let _ = publish_cloudevent(
-                    &async_nats::jetstream::new(nats_client),
+                let _ = crate::db::outbox::insert_outbox_event(
+                    &pool,
                     NatsSubject::StepFailed(Some(stormchaser_model::nats::compute_shard_id(
                         &run_id,
                     ))),
@@ -77,7 +77,7 @@ async fn handle_sql_execute(
     fencing_token: i64,
     spec: Value,
     pool: PgPool,
-    nats_client: async_nats::Client,
+    _nats_client: async_nats::Client,
 ) -> Result<()> {
     let spec: SqlExecuteSpec = serde_json::from_value(spec.get("spec").unwrap_or(&spec).clone())?;
 
@@ -162,8 +162,8 @@ async fn handle_sql_execute(
         timestamp: Utc::now(),
     };
 
-    publish_cloudevent(
-        &async_nats::jetstream::new(nats_client),
+    crate::db::outbox::insert_outbox_event(
+        &pool,
         NatsSubject::StepCompleted(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
         EventType::Step(StepEventType::Completed),
         EventSource::System,

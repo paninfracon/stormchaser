@@ -366,7 +366,7 @@ async fn execute_request(
     spec: &RestApiSpec,
     rendered_body: Option<String>,
     pool: PgPool,
-    nats_client: async_nats::Client,
+    _nats_client: async_nats::Client,
 ) -> Result<()> {
     let (client, url) = stormchaser_model::net_guard::guarded_client(&spec.url).await?;
     let method = build_request_method(spec);
@@ -407,12 +407,11 @@ async fn execute_request(
     ) {
         Ok(mut event) => {
             event.completion_token = crate::db::step_completion_token(&pool, step_id).await;
-            let js = async_nats::jetstream::new(nats_client);
             let event_payload = serde_json::to_value(event)
                 .context("failed to serialize RestApi completion event")?;
 
-            stormchaser_model::nats::publish_cloudevent(
-                &js,
+            crate::db::outbox::insert_outbox_event(
+                &pool,
                 NatsSubject::StepCompleted(Some(stormchaser_model::nats::compute_shard_id(
                     &run_id,
                 ))),

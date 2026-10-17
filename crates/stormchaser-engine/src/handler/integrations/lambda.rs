@@ -145,7 +145,7 @@ async fn handle_lambda_response(
     step_id: stormchaser_model::StepInstanceId,
     response: aws_sdk_lambda::operation::invoke::InvokeOutput,
     pool: PgPool,
-    nats_client: async_nats::Client,
+    _nats_client: async_nats::Client,
 ) -> Result<()> {
     let status_code = response.status_code();
     let payload = if let Some(payload) = response.payload() {
@@ -178,9 +178,8 @@ async fn handle_lambda_response(
             test_reports: None,
             timestamp: Utc::now(),
         };
-        let js = async_nats::jetstream::new(nats_client);
-        stormchaser_model::nats::publish_cloudevent(
-            &js,
+        crate::db::outbox::insert_outbox_event(
+            &pool,
             NatsSubject::StepCompleted(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
             EventType::Step(StepEventType::Completed),
             EventSource::System,
@@ -212,9 +211,8 @@ async fn handle_lambda_response(
             outputs: None,
             timestamp: Utc::now(),
         };
-        let js = async_nats::jetstream::new(nats_client);
-        stormchaser_model::nats::publish_cloudevent(
-            &js,
+        crate::db::outbox::insert_outbox_event(
+            &pool,
             NatsSubject::StepFailed(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
             EventType::Step(StepEventType::Failed),
             EventSource::System,
