@@ -82,10 +82,12 @@ async fn schedule_iterated_batches(
 
     if finished_instances < total_instances {
         // Some instances are still running or waiting
-        let waiting_instances: Vec<&&StepInstance> = all_instances_of_this_step
+        let mut waiting_instances: Vec<&&StepInstance> = all_instances_of_this_step
             .iter()
             .filter(|s| s.status == StepStatus::WaitingForEvent)
             .collect();
+        // Iterations start in order, not in the order the database returned them
+        waiting_instances.sort_by_key(|s| s.iteration_index);
 
         if !waiting_instances.is_empty() {
             let running_or_pending = all_instances_of_this_step

@@ -63,6 +63,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A step's iterations held back by `max_parallel` start in order. When one finished, the next to start was whichever the database happened to return first, so the third could start before the second.
+
 - One engine replica at a time runs the background workers: liveness, timeouts, resolver crash recovery, the outbox relay and the task message purge. They ran on every replica assigned shard 0, and every replica is unless `STORMCHASER_ASSIGNED_SHARDS` says otherwise, so with several replicas each ran them all. The replicas now compete for a Postgres advisory lock; the one holding it runs the workers until its connection stops answering, and another takes over within seconds. A replica's shards no longer decide whether it runs them.
 
 - The engine no longer loses an event whose handler failed for a reason that passes: the database or broker unreachable, a dropped connection, a serialization or deadlock failure. It acknowledged every event, failed or not, so the run waited for its timeout, 24 hours by default. Such an event is now delivered again, after 1 s, then 2 s, doubling to at most a minute, up to 10 deliveries; an event that fails for any other reason is still acknowledged and logged. A handler that is still working tells the stream so every 10 s, so a slow one, a git clone say, is no longer delivered a second time while it runs. An event delivered more than 10 times, because its handler panics or the engine dies handling it, is logged and dropped.
