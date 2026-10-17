@@ -5,8 +5,18 @@ metadata:
   labels:
     {{- include "stormchaser-orchestration.labels" . | nindent 4 }}
     app.kubernetes.io/component: engine
+{{- $rwoCache := and .Values.engine.persistence.enabled (eq .Values.engine.persistence.accessMode "ReadWriteOnce") }}
+{{- if and $rwoCache (gt (int .Values.engine.replicaCount) 1) }}
+{{- fail "engine.replicaCount above 1 needs a git cache every replica can mount: set engine.persistence.accessMode to ReadWriteMany, or engine.persistence.enabled to false for a cache per pod" }}
+{{- end }}
 spec:
   replicas: {{ .Values.engine.replicaCount }}
+  {{- if $rwoCache }}
+  # The old pod lets go of the cache volume before the new one mounts it, which a pod
+  # on another node could not do while the old one held it. Events wait in the stream.
+  strategy:
+    type: Recreate
+  {{- end }}
   selector:
     matchLabels:
       {{- include "stormchaser-orchestration.selectorLabels" . | nindent 6 }}

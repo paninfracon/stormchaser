@@ -231,6 +231,9 @@ engine:
   rustLog: "stormchaser_engine=info"
   gitCacheDir: "/tmp/stormchaser/git-cache"
   resources: {}
+  # The engine's cache of cloned repositories, kept across restarts. With
+  # ReadWriteOnce the engine is replaced, not rolled, on upgrade, and runs as one
+  # replica; more replicas need ReadWriteMany, or persistence off for a cache per pod.
   persistence:
     enabled: true
     size: 10Gi

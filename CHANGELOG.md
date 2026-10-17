@@ -63,6 +63,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The chart's engine upgrades without getting stuck on its git cache. The cache is a ReadWriteOnce volume by default, and a rolling update starts the new pod before stopping the old one, so a new pod scheduled on another node waited for the volume forever. With a ReadWriteOnce cache the engine is now replaced, not rolled (events wait in the stream meanwhile), and `engine.replicaCount` above 1 fails to render with it: more replicas need `engine.persistence.accessMode: ReadWriteMany`, or `engine.persistence.enabled: false` for a cache per pod.
+
 - A run whose archive failed is archived when its last step's result is delivered again. The engine archives a finished run after saving its last step's result; when archiving failed, the result's next delivery stopped at the step being finished already, so the run stayed unarchived.
 
 - A step's iterations held back by `max_parallel` start in order. When one finished, the next to start was whichever the database happened to return first, so the third could start before the second.
