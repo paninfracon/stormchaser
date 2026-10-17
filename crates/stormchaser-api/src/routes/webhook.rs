@@ -2,7 +2,6 @@ use super::{CreateWebhookRequest, UpdateWebhookRequest};
 use crate::authz::{self, Caller, Kind};
 use crate::db;
 use crate::{AppState, AuthClaims};
-use async_nats::jetstream;
 use axum::{
     body::Bytes,
     extract::{Path, State},
@@ -18,7 +17,7 @@ use std::collections::HashMap;
 use stormchaser_model::event_rules::WebhookConfig;
 use stormchaser_model::events::WorkflowQueuedEvent;
 use stormchaser_model::events::{EventSource, EventType, SchemaVersion, WorkflowEventType};
-use stormchaser_model::nats::{publish_cloudevent, NatsSubject};
+use stormchaser_model::nats::NatsSubject;
 use stormchaser_model::workflow::RunStatus;
 use stormchaser_model::WebhookId;
 
@@ -665,10 +664,6 @@ async fn process_rule(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    tx.commit()
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
     let event = WorkflowQueuedEvent {
         run_id,
         event_type: EventType::Workflow(WorkflowEventType::Queued),
@@ -681,8 +676,10 @@ async fn process_rule(
         sops_role_arn: None,
     };
 
-    publish_cloudevent(
-        &jetstream::new(state.nats.clone()),
+    // In the run's own transaction: the run and the event that starts it are kept
+    // together or not at all, and the engine's relay publishes the event
+    stormchaser_engine::db::outbox::insert_outbox_event(
+        &mut *tx,
         NatsSubject::RunQueued(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
         EventType::Workflow(WorkflowEventType::Queued),
         EventSource::System,
@@ -692,6 +689,10 @@ async fn process_rule(
     )
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    tx.commit()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     tracing::info!(
         "Triggered workflow '{}' (run {}) from rule '{}'",

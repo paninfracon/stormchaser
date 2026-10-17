@@ -63,6 +63,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A run the API starts, from a request, a webhook rule or a schedule's trigger, is no longer left queued forever when the broker does not take the event that starts it. The API committed the run and then published the event; a failed publish answered 500 but kept the run, which nothing would ever start. The event now goes into the outbox in the run's own transaction, and the engine's relay publishes it, so the two are kept together or not at all.
+
 - Built-in steps (RestApi, WebhookInvoke, JinjaRender, SqlExecute, JQ, Wasm, LambdaInvoke and the messaging steps) report their results through the outbox. They published them to the stream directly, so a result the broker did not take was lost and its step stayed initializing until the run timed out. The engine's relay now publishes them, as it does the engine's other events.
 
 - The outbox relay deletes an event only once the stream has stored it, and the stream keeps one copy of an event the relay publishes twice. The relay took a message as published once it was sent, so an event the stream then refused was deleted and lost. A relay that died after publishing a batch, before its deletions were committed, published it again, and each event was handled twice; events now carry their outbox id as `Nats-Msg-Id`, which the stream deduplicates within its 2-minute window.
