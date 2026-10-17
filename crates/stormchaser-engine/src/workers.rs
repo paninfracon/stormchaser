@@ -398,6 +398,81 @@ pub fn start_task_message_purge_worker(
     })
 }
 
+/// How long a claimed step may take to be handed over before it is taken for lost
+const LOST_DISPATCH_SECS: f64 = 300.0;
+/// How long a step may wait for dispatch before the engine tries again
+const WAITING_STEP_SECS: f64 = 60.0;
+
+/// Puts back steps whose dispatch was lost, and dispatches again the runs whose
+/// steps have been waiting longer than they should.
+pub async fn recover_dispatches(
+    pool: &sqlx::PgPool,
+    nats_client: &async_nats::Client,
+    tls_reloader: &Arc<TlsReloader>,
+    lost_after_secs: f64,
+    waiting_after_secs: f64,
+) -> anyhow::Result<()> {
+    for lost in db::reset_lost_dispatches(pool, lost_after_secs).await? {
+        tracing::warn!(
+            "Step {} of run {} was claimed for dispatch and never handed over; dispatching it again",
+            lost.id,
+            lost.run_id
+        );
+        // What it claimed of its run's quota, as a failed dispatch gives back
+        let quotas = handler::fetch_quotas(lost.run_id, pool).await?;
+        let max_cpu = crate::resource_utils::parse_cpu(&quotas.max_cpu).unwrap_or(0.0);
+        let max_mem = crate::resource_utils::parse_memory(&quotas.max_memory).unwrap_or(0);
+        if max_cpu > 0.0 || max_mem > 0 {
+            let req =
+                crate::resource_utils::get_step_resource_requirements(&lost.step_type, &lost.spec);
+            let mut conn = pool.acquire().await?;
+            db::release_step_quota(&mut conn, lost.run_id, req.cpu, req.memory).await?;
+        }
+    }
+
+    for run_id in db::runs_with_waiting_steps(pool, waiting_after_secs).await? {
+        if let Err(e) = handler::dispatch_pending_steps(
+            run_id,
+            pool.clone(),
+            nats_client.clone(),
+            tls_reloader.clone(),
+        )
+        .await
+        {
+            tracing::warn!(
+                "Could not dispatch the waiting steps of run {}: {:?}",
+                run_id,
+                e
+            );
+        }
+    }
+    Ok(())
+}
+
+pub fn start_dispatch_recovery_worker(
+    pool: sqlx::PgPool,
+    nats_client: async_nats::Client,
+    tls_reloader: Arc<TlsReloader>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            if let Err(e) = recover_dispatches(
+                &pool,
+                &nats_client,
+                &tls_reloader,
+                LOST_DISPATCH_SECS,
+                WAITING_STEP_SECS,
+            )
+            .await
+            {
+                tracing::warn!("Dispatch recovery failed: {:?}", e);
+            }
+        }
+    })
+}
+
 #[cfg(test)]
 mod task_message_tests {
     use super::is_task_message_for;

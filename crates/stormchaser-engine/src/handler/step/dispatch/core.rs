@@ -67,6 +67,9 @@ pub async fn dispatch_step_instance(
     )
     .await?;
 
+    // Marked before it is handed over, not after: a step marked and then lost is no
+    // worse off than before, but one handed over and not marked would be run twice
+    crate::db::set_step_dispatched(&pool, step_instance_id, true).await?;
     if try_dispatch_intrinsic(
         run_id,
         step_instance_id,
@@ -82,6 +85,8 @@ pub async fn dispatch_step_instance(
     {
         return Ok(());
     }
+    // A runner's step: what follows can still fail or be lost before it is published
+    crate::db::set_step_dispatched(&pool, step_instance_id, false).await?;
 
     let mut dsl_step_val = Value::Null;
     if let Some(found_step) = find_step(&workflow.steps, step_name) {
@@ -250,6 +255,7 @@ pub async fn dispatch_step_instance(
 
     // From here the runner owns the step and reports its result without a token.
     crate::db::clear_step_completion_token(&pool, step_instance_id).await?;
+    crate::db::set_step_dispatched(&pool, step_instance_id, true).await?;
 
     let stream_seq = publish_cloudevent_with_sequence(
         &js,

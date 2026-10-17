@@ -1,5 +1,6 @@
 //! One engine replica at a time runs the background workers: liveness, timeouts,
-//! resolver crash recovery, the outbox relay and the task message purge.
+//! resolver crash recovery, the outbox relay, the task message purge and dispatch
+//! recovery.
 //!
 //! The replicas compete for a Postgres advisory lock. The one that takes it holds it
 //! on a connection of its own, outside the pool, and runs the workers for as long as
@@ -50,6 +51,7 @@ fn start_workers(
         start_resolver_crash_recovery_worker(pool.clone(), nats_client.clone()),
         start_outbox_relay_worker(pool.clone(), nats_client.clone()),
         start_task_message_purge_worker(pool.clone(), nats_client.clone()),
+        start_dispatch_recovery_worker(pool.clone(), nats_client.clone(), tls_reloader.clone()),
     ]
 }
 

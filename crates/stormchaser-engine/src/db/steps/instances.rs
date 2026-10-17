@@ -330,7 +330,7 @@ where
             FOR UPDATE SKIP LOCKED
         )
         UPDATE step_instances si
-        SET status = 'initializing'
+        SET status = 'initializing', claimed_at = NOW(), dispatched_at = NULL
         FROM claimed
         WHERE si.id = claimed.id
         RETURNING si.id, si.run_id, si.step_name, si.step_type, si.status as "status",
@@ -636,4 +636,86 @@ where
     .execute(executor)
     .await?;
     Ok(result.rows_affected() > 0)
+}
+
+/// Records whether a claimed step is being handed over: its task message published,
+/// or the engine starting it itself.
+pub async fn set_step_dispatched<'a, E>(
+    executor: E,
+    id: StepInstanceId,
+    dispatched: bool,
+) -> Result<PgQueryResult, sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    sqlx::query(
+        "UPDATE step_instances SET dispatched_at = CASE WHEN $2 THEN NOW() END WHERE id = $1",
+    )
+    .bind(id)
+    .bind(dispatched)
+    .execute(executor)
+    .await
+}
+
+/// A step claimed for dispatch and put back to pending, its dispatch lost.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct LostDispatch {
+    pub id: StepInstanceId,
+    pub run_id: RunId,
+    pub step_type: String,
+    pub spec: Value,
+}
+
+/// Puts back to pending the steps of active runs that were claimed for dispatch more
+/// than `older_than_secs` ago and never handed over: the engine dispatching them died,
+/// or could not put them back itself.
+pub async fn reset_lost_dispatches<'a, E>(
+    executor: E,
+    older_than_secs: f64,
+) -> Result<Vec<LostDispatch>, sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    sqlx::query_as(
+        r#"
+        UPDATE step_instances si
+        SET status = 'pending', claimed_at = NULL
+        FROM workflow_runs wr
+        WHERE si.run_id = wr.id
+          AND wr.status = 'running'
+          AND si.status = 'initializing'
+          AND si.dispatched_at IS NULL
+          AND si.claimed_at < NOW() - make_interval(secs => $1)
+        RETURNING si.id, si.run_id, si.step_type, si.spec
+        "#,
+    )
+    .bind(older_than_secs)
+    .fetch_all(executor)
+    .await
+}
+
+/// Running runs with a step that has waited for dispatch for more than
+/// `older_than_secs`. Dispatch happens when a run's events arrive; a run whose steps
+/// were all put back to pending has none coming.
+pub async fn runs_with_waiting_steps<'a, E>(
+    executor: E,
+    older_than_secs: f64,
+) -> Result<Vec<RunId>, sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    sqlx::query_scalar(
+        r#"
+        SELECT DISTINCT si.run_id
+        FROM step_instances si
+        JOIN workflow_runs wr ON wr.id = si.run_id
+        WHERE wr.status = 'running'
+          AND si.status = 'pending'
+          AND si.step_type NOT IN ('Approval', 'Wait')
+          AND si.created_at < NOW() - make_interval(secs => $1)
+        "#,
+    )
+    .bind(older_than_secs)
+    .fetch_all(executor)
+    .await
 }
