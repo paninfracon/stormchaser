@@ -63,6 +63,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A run whose archive failed is archived when its last step's result is delivered again. The engine archives a finished run after saving its last step's result; when archiving failed, the result's next delivery stopped at the step being finished already, so the run stayed unarchived.
+
 - A step's iterations held back by `max_parallel` start in order. When one finished, the next to start was whichever the database happened to return first, so the third could start before the second.
 
 - A step whose dispatch was lost is dispatched again. The engine claims a step, then prepares and publishes its task; an engine that died in between left the step initializing until its run timed out, 24 hours by default. A step that failed to publish went back to pending, but only another event for its run would dispatch it, and a run with nothing else in flight had none coming. A step claimed more than 5 minutes ago and never handed over is now put back to pending, giving back its share of the run's quota, and a run whose steps have waited more than a minute is dispatched again. Steps record when they were claimed and handed over (migration `20261017000000`); steps already initializing when it runs are taken as handed over, so none runs twice. A built-in step whose engine died while running it is not recovered this way.

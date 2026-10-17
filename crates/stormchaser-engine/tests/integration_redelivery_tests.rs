@@ -180,3 +180,97 @@ async fn a_redelivered_queued_event_leaves_a_started_run_alone() {
 
     delete_run(&pool, run_id).await;
 }
+
+/// A finished run left unarchived, its archive having failed after its last step's
+/// result was saved
+async fn finished_unarchived_run(pool: &sqlx::PgPool) -> (RunId, uuid::Uuid) {
+    let run_id = RunId::new_v4();
+    sqlx::query("INSERT INTO workflow_runs (id, workflow_name, initiating_user, status, fencing_token, repo_url, workflow_path, git_ref) VALUES ($1, 'test-redelivery-archive', 'test', 'succeeded', 1, 'http://example.com', 'test.storm', 'main')")
+        .bind(run_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO run_contexts (run_id, dsl_version, workflow_definition, source_code, inputs) VALUES ($1, '1.0', '{}', '', '{}')")
+        .bind(run_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    let step_id = uuid::Uuid::new_v4();
+    sqlx::query("INSERT INTO step_instances (id, run_id, step_name, step_type, status, spec, params) VALUES ($1, $2, 'only', 'RunContainer', 'succeeded', '{}', '{}')")
+        .bind(step_id)
+        .bind(run_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    (run_id, step_id)
+}
+
+async fn archived(pool: &sqlx::PgPool, run_id: RunId) -> bool {
+    let live: bool =
+        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM workflow_runs WHERE id = $1)")
+            .bind(run_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    let kept: bool =
+        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM archived_workflow_runs WHERE id = $1)")
+            .bind(run_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    !live && kept
+}
+
+async fn delete_archived_run(pool: &sqlx::PgPool, run_id: RunId) {
+    sqlx::query("DELETE FROM archived_workflow_runs WHERE id = $1")
+        .bind(run_id)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_redelivered_step_completion_archives_its_finished_run() {
+    let pool = setup_db().await;
+    let (run_id, step_id) = finished_unarchived_run(&pool).await;
+
+    handler::handle_step_completed(
+        serde_json::from_value(json!({
+            "run_id": run_id, "step_id": step_id, "event_type": "StepCompletedEvent",
+            "fencing_token": 1, "timestamp": chrono::Utc::now(), "exit_code": 0
+        }))
+        .unwrap(),
+        pool.clone(),
+        nats().await,
+        Arc::new(None),
+        Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
+    )
+    .await
+    .unwrap();
+
+    assert!(archived(&pool, run_id).await);
+    delete_archived_run(&pool, run_id).await;
+}
+
+#[tokio::test]
+async fn a_redelivered_step_failure_archives_its_finished_run() {
+    let pool = setup_db().await;
+    let (run_id, step_id) = finished_unarchived_run(&pool).await;
+
+    handler::handle_step_failed(
+        serde_json::from_value(json!({
+            "run_id": run_id, "step_id": step_id, "event_type": "StepFailedEvent",
+            "fencing_token": 1, "timestamp": chrono::Utc::now(), "error": "boom",
+            "exit_code": 1
+        }))
+        .unwrap(),
+        pool.clone(),
+        nats().await,
+        Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
+    )
+    .await
+    .unwrap();
+
+    assert!(archived(&pool, run_id).await);
+    delete_archived_run(&pool, run_id).await;
+}

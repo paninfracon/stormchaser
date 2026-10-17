@@ -79,9 +79,11 @@ pub async fn handle_step_completed(
         return Ok(());
     }
 
-    // Ensure we don't process duplicate completion events
+    // A duplicate, or this event delivered again because the archive that followed it
+    // failed: the run may still need archiving
     if is_terminal_step_status(&instance.status) {
-        return Ok(());
+        drop(tx);
+        return archive_workflow(run_id, pool.clone()).await;
     }
 
     if !completion_authorized(&mut tx, &instance, event.completion_token.as_deref()).await {
