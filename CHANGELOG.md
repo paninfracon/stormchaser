@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Step library parameters work. A library's `params` are its arguments: its spec uses them as `${params.<name>}`, a step that uses the library overrides them in its own `params` block, and their values can use the run's inputs, secrets, step outputs and iteration item. A spec that uses a param nobody sets is an error when the workflow is parsed. Before, params were merged but nothing could refer to them, so `${params.x}` reached the step as text. A library's `timeout` and `allow_failure` now reach its steps too, and a param that is a list or a map is an error rather than being dropped. See "Step Libraries" in `docs/workflow_dsl.md`.
 - `stormchaser run --input key=@path` reads the input's value from a file, without its final newline, so a script can pass a secret (`--input password=@<(printf %s "$PASSWORD")`) without it showing in the process list.
 
 - `GET /api/v1/auth/session` returns the subject and email of the caller's token, a cheap check that a token is valid.
@@ -19,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A step that names a step library is stored as the library's step once its workflow is parsed: its type is the library's type, and its spec and params are merged. A run's definition and its steps show that type, not the library's name.
+- One `${...}` in a step's spec that is not an expression (a shell variable, say) no longer stops the expressions after it from being resolved.
 - The API serves its Swagger UI page itself instead of through `utoipa-swagger-ui`. Every release of `zip`, which that crate needs at 8.x, was yanked from crates.io, so a build without a lock file could not resolve its dependencies. The OpenAPI document stays at `/api-docs/openapi.json`; `/swagger-ui` is now a small page that loads Swagger UI 5.29.1 from cdnjs, checked against its published integrity hashes, under a content security policy with no inline code. Both are still served only with `STORMCHASER_API_DOCS=true`. The browser needs to reach cdnjs to show the page.
 - Upgraded all dependencies to their latest releases, including Axum 0.8, Leptos 0.8, SQLx 0.9, reqwest 0.13, kube 4, schemars 1, MiniJinja 3 and jaq 3.
 - The minimum supported Rust version is now 1.96, declared as `rust-version` in the workspace manifest. The Docker builder images use `rust:1.96`.

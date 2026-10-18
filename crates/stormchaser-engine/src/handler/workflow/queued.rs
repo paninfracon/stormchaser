@@ -229,6 +229,8 @@ fn load_workflow(repo_path: &Path, workflow_path: &str) -> Result<(Workflow, Str
         inline_steps(&mut workflow, &inc, inc_workflow.steps);
         includes_to_process.extend(inc_workflow.includes);
     }
+    // The includes may bring step libraries the workflow's own steps name
+    stormchaser_dsl::libraries::apply_step_libraries(&mut workflow)?;
     Ok((workflow, source))
 }
 

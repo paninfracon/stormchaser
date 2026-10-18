@@ -115,3 +115,18 @@ pub fn merge_spec_attr(spec_map: &mut Map<String, Value>, expr: &Expression) -> 
     }
     Ok(())
 }
+
+/// A step's or step library's param: a string, or a number or boolean as its text.
+/// Params are strings once resolved; a list or a map has no single text to be.
+pub fn expr_to_param(name: &str, expr: &Expression) -> Result<String> {
+    match expr_to_value(expr)? {
+        Value::String(s) => Ok(s),
+        Value::Number(n) => Ok(n.to_string()),
+        Value::Bool(b) => Ok(b.to_string()),
+        other => anyhow::bail!(
+            "Param '{}' must be a string, number or boolean, not {}",
+            name,
+            other
+        ),
+    }
+}

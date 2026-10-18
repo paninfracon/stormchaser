@@ -7,7 +7,7 @@ use stormchaser_model::dsl;
 
 use crate::ast::Step;
 
-use super::expr::{block_to_value, expr_to_string, expr_to_value, merge_spec_attr};
+use super::expr::{block_to_value, expr_to_param, expr_to_string, expr_to_value, merge_spec_attr};
 use super::provision::{parse_provision_legacy_block, parse_provision_sub_block};
 use super::step::parse_steps;
 
@@ -297,15 +297,19 @@ fn parse_step_library_block(block: &Block) -> Result<dsl::StepLibrary> {
     for attr in block.body().attributes() {
         match attr.key() {
             "type" => r#type = expr_to_string(attr.expr())?,
-            "params" => {
-                if let Value::Object(obj) = expr_to_value(attr.expr())? {
-                    for (k, v) in obj {
-                        if let Value::String(s) = v {
-                            params.insert(k, s);
-                        }
+            "params" => match attr.expr() {
+                hcl::Expression::Object(fields) => {
+                    for (key, value) in fields {
+                        let key = match key {
+                            hcl::ObjectKey::Identifier(id) => id.to_string(),
+                            hcl::ObjectKey::Expression(e) => expr_to_string(e)?,
+                            _ => anyhow::bail!("Unsupported param name in step library {}", name),
+                        };
+                        params.insert(key.clone(), expr_to_param(&key, value)?);
                     }
                 }
-            }
+                _ => anyhow::bail!("params of step library {} must be an object", name),
+            },
             "timeout" => timeout = Some(expr_to_string(attr.expr())?),
             "allow_failure" => {
                 if let Value::Bool(b) = expr_to_value(attr.expr())? {
@@ -329,7 +333,10 @@ fn parse_step_library_block(block: &Block) -> Result<dsl::StepLibrary> {
             }
         } else if inner.identifier() == "params" {
             for attr in inner.body().attributes() {
-                params.insert(attr.key().to_string(), expr_to_string(attr.expr())?);
+                params.insert(
+                    attr.key().to_string(),
+                    expr_to_param(attr.key(), attr.expr())?,
+                );
             }
         }
     }

@@ -204,6 +204,15 @@ fn jinja_template_fields(step_type: &str) -> &'static [&'static str] {
     }
 }
 
+/// Resolves a step's params, then its spec, in which they are `params.<name>`. An
+/// expression that cannot be resolved is left as it is.
+pub fn resolve_step(step_type: &str, spec: &mut Value, params: &mut Value, ctx: &HclContext) {
+    let _ = resolve_expressions(params, ctx, false);
+    let mut step_ctx = ctx.clone();
+    step_ctx.declare_var("params", json_to_hcl(params.clone()));
+    let _ = resolve_step_spec(step_type, spec, &step_ctx);
+}
+
 /// Resolves the `${...}` expressions in a step's spec.
 ///
 /// A field the step later renders as a Jinja template gets each interpolated value
@@ -223,7 +232,9 @@ pub fn resolve_step_spec(step_type: &str, spec: &mut Value, ctx: &HclContext) ->
         }
     }
 
-    let result = resolve_expressions(spec, ctx, true);
+    // Not strict: a `${...}` that is not an expression, such as a shell variable, is
+    // left as it is, and the expressions after it are still resolved
+    let result = resolve_expressions(spec, ctx, false);
 
     for (pointer, text) in templates {
         let resolved = resolve_jinja_template(&text, ctx).unwrap_or(text);

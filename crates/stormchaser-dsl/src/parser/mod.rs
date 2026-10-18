@@ -88,7 +88,7 @@ impl StormchaserParser {
 
         let blocks = workflow::parse_workflow_blocks(workflow_block.body())?;
 
-        Ok(Workflow {
+        let mut workflow = Workflow {
             is_template,
             dsl_version,
             name,
@@ -110,7 +110,9 @@ impl StormchaserParser {
             steps: blocks.steps,
             on_failure: blocks.on_failure,
             finally: blocks.finally,
-        })
+        };
+        crate::libraries::apply_step_libraries(&mut workflow)?;
+        Ok(workflow)
     }
 
     pub fn parse_steps(&self, body: &Body) -> Result<Vec<Step>> {

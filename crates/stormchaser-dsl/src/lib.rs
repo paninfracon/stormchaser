@@ -8,6 +8,8 @@ pub mod ast;
 /// The input form derived from a workflow.
 pub mod form;
 pub mod hcl_schema;
+/// Step libraries, applied to the steps that name them.
+pub mod libraries;
 pub mod parser;
 
 pub use parser::StormchaserParser;

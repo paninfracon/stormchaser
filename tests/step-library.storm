@@ -7,40 +7,35 @@ workflow "step_library_demo" {
   step_library "python_env" {
     type = "RunContainer"
 
-    // Base container specification
+    // The library's arguments, with their defaults; a step sets the ones it changes
+    params {
+      python_version = "3.12"
+    }
+
+    // Base container specification, which uses the params
     spec {
-      image  = "python:3.12-slim"
+      image  = "python:${params.python_version}-slim"
       cpu    = "500m"
       memory = "1Gi"
       env = [
         { name = "PYTHONDONTWRITEBYTECODE", value = "1" },
         { name = "PYTHONUNBUFFERED", value = "1" },
       ]
+      command = ["python", "-c", "import sys; print('Python', sys.version)"]
     }
 
-    // Default timeout and retry policies for all steps using this library
+    // Default timeout for all steps using this library
     timeout = "10m"
-    retry {
-      max_attempts     = 3
-      backoff          = "exponential"
-      initial_interval = "5s"
-    }
   }
 
   steps {
-    // This step inherits the 'python_env' properties
-    step "check" "python_env" {
-      spec {
-        command = ["python", "-c", "import sys; print('Python', sys.version)"]
-      }
-    }
+    // This step inherits the 'python_env' properties and its default python_version
+    step "check" "python_env" {}
 
-    // This step also inherits 'python_env'; what it sets in its own spec, here the
-    // image, takes precedence over the library's
+    // This step also inherits 'python_env', but overrides the python_version param
     step "check_older" "python_env" {
-      spec {
-        image   = "python:3.11-slim"
-        command = ["python", "-c", "import sys; print('Python', sys.version)"]
+      params {
+        python_version = "3.11"
       }
       next = ["check"] // Run on the older Python, then the newer
     }

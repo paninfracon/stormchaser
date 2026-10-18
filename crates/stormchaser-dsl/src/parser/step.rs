@@ -8,7 +8,8 @@ use stormchaser_model::dsl;
 use crate::ast::Step;
 
 use super::expr::{
-    block_to_value, expr_to_string, expr_to_string_vec, expr_to_value, merge_spec_attr,
+    block_to_value, expr_to_param, expr_to_string, expr_to_string_vec, expr_to_value,
+    merge_spec_attr,
 };
 
 pub fn parse_steps(body: &Body) -> Result<Vec<Step>> {
@@ -113,8 +114,10 @@ fn apply_step_inner_blocks(
         match inner_block.identifier() {
             "params" => {
                 for attr in inner_block.body().attributes() {
-                    step.params
-                        .insert(attr.key().to_string(), expr_to_string(attr.expr())?);
+                    step.params.insert(
+                        attr.key().to_string(),
+                        expr_to_param(attr.key(), attr.expr())?,
+                    );
                 }
             }
             "aliases" => {

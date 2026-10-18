@@ -36,10 +36,12 @@ fn test_parse_step_library() {
     assert_eq!(lib.params.get("tag").unwrap(), "latest");
     assert_eq!(lib.spec["image"], "ubuntu:22.04");
 
+    // The step is the library's step, with its own settings on top
     let step = &workflow.steps[0];
-    assert_eq!(step.r#type, "ubuntu_base");
+    assert_eq!(step.r#type, "RunContainer");
     assert_eq!(step.params.get("tag").unwrap(), "v1");
     assert_eq!(step.spec["command"][0], "echo");
+    assert_eq!(step.spec["image"], "ubuntu:22.04");
 }
 
 #[test]

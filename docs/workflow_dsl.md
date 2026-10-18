@@ -967,7 +967,7 @@ workflow "ContainerBuildAndDeploy" {
 
 ## Step Libraries
 
-You can define reusable steps inside a workflow using the `step_library` block. When you define a step that uses the library name as its `type`, it will inherit the properties defined in the library. Properties defined on the step itself will be merged with the library (with the step's properties taking precedence).
+You can define reusable steps inside a workflow using the `step_library` block. A step that names the library as its `type` becomes a step of the library's type, with the library's `spec`, `params`, `timeout` and `allow_failure`. Whatever the step sets itself takes precedence: its `params` replace the library's of the same name, and each key of its `spec` replaces the library's value for that key whole (an `env` list the step sets replaces the library's list rather than adding to it).
 
 ```hcl
 step_library "ubuntu_base" {
@@ -983,6 +983,37 @@ step "my_step" "ubuntu_base" {
   }
 }
 ```
+
+### Parameters
+
+A library's `params` are its arguments, with the values it gives them by default. Its `spec` uses them as `${params.<name>}`, and a step that uses the library sets the ones it wants changed:
+
+```hcl
+step_library "python_env" {
+  type = "RunContainer"
+  params {
+    python_version = "3.12"
+    test_selection = "${inputs.selection}"
+  }
+  spec {
+    image   = "python:${params.python_version}-slim"
+    command = ["sh", "-c", "pip install pytest && pytest -k '${params.test_selection}'"]
+  }
+}
+
+step "unit_tests" "python_env" {}
+
+step "unit_tests_older" "python_env" {
+  params {
+    python_version = "3.11"
+  }
+}
+```
+
+* A param's value is a string, number or boolean; a list or a map is an error. Numbers and booleans become their text.
+* A param's value can use the run's `inputs`, `secrets`, `steps` outputs and the iteration item, as a spec can. Params are resolved first, then the spec; a param cannot use another param.
+* A spec that uses a param that neither the step nor its library sets is an error when the workflow is parsed, naming the step and the param.
+* A step that uses no library can set `params` too, and its own `spec` can use them the same way.
 
 ## Template Workflows and Includes
 
