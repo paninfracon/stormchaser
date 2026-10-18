@@ -293,6 +293,15 @@ pub fn is_terminal_step_status(status: &StepStatus) -> bool {
     )
 }
 
+/// Whether a step has finished in a way that lets the steps after it, and its run, go on:
+/// it succeeded, was skipped, or failed with `allow_failure` set.
+pub fn step_lets_run_continue(status: &StepStatus) -> bool {
+    matches!(
+        *status,
+        StepStatus::Succeeded | StepStatus::Skipped | StepStatus::FailedIgnored
+    )
+}
+
 /// The reports a step declares in its workflow, which are the only ones it may hand in.
 ///
 /// A run whose stored definition cannot be read declares none.

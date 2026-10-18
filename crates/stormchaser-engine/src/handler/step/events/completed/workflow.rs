@@ -7,9 +7,10 @@ use stormchaser_dsl::ast::Workflow;
 use stormchaser_model::events::{
     EventSource, EventType, WorkflowCompletedEvent, WorkflowEventType,
 };
-use stormchaser_model::step::StepStatus;
 use stormchaser_model::RunId;
 use tracing::{error, info};
+
+use super::super::helpers::step_lets_run_continue;
 
 pub async fn check_workflow_completion(
     tx: &mut sqlx::PgConnection,
@@ -29,7 +30,7 @@ pub async fn check_workflow_completion(
         let is_done = !step_instances.is_empty()
             && step_instances
                 .iter()
-                .all(|s| s.status == StepStatus::Succeeded || s.status == StepStatus::Skipped);
+                .all(|s| step_lets_run_continue(&s.status));
 
         tracing::info!(
             "Step {} done? {} (instances: {})",

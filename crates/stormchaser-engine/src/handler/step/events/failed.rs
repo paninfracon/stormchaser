@@ -1,10 +1,14 @@
-use crate::handler::{archive_workflow, dispatch_pending_steps, fetch_run, fetch_step_instance};
+use crate::handler::step::dispatch::find_step;
+use crate::handler::{
+    archive_workflow, dispatch_pending_steps, fetch_run, fetch_run_context, fetch_step_instance,
+};
 use crate::workflow_machine::{state, WorkflowMachine};
 use anyhow::Result;
 use chrono::Utc;
 use opentelemetry::KeyValue;
 use sqlx::PgPool;
 use std::sync::Arc;
+use stormchaser_dsl::ast::Workflow;
 use stormchaser_model::events::WorkflowFailedEvent;
 use stormchaser_model::events::{EventSource, EventType, WorkflowEventType};
 use stormchaser_tls::TlsReloader;
@@ -12,6 +16,7 @@ use tracing::{error, info};
 
 use crate::handler::step::quota::release_step_quota_for_instance;
 
+use super::completed::{advance_run, after_advance};
 use super::helpers::{
     completion_authorized, declared_test_reports, is_terminal_step_status,
     persist_step_test_reports, reporter_is_assigned_runner, step_belongs_to_run,
@@ -100,13 +105,16 @@ pub async fn handle_step_failed(
             instance.clone(),
         );
 
-    if lost_zombie {
+    let failed = if lost_zombie {
         let _ = machine.zombify(&mut *tx).await?;
+        None
     } else {
-        let _ = machine
-            .fail(error_msg.to_string(), exit_code, &mut *tx)
-            .await?;
-    }
+        Some(
+            machine
+                .fail(error_msg.to_string(), exit_code, &mut *tx)
+                .await?,
+        )
+    };
 
     let step_name = instance.step_name.clone();
     let attributes = [
@@ -150,6 +158,46 @@ pub async fn handle_step_failed(
             &pool,
         )
         .await?;
+    }
+
+    // A step that sets allow_failure fails without failing its run, which goes on as if
+    // the step had succeeded. A runner that is lost is not a step that failed.
+    if let Some(failed) = failed {
+        let context = fetch_run_context(run_id, &mut *tx).await?;
+        let workflow_ast: Option<Workflow> =
+            match serde_json::from_value(context.workflow_definition.clone()) {
+                Ok(workflow) => Some(workflow),
+                Err(e) => {
+                    // The run cannot go on without it, so it fails
+                    error!("Run {}'s workflow definition does not parse: {}", run_id, e);
+                    None
+                }
+            };
+        let allowed = workflow_ast.as_ref().and_then(|w| {
+            find_step(&w.steps, &step_name).filter(|s| s.allow_failure == Some(true))
+        });
+        if let (Some(workflow_ast), Some(dsl_step)) = (&workflow_ast, allowed) {
+            failed.ignore_failure(&mut *tx).await?;
+            info!(
+                "Step {} (Run {}) is allowed to fail; the run continues",
+                step_id, run_id
+            );
+            let all_steps = crate::db::get_step_instances_by_run_id(&mut *tx, run_id).await?;
+            let finished = advance_run(
+                &mut *tx,
+                run_id,
+                Some(dsl_step),
+                &all_steps,
+                &context,
+                workflow_ast,
+                nats_client.clone(),
+                pool.clone(),
+                tls_reloader.clone(),
+            )
+            .await?;
+            tx.commit().await?;
+            return after_advance(finished, run_id, pool, nats_client, tls_reloader).await;
+        }
     }
 
     let run = fetch_run(run_id, &mut *tx).await?;

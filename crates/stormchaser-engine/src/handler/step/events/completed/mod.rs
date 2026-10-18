@@ -6,8 +6,9 @@ use chrono::Utc;
 use opentelemetry::KeyValue;
 use sqlx::PgPool;
 use std::sync::Arc;
-use stormchaser_dsl::ast::Workflow;
-use stormchaser_model::LogBackend;
+use stormchaser_dsl::ast::{Step, Workflow};
+use stormchaser_model::workflow::RunContext;
+use stormchaser_model::{LogBackend, RunId};
 use stormchaser_tls::TlsReloader;
 use tracing::{debug, info};
 
@@ -119,7 +120,7 @@ pub async fn handle_step_completed(
         crate::db::get_step_instances_by_run_id(&mut *tx, run_id).await?;
 
     let context = fetch_run_context(run_id, &mut *tx).await?;
-    let workflow_ast: Workflow = serde_json::from_value(context.workflow_definition)
+    let workflow_ast: Workflow = serde_json::from_value(context.workflow_definition.clone())
         .context("Failed to parse workflow definition from DB")?;
 
     let current_step_instance = all_steps
@@ -207,55 +208,79 @@ pub async fn handle_step_completed(
         .await?;
     }
 
-    let mut should_archive = false;
-    if let Some(step) = dsl_step {
-        if process::process_step_completion(
-            &step,
-            &all_steps,
-            run_id,
-            &mut *tx,
-            nats_client.clone(),
-            pool.clone(),
-            tls_reloader.clone(),
-            context.inputs.clone(),
-            context.secrets.clone(),
-            &workflow_ast,
-        )
-        .await?
-        {
-            should_archive = workflow::check_workflow_completion(
-                &mut *tx,
-                run_id,
-                &workflow_ast,
-                nats_client.clone(),
-            )
-            .await?;
-        }
-    } else {
-        should_archive = workflow::check_workflow_completion(
-            &mut *tx,
-            run_id,
-            &workflow_ast,
-            nats_client.clone(),
-        )
-        .await?;
-    }
+    let finished = advance_run(
+        &mut *tx,
+        run_id,
+        dsl_step.as_ref(),
+        &all_steps,
+        &context,
+        &workflow_ast,
+        nats_client.clone(),
+        pool.clone(),
+        tls_reloader.clone(),
+    )
+    .await?;
 
     tx.commit().await?;
 
-    if should_archive {
-        archive_workflow(run_id, pool.clone()).await?;
-    } else {
-        if let Err(e) =
-            crate::handler::dispatch_pending_steps(run_id, pool, nats_client, tls_reloader).await
-        {
-            tracing::error!(
-                "Failed to dispatch pending steps for run {}: {:?}",
-                run_id,
-                e
-            );
+    after_advance(finished, run_id, pool, nats_client, tls_reloader).await
+}
+
+/// Moves a run on after one of its steps finished in a way that lets it continue:
+/// schedules what waited on the step and, once every step is done, completes the run.
+/// Returns whether the run finished, for [`after_advance`] once `tx` commits.
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn advance_run(
+    tx: &mut sqlx::PgConnection,
+    run_id: RunId,
+    dsl_step: Option<&Step>,
+    all_steps: &[StepInstance],
+    context: &RunContext,
+    workflow_ast: &Workflow,
+    nats_client: async_nats::Client,
+    pool: PgPool,
+    tls_reloader: Arc<TlsReloader>,
+) -> Result<bool> {
+    if let Some(step) = dsl_step {
+        let step_done = process::process_step_completion(
+            step,
+            all_steps,
+            run_id,
+            &mut *tx,
+            nats_client.clone(),
+            pool,
+            tls_reloader,
+            context.inputs.clone(),
+            context.secrets.clone(),
+            workflow_ast,
+        )
+        .await?;
+        if !step_done {
+            return Ok(false);
         }
     }
+    workflow::check_workflow_completion(&mut *tx, run_id, workflow_ast, nats_client).await
+}
 
+/// Archives a run that [`advance_run`] finished, or dispatches the steps it scheduled
+pub(super) async fn after_advance(
+    finished: bool,
+    run_id: RunId,
+    pool: PgPool,
+    nats_client: async_nats::Client,
+    tls_reloader: Arc<TlsReloader>,
+) -> Result<()> {
+    if finished {
+        return archive_workflow(run_id, pool).await;
+    }
+    if let Err(e) =
+        crate::handler::dispatch_pending_steps(run_id, pool, nats_client, tls_reloader).await
+    {
+        tracing::error!(
+            "Failed to dispatch pending steps for run {}: {:?}",
+            run_id,
+            e
+        );
+    }
     Ok(())
 }

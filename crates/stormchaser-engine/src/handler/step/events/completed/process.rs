@@ -10,6 +10,8 @@ use stormchaser_model::step::StepStatus;
 use stormchaser_model::RunId;
 use stormchaser_tls::TlsReloader;
 
+use super::super::helpers::step_lets_run_continue;
+
 #[allow(clippy::too_many_arguments)]
 pub async fn process_step_completion(
     dsl_step: &ast::Step,
@@ -75,7 +77,7 @@ async fn schedule_iterated_batches(
 
     let finished_instances = all_instances_of_this_step
         .iter()
-        .filter(|s| s.status == StepStatus::Succeeded || s.status == StepStatus::Skipped)
+        .filter(|s| step_lets_run_continue(&s.status))
         .count();
 
     let total_instances = all_instances_of_this_step.len();
@@ -166,7 +168,7 @@ async fn evaluate_successors(
             !pred_instances.is_empty()
                 && pred_instances
                     .iter()
-                    .all(|s| s.status == StepStatus::Succeeded || s.status == StepStatus::Skipped)
+                    .all(|s| step_lets_run_continue(&s.status))
         });
 
         if all_predecessors_done {
