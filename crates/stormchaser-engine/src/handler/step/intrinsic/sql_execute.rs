@@ -87,14 +87,7 @@ pub(crate) async fn handle_sql_execute(
     });
 
     let outputs = HashMap::from([("result".to_string(), output)]);
-    report_step_completed(
-        &mut *pool.acquire().await?,
-        run_id,
-        step_id,
-        fencing_token,
-        Some(outputs),
-    )
-    .await
+    report_step_completed(&pool, run_id, step_id, fencing_token, Some(outputs)).await
 }
 
 async fn execute_sql_query(

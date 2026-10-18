@@ -63,6 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A built-in step whose result could not be written because the database was briefly unreachable no longer stays running until its run times out, and RestApi no longer reports such a step failed after its call succeeded. The engine tries the write again for up to 10 minutes, on a fresh connection each time, and an engine-made result no longer goes out without the step's completion token when the token could not be read. Found by stopping Postgres for 20 seconds under load with two engines.
 - A queued run whose resolution meets a transient failure, such as an OPA server or database that is briefly unreachable, is resolved again when its event is delivered again, instead of failing for good. Failures of the workflow's own (an unreadable file, a denied policy, invalid inputs) still fail the run.
 - Built-in steps (RestApi, SqlExecute, JQ, Wasm) whose result the outbox would not take no longer hang until their run times out with nothing logged; the failure is reported, or logged when even that is not possible. JinjaRender and LambdaInvoke save their output and their result together.
 - A runner's step whose engine died while dispatching it is dispatched again, never failed as a built-in step would be.

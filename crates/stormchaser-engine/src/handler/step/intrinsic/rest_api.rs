@@ -1,13 +1,11 @@
+use crate::handler::integrations::utils::report_step_completed;
 use crate::handler::{fetch_outputs, fetch_run_context, fetch_step_instance};
 use anyhow::{Context, Result};
 use serde_json::Value;
 use sqlx::PgPool;
+use std::collections::HashMap;
 use std::time::Duration;
 use stormchaser_model::dsl::{RestApiResponseExtractor, RestApiSpec};
-use stormchaser_model::events::{
-    EventSource, EventType, SchemaVersion, StepCompletedEvent, StepEventType,
-};
-use stormchaser_model::nats::NatsSubject;
 use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
 use tracing::{info, warn};
@@ -258,14 +256,12 @@ fn normalize_json_pointer(path: &str) -> String {
     }
 }
 
+/// The step's outputs from a successful response
 fn parse_response(
     status_is_success: bool,
     body_bytes: &[u8],
     spec: &RestApiSpec,
-    run_id: RunId,
-    step_id: StepInstanceId,
-    fencing_token: i64,
-) -> Result<StepCompletedEvent> {
+) -> Result<HashMap<String, Value>> {
     if status_is_success {
         let body_val: Value = serde_json::from_slice(body_bytes)
             .unwrap_or_else(|_| serde_json::json!({ "text": String::from_utf8_lossy(body_bytes) }));
@@ -276,20 +272,7 @@ fn parse_response(
 
         apply_extractors(spec, &body_val, &body_text, &mut final_outputs);
 
-        Ok(StepCompletedEvent {
-            run_id,
-            step_id,
-            fencing_token,
-            completion_token: None,
-            event_type: EventType::Step(StepEventType::Completed),
-            test_reports: None,
-            artifacts: None,
-            storage_hashes: None,
-            outputs: Some(final_outputs.into_iter().collect()),
-            timestamp: chrono::Utc::now(),
-            exit_code: Some(0),
-            runner_id: Some("engine-intrinsic".to_string()),
-        })
+        Ok(final_outputs.into_iter().collect())
     } else {
         let error_body = String::from_utf8_lossy(body_bytes).to_string();
         anyhow::bail!("RestApi failed with error body: {}", error_body);
@@ -333,38 +316,9 @@ async fn execute_request(
     )
     .await?;
 
-    match parse_response(
-        status.is_success(),
-        &body_bytes,
-        spec,
-        run_id,
-        step_id,
-        fencing_token,
-    ) {
-        Ok(mut event) => {
-            event.completion_token = crate::db::step_completion_token(&pool, step_id).await;
-            let event_payload = serde_json::to_value(event)
-                .context("failed to serialize RestApi completion event")?;
-
-            crate::db::outbox::insert_outbox_event(
-                &pool,
-                NatsSubject::StepCompleted(Some(stormchaser_model::nats::compute_shard_id(
-                    &run_id,
-                ))),
-                EventType::Step(StepEventType::Completed),
-                EventSource::System,
-                event_payload,
-                Some(SchemaVersion::new("1.0".to_string())),
-                None,
-            )
-            .await
-            .context("failed to publish RestApi completion event")?;
-            Ok(())
-        }
-        Err(e) => {
-            anyhow::bail!("RestApi failed with status {}: {}", status, e);
-        }
-    }
+    let outputs = parse_response(status.is_success(), &body_bytes, spec)
+        .map_err(|e| anyhow::anyhow!("RestApi failed with status {}: {}", status, e))?;
+    report_step_completed(&pool, run_id, step_id, fencing_token, Some(outputs)).await
 }
 
 #[cfg(test)]
@@ -662,9 +616,6 @@ mod tests {
 
     #[test]
     fn test_parse_response_success() {
-        use stormchaser_model::StepInstanceId;
-        let run_id = RunId::new(Uuid::new_v4());
-        let step_id = StepInstanceId::new(Uuid::new_v4());
         let spec = RestApiSpec {
             connection: None,
             url: "http://example.com".to_string(),
@@ -676,18 +627,13 @@ mod tests {
         };
 
         let body = b"{\"hello\":\"world\"}";
-        let result = parse_response(true, body, &spec, run_id, step_id, 1).unwrap();
+        let outputs = parse_response(true, body, &spec).unwrap();
 
-        assert_eq!(result.exit_code, Some(0));
-        let outputs = result.outputs.unwrap();
         assert_eq!(outputs.get("response").unwrap(), &json!({"hello": "world"}));
     }
 
     #[test]
     fn test_parse_response_failure() {
-        use stormchaser_model::StepInstanceId;
-        let run_id = RunId::new(Uuid::new_v4());
-        let step_id = StepInstanceId::new(Uuid::new_v4());
         let spec = RestApiSpec {
             connection: None,
             url: "http://example.com".to_string(),
@@ -699,7 +645,7 @@ mod tests {
         };
 
         let body = b"Internal Server Error";
-        let err = parse_response(false, body, &spec, run_id, step_id, 1).unwrap_err();
+        let err = parse_response(false, body, &spec).unwrap_err();
 
         assert!(err
             .to_string()

@@ -45,8 +45,66 @@ pub async fn fetch_http_api_url_from_connection(
 
 /// Reports that a step the engine runs itself has completed. The result goes through
 /// the outbox to the step-completed handler, as a runner's would, carrying the step's
-/// completion token. On a transaction, the result commits with what the step wrote.
+/// completion token. Tried again while the database is unreachable: no event would
+/// bring the result back, and the step would never end.
 pub async fn report_step_completed(
+    pool: &PgPool,
+    run_id: RunId,
+    step_id: StepInstanceId,
+    fencing_token: i64,
+    outputs: Option<HashMap<String, Value>>,
+) -> Result<()> {
+    crate::retry::persist("record a built-in step's result", || async {
+        let mut conn = pool.acquire().await?;
+        queue_step_completed(&mut conn, run_id, step_id, fencing_token, outputs.clone()).await
+    })
+    .await
+}
+
+/// Reports a built-in step's completion together with the one output it produced, so
+/// that the step cannot be left with one and not the other. Tried again as
+/// [`report_step_completed`] is.
+pub async fn report_step_output_and_completion(
+    pool: &PgPool,
+    run_id: RunId,
+    step_id: StepInstanceId,
+    fencing_token: i64,
+    key: &str,
+    value: &Value,
+) -> Result<()> {
+    crate::retry::persist("record a built-in step's output and result", || async {
+        let mut tx = pool.begin().await?;
+        crate::db::upsert_step_output(&mut *tx, step_id, key, value).await?;
+        let outputs = HashMap::from([(key.to_string(), value.clone())]);
+        queue_step_completed(&mut tx, run_id, step_id, fencing_token, Some(outputs)).await?;
+        tx.commit().await?;
+        Ok(())
+    })
+    .await
+}
+
+/// Reports that a step the engine runs itself has failed, as [`report_step_completed`]
+/// does its completion. The failure goes to the step-failed handler, as a runner's
+/// would, so that the run's failure handling follows; marking the step failed here
+/// instead would leave the handler nothing to do.
+pub async fn report_step_failed(
+    pool: &PgPool,
+    run_id: RunId,
+    step_id: StepInstanceId,
+    fencing_token: i64,
+    error: impl Into<String>,
+) -> Result<()> {
+    let error = error.into();
+    crate::retry::persist("record a built-in step's failure", || async {
+        let mut conn = pool.acquire().await?;
+        queue_step_failed(&mut conn, run_id, step_id, fencing_token, error.clone()).await
+    })
+    .await
+}
+
+/// Queues a built-in step's completion on `conn`, without trying again. On a
+/// transaction, the result commits with what the step wrote.
+pub async fn queue_step_completed(
     conn: &mut PgConnection,
     run_id: RunId,
     step_id: StepInstanceId,
@@ -54,7 +112,7 @@ pub async fn report_step_completed(
     outputs: Option<HashMap<String, Value>>,
 ) -> Result<()> {
     let event = StepCompletedEvent {
-        completion_token: crate::db::step_completion_token(&mut *conn, step_id).await,
+        completion_token: crate::db::read_step_completion_token(&mut *conn, step_id).await?,
         outputs,
         exit_code: Some(0),
         ..StepCompletedEvent::new(run_id, step_id, fencing_token)
@@ -62,11 +120,8 @@ pub async fn report_step_completed(
     crate::db::outbox::insert_step_completed(conn, &event).await
 }
 
-/// Reports that a step the engine runs itself has failed. The failure goes through the
-/// outbox to the step-failed handler, as a runner's would, so that the run's failure
-/// handling follows; marking the step failed here instead would leave the handler
-/// nothing to do.
-pub async fn report_step_failed(
+/// Queues a built-in step's failure on `conn`, without trying again.
+pub async fn queue_step_failed(
     conn: &mut PgConnection,
     run_id: RunId,
     step_id: StepInstanceId,
@@ -74,7 +129,7 @@ pub async fn report_step_failed(
     error: impl Into<String>,
 ) -> Result<()> {
     let event = StepFailedEvent {
-        completion_token: crate::db::step_completion_token(&mut *conn, step_id).await,
+        completion_token: crate::db::read_step_completion_token(&mut *conn, step_id).await?,
         ..StepFailedEvent::new(run_id, step_id, fencing_token, error)
     };
     crate::db::outbox::insert_step_failed(conn, &event).await

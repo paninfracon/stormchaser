@@ -95,7 +95,7 @@ pub async fn handle_teams_message(
     let status = res.status();
     if status.is_success() {
         super::utils::report_step_completed(
-            &mut *pool.acquire().await?,
+            &pool,
             run_id,
             step_instance_id,
             fencing_token,

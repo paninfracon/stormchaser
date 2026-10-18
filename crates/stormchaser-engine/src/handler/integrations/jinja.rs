@@ -2,10 +2,9 @@ use crate::handler::{fetch_outputs, fetch_run_context, fetch_step_instance};
 use anyhow::Result;
 use serde_json::Value;
 use sqlx::PgPool;
-use std::collections::HashMap;
 use stormchaser_model::dsl::JinjaRenderSpec;
 
-use super::utils::report_step_completed;
+use super::utils::report_step_output_and_completion;
 use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
 use tracing::info;
@@ -85,25 +84,16 @@ async fn save_output_and_complete(
     rendered: String,
     pool: PgPool,
 ) -> Result<()> {
-    let mut tx = pool.begin().await?;
-
-    let output_key = spec
-        .output_key
-        .clone()
-        .unwrap_or_else(|| "result".to_string());
-    crate::db::upsert_step_output(
-        &mut *tx,
+    let output_key = spec.output_key.as_deref().unwrap_or("result");
+    report_step_output_and_completion(
+        &pool,
+        run_id,
         step_id,
-        &output_key,
-        &Value::String(rendered.clone()),
+        0,
+        output_key,
+        &Value::String(rendered),
     )
-    .await?;
-
-    let outputs = HashMap::from([(output_key, Value::String(rendered))]);
-    // With the output, so that the step cannot be left with one and not the other
-    report_step_completed(&mut *tx, run_id, step_id, 0, Some(outputs)).await?;
-    tx.commit().await?;
-    Ok(())
+    .await
 }
 
 #[cfg(test)]

@@ -168,11 +168,7 @@ pub async fn dispatch_pending_steps(
             );
             warn!("Run {}: {}", run_id, error);
             crate::handler::integrations::utils::report_step_failed(
-                &mut *pool.acquire().await?,
-                run_id,
-                step.id,
-                0,
-                error,
+                &pool, run_id, step.id, 0, error,
             )
             .await?;
             continue;

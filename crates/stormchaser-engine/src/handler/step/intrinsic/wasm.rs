@@ -105,7 +105,7 @@ async fn execute_wasm_step(
                 _ => HashMap::new(),
             };
             report_step_completed(
-                &mut *pool.acquire().await?,
+                &pool,
                 run_id,
                 step_instance_id,
                 fencing_token,
@@ -115,7 +115,7 @@ async fn execute_wasm_step(
         }
         Err(e) => {
             report_step_failed(
-                &mut *pool.acquire().await?,
+                &pool,
                 run_id,
                 step_instance_id,
                 fencing_token,

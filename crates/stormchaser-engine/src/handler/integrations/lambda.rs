@@ -3,13 +3,11 @@ use serde_json::Value;
 use sqlx::PgPool;
 
 #[cfg(feature = "aws-lambda")]
-use super::utils::{report_step_completed, report_step_failed};
+use super::utils::{report_step_failed, report_step_output_and_completion};
 #[cfg(feature = "aws-lambda")]
 use crate::handler::fetch_step_instance;
 #[cfg(feature = "aws-lambda")]
 use anyhow::Context;
-#[cfg(feature = "aws-lambda")]
-use std::collections::HashMap;
 #[cfg(feature = "aws-lambda")]
 use stormchaser_model::dsl::{self};
 #[cfg(feature = "aws-lambda")]
@@ -150,19 +148,14 @@ async fn handle_lambda_response(
     };
 
     if (200..300).contains(&status_code) {
-        let mut tx = pool.begin().await?;
-        crate::db::upsert_step_output(&mut *tx, step_id, "response", &payload).await?;
-        let outputs = HashMap::from([("response".to_string(), payload)]);
-        report_step_completed(&mut *tx, run_id, step_id, 0, Some(outputs)).await?;
-        tx.commit().await?;
-        Ok(())
+        report_step_output_and_completion(&pool, run_id, step_id, 0, "response", &payload).await
     } else {
         let error = format!(
             "Lambda returned status code {}: {:?}",
             status_code,
             response.function_error()
         );
-        report_step_failed(&mut *pool.acquire().await?, run_id, step_id, 0, error).await
+        report_step_failed(&pool, run_id, step_id, 0, error).await
     }
 }
 

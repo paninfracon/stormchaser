@@ -201,14 +201,8 @@ pub(crate) async fn complete_email_step(
     step_id: stormchaser_model::StepInstanceId,
     pool: PgPool,
 ) -> Result<()> {
-    crate::handler::integrations::utils::report_step_completed(
-        &mut *pool.acquire().await?,
-        run_id,
-        step_id,
-        0,
-        None,
-    )
-    .await
+    crate::handler::integrations::utils::report_step_completed(&pool, run_id, step_id, 0, None)
+        .await
 }
 
 #[cfg(feature = "email")]
@@ -219,14 +213,8 @@ pub(crate) async fn fail_email_step(
     pool: PgPool,
 ) -> Result<()> {
     error!("{}", error_msg);
-    crate::handler::integrations::utils::report_step_failed(
-        &mut *pool.acquire().await?,
-        run_id,
-        step_id,
-        0,
-        error_msg,
-    )
-    .await
+    crate::handler::integrations::utils::report_step_failed(&pool, run_id, step_id, 0, error_msg)
+        .await
 }
 
 #[cfg(not(feature = "email"))]

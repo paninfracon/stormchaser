@@ -221,7 +221,7 @@ pub async fn try_dispatch_intrinsic(step: BuiltInStep) -> Result<bool> {
 
 async fn report_failure(step: &BuiltInStep, error: anyhow::Error) -> Result<()> {
     report_step_failed(
-        &mut *step.pool.acquire().await?,
+        &step.pool,
         step.run_id,
         step.step_id,
         step.fencing_token,

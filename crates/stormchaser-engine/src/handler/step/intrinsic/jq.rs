@@ -95,7 +95,7 @@ pub(crate) async fn run_jq(
         Ok(outputs) => {
             let outputs = HashMap::from([("result".to_string(), outputs)]);
             report_step_completed(
-                &mut *pool.acquire().await?,
+                &pool,
                 run_id,
                 step_instance_id,
                 fencing_token,
@@ -105,7 +105,7 @@ pub(crate) async fn run_jq(
         }
         Err(e) => {
             report_step_failed(
-                &mut *pool.acquire().await?,
+                &pool,
                 run_id,
                 step_instance_id,
                 fencing_token,

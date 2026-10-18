@@ -5,6 +5,7 @@
 //! transaction as a serialization or deadlock victim. Everything else, from a bad
 //! payload to a run in the wrong state, fails the same way every time.
 
+use std::future::Future;
 use std::time::Duration;
 
 /// How many times an event is delivered before the engine gives up on it.
@@ -69,6 +70,38 @@ pub fn backoff(delivered: i64) -> Duration {
     Duration::from_secs((1u64 << exponent).min(60))
 }
 
+/// How long a write that nothing else would retry is tried again while it fails
+/// transiently: a built-in step's result, which no event will bring back
+pub const PERSIST_FOR: Duration = Duration::from_secs(10 * 60);
+
+/// Runs `attempt` until it succeeds, fails in a way another try would not change, or
+/// [`PERSIST_FOR`] has passed, waiting longer between tries each time.
+pub async fn persist<T, F, Fut>(what: &str, mut attempt: F) -> anyhow::Result<T>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = anyhow::Result<T>>,
+{
+    let deadline = tokio::time::Instant::now() + PERSIST_FOR;
+    let mut tries = 1;
+    loop {
+        match attempt().await {
+            Err(e) if is_transient(&e) && tokio::time::Instant::now() < deadline => {
+                let delay = backoff(tries);
+                tracing::warn!(
+                    "Failed to {} (try {}), retrying in {:?}: {:#}",
+                    what,
+                    tries,
+                    delay,
+                    e
+                );
+                tokio::time::sleep(delay).await;
+                tries += 1;
+            }
+            result => return result,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -91,6 +124,36 @@ mod tests {
         assert!(!is_transient(
             &anyhow::Error::new(json).context("bad payload")
         ));
+    }
+
+    #[tokio::test]
+    async fn persist_tries_again_while_failures_are_transient() {
+        let mut tries = 0;
+        let result = persist("test", || {
+            tries += 1;
+            let attempt = tries;
+            async move {
+                if attempt < 3 {
+                    Err(anyhow::Error::new(sqlx::Error::PoolTimedOut))
+                } else {
+                    Ok(attempt)
+                }
+            }
+        })
+        .await;
+        assert_eq!(result.unwrap(), 3);
+    }
+
+    #[tokio::test]
+    async fn persist_gives_up_at_once_on_any_other_failure() {
+        let mut tries = 0;
+        let result: anyhow::Result<()> = persist("test", || {
+            tries += 1;
+            async { Err(anyhow::anyhow!("bad payload")) }
+        })
+        .await;
+        assert!(result.is_err());
+        assert_eq!(tries, 1);
     }
 
     #[test]

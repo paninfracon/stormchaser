@@ -119,14 +119,7 @@ async fn execute_webhook_request(
         );
 
         let outputs = std::collections::HashMap::from([("response".to_string(), body_val)]);
-        super::utils::report_step_completed(
-            &mut *pool.acquire().await?,
-            run_id,
-            step_id,
-            0,
-            Some(outputs),
-        )
-        .await
+        super::utils::report_step_completed(&pool, run_id, step_id, 0, Some(outputs)).await
     } else {
         let error_body = res
             .text()
