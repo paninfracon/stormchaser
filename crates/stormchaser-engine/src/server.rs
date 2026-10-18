@@ -381,18 +381,22 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
     let assigned_shards = parse_assigned_shards(&assigned_shards_env)?;
 
     // Before it takes any step, so that the steps it runs itself are never without one
-    crate::engine_instance::start_heartbeat(pool.clone())
+    let heartbeat = crate::engine_instance::start_heartbeat(pool.clone())
         .await
         .context("Failed to record the engine's first heartbeat")?;
 
     // Whatever its shards, one replica at a time runs the background workers
-    crate::leader::start_leader_election(pool.clone(), nats_client.clone(), tls_reloader.clone());
+    let leader_election = crate::leader::start_leader_election(
+        pool.clone(),
+        nats_client.clone(),
+        tls_reloader.clone(),
+    );
 
     let (messages, query_messages) = setup_nats_consumers(&nats_client, &assigned_shards).await?;
 
     info!("Engine listening for events and queries");
 
-    run_event_loop(
+    let event_loop = run_event_loop(
         messages,
         query_messages,
         pool,
@@ -401,10 +405,15 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
         nats_client,
         tls_reloader,
         log_backend,
-    )
-    .await;
-
-    Ok(())
+    );
+    // Neither task ends unless it panics. An engine without its heartbeat would have its
+    // built-in steps failed under it, and one out of the leader election would never
+    // run the background workers; exiting lets it be restarted whole.
+    tokio::select! {
+        _ = event_loop => Ok(()),
+        ended = heartbeat => anyhow::bail!("The engine's heartbeat stopped: {:?}", ended),
+        ended = leader_election => anyhow::bail!("The leader election stopped: {:?}", ended),
+    }
 }
 
 #[cfg(test)]

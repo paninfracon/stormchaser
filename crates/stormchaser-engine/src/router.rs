@@ -286,11 +286,13 @@ pub async fn handle_message(
     // or the engine dies handling it
     let delivered = deliveries(&message);
     if delivered > retry::MAX_DELIVERIES {
+        // Not the payload: a run's events carry its workflow and inputs
         tracing::error!(
-            "Giving up on {} after {} deliveries: {}",
+            "Giving up on {} after {} deliveries (run {}, step {})",
             subject,
             delivered,
-            payload
+            payload["run_id"].as_str().unwrap_or("unknown"),
+            payload["step_id"].as_str().unwrap_or("none")
         );
         let _ = message.double_ack().await;
         return;
