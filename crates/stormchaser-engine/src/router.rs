@@ -29,6 +29,29 @@ where
     });
 }
 
+/// [`spawn_handler`] for an event that starts a run or moves it on to starting. Given
+/// up on, the run is recorded as failed rather than left queued, or never created.
+fn spawn_run_handler<F>(
+    message: Message,
+    what: String,
+    subject: &'static str,
+    payload: Value,
+    pool: sqlx::PgPool,
+    handler: F,
+) where
+    F: Future<Output = anyhow::Result<()>> + Send + 'static,
+{
+    tokio::spawn(async move {
+        let result = with_progress(&message, handler).await;
+        let reason = result.as_ref().err().map(|e| format!("{:#}", e));
+        if settle(&message, &what, result).await {
+            if let Some(reason) = reason {
+                handler::abandon_run_event(subject, &payload, &pool, &reason).await;
+            }
+        }
+    });
+}
+
 async fn with_progress<F: Future>(message: &Message, handler: F) -> F::Output {
     tokio::pin!(handler);
     let mut ticks = tokio::time::interval(PROGRESS_INTERVAL);
@@ -51,10 +74,12 @@ fn deliveries(message: &Message) -> i64 {
         .unwrap_or(retry::MAX_DELIVERIES)
 }
 
-async fn settle(message: &Message, what: &str, result: anyhow::Result<()>) {
+/// Acknowledges the event, or asks for it again after a transient failure. Returns
+/// whether its handler failed and the event is given up on.
+async fn settle(message: &Message, what: &str, result: anyhow::Result<()>) -> bool {
     let Err(e) = result else {
         let _ = message.double_ack().await;
-        return;
+        return false;
     };
     let delivered = deliveries(message);
     if retry::is_transient(&e) && delivered < retry::MAX_DELIVERIES {
@@ -67,9 +92,11 @@ async fn settle(message: &Message, what: &str, result: anyhow::Result<()>) {
             e
         );
         let _ = message.ack_with(AckKind::Nak(Some(delay))).await;
+        false
     } else {
         tracing::error!("Failed to handle {}: {:?}", what, e);
         let _ = message.double_ack().await;
+        true
     }
 }
 
@@ -101,9 +128,12 @@ async fn handle_run_events(
 
     match subject {
         "stormchaser.v1.run.queued" => {
-            spawn_handler(
+            spawn_run_handler(
                 message,
                 format!("workflow queued event for {}", run_id),
+                "stormchaser.v1.run.queued",
+                payload.clone(),
+                pool.clone(),
                 async move {
                     handler::handle_workflow_queued(
                         stormchaser_model::RunId::new(run_id),
@@ -119,18 +149,24 @@ async fn handle_run_events(
             );
         }
         "stormchaser.v1.run.direct" => {
-            spawn_handler(
+            spawn_run_handler(
                 message,
                 format!("workflow direct event for {}", run_id),
+                "stormchaser.v1.run.direct",
+                payload.clone(),
+                pool.clone(),
                 async move {
                     handler::handle_workflow_direct(payload, pool, opa_client, nats_client).await
                 },
             );
         }
         "stormchaser.v1.run.start_pending" => {
-            spawn_handler(
+            spawn_run_handler(
                 message,
                 format!("workflow start_pending event for {}", run_id),
+                "stormchaser.v1.run.start_pending",
+                payload.clone(),
+                pool.clone(),
                 async move {
                     handler::handle_workflow_start_pending(
                         stormchaser_model::RunId::new(run_id),
@@ -295,6 +331,11 @@ pub async fn handle_message(
             payload["step_id"].as_str().unwrap_or("none")
         );
         let _ = message.double_ack().await;
+        let subject = subject.to_string();
+        tokio::spawn(async move {
+            let reason = format!("its handler did not finish in {} tries", delivered);
+            handler::abandon_run_event(&subject, &payload, &pool, &reason).await;
+        });
         return;
     }
 

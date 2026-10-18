@@ -194,7 +194,7 @@ pub async fn handle_workflow_direct(
 }
 
 /// A direct run refused before it was created
-struct Rejected<'a> {
+pub(super) struct Rejected<'a> {
     run_id: RunId,
     workflow: Option<&'a stormchaser_model::dsl::Workflow>,
     initiating_user: &'a str,
@@ -203,7 +203,7 @@ struct Rejected<'a> {
 }
 
 impl<'a> Rejected<'a> {
-    fn new(
+    pub(super) fn new(
         run_id: RunId,
         workflow: Option<&'a stormchaser_model::dsl::Workflow>,
         initiating_user: &'a str,
@@ -228,6 +228,11 @@ impl<'a> Rejected<'a> {
         }
         let reason = format!("{:#}", error);
         info!("Direct run {} refused: {}", self.run_id, reason);
+        self.record_failed(pool, &reason).await
+    }
+
+    /// Records the run as failed with `reason`
+    pub(super) async fn record_failed(&self, pool: &PgPool, reason: &str) -> Result<()> {
         let now = Utc::now();
         let mut tx = pool.begin().await?;
         crate::db::insert_workflow_run(
@@ -257,7 +262,7 @@ impl<'a> Rejected<'a> {
             self.inputs.clone(),
         )
         .await?;
-        crate::db::fail_workflow_run(&mut *tx, RunStatus::Failed, &reason, self.run_id).await?;
+        crate::db::fail_workflow_run(&mut *tx, RunStatus::Failed, reason, self.run_id).await?;
         tx.commit().await?;
         crate::handler::archive_workflow(self.run_id, pool.clone()).await
     }

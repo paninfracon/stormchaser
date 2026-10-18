@@ -297,6 +297,29 @@ where
     .await
 }
 
+/// Fails a run that has not started running yet: one that is queued, resolving or
+/// waiting to start
+pub async fn fail_starting_workflow_run<'a, E>(
+    executor: E,
+    error: &str,
+    id: RunId,
+) -> Result<PgQueryResult, sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    sqlx::query(
+        r#"
+        UPDATE workflow_runs
+        SET status = 'failed', finished_at = NOW(), updated_at = NOW(), version = version + 1, error = $1
+        WHERE id = $2 AND status IN ('queued', 'resolving', 'start_pending')
+        "#,
+    )
+    .bind(error)
+    .bind(id)
+    .execute(executor)
+    .await
+}
+
 #[allow(clippy::too_many_arguments)]
 /// Get workflow run by id.
 pub async fn get_workflow_run_by_id<'a, E, O>(executor: E, id: RunId) -> Result<O, sqlx::Error>
