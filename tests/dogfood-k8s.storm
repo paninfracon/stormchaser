@@ -80,7 +80,7 @@ workflow "dogfood" {
       env = [
         { name = "DATABASE_URL", value = "postgres://stormchaser:${inputs.db_password}@stormchaser-postgresql.stormchaser.svc.cluster.local:5432/stormchaser" }
       ]
-      command = ["/bin/sh", "-c"]
+      command = ["/bin/bash", "-c"]
       args = [<<-EOF
         set -eo pipefail
         apt-get update
@@ -110,7 +110,7 @@ workflow "dogfood" {
         { name = "NATS_USER", value = "stormchaser" },
         { name = "NATS_PASSWORD", value = inputs.nats_password }
       ]
-      command = ["/bin/sh", "-c"]
+      command = ["/bin/bash", "-c"]
       args = [<<-EOF
         set -eo pipefail
         apt-get update
