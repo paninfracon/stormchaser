@@ -191,7 +191,10 @@ workflow "dogfood" {
         # test_run_from_git: requires outbound HTTPS access to github.com for a live git clone,
         #   which is not available inside this step container; run this test locally with the
         #   full service stack instead.
-        SQLX_OFFLINE=true cargo test --release -p stormchaser-api --jobs 1 -- --test-threads=1 -Z unstable-options --format junit --skip test_enterprise_opa_rbac_integration --skip test_mcp_opa_policy --skip test_run_from_git > tests.xml
+        # users_see_and_change_only_what_they_own, a_report_is_only_served_under_its_own_run,
+        #   starting_a_run_needs_use_of_its_git_connection: start an OPA container with
+        #   Docker, which this step container does not have.
+        SQLX_OFFLINE=true cargo test --release -p stormchaser-api --jobs 1 -- --test-threads=1 -Z unstable-options --format junit --skip test_enterprise_opa_rbac_integration --skip test_mcp_opa_policy --skip test_run_from_git --skip users_see_and_change_only_what_they_own --skip a_report_is_only_served_under_its_own_run --skip starting_a_run_needs_use_of_its_git_connection > tests.xml
       EOF
       ]
       reports {
