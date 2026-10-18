@@ -7,7 +7,7 @@ use stormchaser_model::dsl;
 
 use crate::ast::Step;
 
-use super::expr::{block_to_value, expr_to_string, expr_to_value};
+use super::expr::{block_to_value, expr_to_string, expr_to_value, merge_spec_attr};
 use super::provision::{parse_provision_legacy_block, parse_provision_sub_block};
 use super::step::parse_steps;
 
@@ -312,12 +312,7 @@ fn parse_step_library_block(block: &Block) -> Result<dsl::StepLibrary> {
                     allow_failure = Some(b);
                 }
             }
-            // `spec = { ... }` means the same as a `spec { ... }` block
-            "spec" => {
-                if let Value::Object(fields) = expr_to_value(attr.expr())? {
-                    spec_map.extend(fields);
-                }
-            }
+            "spec" => merge_spec_attr(&mut spec_map, attr.expr())?,
             _ => {}
         }
     }

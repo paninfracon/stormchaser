@@ -102,3 +102,16 @@ pub fn block_to_value(block: &Block) -> Result<Value> {
     }
     Ok(Value::Object(map))
 }
+
+/// Adds a `spec = ...` attribute to a step's spec. `spec = { ... }` means the same as a
+/// `spec { ... }` block; any other value, such as an expression resolved when the step
+/// runs, is kept under `spec`, where the engine also looks.
+pub fn merge_spec_attr(spec_map: &mut Map<String, Value>, expr: &Expression) -> Result<()> {
+    match expr_to_value(expr)? {
+        Value::Object(fields) => spec_map.extend(fields),
+        other => {
+            spec_map.insert("spec".to_string(), other);
+        }
+    }
+    Ok(())
+}

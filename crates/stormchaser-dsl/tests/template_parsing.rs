@@ -135,3 +135,29 @@ fn test_spec_attribute_means_the_same_as_spec_block() {
         serde_json::json!({ "url": "https://paninfracon.net/hook" })
     );
 }
+
+#[test]
+fn a_spec_attribute_that_is_not_an_object_is_kept_in_steps_and_step_libraries_alike() {
+    let dsl = r#"
+        stormchaser_dsl_version = "0.1"
+        workflow "spec_value" {
+            step_library "from_input" {
+                type = "WebhookInvoke"
+                spec = "${inputs.webhook}"
+            }
+
+            steps {
+                step "from_input" "WebhookInvoke" {
+                    spec = "${inputs.webhook}"
+                }
+            }
+        }
+    "#;
+
+    let workflow = StormchaserParser::new()
+        .parse(dsl)
+        .expect("Failed to parse DSL");
+
+    assert_eq!(workflow.steps[0].spec["spec"], "${inputs.webhook}");
+    assert_eq!(workflow.step_libraries[0].spec, workflow.steps[0].spec);
+}

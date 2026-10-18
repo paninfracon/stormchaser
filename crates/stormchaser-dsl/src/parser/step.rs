@@ -7,7 +7,9 @@ use stormchaser_model::dsl;
 
 use crate::ast::Step;
 
-use super::expr::{block_to_value, expr_to_string, expr_to_string_vec, expr_to_value};
+use super::expr::{
+    block_to_value, expr_to_string, expr_to_string_vec, expr_to_value, merge_spec_attr,
+};
 
 pub fn parse_steps(body: &Body) -> Result<Vec<Step>> {
     let mut steps = Vec::new();
@@ -93,13 +95,7 @@ fn apply_step_attributes(
             }
             "timeout" => step.timeout = Some(expr_to_string(attr.expr())?),
             "artifacts" => step.artifacts = Some(expr_to_string_vec(attr.expr())?),
-            // `spec = { ... }` means the same as a `spec { ... }` block
-            "spec" => match expr_to_value(attr.expr())? {
-                Value::Object(fields) => spec_map.extend(fields),
-                other => {
-                    spec_map.insert("spec".to_string(), other);
-                }
-            },
+            "spec" => merge_spec_attr(spec_map, attr.expr())?,
             _ => {
                 spec_map.insert(attr.key().to_string(), expr_to_value(attr.expr())?);
             }
