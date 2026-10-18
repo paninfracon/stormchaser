@@ -1,8 +1,9 @@
+mod common;
+
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use std::env::var;
 use std::sync::Arc;
-use stormchaser_engine::handler;
 use stormchaser_model::auth::OpaClient;
 use stormchaser_model::RunId;
 use wiremock::matchers::{method, path};
@@ -38,13 +39,7 @@ async fn run_validation_test(dsl: &str, inputs: serde_json::Value) -> Result<(),
         "initiating_user": "test-user"
     });
 
-    handler::handle_workflow_direct(
-        payload,
-        pool.clone(),
-        opa_client.clone(),
-        nats_client.clone(),
-    )
-    .await
+    common::run_direct(payload, &pool, opa_client.clone(), nats_client.clone()).await
 }
 
 #[tokio::test]

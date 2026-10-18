@@ -42,21 +42,46 @@ pub async fn handle_workflow_direct(
     info!("Handling direct one-off workflow run: {}", run_id);
 
     // Nothing is recorded until the run is created below, so an event that fails
-    // transiently, an unreachable OPA server or database, can simply be delivered again
-    let parsed_workflow = StormchaserParser::new()
+    // transiently, an unreachable OPA server or database, can simply be delivered again.
+    // A run refused for good is recorded as failed, with why.
+    let parsed_workflow = match StormchaserParser::new()
         .parse(workflow_content)
-        .context("Direct workflow parsing failed")?;
-    check_policy(
-        &opa_client,
-        run_id,
-        &initiating_user,
-        &parsed_workflow,
-        &inputs,
-    )
-    .await?;
-    let (query_results, mut query_secrets) =
-        run_queries(run_id, &initiating_user, &parsed_workflow, &inputs, &pool).await?;
-    let inputs_to_save = validate_inputs(run_id, &parsed_workflow, inputs, query_results)?;
+        .context("Direct workflow parsing failed")
+    {
+        Ok(workflow) => workflow,
+        Err(e) => {
+            let rejected = Rejected::new(run_id, None, &initiating_user, workflow_content, &inputs);
+            return rejected.record(&pool, e).await;
+        }
+    };
+    let checked = async {
+        check_policy(
+            &opa_client,
+            run_id,
+            &initiating_user,
+            &parsed_workflow,
+            &inputs,
+        )
+        .await?;
+        let (query_results, query_secrets) =
+            run_queries(run_id, &initiating_user, &parsed_workflow, &inputs, &pool).await?;
+        let inputs = validate_inputs(run_id, &parsed_workflow, inputs.clone(), query_results)?;
+        anyhow::Ok((query_secrets, inputs))
+    }
+    .await;
+    let (mut query_secrets, inputs_to_save) = match checked {
+        Ok(checked) => checked,
+        Err(e) => {
+            let rejected = Rejected::new(
+                run_id,
+                Some(&parsed_workflow),
+                &initiating_user,
+                workflow_content,
+                &inputs,
+            );
+            return rejected.record(&pool, e).await;
+        }
+    };
 
     // 2. Create WorkflowRun and RunContext in DB
     // Direct runs have no repo_url or workflow_path in the traditional sense
@@ -166,4 +191,74 @@ pub async fn handle_workflow_direct(
     );
 
     Ok(())
+}
+
+/// A direct run refused before it was created
+struct Rejected<'a> {
+    run_id: RunId,
+    workflow: Option<&'a stormchaser_model::dsl::Workflow>,
+    initiating_user: &'a str,
+    source: &'a str,
+    inputs: &'a Value,
+}
+
+impl<'a> Rejected<'a> {
+    fn new(
+        run_id: RunId,
+        workflow: Option<&'a stormchaser_model::dsl::Workflow>,
+        initiating_user: &'a str,
+        source: &'a str,
+        inputs: &'a Value,
+    ) -> Self {
+        Self {
+            run_id,
+            workflow,
+            initiating_user,
+            source,
+            inputs,
+        }
+    }
+
+    /// Records the run as failed with `error`, so that whoever started it, who was
+    /// given its id, can see why it did not run. A transient error is returned instead,
+    /// for the event to be delivered again.
+    async fn record(&self, pool: &PgPool, error: anyhow::Error) -> Result<()> {
+        if crate::retry::is_transient(&error) {
+            return Err(error);
+        }
+        let reason = format!("{:#}", error);
+        info!("Direct run {} refused: {}", self.run_id, reason);
+        let now = Utc::now();
+        let mut tx = pool.begin().await?;
+        crate::db::insert_workflow_run(
+            &mut *tx,
+            self.run_id,
+            self.workflow.map_or("unknown", |w| w.name.as_str()),
+            Some(self.initiating_user),
+            Some("direct://"),
+            Some("inline.storm"),
+            Some("HEAD"),
+            RunStatus::Queued,
+            Some(now.timestamp_nanos_opt().unwrap_or(0)),
+            now,
+            now,
+            None,
+        )
+        .await?;
+        crate::db::insert_run_context(
+            &mut *tx,
+            self.run_id,
+            self.workflow.map_or("unknown", |w| w.dsl_version.as_str()),
+            self.workflow
+                .map(serde_json::to_value)
+                .transpose()?
+                .unwrap_or_else(|| serde_json::json!({})),
+            Some(self.source),
+            self.inputs.clone(),
+        )
+        .await?;
+        crate::db::fail_workflow_run(&mut *tx, RunStatus::Failed, &reason, self.run_id).await?;
+        tx.commit().await?;
+        crate::handler::archive_workflow(self.run_id, pool.clone()).await
+    }
 }

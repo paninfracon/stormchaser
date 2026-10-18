@@ -78,3 +78,31 @@ pub fn start_relay(pool: PgPool, nats: async_nats::Client) -> Relay {
         pool, nats,
     ))
 }
+
+/// Handles a direct run's event and returns, as an error, why the engine refused the run:
+/// a refused run is recorded as failed, with the reason, rather than the handler failing.
+pub async fn run_direct(
+    payload: serde_json::Value,
+    pool: &PgPool,
+    opa_client: Arc<stormchaser_model::auth::OpaClient>,
+    nats_client: async_nats::Client,
+) -> anyhow::Result<()> {
+    let run_id: RunId = serde_json::from_value(payload["run_id"].clone())?;
+    stormchaser_engine::handler::handle_workflow_direct(
+        payload,
+        pool.clone(),
+        opa_client,
+        nats_client,
+    )
+    .await?;
+    let refused: Option<Option<String>> = sqlx::query_scalar(
+        "SELECT error FROM archived_workflow_runs WHERE id = $1 AND status = 'failed'",
+    )
+    .bind(run_id)
+    .fetch_optional(pool)
+    .await?;
+    match refused {
+        Some(reason) => Err(anyhow::anyhow!(reason.unwrap_or_default())),
+        None => Ok(()),
+    }
+}
