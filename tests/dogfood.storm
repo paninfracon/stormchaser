@@ -174,6 +174,9 @@ workflow "dogfood" {
       env = [
         { name = "DATABASE_URL", value = "postgres://stormchaser:${inputs.db_password}@${inputs.host_ip}:${inputs.port_db}/stormchaser" },
         { name = "NATS_URL", value = "nats://${inputs.host_ip}:${inputs.port_nats}" },
+        # The tests sign tokens with the API's dev-only secret. A release build, which
+        # this is, falls back to it only when told to
+        { name = "STORMCHASER_JWT_SECRET", value = "stormchaser-secret-dev-only" },
         { name = "NATS_USER", value = "stormchaser" },
         { name = "NATS_PASSWORD", value = inputs.nats_password }
       ]

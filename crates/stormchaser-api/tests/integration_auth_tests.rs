@@ -132,7 +132,6 @@ async fn setup_app(mock_server_url: String) -> Option<axum::Router> {
         println!("DATABASE_URL was not set! Generated URL: {}", url);
         url
     });
-    println!("Connecting to DB at: {}", db_url);
     let pool = PgPoolOptions::new()
         .max_connections(2)
         .connect(&db_url)
@@ -482,7 +481,6 @@ async fn test_auth_exchange_network_error() {
         println!("DATABASE_URL was not set! Generated URL: {}", url);
         url
     });
-    println!("Connecting to DB at: {}", db_url);
     let pool = PgPoolOptions::new()
         .max_connections(2)
         .connect(&db_url)
@@ -811,7 +809,6 @@ async fn test_auth_refresh_network_error() {
         println!("DATABASE_URL was not set! Generated URL: {}", url);
         url
     });
-    println!("Connecting to DB at: {}", db_url);
     let pool = PgPoolOptions::new()
         .max_connections(2)
         .connect(&db_url)
