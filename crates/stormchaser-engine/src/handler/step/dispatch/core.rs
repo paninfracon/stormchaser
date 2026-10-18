@@ -69,7 +69,8 @@ pub async fn dispatch_step_instance(
 
     // Marked before it is handed over, not after: a step marked and then lost is no
     // worse off than before, but one handed over and not marked would be run twice
-    crate::db::set_step_dispatched(&pool, step_instance_id, true).await?;
+    crate::db::set_step_run_by_engine(&pool, step_instance_id, *crate::engine_instance::ENGINE_ID)
+        .await?;
     if try_dispatch_intrinsic(
         run_id,
         step_instance_id,

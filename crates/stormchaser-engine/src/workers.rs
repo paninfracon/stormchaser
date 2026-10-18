@@ -111,8 +111,73 @@ pub fn start_liveness_worker(
                     tracing::error!("Failed to commit liveness worker transaction: {:?}", error);
                 }
             }
+
+            // 3. Fail the built-in steps of engines that have gone
+            if let Err(e) =
+                fail_lost_engine_steps(&pool, crate::engine_instance::LOST_AFTER_SECS).await
+            {
+                tracing::error!("Failed to fail the steps of lost engines: {:?}", e);
+            }
         }
     })
+}
+
+/// How long an engine may go without a heartbeat before it is forgotten
+const ENGINE_GONE_SECS: f64 = 86400.0;
+
+/// Fails the built-in steps whose engine has sent no heartbeat for `lost_after_secs`.
+/// They would never finish. Failing them, rather than running them again, is what
+/// happens to a step whose runner has gone: a built-in step may have had its effect
+/// before its engine died.
+pub async fn fail_lost_engine_steps(
+    pool: &sqlx::PgPool,
+    lost_after_secs: f64,
+) -> anyhow::Result<usize> {
+    let mut tx = pool.begin().await?;
+    let lost = db::take_lost_engine_steps(&mut tx, lost_after_secs).await?;
+    for step in &lost {
+        tracing::warn!(
+            "Step {} of run {} was running in an engine that has stopped; failing it",
+            step.id,
+            step.run_id
+        );
+        let event = stormchaser_model::events::StepFailedEvent {
+            run_id: step.run_id,
+            step_id: step.id,
+            fencing_token: step.fencing_token,
+            completion_token: step.completion_token.clone(),
+            event_type: stormchaser_model::events::EventType::Step(
+                stormchaser_model::events::StepEventType::Failed,
+            ),
+            error: "The engine running this step stopped before it finished".to_string(),
+            runner_id: None,
+            exit_code: None,
+            storage_hashes: None,
+            artifacts: None,
+            test_reports: None,
+            outputs: None,
+            timestamp: chrono::Utc::now(),
+        };
+        crate::db::outbox::insert_outbox_event(
+            &mut *tx,
+            stormchaser_model::nats::NatsSubject::StepFailed(Some(
+                stormchaser_model::nats::compute_shard_id(&step.run_id),
+            )),
+            stormchaser_model::events::EventType::Step(
+                stormchaser_model::events::StepEventType::Failed,
+            ),
+            stormchaser_model::events::EventSource::System,
+            serde_json::to_value(&event)?,
+            Some(stormchaser_model::events::SchemaVersion::new(
+                "1.0".to_string(),
+            )),
+            None,
+        )
+        .await?;
+    }
+    db::delete_gone_engines(&mut *tx, ENGINE_GONE_SECS).await?;
+    tx.commit().await?;
+    Ok(lost.len())
 }
 
 pub fn start_timeout_worker(

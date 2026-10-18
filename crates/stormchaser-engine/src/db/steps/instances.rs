@@ -330,7 +330,7 @@ where
             FOR UPDATE SKIP LOCKED
         )
         UPDATE step_instances si
-        SET status = 'initializing', claimed_at = NOW(), dispatched_at = NULL
+        SET status = 'initializing', claimed_at = NOW(), dispatched_at = NULL, engine_id = NULL
         FROM claimed
         WHERE si.id = claimed.id
         RETURNING si.id, si.run_id, si.step_name, si.step_type, si.status as "status",
@@ -649,10 +649,88 @@ where
     E: Executor<'a, Database = Postgres>,
 {
     sqlx::query(
-        "UPDATE step_instances SET dispatched_at = CASE WHEN $2 THEN NOW() END WHERE id = $1",
+        "UPDATE step_instances SET dispatched_at = CASE WHEN $2 THEN NOW() END, engine_id = NULL WHERE id = $1",
     )
     .bind(id)
     .bind(dispatched)
+    .execute(executor)
+    .await
+}
+
+/// Records that the engine process `engine_id` is starting a claimed step itself.
+pub async fn set_step_run_by_engine<'a, E>(
+    executor: E,
+    id: StepInstanceId,
+    engine_id: uuid::Uuid,
+) -> Result<PgQueryResult, sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    sqlx::query("UPDATE step_instances SET dispatched_at = NOW(), engine_id = $2 WHERE id = $1")
+        .bind(id)
+        .bind(engine_id)
+        .execute(executor)
+        .await
+}
+
+/// A built-in step whose engine stopped sending heartbeats before it finished.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct LostEngineStep {
+    pub id: StepInstanceId,
+    pub run_id: RunId,
+    pub fencing_token: i64,
+    pub completion_token: Option<String>,
+}
+
+/// Takes the built-in steps whose engine has sent no heartbeat for `lost_after_secs`,
+/// and forgets which engine ran them, so that each is taken once. They stay locked
+/// until the transaction ends.
+pub async fn take_lost_engine_steps(
+    tx: &mut sqlx::PgConnection,
+    lost_after_secs: f64,
+) -> Result<Vec<LostEngineStep>, sqlx::Error> {
+    sqlx::query_as(
+        r#"
+        WITH lost AS (
+            SELECT s.id
+            FROM step_instances s
+            JOIN engine_instances e ON s.engine_id = e.id
+            WHERE s.status IN ('initializing', 'running')
+              AND e.last_heartbeat_at < NOW() - make_interval(secs => $1)
+            FOR UPDATE OF s SKIP LOCKED
+        )
+        UPDATE step_instances s
+        SET engine_id = NULL
+        FROM lost, workflow_runs wr
+        WHERE s.id = lost.id AND wr.id = s.run_id
+        RETURNING s.id, s.run_id, wr.fencing_token, s.completion_token
+        "#,
+    )
+    .bind(lost_after_secs)
+    .fetch_all(tx)
+    .await
+}
+
+/// Forgets engines that have sent no heartbeat for `gone_after_secs` and are running
+/// no step.
+pub async fn delete_gone_engines<'a, E>(
+    executor: E,
+    gone_after_secs: f64,
+) -> Result<PgQueryResult, sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    sqlx::query(
+        r#"
+        DELETE FROM engine_instances e
+        WHERE e.last_heartbeat_at < NOW() - make_interval(secs => $1)
+          AND NOT EXISTS (
+              SELECT 1 FROM step_instances s
+              WHERE s.engine_id = e.id AND s.status IN ('initializing', 'running')
+          )
+        "#,
+    )
+    .bind(gone_after_secs)
     .execute(executor)
     .await
 }

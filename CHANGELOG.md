@@ -63,6 +63,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A built-in step whose engine dies while running it fails within about a minute, as a step whose runner has gone does, instead of staying `initializing` until its run times out. Each engine process now records a heartbeat (in the new `engine_instances` table), each built-in step records the engine running it, and the replica running the background workers fails the built-in steps of an engine that has sent no heartbeat for 60 seconds. They are failed rather than run again, since one may have had its effect, such as an API call, before its engine died.
+
 - A run the API starts, from a request, a webhook rule or a schedule's trigger, is no longer left queued forever when the broker does not take the event that starts it. The API committed the run and then published the event; a failed publish answered 500 but kept the run, which nothing would ever start. The event now goes into the outbox in the run's own transaction, and the engine's relay publishes it, so the two are kept together or not at all.
 
 - Built-in steps (RestApi, WebhookInvoke, JinjaRender, SqlExecute, JQ, Wasm, LambdaInvoke and the messaging steps) report their results through the outbox. They published them to the stream directly, so a result the broker did not take was lost and its step stayed initializing until the run timed out. The engine's relay now publishes them, as it does the engine's other events.

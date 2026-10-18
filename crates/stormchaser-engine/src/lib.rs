@@ -11,6 +11,8 @@ pub mod authz;
 pub mod aws_guard;
 /// Database interaction layer.
 pub mod db;
+/// The heartbeat by which the engine tells it is still running its built-in steps.
+pub mod engine_instance;
 /// Git caching and cloning utilities.
 pub mod git_cache;
 /// Event handling and dispatching.

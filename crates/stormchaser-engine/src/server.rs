@@ -380,6 +380,11 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
         std::env::var("STORMCHASER_ASSIGNED_SHARDS").unwrap_or_else(|_| "0".to_string());
     let assigned_shards = parse_assigned_shards(&assigned_shards_env)?;
 
+    // Before it takes any step, so that the steps it runs itself are never without one
+    crate::engine_instance::start_heartbeat(pool.clone())
+        .await
+        .context("Failed to record the engine's first heartbeat")?;
+
     // Whatever its shards, one replica at a time runs the background workers
     crate::leader::start_leader_election(pool.clone(), nats_client.clone(), tls_reloader.clone());
 
