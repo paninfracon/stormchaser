@@ -17,10 +17,10 @@ workflow "step_library_demo" {
       image  = "python:${inputs.python_version}-slim"
       cpu    = "500m"
       memory = "1Gi"
-      env = {
-        PYTHONDONTWRITEBYTECODE = "1"
-        PYTHONUNBUFFERED        = "1"
-      }
+      env = [
+        { name = "PYTHONDONTWRITEBYTECODE", value = "1" },
+        { name = "PYTHONUNBUFFERED", value = "1" },
+      ]
     }
 
     // Default timeout and retry policies for all steps using this library
