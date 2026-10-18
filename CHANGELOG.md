@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `STORMCHASER_DB_MAX_CONNECTIONS` sets how many connections the API and the engine each open to Postgres. The default is 10; it was 5, fixed in code.
 - Step library parameters work. A library's `params` are its arguments: its spec uses them as `${params.<name>}`, a step that uses the library overrides them in its own `params` block, and their values can use the run's inputs, secrets, step outputs and iteration item. A spec that uses a param nobody sets is an error when the workflow is parsed. Before, params were merged but nothing could refer to them, so `${params.x}` reached the step as text. A library's `timeout` and `allow_failure` now reach its steps too, and a param that is a list or a map is an error rather than being dropped. See "Step Libraries" in `docs/workflow_dsl.md`.
 - `stormchaser run --input key=@path` reads the input's value from a file, without its final newline, so a script can pass a secret (`--input password=@<(printf %s "$PASSWORD")`) without it showing in the process list.
 
@@ -20,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A step's `spec` merges into its step library's as deep as it goes: objects key by key, and lists of named entries such as `env` by name. A step that set one env var or one nested key used to replace the library's whole value for that key.
 - A step that names a step library is stored as the library's step once its workflow is parsed: its type is the library's type, and its spec and params are merged. A run's definition and its steps show that type, not the library's name.
 - One `${...}` in a step's spec that is not an expression (a shell variable, say) no longer stops the expressions after it from being resolved.
 - The API serves its Swagger UI page itself instead of through `utoipa-swagger-ui`. Every release of `zip`, which that crate needs at 8.x, was yanked from crates.io, so a build without a lock file could not resolve its dependencies. The OpenAPI document stays at `/api-docs/openapi.json`; `/swagger-ui` is now a small page that loads Swagger UI 5.29.1 from cdnjs, checked against its published integrity hashes, under a content security policy with no inline code. Both are still served only with `STORMCHASER_API_DOCS=true`. The browser needs to reach cdnjs to show the page.
@@ -66,6 +68,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `allow_failure = true` works. A step that sets it, or whose step library does, is marked `failed_ignored` when it fails, and its run goes on as if it had succeeded. Before, the engine never read the setting and any failed step failed its run. A step whose runner is lost still fails its run.
+- A run whose starting event the engine gives up on, after 10 transient failures or handler crashes, is recorded as failed with the reason. It used to stay queued forever, or, for a direct run, never exist.
+- Engine images include `sops` (3.13.3), which the engine runs to decrypt SOPS-encrypted secrets. No image had it, so every run with SOPS secrets failed.
 - `POST /api/v1/runs/direct` (`stormchaser run <file>`) refuses a workflow that does not parse with `400 Bad Request` and the parser's reason, where it accepted any text and the run failed later. It queues the run through the outbox instead of publishing it to NATS without waiting for the stream to store it, so an accepted run is no longer lost on the way to the engine, and runs are accepted while NATS is down. Its response now says `queued`, not `running`.
 - A direct run the engine refuses for good (its DSL does not parse, policy denies it, a query fails, its inputs are invalid) is recorded as a failed run with the reason, which `stormchaser runs get` shows. It used to be dropped, and the run id the API had answered with returned 404.
 - A JQ or JinjaRender step whose engine dies runs again on another engine instead of failing its run; these steps have no effect but their output. Other built-in steps are still failed, since they may have had their effect.
