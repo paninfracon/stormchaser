@@ -1,10 +1,11 @@
 //! An event whose handler failed is delivered again only when another try could
 //! succeed: the database was unreachable, say, not the run missing.
 
+mod common;
+
+use common::{nats, setup_db, tls_reloader, ROUTER_RETRY_SHARDS};
 use futures::StreamExt;
 use serde_json::json;
-use sqlx::postgres::PgPoolOptions;
-use std::env::var;
 use std::sync::Arc;
 use std::time::Duration;
 use stormchaser_engine::git_cache::GitCache;
@@ -12,23 +13,10 @@ use stormchaser_engine::router::handle_message;
 use stormchaser_model::auth::OpaClient;
 use stormchaser_model::nats::NatsSubject;
 use stormchaser_model::RunId;
-use stormchaser_tls::{TlsConfig, TlsReloader};
+use stormchaser_tls::TlsReloader;
 
-async fn setup_db() -> sqlx::PgPool {
-    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
-        dotenvy::dotenv().ok();
-        format!(
-            "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            var("STORMCHASER_DEV_PASSWORD")
-                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
-        )
-    });
-    PgPoolOptions::new()
-        .max_connections(2)
-        .connect(&db_url)
-        .await
-        .unwrap()
-}
+/// How long the consumer waits for an acknowledgement before delivering an event again
+const ACK_WAIT: Duration = Duration::from_secs(2);
 
 struct Harness {
     nats_client: async_nats::Client,
@@ -43,8 +31,7 @@ struct Harness {
 impl Harness {
     /// On a shard of its own, which no engine in the tests consumes
     async fn new(shard: u32) -> Self {
-        let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-        let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
+        let nats_client = nats().await;
         let js = stormchaser_engine::nats::init_jetstream(&nats_client)
             .await
             .unwrap();
@@ -56,7 +43,7 @@ impl Harness {
             .create_consumer(async_nats::jetstream::consumer::pull::Config {
                 filter_subject: subject.clone(),
                 deliver_policy: async_nats::jetstream::consumer::DeliverPolicy::New,
-                ack_wait: Duration::from_secs(2),
+                ack_wait: ACK_WAIT,
                 ..Default::default()
             })
             .await
@@ -68,7 +55,7 @@ impl Harness {
             subject,
             git_cache: Arc::new(GitCache::new(git_dir.path())),
             _git_dir: git_dir,
-            tls_reloader: Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
+            tls_reloader: tls_reloader().await,
         }
     }
 
@@ -122,7 +109,7 @@ fn run_id_of(message: &async_nats::jetstream::Message) -> String {
 
 #[tokio::test]
 async fn an_event_that_failed_on_an_unreachable_database_is_delivered_again() {
-    let harness = Harness::new(997).await;
+    let harness = Harness::new(ROUTER_RETRY_SHARDS[0]).await;
     let run_id = RunId::new_v4();
     harness.publish(run_id).await;
 
@@ -147,7 +134,7 @@ async fn an_event_that_failed_on_an_unreachable_database_is_delivered_again() {
 
 #[tokio::test]
 async fn an_event_for_a_missing_run_is_not_delivered_again() {
-    let harness = Harness::new(998).await;
+    let harness = Harness::new(ROUTER_RETRY_SHARDS[1]).await;
     let run_id = RunId::new_v4();
     harness.publish(run_id).await;
 
@@ -158,5 +145,5 @@ async fn an_event_for_a_missing_run_is_not_delivered_again() {
     harness.handle(first, setup_db().await).await;
 
     // Twice the ack wait: an event left unacknowledged would be back by then
-    assert!(harness.next(Duration::from_secs(4)).await.is_none());
+    assert!(harness.next(ACK_WAIT * 2).await.is_none());
 }

@@ -1,25 +1,10 @@
 //! One engine replica at a time holds the leader lock, and another takes it once the
 //! holder's connection goes.
 
-use sqlx::postgres::PgPoolOptions;
-use std::env::var;
-use stormchaser_engine::leader::try_lock;
+mod common;
 
-async fn setup_db() -> sqlx::PgPool {
-    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
-        dotenvy::dotenv().ok();
-        format!(
-            "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            var("STORMCHASER_DEV_PASSWORD")
-                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
-        )
-    });
-    PgPoolOptions::new()
-        .max_connections(2)
-        .connect(&db_url)
-        .await
-        .unwrap()
-}
+use common::setup_db;
+use stormchaser_engine::leader::try_lock;
 
 #[tokio::test]
 async fn one_replica_holds_the_lock_until_its_connection_goes() {

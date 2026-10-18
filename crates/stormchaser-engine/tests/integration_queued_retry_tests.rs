@@ -2,10 +2,11 @@
 //! cannot be reached) stays resolving, so that the event's next delivery resolves it,
 //! instead of failing for good on the first blip.
 
+mod common;
+
+use common::{delete_run, nats, setup_db, tls_reloader};
 use serde_json::json;
-use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
-use std::env::var;
 use std::path::Path;
 use std::sync::Arc;
 use stormchaser_engine::git_cache::{GitCache, GIT_ALLOWED_SCHEMES_ENV};
@@ -13,23 +14,6 @@ use stormchaser_engine::handler;
 use stormchaser_model::auth::OpaClient;
 use stormchaser_model::workflow::RunStatus;
 use stormchaser_model::RunId;
-use stormchaser_tls::{TlsConfig, TlsReloader};
-
-async fn setup_db() -> PgPool {
-    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
-        dotenvy::dotenv().ok();
-        format!(
-            "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            var("STORMCHASER_DEV_PASSWORD")
-                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
-        )
-    });
-    PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&db_url)
-        .await
-        .unwrap()
-}
 
 /// A repository whose `main` holds `workflow.storm`
 fn repository_with_workflow(dir: &Path) {
@@ -76,9 +60,8 @@ async fn a_transient_failure_leaves_the_run_for_the_next_delivery() {
     std::env::set_var(GIT_ALLOWED_SCHEMES_ENV, "file");
 
     let pool = setup_db().await;
-    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
-    let tls_reloader = Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap());
+    let nats_client = nats().await;
+    let tls_reloader = tls_reloader().await;
     let repo_dir = tempfile::tempdir().unwrap();
     repository_with_workflow(repo_dir.path());
     let git_dir = tempfile::tempdir().unwrap();
@@ -133,14 +116,5 @@ async fn a_transient_failure_leaves_the_run_for_the_next_delivery() {
     .unwrap();
     assert_eq!(status(&pool, run_id).await, RunStatus::StartPending);
 
-    sqlx::query("DELETE FROM workflow_runs WHERE id = $1")
-        .bind(run_id)
-        .execute(&pool)
-        .await
-        .unwrap();
-    sqlx::query("DELETE FROM outbox_events WHERE payload LIKE '%' || $1 || '%'")
-        .bind(run_id.to_string())
-        .execute(&pool)
-        .await
-        .unwrap();
+    delete_run(&pool, run_id).await;
 }

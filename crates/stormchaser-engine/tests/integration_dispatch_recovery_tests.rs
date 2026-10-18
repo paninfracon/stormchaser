@@ -1,35 +1,18 @@
 //! A step claimed for dispatch and never handed over, its engine dead, is put back and
 //! dispatched again; so is a step left pending with no event coming to dispatch it.
 
+mod common;
+
+use common::{delete_run, nats, setup_db, tls_reloader};
 use serde_json::json;
-use sqlx::postgres::PgPoolOptions;
-use std::env::var;
-use std::sync::Arc;
 use std::time::Duration;
 use stormchaser_engine::workers::recover_dispatches;
 use stormchaser_model::RunId;
-use stormchaser_tls::{TlsConfig, TlsReloader};
 use uuid::Uuid;
 
 /// A sweep covers every run in the database, so one test's would take another's steps
 /// mid-way. In an engine only the leader sweeps.
 static SWEEP: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
-async fn setup_db() -> sqlx::PgPool {
-    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
-        dotenvy::dotenv().ok();
-        format!(
-            "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            var("STORMCHASER_DEV_PASSWORD")
-                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
-        )
-    });
-    PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&db_url)
-        .await
-        .unwrap()
-}
 
 /// A running run with one container step in `status`, claimed `claimed_secs_ago`
 async fn run_with_step(
@@ -104,9 +87,8 @@ async fn step_state(pool: &sqlx::PgPool, step_id: Uuid) -> (String, bool, i64) {
 }
 
 async fn recover(pool: &sqlx::PgPool) {
-    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
-    let tls_reloader = Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap());
+    let nats_client = nats().await;
+    let tls_reloader = tls_reloader().await;
     recover_dispatches(
         pool,
         &nats_client,
@@ -116,14 +98,6 @@ async fn recover(pool: &sqlx::PgPool) {
     )
     .await
     .unwrap();
-}
-
-async fn delete_run(pool: &sqlx::PgPool, run_id: RunId) {
-    sqlx::query("DELETE FROM workflow_runs WHERE id = $1")
-        .bind(run_id)
-        .execute(pool)
-        .await
-        .unwrap();
 }
 
 #[tokio::test]

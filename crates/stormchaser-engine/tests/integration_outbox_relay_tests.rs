@@ -1,28 +1,13 @@
 //! The outbox relay publishes an event again when it dies between publishing it and
 //! deleting its row. The stream keeps one copy.
 
+mod common;
+
+use common::{nats, setup_db, start_relay, OUTBOX_RELAY_SHARD};
 use futures::StreamExt;
-use sqlx::postgres::PgPoolOptions;
-use std::env::var;
 use std::time::Duration;
 use stormchaser_model::events::{EventSource, EventType, WorkflowEventType};
 use stormchaser_model::nats::NatsSubject;
-
-async fn setup_db() -> sqlx::PgPool {
-    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
-        dotenvy::dotenv().ok();
-        format!(
-            "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            var("STORMCHASER_DEV_PASSWORD")
-                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
-        )
-    });
-    PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&db_url)
-        .await
-        .unwrap()
-}
 
 #[derive(sqlx::FromRow)]
 struct Row {
@@ -53,14 +38,16 @@ async fn until_published(pool: &sqlx::PgPool, subject: &str) {
 #[tokio::test]
 async fn an_event_the_relay_publishes_twice_is_stored_once() {
     let pool = setup_db().await;
-    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
+    let nats_client = nats().await;
     let js = stormchaser_engine::nats::init_jetstream(&nats_client)
         .await
         .unwrap();
 
     // A subject of this test's own
-    let subject = format!("stormchaser.v1.995.test.outbox.{}", uuid::Uuid::new_v4());
+    let subject = format!(
+        "stormchaser.v1.{OUTBOX_RELAY_SHARD}.test.outbox.{}",
+        uuid::Uuid::new_v4()
+    );
     let consumer = js
         .get_stream("stormchaser")
         .await
@@ -85,8 +72,7 @@ async fn an_event_the_relay_publishes_twice_is_stored_once() {
     .unwrap();
     let row = outbox_row(&pool, &subject).await.unwrap();
 
-    let relay =
-        stormchaser_engine::workers::start_outbox_relay_worker(pool.clone(), nats_client.clone());
+    let relay = start_relay(pool.clone(), nats_client.clone());
     until_published(&pool, &subject).await;
 
     // As if the relay had died after publishing, before its deletion was committed
@@ -101,7 +87,7 @@ async fn an_event_the_relay_publishes_twice_is_stored_once() {
     .await
     .unwrap();
     until_published(&pool, &subject).await;
-    relay.abort();
+    drop(relay);
 
     let mut messages = consumer
         .fetch()

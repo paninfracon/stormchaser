@@ -1,37 +1,16 @@
 //! JetStream delivers an event again when it is not acknowledged in time, or when its
 //! handler failed. Handling a run's events a second time must not run it a second time.
 
+mod common;
+
+use common::{delete_run, nats, setup_db, tls_reloader};
 use serde_json::json;
-use sqlx::postgres::PgPoolOptions;
-use std::env::var;
 use std::sync::Arc;
 use stormchaser_engine::git_cache::GitCache;
 use stormchaser_engine::handler;
 use stormchaser_model::auth::OpaClient;
 use stormchaser_model::workflow::RunStatus;
 use stormchaser_model::RunId;
-use stormchaser_tls::{TlsConfig, TlsReloader};
-
-async fn setup_db() -> sqlx::PgPool {
-    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
-        dotenvy::dotenv().ok();
-        format!(
-            "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            var("STORMCHASER_DEV_PASSWORD")
-                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
-        )
-    });
-    PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&db_url)
-        .await
-        .unwrap()
-}
-
-async fn nats() -> async_nats::Client {
-    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    stormchaser_model::nats::connect(nats_url).await.unwrap()
-}
 
 async fn status_and_version(pool: &sqlx::PgPool, run_id: RunId) -> (RunStatus, i32) {
     sqlx::query_as("SELECT status, version FROM workflow_runs WHERE id = $1")
@@ -47,14 +26,6 @@ async fn step_count(pool: &sqlx::PgPool, run_id: RunId) -> i64 {
         .fetch_one(pool)
         .await
         .unwrap()
-}
-
-async fn delete_run(pool: &sqlx::PgPool, run_id: RunId) {
-    sqlx::query("DELETE FROM workflow_runs WHERE id = $1")
-        .bind(run_id)
-        .execute(pool)
-        .await
-        .unwrap();
 }
 
 fn direct_payload(run_id: RunId) -> serde_json::Value {
@@ -113,7 +84,7 @@ async fn a_redelivered_start_pending_does_not_start_the_run_again() {
     let pool = setup_db().await;
     let nats_client = nats().await;
     let opa_client = Arc::new(OpaClient::new(None, None));
-    let tls_reloader = Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap());
+    let tls_reloader = tls_reloader().await;
     let run_id = RunId::new_v4();
 
     handler::handle_workflow_direct(
@@ -151,7 +122,7 @@ async fn a_redelivered_start_pending_does_not_start_the_run_again() {
 async fn a_redelivered_queued_event_leaves_a_started_run_alone() {
     let pool = setup_db().await;
     let nats_client = nats().await;
-    let tls_reloader = Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap());
+    let tls_reloader = tls_reloader().await;
     let git_dir = tempfile::tempdir().unwrap();
     let run_id = RunId::new_v4();
 
@@ -221,14 +192,6 @@ async fn archived(pool: &sqlx::PgPool, run_id: RunId) -> bool {
     !live && kept
 }
 
-async fn delete_archived_run(pool: &sqlx::PgPool, run_id: RunId) {
-    sqlx::query("DELETE FROM archived_workflow_runs WHERE id = $1")
-        .bind(run_id)
-        .execute(pool)
-        .await
-        .unwrap();
-}
-
 #[tokio::test]
 async fn a_redelivered_step_completion_archives_its_finished_run() {
     let pool = setup_db().await;
@@ -243,13 +206,13 @@ async fn a_redelivered_step_completion_archives_its_finished_run() {
         pool.clone(),
         nats().await,
         Arc::new(None),
-        Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
+        tls_reloader().await,
     )
     .await
     .unwrap();
 
     assert!(archived(&pool, run_id).await);
-    delete_archived_run(&pool, run_id).await;
+    delete_run(&pool, run_id).await;
 }
 
 #[tokio::test]
@@ -266,11 +229,11 @@ async fn a_redelivered_step_failure_archives_its_finished_run() {
         .unwrap(),
         pool.clone(),
         nats().await,
-        Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
+        tls_reloader().await,
     )
     .await
     .unwrap();
 
     assert!(archived(&pool, run_id).await);
-    delete_archived_run(&pool, run_id).await;
+    delete_run(&pool, run_id).await;
 }

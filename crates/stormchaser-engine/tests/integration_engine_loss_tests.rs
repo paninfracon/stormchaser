@@ -2,10 +2,11 @@
 //! dies the step will never finish, and the engine fails it, as it does a step whose
 //! runner has gone, instead of leaving it to the run's timeout.
 
+mod common;
+
+use common::{delete_run, nats, setup_db, tls_reloader};
 use serde_json::json;
-use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
-use std::env::var;
 use std::sync::Arc;
 use stormchaser_engine::engine_instance::ENGINE_ID;
 use stormchaser_engine::handler;
@@ -14,31 +15,9 @@ use stormchaser_model::auth::OpaClient;
 use stormchaser_model::events::StepFailedEvent;
 use stormchaser_model::step::StepStatus;
 use stormchaser_model::{RunId, StepInstanceId};
-use stormchaser_tls::{TlsConfig, TlsReloader};
 use uuid::Uuid;
 
 use stormchaser_engine::engine_instance::LOST_AFTER;
-
-async fn setup_db() -> PgPool {
-    let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
-        dotenvy::dotenv().ok();
-        format!(
-            "postgres://stormchaser:{}@localhost:5432/stormchaser",
-            var("STORMCHASER_DEV_PASSWORD")
-                .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
-        )
-    });
-    PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&db_url)
-        .await
-        .unwrap()
-}
-
-async fn nats() -> async_nats::Client {
-    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    stormchaser_model::nats::connect(nats_url).await.unwrap()
-}
 
 /// Records a heartbeat for `engine_id` made `seconds_ago`
 async fn heartbeat_at(pool: &PgPool, engine_id: Uuid, seconds_ago: f64) {
@@ -71,19 +50,11 @@ async fn queued_failures(pool: &PgPool, step_id: StepInstanceId) -> Vec<StepFail
         .collect()
 }
 
-async fn delete_queued_events(pool: &PgPool, run_id: RunId) {
-    sqlx::query("DELETE FROM outbox_events WHERE payload LIKE '%' || $1 || '%'")
-        .bind(run_id.to_string())
-        .execute(pool)
-        .await
-        .unwrap();
-}
-
 #[tokio::test]
 async fn a_built_in_step_whose_engine_died_fails_and_ends_its_run() {
     let pool = setup_db().await;
     let nats_client = nats().await;
-    let tls_reloader = Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap());
+    let tls_reloader = tls_reloader().await;
     let run_id = RunId::new_v4();
 
     // No outbox relay runs here: the step's own result stays queued, as if its engine
@@ -153,7 +124,7 @@ async fn a_built_in_step_whose_engine_died_fails_and_ends_its_run() {
     assert_eq!(status, StepStatus::Failed);
     assert_eq!(run_status, "failed");
 
-    delete_queued_events(&pool, run_id).await;
+    delete_run(&pool, run_id).await;
     sqlx::query("DELETE FROM engine_instances WHERE id = $1")
         .bind(*ENGINE_ID)
         .execute(&pool)
@@ -208,14 +179,9 @@ async fn a_runner_step_never_records_an_engine() {
     )
     .await
     .unwrap();
-    handler::handle_workflow_start_pending(
-        run_id,
-        pool.clone(),
-        nats_client,
-        Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
-    )
-    .await
-    .unwrap();
+    handler::handle_workflow_start_pending(run_id, pool.clone(), nats_client, tls_reloader().await)
+        .await
+        .unwrap();
 
     // Were it to, its loss would fail it as a built-in step's, not retry its dispatch
     let (dispatched, engine_id): (bool, Option<Uuid>) = sqlx::query_as(
@@ -228,9 +194,5 @@ async fn a_runner_step_never_records_an_engine() {
     assert!(dispatched);
     assert_eq!(engine_id, None);
 
-    sqlx::query("DELETE FROM workflow_runs WHERE id = $1")
-        .bind(run_id)
-        .execute(&pool)
-        .await
-        .unwrap();
+    delete_run(&pool, run_id).await;
 }
