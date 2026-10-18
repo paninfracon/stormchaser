@@ -286,7 +286,9 @@ workflow "dogfood" {
         echo "$KUBECONFIG_DATA" > ~/.kube/config
         export KUBECONFIG=~/.kube/config
 
+        # Into the namespace setup_certs put the certificate and NATS credentials in
         helm upgrade --install stormchaser-dogfood /app/deploy/charts/stormchaser-orchestration \
+          --namespace stormchaser-dogfood \
           --set global.image.repository=${inputs.host_ip}:${inputs.port_reg}/stormchaser-api \
           --set global.image.tag=dogfood \
           --set global.database.ssl=false \
