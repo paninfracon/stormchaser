@@ -289,8 +289,8 @@ workflow "dogfood" {
         # Into the namespace setup_certs put the certificate and NATS credentials in
         helm upgrade --install stormchaser-dogfood /app/deploy/charts/stormchaser-orchestration \
           --namespace stormchaser-dogfood \
-          --set global.image.repository=${inputs.host_ip}:${inputs.port_reg}/stormchaser-api \
-          --set global.image.tag=dogfood \
+          --set api.image.repository=${inputs.host_ip}:${inputs.port_reg}/stormchaser-api \
+          --set api.image.tag=dogfood \
           --set global.database.ssl=false \
           --set "global.database.url=postgres://stormchaser:$DB_PASSWORD@${inputs.host_ip}:${inputs.port_db}/stormchaser" \
           --set global.nats.url=nats://${inputs.host_ip}:${inputs.port_nats} \

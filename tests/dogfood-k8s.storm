@@ -198,8 +198,8 @@ workflow "dogfood" {
         helm upgrade --install stormchaser-dogfood /app/deploy/charts/stormchaser-orchestration \
           --namespace stormchaser-dogfood \
           --create-namespace \
-          --set global.image.repository=localhost:32000/stormchaser-api \
-          --set global.image.tag=dogfood \
+          --set api.image.repository=localhost:32000/stormchaser-api \
+          --set api.image.tag=dogfood \
           --set global.database.ssl=false \
           --set "global.database.url=postgres://stormchaser:$DB_PASSWORD@stormchaser-postgresql.stormchaser.svc.cluster.local:5432/stormchaser" \
           --set global.nats.url=nats://stormchaser-nats.stormchaser.svc.cluster.local:4222 \
