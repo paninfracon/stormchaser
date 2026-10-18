@@ -45,7 +45,7 @@ pub async fn build_app_state(config: Config) -> anyhow::Result<AppState> {
         .log_slow_statements(log::LevelFilter::Warn, Duration::from_secs(1));
 
     let pool = PgPoolOptions::new()
-        .max_connections(5)
+        .max_connections(stormchaser_model::db_tls::max_connections()?)
         .connect_with(db_options)
         .await?;
 

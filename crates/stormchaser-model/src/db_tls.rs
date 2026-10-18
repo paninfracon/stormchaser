@@ -1,8 +1,27 @@
-//! How services connect to PostgreSQL over TLS.
+//! How services connect to PostgreSQL: over TLS, with a pool of a configured size.
 
 use anyhow::Result;
 use sqlx::postgres::{PgConnectOptions, PgSslMode};
 use std::path::Path;
+
+/// The largest connection pool a service opens to the database when
+/// `STORMCHASER_DB_MAX_CONNECTIONS` is not set
+pub const DEFAULT_MAX_CONNECTIONS: u32 = 10;
+
+/// How many connections a service may open to the database: `STORMCHASER_DB_MAX_CONNECTIONS`,
+/// or [`DEFAULT_MAX_CONNECTIONS`].
+pub fn max_connections() -> Result<u32> {
+    match std::env::var("STORMCHASER_DB_MAX_CONNECTIONS") {
+        Ok(value) => match value.trim().parse::<u32>() {
+            Ok(n) if n > 0 => Ok(n),
+            _ => anyhow::bail!(
+                "STORMCHASER_DB_MAX_CONNECTIONS must be a whole number above 0, not '{}'",
+                value
+            ),
+        },
+        Err(_) => Ok(DEFAULT_MAX_CONNECTIONS),
+    }
+}
 
 /// The TLS files a service was started with.
 pub struct DbTls<'a> {
