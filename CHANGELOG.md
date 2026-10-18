@@ -63,6 +63,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A queued run whose resolution meets a transient failure, such as an OPA server or database that is briefly unreachable, is resolved again when its event is delivered again, instead of failing for good. Failures of the workflow's own (an unreadable file, a denied policy, invalid inputs) still fail the run.
+- Built-in steps (RestApi, SqlExecute, JQ, Wasm) whose result the outbox would not take no longer hang until their run times out with nothing logged; the failure is reported, or logged when even that is not possible. JinjaRender and LambdaInvoke save their output and their result together.
+- A runner's step whose engine died while dispatching it is dispatched again, never failed as a built-in step would be.
+- The sweeper for lost dispatches no longer leaks a run's quota when giving it back fails partway: steps are put back and their quota given back together.
+- The engine exits, to be restarted, if its heartbeat or leader election stops, instead of running on without them.
+- The engine no longer logs the payload of an event it gives up on, which for a run's events holds its workflow and inputs; it logs the run and step ids.
+- A step library's `spec = <value>` that is not an object is kept, as a step's is, instead of being dropped.
+- The Docker runner reports why waiting for the parking helper failed, instead of "exit code None".
+
 - A built-in step whose engine dies while running it fails within about a minute, as a step whose runner has gone does, instead of staying `initializing` until its run times out. Each engine process now records a heartbeat (in the new `engine_instances` table), each built-in step records the engine running it, and the replica running the background workers fails the built-in steps of an engine that has sent no heartbeat for 60 seconds. They are failed rather than run again, since one may have had its effect, such as an API call, before its engine died.
 
 - A run the API starts, from a request, a webhook rule or a schedule's trigger, is no longer left queued forever when the broker does not take the event that starts it. The API committed the run and then published the event; a failed publish answered 500 but kept the run, which nothing would ever start. The event now goes into the outbox in the run's own transaction, and the engine's relay publishes it, so the two are kept together or not at all.
