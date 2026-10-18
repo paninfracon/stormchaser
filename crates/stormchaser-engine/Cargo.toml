@@ -76,6 +76,7 @@ aws-sdk-sts = { workspace = true, optional = true }
 lettre = { workspace = true, optional = true }
 minijinja = { workspace = true }
 reqwest = { workspace = true }
+reqwest-middleware = { workspace = true }
 vaultrs = { workspace = true, optional = true }
 jaq-core = { workspace = true }
 jaq-json = { workspace = true }

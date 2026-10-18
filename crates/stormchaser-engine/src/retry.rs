@@ -20,6 +20,13 @@ pub fn is_transient(error: &anyhow::Error) -> bool {
         if let Some(e) = cause.downcast_ref::<reqwest::Error>() {
             return e.is_connect() || e.is_timeout();
         }
+        // The OPA client's retrying middleware wraps reqwest's error transparently, so
+        // the reqwest error itself is never a link of the chain
+        if let Some(reqwest_middleware::Error::Reqwest(e)) =
+            cause.downcast_ref::<reqwest_middleware::Error>()
+        {
+            return e.is_connect() || e.is_timeout();
+        }
         if let Some(e) = cause.downcast_ref::<std::io::Error>() {
             return io_is_transient(e);
         }
@@ -123,6 +130,19 @@ mod tests {
         let json = serde_json::from_str::<serde_json::Value>("{").unwrap_err();
         assert!(!is_transient(
             &anyhow::Error::new(json).context("bad payload")
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_host_that_does_not_resolve_is_transient_behind_the_retry_middleware() {
+        let client = reqwest_middleware::ClientBuilder::new(reqwest::Client::new()).build();
+        let error = client
+            .get("http://stormchaser-no-such-host.invalid/")
+            .send()
+            .await
+            .unwrap_err();
+        assert!(is_transient(
+            &anyhow::Error::new(error).context("Failed to reach OPA server")
         ));
     }
 

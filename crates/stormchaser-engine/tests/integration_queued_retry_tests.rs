@@ -1,6 +1,6 @@
-//! A queued run whose resolution meets a transient failure (here an OPA server that
-//! cannot be reached) stays resolving, so that the event's next delivery resolves it,
-//! instead of failing for good on the first blip.
+//! A run whose resolution meets a transient failure (here an OPA server that cannot be
+//! reached) is resolved on the event's next delivery, instead of failing for good, or
+//! for a direct run vanishing, on the first blip.
 
 mod common;
 
@@ -14,6 +14,14 @@ use stormchaser_engine::handler;
 use stormchaser_model::auth::OpaClient;
 use stormchaser_model::workflow::RunStatus;
 use stormchaser_model::RunId;
+
+/// An OPA client for a server that is not there: nothing listens on port 1
+fn unreachable_opa() -> Arc<OpaClient> {
+    Arc::new(OpaClient::new(
+        Some("http://127.0.0.1:1/v1/data/stormchaser/allow".into()),
+        None,
+    ))
+}
 
 /// A repository whose `main` holds `workflow.storm`
 fn repository_with_workflow(dir: &Path) {
@@ -80,17 +88,12 @@ async fn a_transient_failure_leaves_the_run_for_the_next_delivery() {
         .await
         .unwrap();
 
-    // Nothing listens on port 1
-    let unreachable_opa = Arc::new(OpaClient::new(
-        Some("http://127.0.0.1:1/v1/data/stormchaser/allow".into()),
-        None,
-    ));
     let error = handler::handle_workflow_queued(
         run_id,
         json!({}),
         pool.clone(),
         git_cache.clone(),
-        unreachable_opa,
+        unreachable_opa(),
         nats_client.clone(),
         tls_reloader.clone(),
     )
@@ -111,6 +114,62 @@ async fn a_transient_failure_leaves_the_run_for_the_next_delivery() {
         Arc::new(OpaClient::new(None, None)),
         nats_client,
         tls_reloader,
+    )
+    .await
+    .unwrap();
+    assert_eq!(status(&pool, run_id).await, RunStatus::StartPending);
+
+    delete_run(&pool, run_id).await;
+}
+
+#[tokio::test]
+async fn a_direct_run_is_created_on_the_next_delivery_after_a_transient_failure() {
+    let pool = setup_db().await;
+    let nats_client = nats().await;
+    let run_id = RunId::new_v4();
+    let payload = json!({
+        "run_id": run_id,
+        "dsl": r#"
+            stormchaser_dsl_version = "v1"
+            workflow "direct-retry" {
+                steps {
+                    step "hello" "RunContainer" {
+                        image = "alpine"
+                        command = ["echo", "hello"]
+                    }
+                }
+            }
+        "#,
+        "inputs": {},
+        "initiating_user": "test"
+    });
+
+    let error = handler::handle_workflow_direct(
+        payload.clone(),
+        pool.clone(),
+        unreachable_opa(),
+        nats_client.clone(),
+    )
+    .await
+    .expect_err("an unreachable OPA server is an error to retry");
+    assert!(
+        stormchaser_engine::retry::is_transient(&error),
+        "not transient: {error:#}"
+    );
+    let created: bool =
+        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM workflow_runs WHERE id = $1)")
+            .bind(run_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(!created);
+
+    // The event delivered again, OPA back
+    handler::handle_workflow_direct(
+        payload,
+        pool.clone(),
+        Arc::new(OpaClient::new(None, None)),
+        nats_client,
     )
     .await
     .unwrap();

@@ -1,5 +1,6 @@
 pub mod direct;
 pub mod queued;
+mod resolve;
 pub mod sops;
 pub mod start_pending;
 pub mod timeout;
