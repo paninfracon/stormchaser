@@ -224,6 +224,8 @@ workflow "dogfood" {
         # Dockerfile.prebuilt copies target/sit[e] so that only the web image gets site
         # assets. Docker copies nothing when the pattern matches nothing; buildah fails.
         mkdir -p target/site
+        # The binary comes from the api_binary artifact, which keeps no file mode
+        chmod 0755 target/release/stormchaser-api
         buildah bud --storage-driver vfs -t ${inputs.host_ip}:${inputs.port_reg}/stormchaser-api:dogfood -f Dockerfile.prebuilt --build-arg BINARY=stormchaser-api .
         buildah push --storage-driver vfs --tls-verify=false ${inputs.host_ip}:${inputs.port_reg}/stormchaser-api:dogfood
       EOF
