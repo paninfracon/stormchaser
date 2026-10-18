@@ -967,7 +967,7 @@ workflow "ContainerBuildAndDeploy" {
 
 ## Step Libraries
 
-You can define reusable steps inside a workflow using the `step_library` block. A step that names the library as its `type` becomes a step of the library's type, with the library's `spec`, `params`, `timeout` and `allow_failure`. Whatever the step sets itself takes precedence: its `params` replace the library's of the same name, and each key of its `spec` replaces the library's value for that key whole (an `env` list the step sets replaces the library's list rather than adding to it).
+You can define reusable steps inside a workflow using the `step_library` block. A step that names the library as its `type` becomes a step of the library's type, with the library's `spec`, `params`, `timeout` and `allow_failure`. Whatever the step sets itself takes precedence: its `params` replace the library's of the same name, and its `spec` is merged into the library's. Objects merge key by key, as deep as they go. Lists of named entries, such as `env`, merge by name: the step's entry replaces the library's of the same name, and its other entries are added. Any other value the step sets, such as `command`, replaces the library's.
 
 ```hcl
 step_library "ubuntu_base" {

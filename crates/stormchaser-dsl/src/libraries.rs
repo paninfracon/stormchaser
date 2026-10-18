@@ -2,8 +2,8 @@
 //!
 //! A step whose type is a library's name becomes a step of the library's type, with
 //! the library's spec, params, timeout, failure policy and retry policy, each
-//! overridden by what the step sets itself. The spec is merged one key deep: a key the
-//! step sets replaces the library's value for it whole.
+//! overridden by what the step sets itself. The spec is merged as deep as it goes (see
+//! [`merge_spec`]).
 //!
 //! Params are the library's arguments. A spec refers to them as `${params.<name>}`; the
 //! engine resolves the params first, against the run's inputs, secrets and step
@@ -49,15 +49,7 @@ pub fn apply_step_library(step: &mut Step, libraries: &[StepLibrary]) -> Result<
     let library = libraries.iter().find(|l| l.name == step.r#type);
     if let Some(library) = library {
         step.r#type = library.r#type.clone();
-        step.spec = match (&library.spec, std::mem::take(&mut step.spec)) {
-            (Value::Object(base), Value::Object(own)) => {
-                let mut merged = base.clone();
-                merged.extend(own);
-                Value::Object(merged)
-            }
-            (base, Value::Null) => base.clone(),
-            (_, own) => own,
-        };
+        step.spec = merge_spec(library.spec.clone(), std::mem::take(&mut step.spec));
         let mut params = library.params.clone();
         params.extend(std::mem::take(&mut step.params));
         step.params = params;
@@ -86,6 +78,44 @@ pub fn apply_step_library(step: &mut Step, libraries: &[StepLibrary]) -> Result<
         }
     }
     Ok(())
+}
+
+/// Merges a step's spec, `own`, onto its library's, `base`:
+///
+/// - objects merge key by key, recursively;
+/// - lists of named entries, such as `env`, merge by name: the step's entry replaces the
+///   library's of the same name, and its others are added after the library's;
+/// - any other value the step sets replaces the library's.
+pub fn merge_spec(base: Value, own: Value) -> Value {
+    match (base, own) {
+        (base, Value::Null) => base,
+        (Value::Object(mut base), Value::Object(own)) => {
+            for (key, value) in own {
+                let merged = match base.remove(&key) {
+                    Some(base_value) => merge_spec(base_value, value),
+                    None => value,
+                };
+                base.insert(key, merged);
+            }
+            Value::Object(base)
+        }
+        (Value::Array(base), Value::Array(own)) if is_named(&base) && is_named(&own) => {
+            let mut merged = base;
+            for entry in own {
+                match merged.iter_mut().find(|e| e["name"] == entry["name"]) {
+                    Some(existing) => *existing = entry,
+                    None => merged.push(entry),
+                }
+            }
+            Value::Array(merged)
+        }
+        (_, own) => own,
+    }
+}
+
+/// Whether every item of `items` is an object with a `name`
+fn is_named(items: &[Value]) -> bool {
+    !items.is_empty() && items.iter().all(|item| item["name"].is_string())
 }
 
 /// The params that the `${...}` expressions in `spec` use as `params.<name>` or
@@ -119,7 +149,7 @@ fn param_references(spec: &Value) -> BTreeSet<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::param_references;
+    use super::{merge_spec, param_references};
     use serde_json::json;
 
     #[test]
@@ -131,5 +161,42 @@ mod tests {
         });
         let names: Vec<String> = param_references(&spec).into_iter().collect();
         assert_eq!(names, ["greeting", "version"]);
+    }
+
+    #[test]
+    fn a_steps_spec_merges_into_its_librarys_as_deep_as_it_goes() {
+        let library = json!({
+            "image": "python:3.12",
+            "resources": { "cpu": "500m", "memory": "1Gi" },
+            "env": [{ "name": "A", "value": "1" }, { "name": "B", "value": "2" }],
+            "command": ["python", "--version"],
+        });
+        let step = json!({
+            "resources": { "cpu": "1" },
+            "env": [{ "name": "B", "value": "two" }, { "name": "C", "value": "3" }],
+            "command": ["pytest"],
+        });
+        assert_eq!(
+            merge_spec(library, step),
+            json!({
+                "image": "python:3.12",
+                "resources": { "cpu": "1", "memory": "1Gi" },
+                "env": [
+                    { "name": "A", "value": "1" },
+                    { "name": "B", "value": "two" },
+                    { "name": "C", "value": "3" },
+                ],
+                "command": ["pytest"],
+            })
+        );
+    }
+
+    #[test]
+    fn a_spec_that_is_not_an_object_replaces_the_librarys() {
+        assert_eq!(merge_spec(json!({ "a": 1 }), json!("raw")), json!("raw"));
+        assert_eq!(
+            merge_spec(json!({ "a": 1 }), json!(null)),
+            json!({ "a": 1 })
+        );
     }
 }
