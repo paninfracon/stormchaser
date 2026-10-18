@@ -225,7 +225,37 @@ async fn report_failure(step: &BuiltInStep, error: anyhow::Error) -> Result<()> 
         step.run_id,
         step.step_id,
         step.fencing_token,
-        format!("{} failed: {:?}", step.step_type, error),
+        failure_message(&step.step_type, &error),
     )
     .await
+}
+
+/// The error on one line, its causes after colons, named for the step type unless it
+/// already is ("RestApi failed with status 500", not "RestApi failed: RestApi failed …")
+fn failure_message(step_type: &str, error: &anyhow::Error) -> String {
+    let message = format!("{:#}", error);
+    if message.starts_with(step_type) {
+        message
+    } else {
+        format!("{} failed: {}", step_type, message)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::failure_message;
+
+    #[test]
+    fn a_failure_is_named_for_its_step_type_once() {
+        let error = anyhow::anyhow!("RestApi failed with status 500");
+        assert_eq!(
+            failure_message("RestApi", &error),
+            "RestApi failed with status 500"
+        );
+        let error = anyhow::anyhow!("connection refused").context("Could not reach the host");
+        assert_eq!(
+            failure_message("WebhookInvoke", &error),
+            "WebhookInvoke failed: Could not reach the host: connection refused"
+        );
+    }
 }
