@@ -3,18 +3,13 @@ stormchaser_dsl_version = "0.1"
 workflow "step_library_demo" {
   description = "A workflow demonstrating the use of step_library for reusable step definitions."
 
-  // Define a reusable step library for a standard python testing environment
-  step_library "python_test_env" {
+  // Define a reusable step library for a standard python environment
+  step_library "python_env" {
     type = "RunContainer"
-
-    // Default parameters that can be overridden by steps
-    params {
-      python_version = "3.11"
-    }
 
     // Base container specification
     spec {
-      image  = "python:${inputs.python_version}-slim"
+      image  = "python:3.12-slim"
       cpu    = "500m"
       memory = "1Gi"
       env = [
@@ -33,22 +28,21 @@ workflow "step_library_demo" {
   }
 
   steps {
-    // This step inherits the 'python_test_env' properties
-    step "lint" "python_test_env" {
+    // This step inherits the 'python_env' properties
+    step "check" "python_env" {
       spec {
-        command = ["sh", "-c", "pip install flake8 && flake8 ."]
+        command = ["python", "-c", "import sys; print('Python', sys.version)"]
       }
     }
 
-    // This step also inherits 'python_test_env', but overrides the python_version param
-    step "unit_tests" "python_test_env" {
-      params {
-        python_version = "3.12"
-      }
+    // This step also inherits 'python_env'; what it sets in its own spec, here the
+    // image, takes precedence over the library's
+    step "check_older" "python_env" {
       spec {
-        command = ["sh", "-c", "pip install pytest && pytest tests/"]
+        image   = "python:3.11-slim"
+        command = ["python", "-c", "import sys; print('Python', sys.version)"]
       }
-      next = ["lint"] // Run tests, then lint
+      next = ["check"] // Run on the older Python, then the newer
     }
   }
 }

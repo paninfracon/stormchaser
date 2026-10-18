@@ -63,6 +63,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A direct run the engine refuses for good (its DSL does not parse, policy denies it, a query fails, its inputs are invalid) is recorded as a failed run with the reason, which `stormchaser runs get` shows. It used to be dropped, and the run id the API had answered with returned 404.
+- A JQ or JinjaRender step whose engine dies runs again on another engine instead of failing its run; these steps have no effect but their output. Other built-in steps are still failed, since they may have had their effect.
+- A failed built-in step's error names its step type once and reads on one line ("RestApi failed with status 500 …", not "RestApi failed: RestApi failed with status 500 …").
 - Images built with `Dockerfile.prebuilt` hold their binary again with current Docker (29.6, buildx 0.35): `.dockerignore` re-included `target/release/stormchaser*` before excluding `**/target/`, and each binary was copied in as an empty file, so the container exited at once with status 0.
 - A direct run (`stormchaser run <file>`) submitted while the engine's OPA server is unreachable is created once OPA is back, instead of being dropped: the API had answered with a run id that then never existed. Its OPA, query and input-validation errors are no longer flattened to text, and an OPA server whose host does not resolve now counts as transient. The direct and queued handlers share these stages.
 - A built-in step whose result could not be written because the database was briefly unreachable no longer stays running until its run times out, and RestApi no longer reports such a step failed after its call succeeded. The engine tries the write again for up to 10 minutes, on a fresh connection each time, and an engine-made result no longer goes out without the step's completion token when the token could not be read. Found by stopping Postgres for 20 seconds under load with two engines.
