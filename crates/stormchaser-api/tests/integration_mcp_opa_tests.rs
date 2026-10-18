@@ -226,17 +226,17 @@ async fn test_mcp_opa_policy() {
             false,
         ),
     ];
-    for (path, method, token, expected) in cases {
+    for (path, method, subject, expected) in cases {
+        let authenticated = subject.is_some();
         let ctx = ApiOpaContext {
             path,
             method,
-            subject: token,
+            subject,
         };
         assert_eq!(
             client.check(ctx).await.unwrap(),
             expected,
-            "{method} {path} (token: {}) should be {}",
-            token.is_some(),
+            "{method} {path} (authenticated: {authenticated}) should be {}",
             if expected { "allowed" } else { "denied" }
         );
     }

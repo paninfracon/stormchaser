@@ -40,7 +40,11 @@ pub async fn opa_middleware(
     let claims = match request.extensions().get::<AuthClaims>() {
         Some(AuthClaims(claims)) => Some(claims.clone()),
         None if request.headers().contains_key(header::AUTHORIZATION) => {
-            super::authenticate(request.headers(), &state).await.ok()
+            // Policy sees an anonymous caller; say why, or a rejected token is a mystery
+            super::authenticate(request.headers(), &state)
+                .await
+                .inspect_err(|e| tracing::debug!("Token not accepted for policy: {:?}", e))
+                .ok()
         }
         None => None,
     };

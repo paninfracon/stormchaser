@@ -25,7 +25,7 @@ pub struct Config {
     /// The opa url.
     pub opa_url: Option<String>,
     /// The opa wasm path.
-    pub opa_wasm_path: Option<String>,
+    pub opa_wasm_path: Option<PathBuf>,
     /// The opa entrypoint.
     pub opa_entrypoint: Option<String>,
     /// `OPA_DATA_PATH`: the data document (settings) for a WASM policy.
@@ -104,7 +104,7 @@ impl Config {
                         opa_url = Some(val);
                     }
                 }
-                "OPA_WASM_PATH" => opa_wasm_path = Some(v.as_ref().to_string()),
+                "OPA_WASM_PATH" => opa_wasm_path = Some(PathBuf::from(v.as_ref())),
                 "OPA_ENTRYPOINT" => opa_entrypoint = Some(v.as_ref().to_string()),
                 "OPA_DATA_PATH" => opa_data_path = Some(PathBuf::from(v.as_ref())),
                 "STORMCHASER_AUTHZ_DISABLED" => {

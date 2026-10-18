@@ -59,7 +59,7 @@ pub async fn build_app_state(config: Config) -> anyhow::Result<AppState> {
     let opa_client = Arc::new(stormchaser_opa::policy_client(
         &PolicyConfig {
             url: config.opa_url.clone(),
-            wasm_path: config.opa_wasm_path.clone().map(Into::into),
+            wasm_path: config.opa_wasm_path.clone(),
             data_path: config.opa_data_path.clone(),
             entrypoint: config.opa_entrypoint.clone(),
             disabled: config.authz_disabled,
