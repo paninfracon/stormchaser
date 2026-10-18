@@ -17,7 +17,7 @@ use stormchaser_model::{RunId, StepInstanceId};
 use stormchaser_tls::{TlsConfig, TlsReloader};
 use uuid::Uuid;
 
-const LOST_AFTER_SECS: f64 = 60.0;
+use stormchaser_engine::engine_instance::LOST_AFTER;
 
 async fn setup_db() -> PgPool {
     let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
@@ -129,19 +129,13 @@ async fn a_built_in_step_whose_engine_died_fails_and_ends_its_run() {
 
     // While its engine sends heartbeats the step is left alone
     heartbeat_at(&pool, *ENGINE_ID, 0.0).await;
-    fail_lost_engine_steps(&pool, LOST_AFTER_SECS)
-        .await
-        .unwrap();
+    fail_lost_engine_steps(&pool, LOST_AFTER).await.unwrap();
     assert!(queued_failures(&pool, step_id).await.is_empty());
 
     // Its engine stops
-    heartbeat_at(&pool, *ENGINE_ID, 2.0 * LOST_AFTER_SECS).await;
-    fail_lost_engine_steps(&pool, LOST_AFTER_SECS)
-        .await
-        .unwrap();
-    fail_lost_engine_steps(&pool, LOST_AFTER_SECS)
-        .await
-        .unwrap();
+    heartbeat_at(&pool, *ENGINE_ID, 2.0 * LOST_AFTER.as_secs_f64()).await;
+    fail_lost_engine_steps(&pool, LOST_AFTER).await.unwrap();
+    fail_lost_engine_steps(&pool, LOST_AFTER).await.unwrap();
     let failures = queued_failures(&pool, step_id).await;
     assert_eq!(failures.len(), 1, "the step is failed once");
 
@@ -171,11 +165,10 @@ async fn a_built_in_step_whose_engine_died_fails_and_ends_its_run() {
 async fn an_engine_long_gone_is_forgotten_once_it_runs_no_step() {
     let pool = setup_db().await;
     let gone = Uuid::new_v4();
+    // Twice as long as an engine is kept
     heartbeat_at(&pool, gone, 2.0 * 86400.0).await;
 
-    fail_lost_engine_steps(&pool, LOST_AFTER_SECS)
-        .await
-        .unwrap();
+    fail_lost_engine_steps(&pool, LOST_AFTER).await.unwrap();
 
     let kept: bool =
         sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM engine_instances WHERE id = $1)")

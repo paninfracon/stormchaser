@@ -42,8 +42,7 @@ pub fn start_liveness_worker(
             }
 
             // 3. Fail the built-in steps of engines that have gone
-            if let Err(e) =
-                fail_lost_engine_steps(&pool, crate::engine_instance::LOST_AFTER_SECS).await
+            if let Err(e) = fail_lost_engine_steps(&pool, crate::engine_instance::LOST_AFTER).await
             {
                 tracing::error!("Failed to fail the steps of lost engines: {:?}", e);
             }
@@ -78,18 +77,18 @@ pub async fn fail_zombie_steps(pool: &sqlx::PgPool) -> anyhow::Result<usize> {
 }
 
 /// How long an engine may go without a heartbeat before it is forgotten
-const ENGINE_GONE_SECS: f64 = 86400.0;
+const ENGINE_GONE: Duration = Duration::from_secs(24 * 60 * 60);
 
-/// Fails the built-in steps whose engine has sent no heartbeat for `lost_after_secs`.
+/// Fails the built-in steps whose engine has sent no heartbeat for `lost_after`.
 /// They would never finish. Failing them, rather than running them again, is what
 /// happens to a step whose runner has gone: a built-in step may have had its effect
 /// before its engine died.
 pub async fn fail_lost_engine_steps(
     pool: &sqlx::PgPool,
-    lost_after_secs: f64,
+    lost_after: Duration,
 ) -> anyhow::Result<usize> {
     let mut tx = pool.begin().await?;
-    let lost = db::take_lost_engine_steps(&mut tx, lost_after_secs).await?;
+    let lost = db::take_lost_engine_steps(&mut tx, lost_after).await?;
     for step in &lost {
         tracing::warn!(
             "Step {} of run {} was running in an engine that has stopped; failing it",
@@ -107,7 +106,7 @@ pub async fn fail_lost_engine_steps(
         };
         crate::db::outbox::insert_step_failed(&mut *tx, &event).await?;
     }
-    db::delete_gone_engines(&mut *tx, ENGINE_GONE_SECS).await?;
+    db::delete_gone_engines(&mut *tx, ENGINE_GONE).await?;
     tx.commit().await?;
     Ok(lost.len())
 }
@@ -411,9 +410,9 @@ pub fn start_task_message_purge_worker(
 }
 
 /// How long a claimed step may take to be handed over before it is taken for lost
-const LOST_DISPATCH_SECS: f64 = 300.0;
+const LOST_DISPATCH: Duration = Duration::from_secs(5 * 60);
 /// How long a step may wait for dispatch before the engine tries again
-const WAITING_STEP_SECS: f64 = 60.0;
+const WAITING_STEP: Duration = Duration::from_secs(60);
 
 /// Puts back steps whose dispatch was lost, and dispatches again the runs whose
 /// steps have been waiting longer than they should.
@@ -421,12 +420,12 @@ pub async fn recover_dispatches(
     pool: &sqlx::PgPool,
     nats_client: &async_nats::Client,
     tls_reloader: &Arc<TlsReloader>,
-    lost_after_secs: f64,
-    waiting_after_secs: f64,
+    lost_after: Duration,
+    waiting_after: Duration,
 ) -> anyhow::Result<()> {
-    put_back_lost_dispatches(pool, lost_after_secs).await?;
+    put_back_lost_dispatches(pool, lost_after).await?;
 
-    for run_id in db::runs_with_waiting_steps(pool, waiting_after_secs).await? {
+    for run_id in db::runs_with_waiting_steps(pool, waiting_after).await? {
         if let Err(e) = handler::dispatch_pending_steps(
             run_id,
             pool.clone(),
@@ -448,9 +447,9 @@ pub async fn recover_dispatches(
 /// Puts back to pending the steps whose dispatch was lost, giving back what they
 /// claimed of their run's quota, as a failed dispatch does. All or none, so that no
 /// step is put back without its quota.
-async fn put_back_lost_dispatches(pool: &sqlx::PgPool, lost_after_secs: f64) -> anyhow::Result<()> {
+async fn put_back_lost_dispatches(pool: &sqlx::PgPool, lost_after: Duration) -> anyhow::Result<()> {
     let mut tx = pool.begin().await?;
-    let lost = db::reset_lost_dispatches(&mut *tx, lost_after_secs).await?;
+    let lost = db::reset_lost_dispatches(&mut *tx, lost_after).await?;
     let mut limits = std::collections::HashMap::new();
     for step in lost {
         tracing::warn!(
@@ -492,8 +491,8 @@ pub fn start_dispatch_recovery_worker(
                 &pool,
                 &nats_client,
                 &tls_reloader,
-                LOST_DISPATCH_SECS,
-                WAITING_STEP_SECS,
+                LOST_DISPATCH,
+                WAITING_STEP,
             )
             .await
             {

@@ -15,7 +15,7 @@ pub static ENGINE_ID: LazyLock<Uuid> = LazyLock::new(Uuid::new_v4);
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 
 /// How long an engine may go without a heartbeat before the steps it runs are lost
-pub const LOST_AFTER_SECS: f64 = 60.0;
+pub const LOST_AFTER: Duration = Duration::from_secs(60);
 
 pub async fn heartbeat(pool: &PgPool, id: Uuid) -> Result<()> {
     sqlx::query(

@@ -5,6 +5,7 @@ use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use std::env::var;
 use std::sync::Arc;
+use std::time::Duration;
 use stormchaser_engine::workers::recover_dispatches;
 use stormchaser_model::RunId;
 use stormchaser_tls::{TlsConfig, TlsReloader};
@@ -106,9 +107,15 @@ async fn recover(pool: &sqlx::PgPool) {
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
     let tls_reloader = Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap());
-    recover_dispatches(pool, &nats_client, &tls_reloader, 300.0, 60.0)
-        .await
-        .unwrap();
+    recover_dispatches(
+        pool,
+        &nats_client,
+        &tls_reloader,
+        Duration::from_secs(300),
+        Duration::from_secs(60),
+    )
+    .await
+    .unwrap();
 }
 
 async fn delete_run(pool: &sqlx::PgPool, run_id: RunId) {

@@ -21,6 +21,9 @@ pub const LEADER_LOCK: i64 = 0x73746f726d636872;
 /// How often a replica that is not leading tries to, and the leader checks it still is
 const CHECK_INTERVAL: Duration = Duration::from_secs(5);
 
+/// How long the leader's connection may take to answer before the leader steps down
+const HOLD_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Takes the advisory lock `key`, if no other session holds it, on a connection that
 /// leaves the pool with it. Dropping the connection closes it, which releases the lock.
 pub async fn try_lock(pool: &PgPool, key: i64) -> Result<Option<PgConnection>> {
@@ -36,7 +39,10 @@ pub async fn try_lock(pool: &PgPool, key: i64) -> Result<Option<PgConnection>> {
 /// Whether the connection holding the lock still answers in time
 async fn still_holds(conn: &mut PgConnection) -> bool {
     let check = sqlx::query("SELECT 1").execute(&mut *conn);
-    matches!(tokio::time::timeout(CHECK_INTERVAL, check).await, Ok(Ok(_)))
+    matches!(
+        tokio::time::timeout(HOLD_CHECK_TIMEOUT, check).await,
+        Ok(Ok(_))
+    )
 }
 
 fn start_workers(

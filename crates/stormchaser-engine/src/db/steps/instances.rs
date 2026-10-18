@@ -678,12 +678,12 @@ pub struct LostEngineStep {
     pub completion_token: Option<String>,
 }
 
-/// Takes the built-in steps whose engine has sent no heartbeat for `lost_after_secs`,
+/// Takes the built-in steps whose engine has sent no heartbeat for `lost_after`,
 /// and forgets which engine ran them, so that each is taken once. They stay locked
 /// until the transaction ends.
 pub async fn take_lost_engine_steps(
     tx: &mut sqlx::PgConnection,
-    lost_after_secs: f64,
+    lost_after: std::time::Duration,
 ) -> Result<Vec<LostEngineStep>, sqlx::Error> {
     sqlx::query_as(
         r#"
@@ -702,16 +702,16 @@ pub async fn take_lost_engine_steps(
         RETURNING s.id, s.run_id, wr.fencing_token, s.completion_token
         "#,
     )
-    .bind(lost_after_secs)
+    .bind(lost_after.as_secs_f64())
     .fetch_all(tx)
     .await
 }
 
-/// Forgets engines that have sent no heartbeat for `gone_after_secs` and are running
+/// Forgets engines that have sent no heartbeat for `gone_after` and are running
 /// no step.
 pub async fn delete_gone_engines<'a, E>(
     executor: E,
-    gone_after_secs: f64,
+    gone_after: std::time::Duration,
 ) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
@@ -726,7 +726,7 @@ where
           )
         "#,
     )
-    .bind(gone_after_secs)
+    .bind(gone_after.as_secs_f64())
     .execute(executor)
     .await
 }
@@ -741,11 +741,11 @@ pub struct LostDispatch {
 }
 
 /// Puts back to pending the steps of active runs that were claimed for dispatch more
-/// than `older_than_secs` ago and never handed over: the engine dispatching them died,
+/// than `older_than` ago and never handed over: the engine dispatching them died,
 /// or could not put them back itself.
 pub async fn reset_lost_dispatches<'a, E>(
     executor: E,
-    older_than_secs: f64,
+    older_than: std::time::Duration,
 ) -> Result<Vec<LostDispatch>, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
@@ -763,17 +763,18 @@ where
         RETURNING si.id, si.run_id, si.step_type, si.spec
         "#,
     )
-    .bind(older_than_secs)
+    .bind(older_than.as_secs_f64())
     .fetch_all(executor)
     .await
 }
 
-/// Running runs with a step that has waited for dispatch for more than
-/// `older_than_secs`. Dispatch happens when a run's events arrive; a run whose steps
-/// were all put back to pending has none coming.
+/// Running runs with a step created more than `older_than` ago and still pending.
+/// Dispatch happens when a run's events arrive; a run whose steps were all put back to
+/// pending has none coming. A run whose steps wait for its concurrency limit is listed
+/// too, and dispatching it again finds no room, which costs a query.
 pub async fn runs_with_waiting_steps<'a, E>(
     executor: E,
-    older_than_secs: f64,
+    older_than: std::time::Duration,
 ) -> Result<Vec<RunId>, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
@@ -789,7 +790,7 @@ where
           AND si.created_at < NOW() - make_interval(secs => $1)
         "#,
     )
-    .bind(older_than_secs)
+    .bind(older_than.as_secs_f64())
     .fetch_all(executor)
     .await
 }
