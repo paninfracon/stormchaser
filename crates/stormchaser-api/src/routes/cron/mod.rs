@@ -3,9 +3,7 @@ use crate::db;
 use chrono::Utc;
 use external::*;
 use stormchaser_model::cron;
-use stormchaser_model::events::WorkflowQueuedEvent;
-use stormchaser_model::events::{EventSource, EventType, SchemaVersion, WorkflowEventType};
-use stormchaser_model::nats::NatsSubject;
+use stormchaser_model::events::EventSource;
 use stormchaser_model::workflow::RunStatus;
 use stormchaser_model::CronWorkflowId;
 use stormchaser_model::RunId;
@@ -275,27 +273,12 @@ pub async fn trigger_cron_workflow(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let event = WorkflowQueuedEvent {
-        run_id,
-        event_type: EventType::Workflow(WorkflowEventType::Queued),
-        timestamp: Utc::now(),
-        status: stormchaser_model::workflow::RunStatus::Queued,
-        dsl: None,
-        inputs: None,
-        initiating_user: None,
-        sops_file: None, // Cron jobs might need these later, but default to None for now
-        sops_role_arn: None,
-    };
-
-    // In the run's own transaction: the run and the event that starts it are kept
-    // together or not at all, and the engine's relay publishes the event
-    stormchaser_engine::db::outbox::insert_outbox_event(
+    // The engine's relay publishes it
+    stormchaser_engine::db::outbox::insert_run_queued(
         &mut *tx,
-        NatsSubject::RunQueued(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
-        EventType::Workflow(WorkflowEventType::Queued),
+        run_id,
         EventSource::System,
-        serde_json::to_value(event).unwrap(),
-        Some(SchemaVersion::new("1.0".to_string())),
+        None,
         None,
     )
     .await

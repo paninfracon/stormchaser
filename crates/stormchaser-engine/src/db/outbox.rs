@@ -2,7 +2,7 @@ use serde_json::Value;
 use sqlx::{Executor, Postgres};
 use stormchaser_model::events::{
     EventSource, EventType, SchemaId, SchemaVersion, StepCompletedEvent, StepEventType,
-    StepFailedEvent,
+    StepFailedEvent, WorkflowEventType, WorkflowQueuedEvent,
 };
 use stormchaser_model::nats::compute_shard_id;
 use stormchaser_model::nats::{build_cloudevent_and_headers, NatsSubject};
@@ -63,6 +63,42 @@ where
     .await?;
 
     Ok(())
+}
+
+/// Queues the event that starts a new run, for the engine to resolve it. In the run's
+/// own transaction, the run and the event that starts it are kept together or not at
+/// all.
+pub async fn insert_run_queued<'e, E>(
+    executor: E,
+    run_id: stormchaser_model::RunId,
+    source: EventSource,
+    sops_file: Option<String>,
+    sops_role_arn: Option<String>,
+) -> Result<(), anyhow::Error>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    let event = WorkflowQueuedEvent {
+        run_id,
+        event_type: EventType::Workflow(WorkflowEventType::Queued),
+        timestamp: chrono::Utc::now(),
+        status: stormchaser_model::workflow::RunStatus::Queued,
+        dsl: None,
+        inputs: None,
+        initiating_user: None,
+        sops_file,
+        sops_role_arn,
+    };
+    insert_outbox_event(
+        executor,
+        NatsSubject::RunQueued(Some(compute_shard_id(&run_id))),
+        EventType::Workflow(WorkflowEventType::Queued),
+        source,
+        serde_json::to_value(event)?,
+        Some(SchemaVersion::new("1.0".to_string())),
+        None,
+    )
+    .await
 }
 
 /// Queues a step's completion for the step-completed handler.
