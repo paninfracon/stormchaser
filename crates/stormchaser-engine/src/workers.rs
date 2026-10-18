@@ -424,23 +424,7 @@ pub async fn recover_dispatches(
     lost_after_secs: f64,
     waiting_after_secs: f64,
 ) -> anyhow::Result<()> {
-    for lost in db::reset_lost_dispatches(pool, lost_after_secs).await? {
-        tracing::warn!(
-            "Step {} of run {} was claimed for dispatch and never handed over; dispatching it again",
-            lost.id,
-            lost.run_id
-        );
-        // What it claimed of its run's quota, as a failed dispatch gives back
-        let quotas = handler::fetch_quotas(lost.run_id, pool).await?;
-        let max_cpu = crate::resource_utils::parse_cpu(&quotas.max_cpu).unwrap_or(0.0);
-        let max_mem = crate::resource_utils::parse_memory(&quotas.max_memory).unwrap_or(0);
-        if max_cpu > 0.0 || max_mem > 0 {
-            let req =
-                crate::resource_utils::get_step_resource_requirements(&lost.step_type, &lost.spec);
-            let mut conn = pool.acquire().await?;
-            db::release_step_quota(&mut conn, lost.run_id, req.cpu, req.memory).await?;
-        }
-    }
+    put_back_lost_dispatches(pool, lost_after_secs).await?;
 
     for run_id in db::runs_with_waiting_steps(pool, waiting_after_secs).await? {
         if let Err(e) = handler::dispatch_pending_steps(
@@ -458,6 +442,40 @@ pub async fn recover_dispatches(
             );
         }
     }
+    Ok(())
+}
+
+/// Puts back to pending the steps whose dispatch was lost, giving back what they
+/// claimed of their run's quota, as a failed dispatch does. All or none, so that no
+/// step is put back without its quota.
+async fn put_back_lost_dispatches(pool: &sqlx::PgPool, lost_after_secs: f64) -> anyhow::Result<()> {
+    let mut tx = pool.begin().await?;
+    let lost = db::reset_lost_dispatches(&mut *tx, lost_after_secs).await?;
+    let mut limits = std::collections::HashMap::new();
+    for step in lost {
+        tracing::warn!(
+            "Step {} of run {} was claimed for dispatch and never handed over; dispatching it again",
+            step.id,
+            step.run_id
+        );
+        let (max_cpu, max_mem) = match limits.get(&step.run_id) {
+            Some(limit) => *limit,
+            None => {
+                let quotas = handler::fetch_quotas(step.run_id, &mut *tx).await?;
+                let limit = (
+                    crate::resource_utils::parse_cpu(&quotas.max_cpu).unwrap_or(0.0),
+                    crate::resource_utils::parse_memory(&quotas.max_memory).unwrap_or(0),
+                );
+                *limits.entry(step.run_id).or_insert(limit)
+            }
+        };
+        if max_cpu > 0.0 || max_mem > 0 {
+            let req =
+                crate::resource_utils::get_step_resource_requirements(&step.step_type, &step.spec);
+            db::release_step_quota(&mut tx, step.run_id, req.cpu, req.memory).await?;
+        }
+    }
+    tx.commit().await?;
     Ok(())
 }
 
