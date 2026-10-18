@@ -91,6 +91,24 @@ async fn step_on_test_engine(pool: &PgPool, run_id: RunId) -> (StepInstanceId, U
             .unwrap();
     assert_eq!(engine_id, Some(*ENGINE_ID), "the step records its engine");
 
+    // The step runs in this process. Its result in the outbox says it is done, and will
+    // not write the step again under the changes the test makes.
+    let mut done = false;
+    for _ in 0..50 {
+        done = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM outbox_events WHERE subject LIKE '%.step.completed' AND payload LIKE '%' || $1 || '%')",
+        )
+        .bind(step_id.to_string())
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        if done {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(done, "the step did not finish");
+
     let engine = Uuid::new_v4();
     heartbeat_at(pool, engine, 0.0).await;
     sqlx::query("UPDATE step_instances SET engine_id = $2 WHERE id = $1")
