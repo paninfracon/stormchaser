@@ -68,6 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The dogfood workflows (`tests/dogfood.storm`, `tests/dogfood-k8s.storm`) deploy a working API again. The test step gives the release-built tests the dev JWT secret and skips the ownership tests, which need Docker. The API is built on bookworm, to match the image it runs in, with its scripts run by bash. The binary is made executable after it comes through an artifact. The chart is deployed into the namespace holding its secrets, with `api.image` (the `global.image` values were never read) and pulled every time. The API's auth tests no longer print `DATABASE_URL` into test reports.
 - `allow_failure = true` works. A step that sets it, or whose step library does, is marked `failed_ignored` when it fails, and its run goes on as if it had succeeded. Before, the engine never read the setting and any failed step failed its run. A step whose runner is lost still fails its run.
 - A run whose starting event the engine gives up on, after 10 transient failures or handler crashes, is recorded as failed with the reason. It used to stay queued forever, or, for a direct run, never exist.
 - Engine images include `sops` (3.13.3), which the engine runs to decrypt SOPS-encrypted secrets. No image had it, so every run with SOPS secrets failed.
