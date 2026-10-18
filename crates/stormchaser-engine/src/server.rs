@@ -385,14 +385,15 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
         .await
         .context("Failed to record the engine's first heartbeat")?;
 
-    // Whatever its shards, one replica at a time runs the background workers
+    let (messages, query_messages) = setup_nats_consumers(&nats_client, &assigned_shards).await?;
+
+    // Whatever its shards, one replica at a time runs the background workers. After the
+    // consumers are set up, which creates the stream that the relay and purge work on.
     let leader_election = crate::leader::start_leader_election(
         pool.clone(),
         nats_client.clone(),
         tls_reloader.clone(),
     );
-
-    let (messages, query_messages) = setup_nats_consumers(&nats_client, &assigned_shards).await?;
 
     info!("Engine listening for events and queries");
 
