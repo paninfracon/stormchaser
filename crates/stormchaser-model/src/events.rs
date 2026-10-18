@@ -52,6 +52,8 @@ impl EventSource {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub enum WorkflowEventType {
     Queued,
+    /// A workflow submitted as text, for the engine to parse, check and create
+    Direct,
     StartPending,
     Running,
     Completed,
@@ -63,6 +65,7 @@ impl WorkflowEventType {
     pub fn as_str(&self) -> &str {
         match self {
             WorkflowEventType::Queued => "WorkflowQueuedEvent",
+            WorkflowEventType::Direct => "WorkflowDirectEvent",
             WorkflowEventType::StartPending => "WorkflowStartPendingEvent",
             WorkflowEventType::Running => "WorkflowRunningEvent",
             WorkflowEventType::Completed => "WorkflowCompletedEvent",

@@ -101,6 +101,35 @@ where
     .await
 }
 
+/// Queues a workflow submitted as text, for the engine to parse, check and create as
+/// run `run_id`.
+pub async fn insert_run_direct<'e, E>(
+    executor: E,
+    run_id: stormchaser_model::RunId,
+    dsl: &str,
+    initiating_user: &str,
+    inputs: &Value,
+) -> Result<(), anyhow::Error>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    insert_outbox_event(
+        executor,
+        NatsSubject::RunDirect(Some(compute_shard_id(&run_id))),
+        EventType::Workflow(WorkflowEventType::Direct),
+        EventSource::Api,
+        serde_json::json!({
+            "run_id": run_id,
+            "dsl": dsl,
+            "initiating_user": initiating_user,
+            "inputs": inputs,
+        }),
+        Some(SchemaVersion::new("1.0".to_string())),
+        None,
+    )
+    .await
+}
+
 /// Queues a step's completion for the step-completed handler.
 pub async fn insert_step_completed<'e, E>(
     executor: E,

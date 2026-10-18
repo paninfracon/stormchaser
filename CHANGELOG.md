@@ -66,6 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `POST /api/v1/runs/direct` (`stormchaser run <file>`) refuses a workflow that does not parse with `400 Bad Request` and the parser's reason, where it accepted any text and the run failed later. It queues the run through the outbox instead of publishing it to NATS without waiting for the stream to store it, so an accepted run is no longer lost on the way to the engine, and runs are accepted while NATS is down. Its response now says `queued`, not `running`.
 - A direct run the engine refuses for good (its DSL does not parse, policy denies it, a query fails, its inputs are invalid) is recorded as a failed run with the reason, which `stormchaser runs get` shows. It used to be dropped, and the run id the API had answered with returned 404.
 - A JQ or JinjaRender step whose engine dies runs again on another engine instead of failing its run; these steps have no effect but their output. Other built-in steps are still failed, since they may have had their effect.
 - A failed built-in step's error names its step type once and reads on one line ("RestApi failed with status 500 …", not "RestApi failed: RestApi failed with status 500 …").

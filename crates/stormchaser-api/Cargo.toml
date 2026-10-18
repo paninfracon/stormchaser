@@ -18,6 +18,7 @@ path = "src/lib.rs"
 
 [dependencies]
 stormchaser-model = { workspace = true }
+stormchaser-dsl = { workspace = true }
 stormchaser-tls = { workspace = true, features = ["listener"] }
 stormchaser-opa = { version = "1.5.1", path = "../stormchaser-opa" }
 stormchaser-engine = { version = "1.5.1", path = "../stormchaser-engine" }

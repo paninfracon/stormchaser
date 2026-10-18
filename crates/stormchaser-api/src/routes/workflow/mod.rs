@@ -6,7 +6,6 @@ use super::{
 use crate::authz::{self, Caller, Kind};
 use crate::db;
 use crate::{AppState, AuthClaims, RUNS_ENQUEUED};
-use async_nats::HeaderMap;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -375,7 +374,8 @@ pub async fn delete_workflow_run_api(
     path = "/api/v1/runs/direct",
     request_body = DirectRunRequest,
     responses(
-        (status = 200, description = "Workflow started", body = EnqueueResponse),
+        (status = 200, description = "Workflow queued", body = EnqueueResponse),
+        (status = 400, description = "The workflow does not parse; the body says why", body = String),
         (status = 500, description = "Internal Server Error")
     ),
     security(
@@ -384,12 +384,16 @@ pub async fn delete_workflow_run_api(
     tag = "workflow"
 )]
 /// Executes a direct run.
+///
+/// A workflow that does not parse is refused here, with the reason. The engine checks
+/// the rest (policy, queries, inputs) once it has the run, and a run it refuses is
+/// recorded as failed, with why.
 #[tracing::instrument(skip(state, claims, payload), fields(run_id = tracing::field::Empty, initiating_user = tracing::field::Empty))]
 pub async fn direct_run(
     AuthClaims(claims): AuthClaims,
     State(state): State<AppState>,
     Json(payload): Json<DirectRunRequest>,
-) -> Result<impl IntoResponse, StatusCode> {
+) -> Result<impl IntoResponse, (StatusCode, String)> {
     let run_id = RunId::new_v4();
     let user_id = claims.email.clone().unwrap_or(claims.sub.clone());
 
@@ -397,42 +401,30 @@ pub async fn direct_run(
     span.record("run_id", tracing::field::display(run_id));
     span.record("initiating_user", tracing::field::display(&user_id));
 
-    // Publish to NATS stormchaser.run.direct
-    let payload_json = serde_json::json!({
-        "run_id": run_id,
-        "dsl": payload.dsl,
-        "initiating_user": user_id,
-        "inputs": payload.inputs,
-    });
+    if let Err(e) = stormchaser_dsl::StormchaserParser::new().parse(&payload.dsl) {
+        return Err((StatusCode::BAD_REQUEST, format!("{:#}", e)));
+    }
 
-    use cloudevents::{EventBuilder, EventBuilderV10};
-    let event = EventBuilderV10::new()
-        .id(uuid::Uuid::new_v4().to_string())
-        .ty("stormchaser.v1.run.direct")
-        .source(EventSource::Api.as_str())
-        .time(Utc::now())
-        .data(stormchaser_model::APPLICATION_JSON, payload_json)
-        .build()
-        .map_err(|e| {
-            tracing::error!("Failed to build CloudEvent: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-
-    let event_str = serde_json::to_string(&event).unwrap_or_default();
-    let mut headers = HeaderMap::new();
-    headers.insert("Content-Type", "application/cloudevents+json");
-
-    state
-        .nats
-        .publish_with_headers("stormchaser.v1.run.direct", headers, event_str.into())
-        .await
-        .map_err(|e| {
-            tracing::error!("Failed to publish CloudEvent: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    // Through the outbox, which the engine's relay publishes and the stream confirms:
+    // a run the API answers for is never lost on the way to the engine
+    stormchaser_engine::db::outbox::insert_run_direct(
+        &state.pool,
+        run_id,
+        &payload.dsl,
+        &user_id,
+        &payload.inputs,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to queue direct run {}: {:?}", run_id, e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to queue the run".to_string(),
+        )
+    })?;
 
     Ok(Json(EnqueueResponse {
         run_id,
-        status: RunStatus::Running,
+        status: RunStatus::Queued,
     }))
 }

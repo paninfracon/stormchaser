@@ -783,36 +783,92 @@ async fn test_delete_workflow_run() {
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
 }
 
+async fn post_direct_run(app: axum::Router, dsl: &str) -> axum::response::Response {
+    let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
+    app.oneshot(
+        Request::builder()
+            .method("POST")
+            .uri("/api/v1/runs/direct")
+            .header(AUTHORIZATION, format!("Bearer {}", get_token()))
+            .header("Content-Type", stormchaser_model::APPLICATION_JSON)
+            .extension(ConnectInfo(addr))
+            .body(Body::from(
+                serde_json::to_vec(&json!({ "dsl": dsl, "inputs": {} })).unwrap(),
+            ))
+            .unwrap(),
+    )
+    .await
+    .unwrap()
+}
+
 #[tokio::test]
 async fn test_direct_run() {
+    let (app, pool) = match setup_app_with_pool().await {
+        Some(a) => a,
+        None => return,
+    };
+
+    let response =
+        post_direct_run(app, "stormchaser_dsl_version = \"v1\"\nworkflow \"wf\" {}").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let run_id = body["run_id"].as_str().unwrap().to_string();
+
+    // Queued in the outbox, for the engine's relay to publish
+    let queued: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM outbox_events WHERE subject LIKE '%.run.direct' AND payload LIKE '%' || $1 || '%'",
+    )
+    .bind(&run_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(queued, 1);
+    sqlx::query("DELETE FROM outbox_events WHERE payload LIKE '%' || $1 || '%'")
+        .bind(&run_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_direct_run_that_does_not_parse_is_refused_with_why() {
     let app = match setup_app().await {
         Some(a) => a,
         None => return,
     };
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/v1/runs/direct")
-                .header(AUTHORIZATION, format!("Bearer {}", get_token()))
-                .header("Content-Type", stormchaser_model::APPLICATION_JSON)
-                .extension(ConnectInfo(addr))
-                .body(Body::from(
-                    serde_json::to_vec(&json!({
-                        "dsl": "stormchaser_dsl_version = \"v1\"\nworkflow \"wf\" {}",
-                        "inputs": {},
-                        "secrets": {}
-                    }))
-                    .unwrap(),
-                ))
-                .unwrap(),
-        )
+    let response = post_direct_run(
+        app,
+        r#"
+        stormchaser_dsl_version = "v1"
+        workflow "wf" {
+            step_library "base" {
+                type = "RunContainer"
+                spec { image = "alpine:${params.tag}" }
+            }
+            steps {
+                step "s" "base" {}
+            }
+        }
+        "#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
+    let body = String::from_utf8_lossy(&body);
+    assert!(
+        body.contains(
+            "Step 's' uses params.tag, which neither it nor its step library 'base' sets"
+        ),
+        "{body}"
+    );
 }
 
 #[tokio::test]
