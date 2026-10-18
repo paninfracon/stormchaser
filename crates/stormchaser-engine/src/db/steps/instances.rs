@@ -690,6 +690,34 @@ pub struct LostEngineStep {
     pub completion_token: Option<String>,
 }
 
+/// Puts back to pending the steps of `step_types` whose engine has sent no heartbeat
+/// for `lost_after`, for dispatch again, and returns them as (step, run).
+pub async fn reset_lost_engine_steps(
+    tx: &mut sqlx::PgConnection,
+    lost_after: std::time::Duration,
+    step_types: &[&str],
+) -> Result<Vec<(StepInstanceId, RunId)>, sqlx::Error> {
+    sqlx::query_as(
+        r#"
+        UPDATE step_instances s
+        SET status = 'pending', engine_id = NULL, runner_id = NULL, started_at = NULL,
+            claimed_at = NULL, dispatched_at = NULL
+        FROM engine_instances e, workflow_runs wr
+        WHERE s.engine_id = e.id
+          AND wr.id = s.run_id
+          AND wr.status = 'running'
+          AND s.status IN ('initializing', 'running')
+          AND s.step_type = ANY($2)
+          AND e.last_heartbeat_at < NOW() - make_interval(secs => $1)
+        RETURNING s.id, s.run_id
+        "#,
+    )
+    .bind(lost_after.as_secs_f64())
+    .bind(step_types)
+    .fetch_all(tx)
+    .await
+}
+
 /// Takes the built-in steps whose engine has sent no heartbeat for `lost_after`,
 /// and forgets which engine ran them, so that each is taken once. They stay locked
 /// until the transaction ends.

@@ -79,15 +79,29 @@ pub async fn fail_zombie_steps(pool: &sqlx::PgPool) -> anyhow::Result<usize> {
 /// How long an engine may go without a heartbeat before it is forgotten
 const ENGINE_GONE: Duration = Duration::from_secs(24 * 60 * 60);
 
+/// Built-in step types with no effect but their output, which an engine that stopped
+/// while running one can leave to another to run again
+const RERUNNABLE_BUILT_INS: &[&str] = &["JQ", "JinjaRender"];
+
 /// Fails the built-in steps whose engine has sent no heartbeat for `lost_after`.
 /// They would never finish. Failing them, rather than running them again, is what
 /// happens to a step whose runner has gone: a built-in step may have had its effect
-/// before its engine died.
+/// before its engine died. Those of [`RERUNNABLE_BUILT_INS`] have none, and are put
+/// back to pending; the dispatch recovery worker dispatches them again.
 pub async fn fail_lost_engine_steps(
     pool: &sqlx::PgPool,
     lost_after: Duration,
 ) -> anyhow::Result<usize> {
     let mut tx = pool.begin().await?;
+    for (step_id, run_id) in
+        db::reset_lost_engine_steps(&mut tx, lost_after, RERUNNABLE_BUILT_INS).await?
+    {
+        tracing::warn!(
+            "Step {} of run {} was running in an engine that has stopped; it has no side effects, so it runs again",
+            step_id,
+            run_id
+        );
+    }
     let lost = db::take_lost_engine_steps(&mut tx, lost_after).await?;
     for step in &lost {
         tracing::warn!(

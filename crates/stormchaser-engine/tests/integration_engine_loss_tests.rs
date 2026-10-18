@@ -1,6 +1,7 @@
 //! A built-in step runs in the engine process that dispatched it. When that process
 //! dies the step will never finish, and the engine fails it, as it does a step whose
-//! runner has gone, instead of leaving it to the run's timeout.
+//! runner has gone, instead of leaving it to the run's timeout; or, for a step with no
+//! effect but its output, runs it again.
 
 mod common;
 
@@ -50,15 +51,12 @@ async fn queued_failures(pool: &PgPool, step_id: StepInstanceId) -> Vec<StepFail
         .collect()
 }
 
-#[tokio::test]
-async fn a_built_in_step_whose_engine_died_fails_and_ends_its_run() {
-    let pool = setup_db().await;
+/// Starts a run of one JinjaRender step and returns it, dispatched, with the engine
+/// that runs it moved to one of the test's own, whose heartbeats the test controls. No
+/// outbox relay runs here: the step's own result stays queued, as if its engine had
+/// died before the result reached the stream.
+async fn step_on_test_engine(pool: &PgPool, run_id: RunId) -> (StepInstanceId, Uuid) {
     let nats_client = nats().await;
-    let tls_reloader = tls_reloader().await;
-    let run_id = RunId::new_v4();
-
-    // No outbox relay runs here: the step's own result stays queued, as if its engine
-    // had died before the result reached the stream
     handler::handle_workflow_direct(
         json!({
             "run_id": run_id,
@@ -81,38 +79,68 @@ async fn a_built_in_step_whose_engine_died_fails_and_ends_its_run() {
     )
     .await
     .unwrap();
-    handler::handle_workflow_start_pending(
-        run_id,
-        pool.clone(),
-        nats_client.clone(),
-        tls_reloader.clone(),
-    )
-    .await
-    .unwrap();
+    handler::handle_workflow_start_pending(run_id, pool.clone(), nats_client, tls_reloader().await)
+        .await
+        .unwrap();
 
     let (step_id, engine_id): (StepInstanceId, Option<Uuid>) =
         sqlx::query_as("SELECT id, engine_id FROM step_instances WHERE run_id = $1")
             .bind(run_id)
-            .fetch_one(&pool)
+            .fetch_one(pool)
             .await
             .unwrap();
     assert_eq!(engine_id, Some(*ENGINE_ID), "the step records its engine");
 
+    let engine = Uuid::new_v4();
+    heartbeat_at(pool, engine, 0.0).await;
+    sqlx::query("UPDATE step_instances SET engine_id = $2 WHERE id = $1")
+        .bind(step_id)
+        .bind(engine)
+        .execute(pool)
+        .await
+        .unwrap();
+    (step_id, engine)
+}
+
+async fn delete_engine(pool: &PgPool, engine: Uuid) {
+    sqlx::query("DELETE FROM engine_instances WHERE id = $1")
+        .bind(engine)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_built_in_step_whose_engine_died_fails_and_ends_its_run() {
+    let pool = setup_db().await;
+    let run_id = RunId::new_v4();
+    let (step_id, engine) = step_on_test_engine(&pool, run_id).await;
+    // A step with effects beyond its output, which must not run twice
+    sqlx::query("UPDATE step_instances SET step_type = 'WebhookInvoke' WHERE id = $1")
+        .bind(step_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
     // While its engine sends heartbeats the step is left alone
-    heartbeat_at(&pool, *ENGINE_ID, 0.0).await;
     fail_lost_engine_steps(&pool, LOST_AFTER).await.unwrap();
     assert!(queued_failures(&pool, step_id).await.is_empty());
 
     // Its engine stops
-    heartbeat_at(&pool, *ENGINE_ID, 2.0 * LOST_AFTER.as_secs_f64()).await;
+    heartbeat_at(&pool, engine, 2.0 * LOST_AFTER.as_secs_f64()).await;
     fail_lost_engine_steps(&pool, LOST_AFTER).await.unwrap();
     fail_lost_engine_steps(&pool, LOST_AFTER).await.unwrap();
     let failures = queued_failures(&pool, step_id).await;
     assert_eq!(failures.len(), 1, "the step is failed once");
 
-    handler::handle_step_failed(failures[0].clone(), pool.clone(), nats_client, tls_reloader)
-        .await
-        .unwrap();
+    handler::handle_step_failed(
+        failures[0].clone(),
+        pool.clone(),
+        nats().await,
+        tls_reloader().await,
+    )
+    .await
+    .unwrap();
 
     let (status, run_status): (StepStatus, String) = sqlx::query_as(
         "SELECT s.status, r.status::text FROM archived_step_instances s JOIN archived_workflow_runs r ON r.id = s.run_id WHERE s.id = $1",
@@ -125,11 +153,30 @@ async fn a_built_in_step_whose_engine_died_fails_and_ends_its_run() {
     assert_eq!(run_status, "failed");
 
     delete_run(&pool, run_id).await;
-    sqlx::query("DELETE FROM engine_instances WHERE id = $1")
-        .bind(*ENGINE_ID)
-        .execute(&pool)
-        .await
-        .unwrap();
+    delete_engine(&pool, engine).await;
+}
+
+#[tokio::test]
+async fn a_side_effect_free_step_whose_engine_died_runs_again() {
+    let pool = setup_db().await;
+    let run_id = RunId::new_v4();
+    let (step_id, engine) = step_on_test_engine(&pool, run_id).await;
+
+    heartbeat_at(&pool, engine, 2.0 * LOST_AFTER.as_secs_f64()).await;
+    fail_lost_engine_steps(&pool, LOST_AFTER).await.unwrap();
+
+    assert!(queued_failures(&pool, step_id).await.is_empty());
+    let (status, engine_id): (StepStatus, Option<Uuid>) =
+        sqlx::query_as("SELECT status, engine_id FROM step_instances WHERE id = $1")
+            .bind(step_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(status, StepStatus::Pending, "put back for dispatch");
+    assert_eq!(engine_id, None);
+
+    delete_run(&pool, run_id).await;
+    delete_engine(&pool, engine).await;
 }
 
 #[tokio::test]
