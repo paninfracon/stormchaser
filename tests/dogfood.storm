@@ -126,9 +126,11 @@ workflow "dogfood" {
   steps {
     # 1. Build Phase
     # Compiles the Stormchaser API binary from the provisioned source code.
-    # This runs in a clean rust:nightly container.
+    # This runs in a clean rust:nightly-bookworm container.
     step "build" "RunContainer" {
-      image = "rustlang/rust:nightly"
+      # Bookworm, as the image Dockerfile.prebuilt runs it in: a binary built on a newer
+      # Debian needs a newer glibc than that image has
+      image = "rustlang/rust:nightly-bookworm"
       # A release build of the workspace needs more than the default step limits
       # (1 CPU, 2Gi): rustc is OOM-killed at 2Gi
       cpu    = "8"
@@ -161,7 +163,7 @@ workflow "dogfood" {
     # volume at the end of this step, it only keeps the specific files needed for the
     # subsequent steps, discarding the massive intermediate `target/` compilation objects.
     step "test" "RunContainer" {
-      image  = "rustlang/rust:nightly"
+      image  = "rustlang/rust:nightly-bookworm"
       cpu    = "8"
       memory = "16Gi"
       storage_mounts = [
@@ -293,6 +295,7 @@ workflow "dogfood" {
           --namespace stormchaser-dogfood \
           --set api.image.repository=${inputs.host_ip}:${inputs.port_reg}/stormchaser-api \
           --set api.image.tag=dogfood \
+          --set api.image.pullPolicy=Always \
           --set global.database.ssl=false \
           --set "global.database.url=postgres://stormchaser:$DB_PASSWORD@${inputs.host_ip}:${inputs.port_db}/stormchaser" \
           --set global.nats.url=nats://${inputs.host_ip}:${inputs.port_nats} \

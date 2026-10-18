@@ -67,7 +67,9 @@ workflow "dogfood" {
 
   steps {
     step "build" "RunContainer" {
-      image = "rustlang/rust:nightly"
+      # Bookworm, as the image Dockerfile.prebuilt runs it in: a binary built on a newer
+      # Debian needs a newer glibc than that image has
+      image = "rustlang/rust:nightly-bookworm"
       # A release build of the workspace needs more than the default step limits
       # (1 CPU, 2Gi): rustc is OOM-killed at 2Gi
       cpu    = "8"
@@ -92,7 +94,7 @@ workflow "dogfood" {
     }
 
     step "test" "RunContainer" {
-      image  = "rustlang/rust:nightly"
+      image  = "rustlang/rust:nightly-bookworm"
       cpu    = "8"
       memory = "16Gi"
       storage_mounts = [
@@ -200,6 +202,7 @@ workflow "dogfood" {
           --create-namespace \
           --set api.image.repository=localhost:32000/stormchaser-api \
           --set api.image.tag=dogfood \
+          --set api.image.pullPolicy=Always \
           --set global.database.ssl=false \
           --set "global.database.url=postgres://stormchaser:$DB_PASSWORD@stormchaser-postgresql.stormchaser.svc.cluster.local:5432/stormchaser" \
           --set global.nats.url=nats://stormchaser-nats.stormchaser.svc.cluster.local:4222 \
