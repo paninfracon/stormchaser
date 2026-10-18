@@ -179,15 +179,17 @@ async fn test_rest_api_step_execution() {
     let tls_config = TlsConfig::default();
     let tls_reloader = Arc::new(TlsReloader::new(tls_config).await.unwrap());
 
-    stormchaser_engine::handler::step::intrinsic::rest_api::try_dispatch(
-        run_id,
-        step_id,
-        1,
-        "RestApi",
-        &spec,
-        pool.clone(),
-        nats_client.clone(),
-        tls_reloader.clone(),
+    stormchaser_engine::handler::step::dispatch::intrinsic::try_dispatch_intrinsic(
+        stormchaser_engine::handler::step::dispatch::intrinsic::BuiltInStep {
+            run_id,
+            step_id,
+            fencing_token: 1,
+            step_type: "RestApi".to_string(),
+            spec: spec.clone(),
+            params: json!({}),
+            pool: pool.clone(),
+            tls_reloader: tls_reloader.clone(),
+        },
     )
     .await
     .unwrap();

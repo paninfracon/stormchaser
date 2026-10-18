@@ -1,10 +1,8 @@
 use anyhow::Result;
-use chrono::Utc;
-use sqlx::PgPool;
-use stormchaser_model::events::{
-    EventSource, EventType, SchemaVersion, StepCompletedEvent, StepEventType, StepFailedEvent,
-};
-use stormchaser_model::nats::{compute_shard_id, NatsSubject};
+use serde_json::Value;
+use sqlx::{PgConnection, PgPool};
+use std::collections::HashMap;
+use stormchaser_model::events::{StepCompletedEvent, StepFailedEvent};
 use stormchaser_model::{Connection, RunId, StepInstanceId};
 
 /// Fetches the URL from a configured HttpApi connection by name.
@@ -45,77 +43,39 @@ pub async fn fetch_http_api_url_from_connection(
     }
 }
 
-/// Publishes a StepCompletedEvent for the given step, through the outbox.
-pub async fn publish_step_completed_event(
+/// Reports that a step the engine runs itself has completed. The result goes through
+/// the outbox to the step-completed handler, as a runner's would, carrying the step's
+/// completion token. On a transaction, the result commits with what the step wrote.
+pub async fn report_step_completed(
+    conn: &mut PgConnection,
     run_id: RunId,
     step_id: StepInstanceId,
     fencing_token: i64,
-    outputs: Option<std::collections::HashMap<String, serde_json::Value>>,
-    pool: &PgPool,
-    _nats_client: async_nats::Client,
+    outputs: Option<HashMap<String, Value>>,
 ) -> Result<()> {
     let event = StepCompletedEvent {
-        run_id,
-        step_id,
-        fencing_token,
-        completion_token: crate::db::step_completion_token(pool, step_id).await,
-        event_type: EventType::Step(StepEventType::Completed),
-        runner_id: None,
-        storage_hashes: None,
-        artifacts: None,
-        test_reports: None,
+        completion_token: crate::db::step_completion_token(&mut *conn, step_id).await,
         outputs,
-        exit_code: None,
-        timestamp: Utc::now(),
+        exit_code: Some(0),
+        ..StepCompletedEvent::new(run_id, step_id, fencing_token)
     };
-
-    crate::db::outbox::insert_outbox_event(
-        pool,
-        NatsSubject::StepCompleted(Some(compute_shard_id(&run_id))),
-        EventType::Step(StepEventType::Completed),
-        EventSource::System,
-        serde_json::to_value(event)?,
-        Some(SchemaVersion::new("1.0".to_string())),
-        None,
-    )
-    .await?;
-    Ok(())
+    crate::db::outbox::insert_step_completed(conn, &event).await
 }
 
-/// Publishes a StepFailedEvent for the given step, through the outbox.
-pub async fn publish_step_failed_event(
+/// Reports that a step the engine runs itself has failed. The failure goes through the
+/// outbox to the step-failed handler, as a runner's would, so that the run's failure
+/// handling follows; marking the step failed here instead would leave the handler
+/// nothing to do.
+pub async fn report_step_failed(
+    conn: &mut PgConnection,
     run_id: RunId,
     step_id: StepInstanceId,
     fencing_token: i64,
-    error: String,
-    pool: &PgPool,
-    _nats_client: async_nats::Client,
+    error: impl Into<String>,
 ) -> Result<()> {
     let event = StepFailedEvent {
-        run_id,
-        step_id,
-        fencing_token,
-        completion_token: crate::db::step_completion_token(pool, step_id).await,
-        event_type: EventType::Step(StepEventType::Failed),
-        error,
-        runner_id: None,
-        exit_code: None,
-        storage_hashes: None,
-        artifacts: None,
-        test_reports: None,
-        outputs: None,
-        timestamp: Utc::now(),
+        completion_token: crate::db::step_completion_token(&mut *conn, step_id).await,
+        ..StepFailedEvent::new(run_id, step_id, fencing_token, error)
     };
-
-    crate::db::outbox::insert_outbox_event(
-        pool,
-        NatsSubject::StepFailed(Some(compute_shard_id(&run_id))),
-        EventType::Step(StepEventType::Failed),
-        EventSource::System,
-        serde_json::to_value(event)?,
-        Some(SchemaVersion::new("1.0".to_string())),
-        None,
-    )
-    .await?;
-    Ok(())
+    crate::db::outbox::insert_step_failed(conn, &event).await
 }

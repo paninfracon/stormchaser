@@ -14,7 +14,6 @@ pub async fn handle_webhook_invoke(
     step_id: StepInstanceId,
     spec: Value,
     pool: PgPool,
-    nats_client: async_nats::Client,
 ) -> Result<()> {
     let spec: WebhookInvokeSpec = serde_json::from_value(spec)?;
 
@@ -46,7 +45,7 @@ pub async fn handle_webhook_invoke(
     let rendered_body = render_webhook_body(&spec, &template_ctx)?;
 
     // 4. Build and Execute Request
-    execute_webhook_request(run_id, step_id, &spec, rendered_body, pool, nats_client).await
+    execute_webhook_request(run_id, step_id, &spec, rendered_body, pool).await
 }
 
 use stormchaser_model::dsl;
@@ -71,7 +70,6 @@ async fn execute_webhook_request(
     spec: &dsl::WebhookInvokeSpec,
     rendered_body: Option<String>,
     pool: PgPool,
-    nats_client: async_nats::Client,
 ) -> Result<()> {
     let (client, url) = stormchaser_model::net_guard::guarded_client(&spec.url).await?;
     let method = match spec
@@ -121,13 +119,12 @@ async fn execute_webhook_request(
         );
 
         let outputs = std::collections::HashMap::from([("response".to_string(), body_val)]);
-        super::utils::publish_step_completed_event(
+        super::utils::report_step_completed(
+            &mut *pool.acquire().await?,
             run_id,
             step_id,
             0,
             Some(outputs),
-            &pool,
-            nats_client,
         )
         .await
     } else {

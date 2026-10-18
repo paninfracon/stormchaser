@@ -107,7 +107,6 @@ async fn test_ses_handler_invoke() {
         step_id,
         spec.clone(),
         pool.clone(),
-        nats_client.clone(),
         tls_reloader.clone(),
     )
     .await;
@@ -142,7 +141,6 @@ async fn test_ses_handler_invoke() {
         step_id_2,
         spec_invalid,
         pool.clone(),
-        nats_client.clone(),
         tls_reloader.clone(),
     )
     .await;

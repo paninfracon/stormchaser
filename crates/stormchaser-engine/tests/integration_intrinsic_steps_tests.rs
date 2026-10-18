@@ -2,9 +2,7 @@ use futures::StreamExt;
 use sqlx::PgPool;
 use std::env::var;
 use std::sync::Arc;
-use stormchaser_engine::handler::step::intrinsic::{
-    jinja, rest_api, test_report_email, wasm, webhook,
-};
+use stormchaser_engine::handler::step::dispatch::intrinsic::{try_dispatch_intrinsic, BuiltInStep};
 use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
 use stormchaser_tls::{TlsConfig, TlsReloader};
@@ -73,16 +71,23 @@ async fn test_intrinsic_steps_dispatch() {
         .await
         .unwrap();
 
-    // Test Jinja
-    let dispatched = jinja::try_dispatch(
+    let base = BuiltInStep {
         run_id,
         step_id,
-        "JinjaRender",
-        &jinja_spec,
-        pool.clone(),
-        nats_client.clone(),
-        tls_reloader.clone(),
-    )
+        fencing_token: 1,
+        step_type: String::new(),
+        spec: serde_json::Value::Null,
+        params: serde_json::json!({}),
+        pool: pool.clone(),
+        tls_reloader: tls_reloader.clone(),
+    };
+
+    // Test Jinja
+    let dispatched = try_dispatch_intrinsic(BuiltInStep {
+        step_type: "JinjaRender".to_string(),
+        spec: jinja_spec.clone(),
+        ..base.clone()
+    })
     .await
     .unwrap();
     assert!(dispatched);
@@ -109,113 +114,75 @@ async fn test_intrinsic_steps_dispatch() {
         }
     }
 
-    let dispatched = jinja::try_dispatch(
-        run_id,
-        step_id,
-        "Other",
-        &spec,
-        pool.clone(),
-        nats_client.clone(),
-        tls_reloader.clone(),
-    )
+    let dispatched = try_dispatch_intrinsic(BuiltInStep {
+        step_type: "Other".to_string(),
+        spec: spec.clone(),
+        ..base.clone()
+    })
     .await
     .unwrap();
     assert!(!dispatched);
 
     // Test Webhook
-    let dispatched = webhook::try_dispatch(
-        run_id,
-        step_id,
-        "WebhookInvoke",
-        &spec,
-        pool.clone(),
-        nats_client.clone(),
-        tls_reloader.clone(),
-    )
+    let dispatched = try_dispatch_intrinsic(BuiltInStep {
+        step_type: "WebhookInvoke".to_string(),
+        spec: spec.clone(),
+        ..base.clone()
+    })
     .await
     .unwrap();
     assert!(dispatched);
-    let dispatched = webhook::try_dispatch(
-        run_id,
-        step_id,
-        "Other",
-        &spec,
-        pool.clone(),
-        nats_client.clone(),
-        tls_reloader.clone(),
-    )
+    let dispatched = try_dispatch_intrinsic(BuiltInStep {
+        step_type: "Other".to_string(),
+        spec: spec.clone(),
+        ..base.clone()
+    })
     .await
     .unwrap();
     assert!(!dispatched);
 
     // Test RestApi
-    let dispatched = rest_api::try_dispatch(
-        run_id,
-        step_id,
-        1,
-        "RestApi",
-        &spec,
-        pool.clone(),
-        nats_client.clone(),
-        tls_reloader.clone(),
-    )
+    let dispatched = try_dispatch_intrinsic(BuiltInStep {
+        step_type: "RestApi".to_string(),
+        spec: spec.clone(),
+        ..base.clone()
+    })
     .await
     .unwrap();
     assert!(dispatched);
-    let dispatched = rest_api::try_dispatch(
-        run_id,
-        step_id,
-        1,
-        "Other",
-        &spec,
-        pool.clone(),
-        nats_client.clone(),
-        tls_reloader.clone(),
-    )
+    let dispatched = try_dispatch_intrinsic(BuiltInStep {
+        step_type: "Other".to_string(),
+        spec: spec.clone(),
+        ..base.clone()
+    })
     .await
     .unwrap();
     assert!(!dispatched);
 
     // Test TestReportEmail
-    let dispatched = test_report_email::try_dispatch(
-        run_id,
-        step_id,
-        "TestReportEmail",
-        &spec,
-        pool.clone(),
-        nats_client.clone(),
-        tls_reloader.clone(),
-    )
+    let dispatched = try_dispatch_intrinsic(BuiltInStep {
+        step_type: "TestReportEmail".to_string(),
+        spec: spec.clone(),
+        ..base.clone()
+    })
     .await
     .unwrap();
     assert!(dispatched);
-    let dispatched = test_report_email::try_dispatch(
-        run_id,
-        step_id,
-        "Other",
-        &spec,
-        pool.clone(),
-        nats_client.clone(),
-        tls_reloader.clone(),
-    )
+    let dispatched = try_dispatch_intrinsic(BuiltInStep {
+        step_type: "Other".to_string(),
+        spec: spec.clone(),
+        ..base.clone()
+    })
     .await
     .unwrap();
     assert!(!dispatched);
 
-    // Wasm requires params
-    let params = serde_json::json!({});
     // Test non-matching WASM
-    let dispatched = wasm::try_dispatch(
-        run_id,
-        step_id,
-        1,
-        "Other",
-        &spec,
-        &params,
-        pool.clone(),
-        nats_client.clone(),
-        tls_reloader.clone(),
-    )
+    let dispatched = try_dispatch_intrinsic(BuiltInStep {
+        step_type: "Other".to_string(),
+        spec: spec.clone(),
+        ..base.clone()
+    })
     .await
     .unwrap();
     assert!(!dispatched);
@@ -224,17 +191,11 @@ async fn test_intrinsic_steps_dispatch() {
     let wasm_spec = serde_json::json!({
         "module": "test-module"
     });
-    let dispatched = wasm::try_dispatch(
-        run_id,
-        step_id,
-        1,
-        "Wasm",
-        &wasm_spec,
-        &params,
-        pool.clone(),
-        nats_client.clone(),
-        tls_reloader.clone(),
-    )
+    let dispatched = try_dispatch_intrinsic(BuiltInStep {
+        step_type: "Wasm".to_string(),
+        spec: wasm_spec.clone(),
+        ..base.clone()
+    })
     .await
     .unwrap();
     assert!(dispatched);

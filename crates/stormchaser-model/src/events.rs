@@ -325,6 +325,26 @@ pub struct StepCompletedEvent {
     pub timestamp: DateTime<Utc>,
 }
 
+impl StepCompletedEvent {
+    /// A step's completion, now, with nothing else to report; set the fields that apply.
+    pub fn new(run_id: RunId, step_id: StepInstanceId, fencing_token: i64) -> Self {
+        Self {
+            run_id,
+            step_id,
+            fencing_token,
+            completion_token: None,
+            event_type: EventType::Step(StepEventType::Completed),
+            runner_id: None,
+            storage_hashes: None,
+            artifacts: None,
+            test_reports: None,
+            outputs: None,
+            exit_code: None,
+            timestamp: Utc::now(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct StepFailedEvent {
     pub run_id: RunId,
@@ -349,6 +369,32 @@ pub struct StepFailedEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub outputs: Option<HashMap<String, Value>>,
     pub timestamp: DateTime<Utc>,
+}
+
+impl StepFailedEvent {
+    /// A step's failure, now, with nothing else to report; set the fields that apply.
+    pub fn new(
+        run_id: RunId,
+        step_id: StepInstanceId,
+        fencing_token: i64,
+        error: impl Into<String>,
+    ) -> Self {
+        Self {
+            run_id,
+            step_id,
+            fencing_token,
+            completion_token: None,
+            event_type: EventType::Step(StepEventType::Failed),
+            error: error.into(),
+            exit_code: None,
+            runner_id: None,
+            storage_hashes: None,
+            artifacts: None,
+            test_reports: None,
+            outputs: None,
+            timestamp: Utc::now(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

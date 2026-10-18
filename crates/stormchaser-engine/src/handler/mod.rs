@@ -167,13 +167,12 @@ pub async fn dispatch_pending_steps(
                 step.step_name, req.cpu, req.memory, quotas.max_cpu, quotas.max_memory
             );
             warn!("Run {}: {}", run_id, error);
-            crate::handler::integrations::utils::publish_step_failed_event(
+            crate::handler::integrations::utils::report_step_failed(
+                &mut *pool.acquire().await?,
                 run_id,
                 step.id,
                 0,
                 error,
-                &pool,
-                nats_client.clone(),
             )
             .await?;
             continue;

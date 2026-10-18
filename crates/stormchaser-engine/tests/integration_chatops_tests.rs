@@ -107,7 +107,6 @@ async fn test_slack_message_integration() {
             1,
             spec,
             pool.clone(),
-            nats_client.clone(),
         )
         .await
         .expect("handle_slack_message failed");
@@ -242,7 +241,6 @@ async fn test_teams_message_integration() {
             1,
             spec,
             pool.clone(),
-            nats_client.clone(),
         )
         .await
         .expect("handle_teams_message failed");

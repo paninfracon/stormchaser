@@ -1,9 +1,7 @@
-use super::utils::fail_step_instance;
 use crate::handler::{fetch_outputs, fetch_run_context, fetch_step_instance};
 use anyhow::{Context, Result};
 use serde_json::Value;
 use sqlx::PgPool;
-use std::sync::Arc;
 use std::time::Duration;
 use stormchaser_model::dsl::{RestApiResponseExtractor, RestApiSpec};
 use stormchaser_model::events::{
@@ -12,59 +10,7 @@ use stormchaser_model::events::{
 use stormchaser_model::nats::NatsSubject;
 use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
-use stormchaser_tls::TlsReloader;
 use tracing::{info, warn};
-
-/// Attempts to dispatch a REST API step instance directly.
-#[allow(clippy::too_many_arguments)]
-pub async fn try_dispatch(
-    run_id: RunId,
-    step_instance_id: StepInstanceId,
-    fencing_token: i64,
-    step_type: &str,
-    resolved_spec: &Value,
-    pool: PgPool,
-    nats_client: async_nats::Client,
-    _tls_reloader: Arc<TlsReloader>,
-) -> Result<bool> {
-    if step_type == "RestApi" {
-        let pool = pool.clone();
-        let nats_client = nats_client.clone();
-        let spec = resolved_spec.clone();
-
-        tokio::spawn(async move {
-            if let Err(e) = handle_rest_api_invoke(
-                run_id,
-                step_instance_id,
-                fencing_token,
-                spec,
-                pool.clone(),
-                nats_client.clone(),
-            )
-            .await
-            {
-                if let Err(fail_err) = fail_step_instance(
-                    run_id,
-                    step_instance_id,
-                    &pool,
-                    nats_client,
-                    format!("RestApi invoke failed: {:?}", e),
-                )
-                .await
-                {
-                    tracing::error!(
-                        "failed to report step {} as failed: {}",
-                        step_instance_id,
-                        fail_err
-                    );
-                }
-            }
-        });
-        return Ok(true);
-    }
-
-    Ok(false)
-}
 
 fn prepare_template_context(inputs: Value, outputs: Value, run_id: RunId) -> Value {
     serde_json::json!({
@@ -76,13 +22,13 @@ fn prepare_template_context(inputs: Value, outputs: Value, run_id: RunId) -> Val
     })
 }
 
-async fn handle_rest_api_invoke(
+/// Runs a RestApi step, reporting its result.
+pub(crate) async fn handle_rest_api_invoke(
     run_id: RunId,
     step_id: StepInstanceId,
     fencing_token: i64,
     spec: Value,
     pool: PgPool,
-    nats_client: async_nats::Client,
 ) -> Result<()> {
     let mut spec: RestApiSpec = serde_json::from_value(spec.get("spec").unwrap_or(&spec).clone())?;
 
@@ -127,16 +73,7 @@ async fn handle_rest_api_invoke(
     let rendered_body = render_request_body(&spec, &template_ctx)?;
 
     // 4. Build and Execute Request
-    execute_request(
-        run_id,
-        step_id,
-        fencing_token,
-        &spec,
-        rendered_body,
-        pool,
-        nats_client,
-    )
-    .await
+    execute_request(run_id, step_id, fencing_token, &spec, rendered_body, pool).await
 }
 
 /// Resolves the step's URL against an HttpApi connection and attaches the connection's
@@ -366,7 +303,6 @@ async fn execute_request(
     spec: &RestApiSpec,
     rendered_body: Option<String>,
     pool: PgPool,
-    _nats_client: async_nats::Client,
 ) -> Result<()> {
     let (client, url) = stormchaser_model::net_guard::guarded_client(&spec.url).await?;
     let method = build_request_method(spec);

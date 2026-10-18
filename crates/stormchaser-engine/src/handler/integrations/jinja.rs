@@ -1,13 +1,11 @@
 use crate::handler::{fetch_outputs, fetch_run_context, fetch_step_instance};
 use anyhow::Result;
-use chrono::Utc;
 use serde_json::Value;
 use sqlx::PgPool;
+use std::collections::HashMap;
 use stormchaser_model::dsl::JinjaRenderSpec;
-use stormchaser_model::events::{
-    EventSource, EventType, SchemaVersion, StepCompletedEvent, StepEventType,
-};
-use stormchaser_model::nats::NatsSubject;
+
+use super::utils::report_step_completed;
 use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
 use tracing::info;
@@ -18,7 +16,6 @@ pub async fn handle_jinja_render(
     step_id: StepInstanceId,
     spec: Value,
     pool: PgPool,
-    nats_client: async_nats::Client,
 ) -> Result<()> {
     let spec: JinjaRenderSpec = serde_json::from_value(spec)?;
 
@@ -44,7 +41,7 @@ pub async fn handle_jinja_render(
     let rendered = render_template(&spec.template, &template_ctx)?;
 
     // 4. Save Output and Complete Step
-    save_output_and_complete(run_id, step_id, &spec, rendered, pool, nats_client).await
+    save_output_and_complete(run_id, step_id, &spec, rendered, pool).await
 }
 
 use stormchaser_model::dsl;
@@ -87,7 +84,6 @@ async fn save_output_and_complete(
     spec: &dsl::JinjaRenderSpec,
     rendered: String,
     pool: PgPool,
-    _nats_client: async_nats::Client,
 ) -> Result<()> {
     let mut tx = pool.begin().await?;
 
@@ -103,36 +99,10 @@ async fn save_output_and_complete(
     )
     .await?;
 
+    let outputs = HashMap::from([(output_key, Value::String(rendered))]);
+    // With the output, so that the step cannot be left with one and not the other
+    report_step_completed(&mut *tx, run_id, step_id, 0, Some(outputs)).await?;
     tx.commit().await?;
-
-    let mut outputs_map = std::collections::HashMap::new();
-    outputs_map.insert(output_key.clone(), serde_json::json!(rendered));
-
-    let event = StepCompletedEvent {
-        run_id,
-        step_id,
-        fencing_token: 0,
-        completion_token: crate::db::step_completion_token(&pool, step_id).await,
-        event_type: EventType::Step(StepEventType::Completed),
-        outputs: Some(outputs_map),
-        exit_code: Some(0),
-        runner_id: None,
-        storage_hashes: None,
-        artifacts: None,
-        test_reports: None,
-        timestamp: Utc::now(),
-    };
-    crate::db::outbox::insert_outbox_event(
-        &pool,
-        NatsSubject::StepCompleted(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
-        EventType::Step(StepEventType::Completed),
-        EventSource::System,
-        serde_json::to_value(event).unwrap(),
-        Some(SchemaVersion::new("1.0".to_string())),
-        None,
-    )
-    .await?;
-
     Ok(())
 }
 

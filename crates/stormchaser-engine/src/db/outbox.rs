@@ -1,6 +1,10 @@
 use serde_json::Value;
 use sqlx::{Executor, Postgres};
-use stormchaser_model::events::{EventSource, EventType, SchemaId, SchemaVersion};
+use stormchaser_model::events::{
+    EventSource, EventType, SchemaId, SchemaVersion, StepCompletedEvent, StepEventType,
+    StepFailedEvent,
+};
+use stormchaser_model::nats::compute_shard_id;
 use stormchaser_model::nats::{build_cloudevent_and_headers, NatsSubject};
 use uuid::Uuid;
 
@@ -59,6 +63,46 @@ where
     .await?;
 
     Ok(())
+}
+
+/// Queues a step's completion for the step-completed handler.
+pub async fn insert_step_completed<'e, E>(
+    executor: E,
+    event: &StepCompletedEvent,
+) -> Result<(), anyhow::Error>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    insert_outbox_event(
+        executor,
+        NatsSubject::StepCompleted(Some(compute_shard_id(&event.run_id))),
+        EventType::Step(StepEventType::Completed),
+        EventSource::System,
+        serde_json::to_value(event)?,
+        Some(SchemaVersion::new("1.0".to_string())),
+        None,
+    )
+    .await
+}
+
+/// Queues a step's failure for the step-failed handler.
+pub async fn insert_step_failed<'e, E>(
+    executor: E,
+    event: &StepFailedEvent,
+) -> Result<(), anyhow::Error>
+where
+    E: Executor<'e, Database = Postgres>,
+{
+    insert_outbox_event(
+        executor,
+        NatsSubject::StepFailed(Some(compute_shard_id(&event.run_id))),
+        EventType::Step(StepEventType::Failed),
+        EventSource::System,
+        serde_json::to_value(event)?,
+        Some(SchemaVersion::new("1.0".to_string())),
+        None,
+    )
+    .await
 }
 
 /// Fetch a batch of outbox events, locking them for processing

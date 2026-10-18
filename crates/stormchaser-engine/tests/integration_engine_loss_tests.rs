@@ -185,3 +185,59 @@ async fn an_engine_long_gone_is_forgotten_once_it_runs_no_step() {
             .unwrap();
     assert!(!kept);
 }
+
+#[tokio::test]
+async fn a_runner_step_never_records_an_engine() {
+    let pool = setup_db().await;
+    let nats_client = nats().await;
+    let run_id = RunId::new_v4();
+
+    handler::handle_workflow_direct(
+        json!({
+            "run_id": run_id,
+            "dsl": r#"
+                stormchaser_dsl_version = "v1"
+                workflow "engine-loss-runner" {
+                    steps {
+                        step "hello" "RunContainer" {
+                            image = "alpine"
+                            command = ["echo", "hello"]
+                        }
+                    }
+                }
+            "#,
+            "inputs": {},
+            "initiating_user": "test"
+        }),
+        pool.clone(),
+        Arc::new(OpaClient::new(None, None)),
+        nats_client.clone(),
+    )
+    .await
+    .unwrap();
+    handler::handle_workflow_start_pending(
+        run_id,
+        pool.clone(),
+        nats_client,
+        Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
+    )
+    .await
+    .unwrap();
+
+    // Were it to, its loss would fail it as a built-in step's, not retry its dispatch
+    let (dispatched, engine_id): (bool, Option<Uuid>) = sqlx::query_as(
+        "SELECT dispatched_at IS NOT NULL, engine_id FROM step_instances WHERE run_id = $1",
+    )
+    .bind(run_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(dispatched);
+    assert_eq!(engine_id, None);
+
+    sqlx::query("DELETE FROM workflow_runs WHERE id = $1")
+        .bind(run_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+}

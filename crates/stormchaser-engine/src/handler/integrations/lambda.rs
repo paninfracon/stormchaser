@@ -3,19 +3,15 @@ use serde_json::Value;
 use sqlx::PgPool;
 
 #[cfg(feature = "aws-lambda")]
+use super::utils::{report_step_completed, report_step_failed};
+#[cfg(feature = "aws-lambda")]
 use crate::handler::fetch_step_instance;
 #[cfg(feature = "aws-lambda")]
 use anyhow::Context;
 #[cfg(feature = "aws-lambda")]
-use chrono::Utc;
+use std::collections::HashMap;
 #[cfg(feature = "aws-lambda")]
 use stormchaser_model::dsl::{self};
-#[cfg(feature = "aws-lambda")]
-use stormchaser_model::events::{
-    EventSource, EventType, SchemaVersion, StepEventType, StepFailedEvent,
-};
-#[cfg(feature = "aws-lambda")]
-use stormchaser_model::nats::NatsSubject;
 #[cfg(feature = "aws-lambda")]
 use tracing::info;
 
@@ -31,7 +27,6 @@ pub async fn handle_lambda_invoke(
     step_id: stormchaser_model::StepInstanceId,
     spec: Value,
     pool: PgPool,
-    nats_client: async_nats::Client,
 ) -> Result<()> {
     let spec: stormchaser_model::dsl::LambdaInvokeSpec = serde_json::from_value(spec)?;
 
@@ -86,7 +81,7 @@ pub async fn handle_lambda_invoke(
     let response = request.send().await?;
 
     // 5. Handle Response
-    handle_lambda_response(run_id, step_id, response, pool, nats_client).await
+    handle_lambda_response(run_id, step_id, response, pool).await
 }
 
 #[cfg(feature = "aws-lambda")]
@@ -145,7 +140,6 @@ async fn handle_lambda_response(
     step_id: stormchaser_model::StepInstanceId,
     response: aws_sdk_lambda::operation::invoke::InvokeOutput,
     pool: PgPool,
-    _nats_client: async_nats::Client,
 ) -> Result<()> {
     let status_code = response.status_code();
     let payload = if let Some(payload) = response.payload() {
@@ -156,74 +150,20 @@ async fn handle_lambda_response(
     };
 
     if (200..300).contains(&status_code) {
-        // Success
-
-        // Save output
-        crate::db::upsert_step_output(&pool, step_id, "response", &payload).await?;
-
-        let mut outputs_map = std::collections::HashMap::new();
-        outputs_map.insert("response".to_string(), payload.clone());
-
-        let event = stormchaser_model::events::StepCompletedEvent {
-            run_id,
-            step_id,
-            fencing_token: 0,
-            completion_token: crate::db::step_completion_token(&pool, step_id).await,
-            event_type: EventType::Step(StepEventType::Completed),
-            outputs: Some(outputs_map),
-            exit_code: Some(0),
-            runner_id: None,
-            storage_hashes: None,
-            artifacts: None,
-            test_reports: None,
-            timestamp: Utc::now(),
-        };
-        crate::db::outbox::insert_outbox_event(
-            &pool,
-            NatsSubject::StepCompleted(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
-            EventType::Step(StepEventType::Completed),
-            EventSource::System,
-            serde_json::to_value(event).unwrap(),
-            Some(SchemaVersion::new("1.0".to_string())),
-            None,
-        )
-        .await?;
+        let mut tx = pool.begin().await?;
+        crate::db::upsert_step_output(&mut *tx, step_id, "response", &payload).await?;
+        let outputs = HashMap::from([("response".to_string(), payload)]);
+        report_step_completed(&mut *tx, run_id, step_id, 0, Some(outputs)).await?;
+        tx.commit().await?;
+        Ok(())
     } else {
-        // Failure
-        let error_msg = format!(
+        let error = format!(
             "Lambda returned status code {}: {:?}",
             status_code,
             response.function_error()
         );
-
-        let event = StepFailedEvent {
-            run_id,
-            step_id,
-            fencing_token: 0, // Intrinsic step, don't strictly need fencing token but passing 0 is safe as it's generated internally, though ideal would be passing the actual run's token. Let's pass 0, or since it's an intrinsic step, we could pass it from the try_dispatch function. For now 0 is fine because intrinsic steps are not subject to the same runner reassignment race conditions.
-            completion_token: crate::db::step_completion_token(&pool, step_id).await,
-            event_type: EventType::Step(StepEventType::Failed),
-            error: error_msg,
-            runner_id: None,
-            exit_code: None,
-            storage_hashes: None,
-            artifacts: None,
-            test_reports: None,
-            outputs: None,
-            timestamp: Utc::now(),
-        };
-        crate::db::outbox::insert_outbox_event(
-            &pool,
-            NatsSubject::StepFailed(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
-            EventType::Step(StepEventType::Failed),
-            EventSource::System,
-            serde_json::to_value(event).unwrap(),
-            Some(SchemaVersion::new("1.0".to_string())),
-            None,
-        )
-        .await?;
+        report_step_failed(&mut *pool.acquire().await?, run_id, step_id, 0, error).await
     }
-
-    Ok(())
 }
 
 #[cfg(not(feature = "aws-lambda"))]
@@ -233,7 +173,6 @@ pub async fn handle_lambda_invoke(
     _step_id: stormchaser_model::StepInstanceId,
     _spec: Value,
     _pool: PgPool,
-    _nats_client: async_nats::Client,
 ) -> Result<()> {
     anyhow::bail!("AWS Lambda support is not enabled. Enable 'aws-lambda' feature.")
 }

@@ -10,7 +10,7 @@ use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
 
 #[cfg(feature = "aws-lambda")]
-async fn setup() -> (PgPool, async_nats::Client) {
+async fn setup() -> PgPool {
     let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
@@ -19,10 +19,7 @@ async fn setup() -> (PgPool, async_nats::Client) {
                 .expect("STORMCHASER_DEV_PASSWORD must be set if DATABASE_URL is not set")
         )
     });
-    let pool = PgPool::connect(&db_url).await.unwrap();
-    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let nats_client = stormchaser_model::nats::connect(&nats_url).await.unwrap();
-    (pool, nats_client)
+    PgPool::connect(&db_url).await.unwrap()
 }
 
 #[cfg(feature = "aws-lambda")]
@@ -31,7 +28,7 @@ async fn test_lambda_handler_invoke() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter("debug")
         .try_init();
-    let (pool, nats_client) = setup().await;
+    let pool = setup().await;
 
     // Start wiremock
     use wiremock::matchers::{method, path};
@@ -84,15 +81,9 @@ async fn test_lambda_handler_invoke() {
         .execute(&pool)
         .await
         .unwrap();
-    let refused = handle_lambda_invoke(
-        run_id,
-        refused_step_id,
-        spec.clone(),
-        pool.clone(),
-        nats_client.clone(),
-    )
-    .await
-    .unwrap_err();
+    let refused = handle_lambda_invoke(run_id, refused_step_id, spec.clone(), pool.clone())
+        .await
+        .unwrap_err();
     assert!(
         refused
             .to_string()
@@ -101,7 +92,7 @@ async fn test_lambda_handler_invoke() {
     );
 
     std::env::set_var("STORMCHASER_AWS_ALLOWED_LAMBDA_FUNCTIONS", "test-*");
-    let res = handle_lambda_invoke(run_id, step_id, spec, pool.clone(), nats_client).await;
+    let res = handle_lambda_invoke(run_id, step_id, spec, pool.clone()).await;
 
     assert!(res.is_ok(), "Lambda invoke failed: {:?}", res.err());
 }

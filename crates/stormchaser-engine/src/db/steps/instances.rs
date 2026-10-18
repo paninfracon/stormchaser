@@ -638,26 +638,22 @@ where
     Ok(result.rows_affected() > 0)
 }
 
-/// Records whether a claimed step is being handed over: its task message published,
-/// or the engine starting it itself.
-pub async fn set_step_dispatched<'a, E>(
+/// Records that a claimed step's task message is about to be published to a runner.
+pub async fn mark_step_published<'a, E>(
     executor: E,
     id: StepInstanceId,
-    dispatched: bool,
 ) -> Result<PgQueryResult, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
-    sqlx::query(
-        "UPDATE step_instances SET dispatched_at = CASE WHEN $2 THEN NOW() END, engine_id = NULL WHERE id = $1",
-    )
-    .bind(id)
-    .bind(dispatched)
-    .execute(executor)
-    .await
+    sqlx::query("UPDATE step_instances SET dispatched_at = NOW() WHERE id = $1")
+        .bind(id)
+        .execute(executor)
+        .await
 }
 
-/// Records that the engine process `engine_id` is starting a claimed step itself.
+/// Records that the engine process `engine_id` is starting a claimed step itself. A
+/// step marked and then lost is failed; one started and not marked would never end.
 pub async fn set_step_run_by_engine<'a, E>(
     executor: E,
     id: StepInstanceId,

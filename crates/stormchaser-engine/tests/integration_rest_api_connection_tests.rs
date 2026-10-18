@@ -6,6 +6,7 @@ use sqlx::postgres::PgPoolOptions;
 use std::env::var;
 use std::sync::Arc;
 use std::time::Duration;
+use stormchaser_engine::handler::step::dispatch::intrinsic::{try_dispatch_intrinsic, BuiltInStep};
 use stormchaser_model::auth::OpaClient;
 use stormchaser_model::RunId;
 use tokio::time::sleep;
@@ -190,16 +191,16 @@ async fn test_rest_api_with_httpapi_connection() {
     let tls_config = TlsConfig::default();
     let tls_reloader = Arc::new(TlsReloader::new(tls_config).await.unwrap());
 
-    stormchaser_engine::handler::step::intrinsic::rest_api::try_dispatch(
+    try_dispatch_intrinsic(BuiltInStep {
         run_id,
         step_id,
-        1,
-        "RestApi",
-        &spec,
-        pool.clone(),
-        nats_client.clone(),
-        tls_reloader.clone(),
-    )
+        fencing_token: 1,
+        step_type: "RestApi".to_string(),
+        spec: spec.clone(),
+        params: json!({}),
+        pool: pool.clone(),
+        tls_reloader: tls_reloader.clone(),
+    })
     .await
     .unwrap();
 

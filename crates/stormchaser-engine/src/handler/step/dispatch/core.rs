@@ -17,7 +17,7 @@ use crate::handler::fetch_run_context;
 use stormchaser_model::dsl;
 
 /// Recursively searches for a step by name within a list of steps.
-use super::intrinsic::{apply_intrinsic_mutations, try_dispatch_intrinsic};
+use super::intrinsic::{apply_intrinsic_mutations, try_dispatch_intrinsic, BuiltInStep};
 use super::storage::{setup_storage_urls, setup_test_report_urls};
 pub fn find_step<'a>(steps: &'a [Step], name: &str) -> Option<&'a Step> {
     for step in steps {
@@ -67,27 +67,19 @@ pub async fn dispatch_step_instance(
     )
     .await?;
 
-    // Marked before it is handed over, not after: a step marked and then lost is no
-    // worse off than before, but one handed over and not marked would be run twice
-    crate::db::set_step_run_by_engine(&pool, step_instance_id, *crate::engine_instance::ENGINE_ID)
-        .await?;
-    if try_dispatch_intrinsic(
+    let built_in = BuiltInStep {
         run_id,
-        step_instance_id,
+        step_id: step_instance_id,
         fencing_token,
-        &step_type,
-        &resolved_spec,
-        resolved_params,
-        pool.clone(),
-        nats_client.clone(),
-        tls_reloader.clone(),
-    )
-    .await?
-    {
+        step_type: step_type.clone(),
+        spec: resolved_spec.clone(),
+        params: resolved_params.clone(),
+        pool: pool.clone(),
+        tls_reloader: tls_reloader.clone(),
+    };
+    if try_dispatch_intrinsic(built_in).await? {
         return Ok(());
     }
-    // A runner's step: what follows can still fail or be lost before it is published
-    crate::db::set_step_dispatched(&pool, step_instance_id, false).await?;
 
     let mut dsl_step_val = Value::Null;
     if let Some(found_step) = find_step(&workflow.steps, step_name) {
@@ -256,7 +248,7 @@ pub async fn dispatch_step_instance(
 
     // From here the runner owns the step and reports its result without a token.
     crate::db::clear_step_completion_token(&pool, step_instance_id).await?;
-    crate::db::set_step_dispatched(&pool, step_instance_id, true).await?;
+    crate::db::mark_step_published(&pool, step_instance_id).await?;
 
     let stream_seq = publish_cloudevent_with_sequence(
         &js,

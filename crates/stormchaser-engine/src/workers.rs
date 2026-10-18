@@ -36,80 +36,9 @@ pub fn start_liveness_worker(
                 Err(e) => tracing::error!("Failed to check runner liveness: {:?}", e),
             }
 
-            // 2. Detect zombie steps and fail them out
-            if let Ok(mut tx) = pool.begin().await {
-                match crate::db::steps::fetch_zombie_steps(&mut *tx).await {
-                    Ok(zombies) => {
-                        for zombie in zombies {
-                            tracing::warn!(
-                                "Detected zombie step {} (Run {}) on dead runner {}",
-                                zombie.id,
-                                zombie.run_id,
-                                zombie.runner_id.clone().unwrap_or_default()
-                            );
-
-                            let fail_event = stormchaser_model::events::StepFailedEvent {
-                                run_id: zombie.run_id,
-                                step_id: zombie.id,
-                                fencing_token: zombie.fencing_token,
-                                completion_token: None,
-                                event_type: stormchaser_model::events::EventType::Step(
-                                    stormchaser_model::events::StepEventType::Failed,
-                                ),
-                                error: "lost_zombie".to_string(),
-                                runner_id: zombie.runner_id,
-                                exit_code: None,
-                                storage_hashes: None,
-                                artifacts: None,
-                                test_reports: None,
-                                outputs: None,
-                                timestamp: chrono::Utc::now(),
-                            };
-
-                            let event_payload = match serde_json::to_value(&fail_event) {
-                                Ok(value) => value,
-                                Err(error) => {
-                                    tracing::error!(
-                                    "Failed to serialize zombie failure event for run {} step {}: {:?}",
-                                    fail_event.run_id,
-                                    fail_event.step_id,
-                                    error
-                                );
-                                    continue;
-                                }
-                            };
-
-                            if let Err(error) = crate::db::outbox::insert_outbox_event(
-                                &mut *tx,
-                                stormchaser_model::nats::NatsSubject::StepFailed(Some(
-                                    stormchaser_model::nats::compute_shard_id(&zombie.run_id),
-                                )),
-                                stormchaser_model::events::EventType::Step(
-                                    stormchaser_model::events::StepEventType::Failed,
-                                ),
-                                stormchaser_model::events::EventSource::System,
-                                event_payload,
-                                Some(stormchaser_model::events::SchemaVersion::new(
-                                    "1.0".to_string(),
-                                )),
-                                None,
-                            )
-                            .await
-                            {
-                                tracing::error!(
-                                "Failed to enqueue zombie failure event for run {} step {}: {:?}",
-                                zombie.run_id,
-                                zombie.id,
-                                error
-                            );
-                            }
-                        }
-                    }
-                    Err(e) => tracing::error!("Failed to fetch zombie steps: {:?}", e),
-                }
-                if let Err(error) = tx.commit().await {
-                    tracing::error!("Failed to commit liveness worker transaction: {:?}", error);
-                }
+            // 2. Fail the steps of runners that have gone
+            if let Err(e) = fail_zombie_steps(&pool).await {
+                tracing::error!("Failed to fail the steps of lost runners: {:?}", e);
             }
 
             // 3. Fail the built-in steps of engines that have gone
@@ -120,6 +49,32 @@ pub fn start_liveness_worker(
             }
         }
     })
+}
+
+/// Fails the steps of runners that have gone: offline, or silent for 30 seconds.
+pub async fn fail_zombie_steps(pool: &sqlx::PgPool) -> anyhow::Result<usize> {
+    let mut tx = pool.begin().await?;
+    let zombies = db::steps::fetch_zombie_steps(&mut *tx).await?;
+    for zombie in &zombies {
+        tracing::warn!(
+            "Detected zombie step {} (Run {}) on dead runner {}",
+            zombie.id,
+            zombie.run_id,
+            zombie.runner_id.as_deref().unwrap_or_default()
+        );
+        let event = stormchaser_model::events::StepFailedEvent {
+            runner_id: zombie.runner_id.clone(),
+            ..stormchaser_model::events::StepFailedEvent::new(
+                zombie.run_id,
+                zombie.id,
+                zombie.fencing_token,
+                "lost_zombie",
+            )
+        };
+        crate::db::outbox::insert_step_failed(&mut *tx, &event).await?;
+    }
+    tx.commit().await?;
+    Ok(zombies.len())
 }
 
 /// How long an engine may go without a heartbeat before it is forgotten
@@ -142,38 +97,15 @@ pub async fn fail_lost_engine_steps(
             step.run_id
         );
         let event = stormchaser_model::events::StepFailedEvent {
-            run_id: step.run_id,
-            step_id: step.id,
-            fencing_token: step.fencing_token,
             completion_token: step.completion_token.clone(),
-            event_type: stormchaser_model::events::EventType::Step(
-                stormchaser_model::events::StepEventType::Failed,
-            ),
-            error: "The engine running this step stopped before it finished".to_string(),
-            runner_id: None,
-            exit_code: None,
-            storage_hashes: None,
-            artifacts: None,
-            test_reports: None,
-            outputs: None,
-            timestamp: chrono::Utc::now(),
+            ..stormchaser_model::events::StepFailedEvent::new(
+                step.run_id,
+                step.id,
+                step.fencing_token,
+                "The engine running this step stopped before it finished",
+            )
         };
-        crate::db::outbox::insert_outbox_event(
-            &mut *tx,
-            stormchaser_model::nats::NatsSubject::StepFailed(Some(
-                stormchaser_model::nats::compute_shard_id(&step.run_id),
-            )),
-            stormchaser_model::events::EventType::Step(
-                stormchaser_model::events::StepEventType::Failed,
-            ),
-            stormchaser_model::events::EventSource::System,
-            serde_json::to_value(&event)?,
-            Some(stormchaser_model::events::SchemaVersion::new(
-                "1.0".to_string(),
-            )),
-            None,
-        )
-        .await?;
+        crate::db::outbox::insert_step_failed(&mut *tx, &event).await?;
     }
     db::delete_gone_engines(&mut *tx, ENGINE_GONE_SECS).await?;
     tx.commit().await?;
@@ -263,46 +195,12 @@ pub fn start_resolver_crash_recovery_worker(
             match db::get_stalled_resolving_runs(&pool, 5).await {
                 Ok(run_ids) => {
                     for run_id in run_ids {
-                        tracing::warn!("Recovering crashed resolution for run {}", run_id);
-                        if let Ok(run) = handler::fetch_run(run_id, &pool).await {
-                            if run.status == RunStatus::Resolving {
-                                let machine = crate::workflow_machine::WorkflowMachine::<
-                                    crate::workflow_machine::state::Resolving,
-                                >::new_from_run(run);
-                                if let Ok(mut tx) = pool.begin().await {
-                                    let result = machine
-                                        .fail(
-                                            "Engine crashed during resolution".to_string(),
-                                            &mut tx,
-                                        )
-                                        .await;
-                                    if result.is_ok() {
-                                        // Emit failed event
-                                        let event = stormchaser_model::events::WorkflowFailedEvent {
-                                            run_id,
-                                            event_type: stormchaser_model::events::EventType::Workflow(stormchaser_model::events::WorkflowEventType::Failed),
-                                            timestamp: chrono::Utc::now(),
-                                            status: stormchaser_model::workflow::RunStatus::Failed,
-                                        };
-                                        let _ = crate::db::outbox::insert_outbox_event(
-                                            &mut *tx,
-                                            stormchaser_model::nats::NatsSubject::RunFailed(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
-                                            stormchaser_model::events::EventType::Workflow(stormchaser_model::events::WorkflowEventType::Failed),
-                                            stormchaser_model::events::EventSource::System,
-                                            serde_json::to_value(event).unwrap(),
-                                            Some(stormchaser_model::events::SchemaVersion::new("1.0".to_string())),
-                                            None,
-                                        ).await;
-                                        if let Err(error) = tx.commit().await {
-                                            tracing::error!(
-                                                "Failed to commit resolver crash recovery transaction for run {}: {:?}",
-                                                run_id,
-                                                error
-                                            );
-                                        }
-                                    }
-                                }
-                            }
+                        if let Err(e) = fail_crashed_resolution(&pool, run_id).await {
+                            tracing::error!(
+                                "Failed to recover the crashed resolution of run {}: {:?}",
+                                run_id,
+                                e
+                            );
                         }
                     }
                 }
@@ -310,6 +208,46 @@ pub fn start_resolver_crash_recovery_worker(
             }
         }
     })
+}
+
+/// Fails a run whose resolution has stalled, its engine having crashed while resolving
+/// it, together with the event that reports it.
+async fn fail_crashed_resolution(pool: &sqlx::PgPool, run_id: RunId) -> anyhow::Result<()> {
+    use stormchaser_model::events::{
+        EventSource, EventType, SchemaVersion, WorkflowEventType, WorkflowFailedEvent,
+    };
+    let run = handler::fetch_run(run_id, pool).await?;
+    if run.status != RunStatus::Resolving {
+        return Ok(());
+    }
+    tracing::warn!("Recovering crashed resolution for run {}", run_id);
+    let machine = crate::workflow_machine::WorkflowMachine::<
+        crate::workflow_machine::state::Resolving,
+    >::new_from_run(run);
+    let mut tx = pool.begin().await?;
+    machine
+        .fail("Engine crashed during resolution".to_string(), &mut tx)
+        .await?;
+    let event = WorkflowFailedEvent {
+        run_id,
+        event_type: EventType::Workflow(WorkflowEventType::Failed),
+        timestamp: chrono::Utc::now(),
+        status: RunStatus::Failed,
+    };
+    crate::db::outbox::insert_outbox_event(
+        &mut *tx,
+        stormchaser_model::nats::NatsSubject::RunFailed(Some(
+            stormchaser_model::nats::compute_shard_id(&run_id),
+        )),
+        EventType::Workflow(WorkflowEventType::Failed),
+        EventSource::System,
+        serde_json::to_value(event)?,
+        Some(SchemaVersion::new("1.0".to_string())),
+        None,
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(())
 }
 
 pub fn start_outbox_relay_worker(

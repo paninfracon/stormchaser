@@ -28,7 +28,6 @@ pub async fn handle_slack_message(
     fencing_token: i64,
     spec: Value,
     pool: PgPool,
-    nats_client: async_nats::Client,
 ) -> Result<()> {
     use crate::step_machine::{state::Pending, StepMachine};
     use std::collections::HashMap;
@@ -54,13 +53,12 @@ pub async fn handle_slack_message(
 
     let status = res.status();
     if status.is_success() {
-        super::utils::publish_step_completed_event(
+        super::utils::report_step_completed(
+            &mut *pool.acquire().await?,
             run_id,
             step_instance_id,
             fencing_token,
             Some(HashMap::new()),
-            &pool,
-            nats_client,
         )
         .await?;
         Ok(())
