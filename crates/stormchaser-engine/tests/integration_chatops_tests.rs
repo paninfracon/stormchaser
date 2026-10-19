@@ -32,6 +32,10 @@ async fn test_slack_message_integration() {
 
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
+    // The engine creates the stream at start-up; a fresh test stack has none
+    stormchaser_engine::nats::init_jetstream(&nats_client)
+        .await
+        .unwrap();
     // Built-in steps report their results through the outbox, which the engine's
     // relay publishes
     let _relay =
@@ -150,6 +154,10 @@ async fn test_teams_message_integration() {
 
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
+    // The engine creates the stream at start-up; a fresh test stack has none
+    stormchaser_engine::nats::init_jetstream(&nats_client)
+        .await
+        .unwrap();
     // Built-in steps report their results through the outbox, which the engine's
     // relay publishes
     let _relay =

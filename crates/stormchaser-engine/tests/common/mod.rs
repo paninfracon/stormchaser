@@ -34,7 +34,12 @@ pub async fn setup_db() -> PgPool {
 
 pub async fn nats() -> async_nats::Client {
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    stormchaser_model::nats::connect(nats_url).await.unwrap()
+    let client = stormchaser_model::nats::connect(nats_url).await.unwrap();
+    // The engine creates the stream at start-up; a fresh test stack has none
+    stormchaser_engine::nats::init_jetstream(&client)
+        .await
+        .unwrap();
+    client
 }
 
 pub async fn tls_reloader() -> Arc<TlsReloader> {
