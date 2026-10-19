@@ -37,11 +37,7 @@ pub async fn create_webhook(
     Json(payload): Json<CreateWebhookRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
     // A webhook URL is public; the secret is the only thing that says who is calling
-    if !payload
-        .secret_token
-        .as_deref()
-        .is_some_and(|secret| !secret.is_empty())
-    {
+    if payload.secret_token.as_deref().is_none_or(str::is_empty) {
         tracing::warn!(
             "Refusing to create webhook '{}' without a secret",
             payload.name
