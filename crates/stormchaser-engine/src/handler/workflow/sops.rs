@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::Stdio;
 use tokio::process::Command;
-use tracing::{debug, warn};
+use tracing::debug;
 
 /// Extracts all leaf values from a JSON value to populate the redaction registry.
 ///
@@ -89,7 +89,8 @@ pub async fn decrypt_sops_secrets(
         }
     }
 
-    let mut envs = HashMap::new();
+    #[allow(unused_mut)]
+    let mut envs: HashMap<String, String> = HashMap::new();
 
     #[cfg(feature = "aws-sops")]
     {
@@ -123,7 +124,7 @@ pub async fn decrypt_sops_secrets(
                     }
                 }
                 Err(e) => {
-                    warn!("Failed to assume AWS role {} for SOPS: {:?}", arn, e);
+                    tracing::warn!("Failed to assume AWS role {} for SOPS: {:?}", arn, e);
                     return Err(anyhow::anyhow!(
                         "Failed to assume AWS role for SOPS: {:?}",
                         e

@@ -2,7 +2,9 @@ mod approval;
 mod email;
 mod jinja;
 mod lambda;
+#[cfg(feature = "chatops-slack")]
 mod slack;
+#[cfg(feature = "chatops-teams")]
 mod teams;
 pub mod utils;
 mod webhook;

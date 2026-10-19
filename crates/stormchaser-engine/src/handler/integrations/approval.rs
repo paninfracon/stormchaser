@@ -1,7 +1,6 @@
 use anyhow::Result;
 use serde_json::Value;
 use sqlx::PgPool;
-use std::env::var;
 
 #[cfg(feature = "email")]
 #[cfg(feature = "email")]
@@ -22,7 +21,8 @@ pub async fn handle_approval_notification(
         use tracing::info;
 
         let spec: stormchaser_model::dsl::EmailSpec = serde_json::from_value(spec)?;
-        let base_url = var("SYSTEM_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
+        let base_url =
+            std::env::var("SYSTEM_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
 
         // 1. Generate Tokens. There is no fallback key: without one the mail goes out
         // with no links, and approvers use the UI or CLI.

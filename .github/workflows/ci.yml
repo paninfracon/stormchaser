@@ -72,6 +72,9 @@ jobs:
       uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
     - name: Run cargo clippy
       run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+    # The engine's optional integrations are cfg-gated; build it without them too.
+    - name: Run cargo clippy (engine, no default features)
+      run: cargo clippy -p stormchaser-engine --all-targets --no-default-features -- -D warnings
 
   test:
     name: Run Tests

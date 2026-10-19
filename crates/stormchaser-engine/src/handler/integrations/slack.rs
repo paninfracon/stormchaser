@@ -15,13 +15,9 @@ fn build_slack_payload(spec: &stormchaser_model::dsl::SlackMessageSpec) -> Value
     serde_json::to_value(payload).unwrap()
 }
 
-#[cfg(feature = "chatops-slack")]
 use crate::handler::fetch_step_instance;
-#[cfg(feature = "chatops-slack")]
 use anyhow::Result;
-#[cfg(feature = "chatops-slack")]
 use sqlx::PgPool;
-#[cfg(feature = "chatops-slack")]
 pub async fn handle_slack_message(
     run_id: stormchaser_model::RunId,
     step_instance_id: stormchaser_model::StepInstanceId,

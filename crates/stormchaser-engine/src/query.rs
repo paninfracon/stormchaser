@@ -177,7 +177,7 @@ async fn execute_api_query(params: &HashMap<String, String>) -> Result<Vec<Value
 }
 
 async fn execute_aws_cloudcontrol_query(
-    params: &HashMap<String, String>,
+    #[allow(unused_variables)] params: &HashMap<String, String>,
 ) -> Result<Vec<Value>, anyhow::Error> {
     #[cfg(feature = "aws-cloudcontrol")]
     {

@@ -1,3 +1,4 @@
+#![cfg(any(feature = "chatops-slack", feature = "chatops-teams"))]
 #![allow(clippy::explicit_auto_deref)]
 use futures::StreamExt;
 use serde_json::json;
@@ -8,6 +9,7 @@ use uuid::Uuid;
 use wiremock::matchers::{body_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+#[cfg(feature = "chatops-slack")]
 #[tokio::test]
 async fn test_slack_message_integration() {
     let _ = tracing_subscriber::fmt()
@@ -99,7 +101,6 @@ async fn test_slack_message_integration() {
         "blocks": [{"type": "section"}]
     });
 
-    #[cfg(feature = "chatops-slack")]
     {
         stormchaser_engine::handler::handle_slack_message(
             run_id,
@@ -126,6 +127,7 @@ async fn test_slack_message_integration() {
     }
 }
 
+#[cfg(feature = "chatops-teams")]
 #[tokio::test]
 async fn test_teams_message_integration() {
     let _ = tracing_subscriber::fmt()
@@ -233,7 +235,6 @@ async fn test_teams_message_integration() {
         "message": "Hello Teams"
     });
 
-    #[cfg(feature = "chatops-teams")]
     {
         stormchaser_engine::handler::handle_teams_message(
             run_id,

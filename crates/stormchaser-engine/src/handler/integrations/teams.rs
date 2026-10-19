@@ -56,13 +56,9 @@ fn build_teams_payload(spec: &stormchaser_model::dsl::TeamsMessageSpec) -> Value
     serde_json::to_value(payload).unwrap()
 }
 
-#[cfg(feature = "chatops-teams")]
 use crate::handler::fetch_step_instance;
-#[cfg(feature = "chatops-teams")]
 use anyhow::Result;
-#[cfg(feature = "chatops-teams")]
 use sqlx::PgPool;
-#[cfg(feature = "chatops-teams")]
 pub async fn handle_teams_message(
     run_id: stormchaser_model::RunId,
     step_instance_id: stormchaser_model::StepInstanceId,
