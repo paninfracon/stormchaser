@@ -241,8 +241,8 @@ publish allow:
   stormchaser.v1.*.step.running
   stormchaser.v1.*.step.completed
   stormchaser.v1.*.step.failed
-  stormchaser.v1.step.unpacking_sfs
-  stormchaser.v1.step.packing_sfs
+  stormchaser.v1.*.step.unpacking_sfs
+  stormchaser.v1.*.step.packing_sfs
   stormchaser.rpc.step.query
   stormchaser.rpc.step.artifact_auth
   stormchaser.rpc.runner.session

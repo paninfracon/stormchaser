@@ -20,6 +20,9 @@ use stormchaser_model::runner::RunnerStatus;
 use tokio::sync::watch;
 use tracing::{error, info, warn};
 
+/// Where a runner registers. Outside the stream: the engine subscribes to it directly.
+pub const REGISTER_SUBJECT: &str = "stormchaser.v1.runner.register";
+
 /// How often a runner tells the engine it is alive.
 const HEARTBEAT: Duration = Duration::from_secs(10);
 
@@ -275,7 +278,7 @@ async fn register<B: Backend>(
     runner_id: &str,
     own_subject: &str,
 ) -> Result<()> {
-    const SUBJECT: &str = "stormchaser.v1.runner.register";
+    const SUBJECT: &str = REGISTER_SUBJECT;
     let registration = RunnerRegisterEvent {
         runner_id: runner_id.to_string(),
         runner_type: backend.kind().to_string(),
