@@ -5,7 +5,8 @@
 //! first, and policy is asked again with its owner and the caller's verified identity.
 //! As with every policy check, nothing is enforced when no policy engine is configured.
 
-use crate::{AppState, AuthClaims};
+use crate::auth::AuthClaims;
+use crate::service::ServiceState;
 use axum::{
     extract::{FromRequestParts, Request, State},
     http::{request::Parts, Method, StatusCode},
@@ -106,28 +107,25 @@ pub fn owner_key(claims: &Claims) -> String {
     claims.email.clone().unwrap_or_else(|| claims.sub.clone())
 }
 
-impl FromRequestParts<AppState> for Caller {
+impl<S: ServiceState> FromRequestParts<S> for Caller {
     type Rejection = StatusCode;
 
-    async fn from_request_parts(
-        parts: &mut Parts,
-        state: &AppState,
-    ) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let AuthClaims(claims) = AuthClaims::from_request_parts(parts, state).await?;
         Ok(Caller { claims })
     }
 }
 
 /// Asks policy whether `caller` may do `action` to an object.
-pub async fn allowed(
-    state: &AppState,
+pub async fn allowed<S: ServiceState>(
+    state: &S,
     caller: &Caller,
     action: &str,
     kind: Kind,
     id: &str,
     owner: Option<&str>,
 ) -> Result<bool, StatusCode> {
-    if !state.opa.is_configured() {
+    if !state.opa().is_configured() {
         return Ok(true);
     }
     let context = ResourceOpaContext {
@@ -139,7 +137,7 @@ pub async fn allowed(
         },
         subject: caller.claims.opa_subject(),
     };
-    state.opa.check_resource(context).await.map_err(|e| {
+    state.opa().check_resource(context).await.map_err(|e| {
         tracing::error!(
             "Policy check failed for {} on {} {}: {:?}",
             action,
@@ -213,8 +211,8 @@ pub async fn record_owner(
 
 /// Refuses with 403 unless `caller` may use the connection `id` (for example to point a
 /// schedule or an event rule at its repository).
-pub async fn authorize_connection_use(
-    state: &AppState,
+pub async fn authorize_connection_use<S: ServiceState>(
+    state: &S,
     caller: &Caller,
     id: Uuid,
 ) -> Result<(), StatusCode> {
@@ -228,8 +226,8 @@ pub const MAKE_DEFAULT: &str = "make_default";
 
 /// Refuses unless `caller` may make the connection they are creating, `id`, the default
 /// storage backend. An existing connection is checked with [`authorize_action`].
-pub async fn authorize_make_default(
-    state: &AppState,
+pub async fn authorize_make_default<S: ServiceState>(
+    state: &S,
     caller: &Caller,
     id: Uuid,
 ) -> Result<(), StatusCode> {
@@ -253,17 +251,17 @@ pub async fn authorize_make_default(
 /// Refuses unless `caller` may do `action` to the object `id` of `kind`: 404 if it does
 /// not exist, 403 if policy says no. For objects named in a request's body, which the
 /// path-based check in [`authorize_object`] does not see.
-pub async fn authorize_action(
-    state: &AppState,
+pub async fn authorize_action<S: ServiceState>(
+    state: &S,
     caller: &Caller,
     action: &str,
     kind: Kind,
     id: Uuid,
 ) -> Result<(), StatusCode> {
-    if !state.opa.is_configured() {
+    if !state.opa().is_configured() {
         return Ok(());
     }
-    let owner = owners(&state.pool, kind, &[id])
+    let owner = owners(state.pool(), kind, &[id])
         .await
         .map_err(|e| {
             tracing::error!(
@@ -294,16 +292,16 @@ pub async fn authorize_action(
 
 /// Decides which objects of one kind a caller may read, asking policy once per distinct
 /// owner instead of once per object.
-pub struct ReadFilter<'a> {
-    state: &'a AppState,
+pub struct ReadFilter<'a, S: ServiceState> {
+    state: &'a S,
     caller: &'a Caller,
     kind: Kind,
     decided: HashMap<Option<String>, bool>,
 }
 
-impl<'a> ReadFilter<'a> {
+impl<'a, S: ServiceState> ReadFilter<'a, S> {
     /// Starts a filter for `caller` over objects of `kind`.
-    pub fn new(state: &'a AppState, caller: &'a Caller, kind: Kind) -> Self {
+    pub fn new(state: &'a S, caller: &'a Caller, kind: Kind) -> Self {
         Self {
             state,
             caller,
@@ -314,7 +312,7 @@ impl<'a> ReadFilter<'a> {
 
     /// True when the caller may read an object owned by `owner`.
     pub async fn can_read(&mut self, owner: Option<&str>) -> Result<bool, StatusCode> {
-        if !self.state.opa.is_configured() {
+        if !self.state.opa().is_configured() {
             return Ok(true);
         }
         let key = owner.map(str::to_owned);
@@ -329,18 +327,18 @@ impl<'a> ReadFilter<'a> {
 
 /// Drops from a listing the objects the caller may not read, so that a list never shows
 /// what fetching the object would refuse.
-pub async fn filter_readable<T>(
-    state: &AppState,
+pub async fn filter_readable<S: ServiceState, T>(
+    state: &S,
     caller: &Caller,
     kind: Kind,
     items: Vec<T>,
     id_of: impl Fn(&T) -> Uuid,
 ) -> Result<Vec<T>, StatusCode> {
-    if !state.opa.is_configured() || items.is_empty() {
+    if !state.opa().is_configured() || items.is_empty() {
         return Ok(items);
     }
     let ids: Vec<Uuid> = items.iter().map(&id_of).collect();
-    let owners = owners(&state.pool, kind, &ids).await.map_err(|e| {
+    let owners = owners(state.pool(), kind, &ids).await.map_err(|e| {
         tracing::error!("Failed to load owners of {}s: {:?}", kind.as_str(), e);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
@@ -393,12 +391,12 @@ fn object_action(method: &Method, path: &str) -> Option<(Kind, Uuid, &'static st
 /// It sits in front of the whole protected route group, so a new route under, say,
 /// `/runs/{id}/` is covered without its handler doing anything. An object that does not
 /// exist is left to the handler, which answers 404.
-pub async fn authorize_object(
-    State(state): State<AppState>,
+pub async fn authorize_object<S: ServiceState>(
+    State(state): State<S>,
     request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    if !state.opa.is_configured() {
+    if !state.opa().is_configured() {
         return Ok(next.run(request).await);
     }
     let path = request.uri().path();
@@ -407,7 +405,7 @@ pub async fn authorize_object(
         return Ok(next.run(request).await);
     };
 
-    let owner = owners(&state.pool, kind, &[id]).await.map_err(|e| {
+    let owner = owners(state.pool(), kind, &[id]).await.map_err(|e| {
         tracing::error!(
             "Failed to load the owner of {} {}: {:?}",
             kind.as_str(),

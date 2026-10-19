@@ -79,7 +79,7 @@ async fn test_opa_middleware_not_configured() {
     })
     .await;
     let app = Router::new().route("/", get(|| async { "ok" })).layer(
-        axum::middleware::from_fn_with_state(state.clone(), opa_middleware),
+        axum::middleware::from_fn_with_state(state.clone(), opa_middleware::<AppState>),
     );
 
     let response = app
@@ -99,7 +99,7 @@ async fn test_opa_middleware_allowed() {
     .await;
 
     let app = Router::new().route("/", get(|| async { "ok" })).layer(
-        axum::middleware::from_fn_with_state(state.clone(), opa_middleware),
+        axum::middleware::from_fn_with_state(state.clone(), opa_middleware::<AppState>),
     );
 
     let response = app
@@ -119,7 +119,7 @@ async fn test_opa_middleware_denied() {
     .await;
 
     let app = Router::new().route("/", get(|| async { "ok" })).layer(
-        axum::middleware::from_fn_with_state(state.clone(), opa_middleware),
+        axum::middleware::from_fn_with_state(state.clone(), opa_middleware::<AppState>),
     );
 
     let response = app
@@ -139,7 +139,7 @@ async fn test_opa_middleware_error() {
     .await;
 
     let app = Router::new().route("/", get(|| async { "ok" })).layer(
-        axum::middleware::from_fn_with_state(state.clone(), opa_middleware),
+        axum::middleware::from_fn_with_state(state.clone(), opa_middleware::<AppState>),
     );
 
     let response = app

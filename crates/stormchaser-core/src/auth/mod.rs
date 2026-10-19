@@ -2,7 +2,7 @@ pub mod jwks;
 /// OPA integration for authorization
 pub mod opa;
 
-use crate::AppState;
+use crate::service::ServiceState;
 use axum::{
     extract::FromRequestParts,
     http::{request::Parts, StatusCode},
@@ -109,9 +109,9 @@ pub struct AuthClaims(pub Claims);
 ///
 /// Tokens issued by the configured OIDC provider are checked against its keys, audience
 /// and issuer; otherwise the token must be signed with the local secret.
-pub async fn authenticate(
+pub async fn authenticate<S: ServiceState>(
     headers: &axum::http::HeaderMap,
-    state: &AppState,
+    state: &S,
 ) -> Result<Claims, StatusCode> {
     let auth_header = headers
         .get(axum::http::header::AUTHORIZATION)
@@ -125,11 +125,11 @@ pub async fn authenticate(
     let token = &auth_header["Bearer ".len()..];
 
     // 1. Try OIDC/Dex validation if configured
-    if let Some(oidc_config) = &state.oidc_config {
+    if let Some(oidc_config) = state.oidc_config() {
         if let Ok(header) = decode_header(token) {
             if let Some(kid) = header.kid {
                 let jwk_opt =
-                    crate::auth::jwks::key_for(&state.jwks, &oidc_config.jwks_url, &kid).await;
+                    crate::auth::jwks::key_for(state.jwks(), &oidc_config.jwks_url, &kid).await;
 
                 if let Some(jwk) = jwk_opt {
                     let mut validation = Validation::new(header.alg);
@@ -177,8 +177,8 @@ pub async fn authenticate(
 /// It guards the whole protected route group, so a handler that does not ask for
 /// [`AuthClaims`] is still unreachable to unauthenticated callers. The validated claims
 /// are stored on the request for the extractor to reuse.
-pub async fn require_auth(
-    axum::extract::State(state): axum::extract::State<AppState>,
+pub async fn require_auth<S: ServiceState>(
+    axum::extract::State(state): axum::extract::State<S>,
     mut request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> Result<axum::response::Response, StatusCode> {
@@ -187,13 +187,10 @@ pub async fn require_auth(
     Ok(next.run(request).await)
 }
 
-impl FromRequestParts<AppState> for AuthClaims {
+impl<S: ServiceState> FromRequestParts<S> for AuthClaims {
     type Rejection = StatusCode;
 
-    async fn from_request_parts(
-        parts: &mut Parts,
-        state: &AppState,
-    ) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         // Already validated by `require_auth` when the route sits behind it.
         if let Some(claims) = parts.extensions.get::<AuthClaims>() {
             return Ok(claims.clone());

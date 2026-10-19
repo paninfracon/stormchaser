@@ -3,18 +3,10 @@
 
 /// The interactive API documentation
 pub mod api_docs;
-/// Authentication and authorization module
-pub mod auth;
-/// Per-object authorization
-pub mod authz;
-/// Configuration module
-pub mod config;
 /// Database access module
 pub mod db;
 /// Human-in-the-loop module
 pub mod hitl;
-/// The HTTP listener, with or without TLS.
-pub mod listener;
 /// API routes module
 pub mod routes;
 /// Setup module
@@ -38,6 +30,7 @@ use sqlx::PgPool;
 use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
+pub use stormchaser_core::{access as authz, auth, config, listener};
 use stormchaser_model::auth::OpaAuthorizer;
 use stormchaser_model::connections::ArtifactRegistry;
 use stormchaser_model::connections::Connection;
@@ -179,6 +172,21 @@ pub struct AppState {
     pub mcp_allowed_hosts: Vec<String>,
 }
 
+impl stormchaser_core::service::ServiceState for AppState {
+    fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+    fn opa(&self) -> &Arc<dyn OpaAuthorizer> {
+        &self.opa
+    }
+    fn oidc_config(&self) -> Option<&auth::jwks::OidcConfig> {
+        self.oidc_config.as_ref()
+    }
+    fn jwks(&self) -> &Arc<RwLock<auth::jwks::JwksCache>> {
+        &self.jwks
+    }
+}
+
 /// Whether Swagger UI and the OpenAPI document are served (`STORMCHASER_API_DOCS=true`).
 pub fn api_docs_enabled() -> bool {
     std::env::var("STORMCHASER_API_DOCS").is_ok_and(|value| value.eq_ignore_ascii_case("true"))
@@ -273,17 +281,17 @@ pub fn app(state: AppState) -> Router {
         // Runs after the two below: who may act on the object the path names.
         .layer(middleware::from_fn_with_state(
             state.clone(),
-            authz::authorize_object,
+            authz::authorize_object::<AppState>,
         ))
         .layer(middleware::from_fn_with_state(
             state.clone(),
-            opa_middleware,
+            opa_middleware::<AppState>,
         ))
         // Added last so it runs first: unauthenticated requests get 401 before policy
         // is consulted.
         .layer(middleware::from_fn_with_state(
             state.clone(),
-            auth::require_auth,
+            auth::require_auth::<AppState>,
         ));
 
     // The MCP transport is governed by policy alone (see docs/security.md): clients
@@ -298,7 +306,7 @@ pub fn app(state: AppState) -> Router {
     }
     let policy_only_routes = policy_only_routes.layer(middleware::from_fn_with_state(
         state.clone(),
-        opa_middleware,
+        opa_middleware::<AppState>,
     ));
 
     let api_v1 = Router::new()

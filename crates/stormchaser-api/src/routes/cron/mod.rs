@@ -274,7 +274,7 @@ pub async fn trigger_cron_workflow(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // The engine's relay publishes it
-    stormchaser_engine::db::outbox::insert_run_queued(
+    stormchaser_core::db::outbox::insert_run_queued(
         &mut *tx,
         run_id,
         EventSource::System,

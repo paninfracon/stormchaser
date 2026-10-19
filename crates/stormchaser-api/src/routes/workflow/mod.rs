@@ -122,7 +122,7 @@ pub async fn enqueue_workflow(
 
     // 3. Create RunQuotas (always, with defaults + overrides)
     // Chosen by the caller, so the operator's ceiling applies
-    let timeout = stormchaser_engine::run_limits::RunLimits::from_env().timeout(
+    let timeout = stormchaser_core::run_limits::RunLimits::from_env().timeout(
         &payload
             .overrides
             .as_ref()
@@ -135,7 +135,7 @@ pub async fn enqueue_workflow(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // The engine's relay publishes it
-    stormchaser_engine::db::outbox::insert_run_queued(
+    stormchaser_core::db::outbox::insert_run_queued(
         &mut *tx,
         run_id,
         EventSource::Api,
@@ -407,7 +407,7 @@ pub async fn direct_run(
 
     // Through the outbox, which the engine's relay publishes and the stream confirms:
     // a run the API answers for is never lost on the way to the engine
-    stormchaser_engine::db::outbox::insert_run_direct(
+    stormchaser_core::db::outbox::insert_run_direct(
         &state.pool,
         run_id,
         &payload.dsl,

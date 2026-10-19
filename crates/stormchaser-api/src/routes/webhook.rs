@@ -663,7 +663,7 @@ async fn process_rule(
         })?;
 
     // The engine's relay publishes it
-    stormchaser_engine::db::outbox::insert_run_queued(
+    stormchaser_core::db::outbox::insert_run_queued(
         &mut *tx,
         run_id,
         EventSource::System,

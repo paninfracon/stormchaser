@@ -175,6 +175,8 @@ cargo publish -p stormchaser-tls
 sleep 15
 cargo publish -p stormchaser-dsl
 sleep 15
+cargo publish -p stormchaser-core
+sleep 15
 
 # Publish dependent crates
 cargo publish -p stormchaser-engine

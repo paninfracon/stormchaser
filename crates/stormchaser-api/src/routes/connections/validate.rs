@@ -27,7 +27,7 @@ fn git_host_port(repo_url: &str) -> Result<(String, u16), String> {
 
 /// Refuses a repository the engine would not clone, or one on an internal address.
 async fn check_git_target(repo_url: &str) -> Result<(), String> {
-    stormchaser_engine::git_cache::validate_repo_url(repo_url).map_err(|e| e.to_string())?;
+    stormchaser_core::git_cache::validate_repo_url(repo_url).map_err(|e| e.to_string())?;
     let (host, port) = git_host_port(repo_url)?;
     stormchaser_model::net_guard::validate_host_safe(&host, port)
         .await
@@ -74,8 +74,9 @@ async fn check_s3_target(
     endpoint: Option<&str>,
 ) -> Result<(), String> {
     match role_arn {
-        Some(role_arn) => stormchaser_engine::aws_guard::ensure_role_allowed(role_arn)
-            .map_err(|e| e.to_string())?,
+        Some(role_arn) => {
+            stormchaser_core::aws_guard::ensure_role_allowed(role_arn).map_err(|e| e.to_string())?
+        }
         None if !has_keys => {
             return Err(
                 "An S3 connection test needs access_key and secret_key, or an allow-listed role"

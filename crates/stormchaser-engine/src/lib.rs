@@ -5,24 +5,15 @@
 
 /// Artifact management and backend integrations.
 pub mod artifact;
-/// Operator allow-lists for AWS roles and Lambda functions.
-/// Policy checks on connection use.
-pub mod authz;
-pub mod aws_guard;
+pub use stormchaser_core::{authz, aws_guard, git_cache, hitl, jq_sandbox, query, run_limits};
 /// Database interaction layer.
 pub mod db;
 /// The heartbeat by which the engine tells it is still running its built-in steps.
 pub mod engine_instance;
-/// Git caching and cloning utilities.
-pub mod git_cache;
 /// Event handling and dispatching.
 pub mod handler;
 /// HCL expression evaluation and context building.
 pub mod hcl_eval;
-/// Human-In-The-Loop (HITL) manual approval handling.
-pub mod hitl;
-/// Runs workflow-supplied jq programs in a child process that can be stopped.
-pub mod jq_sandbox;
 /// JUnit test report parsing and aggregation.
 pub mod junit;
 /// Chooses the one engine replica that runs the background workers.
@@ -31,8 +22,6 @@ pub mod leader;
 pub mod nats;
 /// Database persistence for workflow and step models.
 pub mod persistence;
-/// Dynamic queries for schemas.
-pub mod query;
 /// Utilities for parsing resources like CPU and Memory.
 /// Short-lived registry credentials for artifact pushes.
 pub mod registry_token;
@@ -40,8 +29,6 @@ pub mod resource_utils;
 /// Which handler errors are worth delivering the event again for.
 pub mod retry;
 /// Issues runners their keys and checks what they sign.
-/// Ceilings on the quotas a run may give itself.
-pub mod run_limits;
 pub mod runner_auth;
 /// S3 backend storage implementation.
 pub mod s3;

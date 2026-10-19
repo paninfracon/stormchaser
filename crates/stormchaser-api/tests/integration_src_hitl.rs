@@ -17,7 +17,7 @@ use reqwest::StatusCode;
 use stormchaser_api::auth::AuthClaims;
 use stormchaser_api::hitl::*;
 use stormchaser_api::AppState;
-use stormchaser_engine::hitl::{seal_approval_link, ApprovalLink};
+use stormchaser_core::hitl::{seal_approval_link, ApprovalLink};
 
 /// The key these tests seal links with; handlers are given it directly.
 const LINK_KEY: &str = "test-only-approval-link-key-aaaaaa";

@@ -10,6 +10,12 @@ Only three crates have features: `stormchaser-api`, `stormchaser-engine` and `st
 | :--- | :---: | :--- |
 | `mcp` | yes | Builds the [Model Context Protocol (MCP) server](mcp-server.md) into the API at `/api/v1/mcp`, exposing the OpenAPI operations as tools over Streamable HTTP. Pulls in `rmcp` and `rmcp-openapi`. |
 
+## `stormchaser-core`
+
+| Feature | Default | Description |
+| :--- | :---: | :--- |
+| `aws-cloudcontrol` | no | Input queries backed by the AWS Cloud Control API. The engine and the query service turn it on with their own `aws-cloudcontrol` features, both on by default. |
+
 ## `stormchaser-engine`
 
 | Feature | Default | Description |
@@ -21,12 +27,18 @@ Only three crates have features: `stormchaser-api`, `stormchaser-engine` and `st
 | `vault` | yes | Reading secrets from HashiCorp Vault (`secret()` in workflows). |
 | `aws-sdk-sts` | yes | The STS client. On its own, it lets Terraform steps assume `aws_assume_role_arn`; the other AWS features turn it on. |
 | `rustls-native-certs` | yes | Pulls in the `rustls-native-certs` crate. No engine code uses it at present; services already validate TLS against the system certificate store without it. |
-| `aws-cloudcontrol` | yes | Workflow input queries backed by the AWS Cloud Control API. |
+| `aws-cloudcontrol` | yes | Workflow input queries backed by the AWS Cloud Control API. Turns on `stormchaser-core/aws-cloudcontrol`. |
 | `aws-sops` | yes | Assuming an IAM role (through STS) before decrypting SOPS secrets. Turns on `aws-sdk-sts`. Decrypting SOPS files itself needs only the `sops` binary on the engine's `PATH`. |
 | `chatops-slack` | yes | `SlackMessage` steps. |
 | `chatops-teams` | yes | `TeamsMessage` steps. |
 
 CI builds and lints the engine both with all features and with `--no-default-features`.
+
+## `stormchaser-query`
+
+| Feature | Default | Description |
+| :--- | :---: | :--- |
+| `aws-cloudcontrol` | yes | Input queries backed by the AWS Cloud Control API. Turns on `stormchaser-core/aws-cloudcontrol`. |
 
 ## `stormchaser-tls`
 

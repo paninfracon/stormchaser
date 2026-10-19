@@ -1,5 +1,5 @@
 use super::AuthClaims;
-use crate::AppState;
+use crate::service::ServiceState;
 use anyhow::Result;
 use axum::{
     extract::{OriginalUri, Request, State},
@@ -11,12 +11,12 @@ use stormchaser_model::auth::ApiOpaContext;
 use tracing::{debug, error, info};
 
 /// Middleware to evaluate Open Policy Agent (OPA) rules for incoming requests
-pub async fn opa_middleware(
-    State(state): State<AppState>,
+pub async fn opa_middleware<S: ServiceState>(
+    State(state): State<S>,
     request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    let authorizer = &*state.opa;
+    let authorizer = &**state.opa();
     if !authorizer.is_configured() {
         return Ok(next.run(request).await);
     }

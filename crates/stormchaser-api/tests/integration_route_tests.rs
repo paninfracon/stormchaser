@@ -922,7 +922,7 @@ async fn test_run_from_git() {
 
     // Verify git file system cache only has the `.storm` file.
     let temp_dir = tempfile::tempdir().unwrap();
-    let git_cache = stormchaser_engine::git_cache::GitCache::new(temp_dir.path());
+    let git_cache = stormchaser_core::git_cache::GitCache::new(temp_dir.path());
     let repo_url = "https://github.com/paninfracon/stormchaser";
     let git_ref = "trunk";
     let workflow_path = "tests/hello-world.storm";
@@ -1007,7 +1007,7 @@ async fn test_run_from_git() {
     // Steps report as a runner the engine has issued a key to: a step no runner has
     // claimed takes a result only from such a runner
     let runner_id = format!("test-runner-{}", uuid::Uuid::new_v4());
-    stormchaser_engine::db::store_runner_session(&pool, &runner_id, &[5u8; 32])
+    stormchaser_core::db::store_runner_session(&pool, &runner_id, &[5u8; 32])
         .await
         .unwrap();
 

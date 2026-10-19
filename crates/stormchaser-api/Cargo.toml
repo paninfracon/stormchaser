@@ -21,7 +21,7 @@ stormchaser-model = { workspace = true }
 stormchaser-dsl = { workspace = true }
 stormchaser-tls = { workspace = true, features = ["listener"] }
 stormchaser-opa = { version = "1.5.1", path = "../stormchaser-opa" }
-stormchaser-engine = { version = "1.5.1", path = "../stormchaser-engine" }
+stormchaser-core = { workspace = true }
 tokio = { workspace = true }
 rustls = { version = "0.23.46", features = ["ring"] }
 axum = { workspace = true }
@@ -48,8 +48,6 @@ hex = { workspace = true }
 hcl-rs = { workspace = true }
 regex = { workspace = true }
 base64 = { workspace = true }
-aes-gcm = { workspace = true }
-aead = { workspace = true }
 jsonwebtoken = { workspace = true }
 tower = { workspace = true }
 once_cell = { workspace = true }
@@ -74,6 +72,8 @@ aws-sdk-sts = { workspace = true }
 git2 = { version = "0.21", features = ["vendored-openssl", "https", "ssh"] }
 
 [dev-dependencies]
+# The route tests drive a run through the engine's handlers
+stormchaser-engine = { version = "1.5.1", path = "../stormchaser-engine" }
 rand = "0.10"
 wiremock = "0.6"
 tower = { version = "0.5", features = ["util"] }

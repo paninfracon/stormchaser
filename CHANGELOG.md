@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A new crate, `stormchaser-core`, holds the code more than one service needs: the HTTP services' settings and start-up, token checks and the policy middleware, object authorization, the Git cache and Git workflow reader, input queries and the jq sandbox, approval links, run limits and the outbox inserts. The API no longer depends on the engine, and the query service depends on neither; it no longer connects to NATS, which it never used. Nothing about how the services behave or are configured changes. Publish `stormchaser-core` after `stormchaser-opa` and `stormchaser-tls` and before the services.
 - A step's `spec` merges into its step library's as deep as it goes: objects key by key, and lists of named entries such as `env` by name. A step that set one env var or one nested key used to replace the library's whole value for that key.
 - A step that names a step library is stored as the library's step once its workflow is parsed: its type is the library's type, and its spec and params are merged. A run's definition and its steps show that type, not the library's name.
 - One `${...}` in a step's spec that is not an expression (a shell variable, say) no longer stops the expressions after it from being resolved.

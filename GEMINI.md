@@ -8,7 +8,7 @@ Any time a domain name which is not `example.com` needs to be used in tests etc 
 
 ### 1. Module Responsibility
 
-The project is divided into specialized crates to ensure a clear separation of concerns. Each crate's internal modules have specific roles. The dependency graph is not strictly layered: `stormchaser-api` depends on `stormchaser-engine` (for outbox inserts, git cache, query execution, run limits and the jq sandbox), and `stormchaser-query` depends on both `stormchaser-api` and `stormchaser-engine`.
+The project is divided into specialized crates to ensure a clear separation of concerns. Each crate's internal modules have specific roles. Code more than one service needs lives in `stormchaser-core`: the API, the engine and the query service depend on it and never on each other. Keep it that way: when one service needs another's code, move that code into `stormchaser-core`.
 
 - **`stormchaser-model`**: Shared domain types, plus the infrastructure code every service needs. The aim was a pure types crate; it is not one. Outside `wasm32` it depends on `tokio`, `sqlx` (Postgres), `async-nats`, `reqwest`, `oci-distribution` and `rustls`, and contains I/O. Keep new execution logic out of it; put shared types and small shared helpers here.
   - `workflow.rs` / `step.rs`: Run and step instance models and their status enums.
@@ -40,23 +40,30 @@ The project is divided into specialized crates to ensure a clear separation of c
   - `leader.rs` / `workers.rs`: A Postgres advisory lock picks one replica to run the background workers (liveness, timeouts, resolver crash recovery, the outbox relay, task message purge, dispatch recovery).
   - `engine_instance.rs`: Per-process heartbeat, used to fail built-in steps of a dead engine.
   - `hcl_eval.rs` / `templating.rs` / `stdlib.rs`: Runtime expression evaluation, MiniJinja templating and the expression function library.
-  - `git_cache.rs`: Cloning, caching and resolution of Git-based workflow sources.
-  - `wasm.rs` / `jq_sandbox.rs`: WASM step execution, and jq programs run in a separate, limited worker process.
-  - `secrets.rs` / `aws_guard.rs` / `run_limits.rs`: Vault and SOPS secrets, IAM role and Vault path allow-lists, and operator ceilings on run quotas.
+  - `wasm.rs`: WASM step execution.
+  - `secrets.rs`: Vault and SOPS secrets and the Vault path allow-list.
   - `db/`: Database layer for engine state (runs, steps, outbox, quotas, runners, task messages, archive).
 
 - **`stormchaser-api`**: REST interface.
-  - `main.rs` / `lib.rs` / `setup.rs` / `config.rs`: Configuration, state and route wiring.
+  - `main.rs` / `lib.rs` / `setup.rs`: State and route wiring.
   - `routes/`: Route handlers (workflows and runs, steps, connections, cron, webhooks, event rules, auth, schema, MCP).
-  - `auth/` / `authz.rs`: Token verification (local HS256 and OIDC via JWKS) and OPA-backed request and object authorization.
-  - `hitl/`: Human-in-the-loop approvals and sealed approval links.
-  - `listener.rs`: HTTPS or plain HTTP listener, chosen by `STORMCHASER_LISTEN_TLS`.
+  - `hitl/`: Human-in-the-loop approvals and approval-link routes.
   - `rate_limit.rs` / `redact.rs` / `api_docs.rs`: Rate limiting, secret masking in responses, and the OpenAPI document and Swagger UI page.
   - `telemetry.rs`: Structured logging, tracing (OpenTelemetry) and metrics.
   - `db/`: API-specific database queries.
 
+- **`stormchaser-core`**: Code shared by the API, the engine and the query service.
+  - `config.rs` / `setup.rs` / `listener.rs`: The HTTP services' settings, their start-up (TLS, database, NATS, policy, log backend, identity provider) and their HTTPS or plain HTTP listener, chosen by `STORMCHASER_LISTEN_TLS`.
+  - `service.rs`: The `ServiceState` trait a service's state implements for the shared HTTP code.
+  - `auth/` / `access.rs`: Token verification (local HS256 and OIDC via JWKS), the policy middleware, and object ownership and authorization. The API re-exports `access` as `authz`.
+  - `authz.rs` / `aws_guard.rs` / `run_limits.rs`: Policy checks on connection use, IAM role and Lambda allow-lists, and operator ceilings on run quotas.
+  - `git_cache.rs` / `git_source.rs`: Cloning and caching Git sources, and reading a workflow file through a Git connection.
+  - `query.rs` / `jq_sandbox.rs`: Input queries (SQL, REST, AWS Cloud Control, mock), and jq programs run in a separate, limited worker process.
+  - `hitl.rs`: Sealing and opening approval links.
+  - `db/`: The outbox inserts and the lookups more than one service makes.
+
 - **`stormchaser-query`**: Separate service for workflow input schema hydration and dynamic option resolution.
-  - `main.rs`: Axum server exposing `/api/v1/schema/hydrate` and `/api/v1/schema/hydrate-direct`. It reuses the API's configuration, authentication and OPA middleware.
+  - `main.rs`: Axum server exposing `/api/v1/schema/hydrate` and `/api/v1/schema/hydrate-direct`. It uses the same configuration, token checks and policy middleware as the API, from `stormchaser-core`.
   - `hydration.rs`: Runs a workflow's input queries (SQL, API, AWS Cloud Control) as the calling user, after a policy check on the connection.
 
 - **`stormchaser-runner-*`**: Environment-specific executors.

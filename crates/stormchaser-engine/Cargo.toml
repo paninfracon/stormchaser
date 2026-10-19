@@ -17,7 +17,7 @@ email = ["dep:lettre"]
 vault = ["dep:vaultrs"]
 aws-sdk-sts = ["dep:aws-sdk-sts"]
 rustls-native-certs = ["dep:rustls-native-certs"]
-aws-cloudcontrol = ["dep:aws-sdk-cloudcontrol", "aws-sdk-sts"]
+aws-cloudcontrol = ["stormchaser-core/aws-cloudcontrol", "aws-sdk-sts"]
 aws-sops = ["aws-sdk-sts"]
 chatops-slack = []
 chatops-teams = []
@@ -31,8 +31,8 @@ name = "stormchaser-engine"
 path = "src/main.rs"
 
 [dependencies]
-libc = "0.2"
 stormchaser-model = { workspace = true }
+stormchaser-core = { workspace = true }
 stormchaser-dsl = { workspace = true }
 stormchaser-tls = { workspace = true }
 stormchaser-opa = { version = "1.5.1", path = "../stormchaser-opa" }
@@ -78,16 +78,12 @@ minijinja = { workspace = true }
 reqwest = { workspace = true }
 reqwest-middleware = { workspace = true }
 vaultrs = { workspace = true, optional = true }
-jaq-core = { workspace = true }
-jaq-json = { workspace = true }
-jaq-std = { workspace = true }
 quick-xml = { workspace = true }
 tar = { workspace = true }
 flate2 = { workspace = true }
 rustls-native-certs = { version = "0.8.3", optional = true }
 cloudevents-sdk = "0.9.0"
 jsonschema.workspace = true
-aws-sdk-cloudcontrol = { version = "1.65.0", default-features = false, features = ["default-https-client", "rt-tokio"], optional = true }
 serde-saphyr = "1.3"
 
 [dev-dependencies]

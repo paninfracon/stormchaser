@@ -8,7 +8,7 @@ use axum::{
     response::IntoResponse,
 };
 use chrono::Utc;
-use stormchaser_engine::hitl::{approval_link_key, open_approval_link, LinkError};
+use stormchaser_core::hitl::{approval_link_key, open_approval_link, LinkError};
 use stormchaser_model::events::{
     EventSource, EventType, SchemaVersion, StepCompletedEvent, StepEventType, StepFailedEvent,
 };
@@ -225,7 +225,7 @@ pub async fn use_approval_link(
             run_id: payload.run_id,
             step_id: payload.step_id,
             fencing_token,
-            completion_token: stormchaser_engine::db::step_completion_token(
+            completion_token: stormchaser_core::db::step_completion_token(
                 &state.pool,
                 payload.step_id,
             )
@@ -257,7 +257,7 @@ pub async fn use_approval_link(
             run_id: payload.run_id,
             step_id: payload.step_id,
             fencing_token,
-            completion_token: stormchaser_engine::db::step_completion_token(
+            completion_token: stormchaser_core::db::step_completion_token(
                 &state.pool,
                 payload.step_id,
             )
