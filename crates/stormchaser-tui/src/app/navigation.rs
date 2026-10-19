@@ -319,6 +319,7 @@ impl<'a> App<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use stormchaser_model::workflow::RunStatus;
     use tokio::sync::mpsc;
 
     #[tokio::test]
@@ -389,22 +390,8 @@ mod tests {
         );
 
         app.runs = vec![
-            WorkflowRunDetail {
-                id: RunId::new_v4(),
-                workflow_name: "1".to_string(),
-                initiating_user: "u".to_string(),
-                status: RunStatus::Succeeded,
-                created_at: chrono::Utc::now(),
-                finished_at: None,
-            },
-            WorkflowRunDetail {
-                id: RunId::new_v4(),
-                workflow_name: "2".to_string(),
-                initiating_user: "u".to_string(),
-                status: RunStatus::Succeeded,
-                created_at: chrono::Utc::now(),
-                finished_at: None,
-            },
+            crate::app::fixtures::run_detail(RunId::new_v4(), "1", RunStatus::Succeeded),
+            crate::app::fixtures::run_detail(RunId::new_v4(), "2", RunStatus::Succeeded),
         ];
 
         app.next_run();
@@ -451,22 +438,8 @@ mod tests {
         );
 
         app.pending_approvals = vec![
-            WorkflowRunDetail {
-                id: RunId::new_v4(),
-                workflow_name: "1".to_string(),
-                initiating_user: "u".to_string(),
-                status: RunStatus::Running,
-                created_at: chrono::Utc::now(),
-                finished_at: None,
-            },
-            WorkflowRunDetail {
-                id: RunId::new_v4(),
-                workflow_name: "2".to_string(),
-                initiating_user: "u".to_string(),
-                status: RunStatus::Running,
-                created_at: chrono::Utc::now(),
-                finished_at: None,
-            },
+            crate::app::fixtures::run_detail(RunId::new_v4(), "1", RunStatus::Running),
+            crate::app::fixtures::run_detail(RunId::new_v4(), "2", RunStatus::Running),
         ];
 
         app.next_pending_approval();

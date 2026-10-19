@@ -1,6 +1,11 @@
+use crate::app::refused;
 use anyhow::Result;
+use futures::StreamExt;
 use ratatui_textarea::TextArea;
 use stormchaser_dsl::StormchaserParser;
+use stormchaser_model::api::{
+    DirectRunRequest, EnqueueRequest, HydrateDirectRequest, HydrationStatus,
+};
 
 impl<'a> crate::app::App<'a> {
     /// Opens the file browser for selecting a local `.storm` file.
@@ -37,25 +42,24 @@ impl<'a> crate::app::App<'a> {
                 .unwrap_or("manual_run")
                 .to_string();
 
-            let res = self
-                .api_request(
-                    reqwest::Method::POST,
-                    "/api/v1/runs",
-                    Some(serde_json::json!({
-                    "connection": connection,
-                    "workflow_name": workflow_name,
-                    "workflow_path": workflow_path,
-                    "git_ref": git_ref,
-                    "inputs": {}
-                    })),
-                )
-                .await?;
-
-            if res.status().is_success() {
-                self.schedule_git_dialog_active = false;
-                self.refresh_runs().await?;
-            } else {
-                self.error = Some(format!("Failed to schedule workflow: {}", res.status()));
+            let request = EnqueueRequest {
+                workflow_name,
+                connection,
+                workflow_path,
+                git_ref,
+                inputs: serde_json::json!({}),
+                overrides: None,
+                sops_file: None,
+                sops_role_arn: None,
+            };
+            match self.api().enqueue(&request).await {
+                Ok(_) => {
+                    self.schedule_git_dialog_active = false;
+                    self.refresh_runs().await?;
+                }
+                Err(e) => {
+                    self.error = Some(format!("Failed to schedule workflow: {}", refused(e)?));
+                }
             }
         }
         Ok(())
@@ -69,49 +73,27 @@ impl<'a> crate::app::App<'a> {
     ) -> Result<(serde_json::Value, String)> {
         // The service reads the schema and queries out of the workflow itself; `schema`
         // is only what to fall back on if it sends nothing.
-        let payload = serde_json::json!({ "dsl": dsl, "inputs": inputs });
-        let res = self
-            .api_request(
-                reqwest::Method::POST,
-                "/api/v1/schema/hydrate-direct",
-                Some(payload),
-            )
-            .await?;
+        let request = HydrateDirectRequest {
+            dsl: dsl.to_string(),
+            inputs: inputs.clone(),
+        };
 
         let mut final_schema = schema.clone();
         let mut final_status = "Update pending".to_string();
 
-        if res.status().is_success() {
-            use futures::stream::StreamExt;
-            let mut byte_stream = res.bytes_stream();
-            let mut buffer = String::new();
-
-            while let Some(item) = byte_stream.next().await {
-                if let Ok(chunk) = item {
-                    buffer.push_str(&String::from_utf8_lossy(&chunk));
-                    while let Some(idx) = buffer.find("\n\n") {
-                        let event_str = buffer[..idx].to_string();
-                        buffer = buffer[idx + 2..].to_string();
-
-                        if let Some(data_idx) = event_str.find("data: ") {
-                            let json_str = &event_str[data_idx + 6..];
-                            if let Ok(event) = serde_json::from_str::<serde_json::Value>(json_str) {
-                                if let Some(status) = event.get("status").and_then(|s| s.as_str()) {
-                                    final_status = status.to_string();
-                                    if let Some(hydrated) = event.get("hydrated_schema") {
-                                        final_schema = hydrated.clone();
-                                    }
-                                    if status == "Completed"
-                                        || status == "Incomplete Input"
-                                        || status == "Schema validation failed"
-                                    {
-                                        return Ok((final_schema, final_status));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+        let Ok(events) = self.api().hydrate_direct(&request).await else {
+            return Ok((final_schema, final_status));
+        };
+        let mut events = std::pin::pin!(events);
+        while let Some(event) = events.next().await {
+            let Ok(event) = event else { continue };
+            final_status = serde_json::to_value(&event.status)?
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            final_schema = event.hydrated_schema;
+            if event.status != HydrationStatus::UpdatePending {
+                break;
             }
         }
 
@@ -222,19 +204,18 @@ impl<'a> crate::app::App<'a> {
                 }
             }
 
-            let res = self
-                .api_request(
-                    reqwest::Method::POST,
-                    "/api/v1/runs/direct",
-                    Some(serde_json::json!({ "dsl": dsl, "inputs": {} })),
-                )
-                .await?;
-
-            if res.status().is_success() {
-                self.file_browser_active = false;
-                self.refresh_runs().await?;
-            } else {
-                self.error = Some(format!("Failed to submit workflow: {}", res.status()));
+            let request = DirectRunRequest {
+                dsl,
+                inputs: serde_json::json!({}),
+            };
+            match self.api().run_direct(&request).await {
+                Ok(_) => {
+                    self.file_browser_active = false;
+                    self.refresh_runs().await?;
+                }
+                Err(e) => {
+                    self.error = Some(format!("Failed to submit workflow: {}", refused(e)?));
+                }
             }
         }
         Ok(())
@@ -243,28 +224,19 @@ impl<'a> crate::app::App<'a> {
     /// Submits the dynamically generated form with inputs for a local workflow file.
     pub async fn submit_direct_form(&mut self, inputs_json: serde_json::Value) -> Result<()> {
         if let Some(dsl) = self.direct_submit_dsl.take() {
-            let res = self
-                .api_request(
-                    reqwest::Method::POST,
-                    "/api/v1/runs/direct",
-                    Some(serde_json::json!({ "dsl": dsl, "inputs": inputs_json })),
-                )
-                .await?;
-
-            if res.status().is_success() {
-                if let Ok(body) = res.json::<serde_json::Value>().await {
-                    if let Some(run_id_str) = body.get("run_id").and_then(|v| v.as_str()) {
-                        if let Ok(run_id) =
-                            uuid::Uuid::parse_str(run_id_str).map(stormchaser_model::RunId::new)
-                        {
-                            self.force_select_run_id = Some(run_id);
-                        }
-                    }
+            let request = DirectRunRequest {
+                dsl,
+                inputs: inputs_json,
+            };
+            match self.api().run_direct(&request).await {
+                Ok(response) => {
+                    self.force_select_run_id = Some(response.run_id);
+                    self.runs_state.select(Some(0));
+                    self.selected_run = None;
                 }
-                self.runs_state.select(Some(0));
-                self.selected_run = None;
-            } else {
-                self.error = Some(format!("Failed to submit workflow: {}", res.status()));
+                Err(e) => {
+                    self.error = Some(format!("Failed to submit workflow: {}", refused(e)?));
+                }
             }
         }
         Ok(())
@@ -332,7 +304,10 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/api/v1/runs"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "run_id": stormchaser_model::RunId::new_v4(),
+                "status": "queued",
+            })))
             .mount(&server)
             .await;
         Mock::given(method("GET"))
@@ -357,9 +332,13 @@ mod tests {
     #[tokio::test]
     async fn test_submit_direct_form_success() {
         let server = MockServer::start().await;
+        let run_id = stormchaser_model::RunId::new_v4();
         Mock::given(method("POST"))
             .and(path("/api/v1/runs/direct"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "run_id": run_id,
+                "status": "queued",
+            })))
             .mount(&server)
             .await;
         Mock::given(method("GET"))
@@ -376,6 +355,7 @@ mod tests {
         res.unwrap();
         assert!(app.error.is_none());
         assert!(app.direct_submit_dsl.is_none()); // Taken
+        assert_eq!(app.force_select_run_id, Some(run_id));
     }
 
     #[tokio::test]
@@ -400,16 +380,27 @@ mod tests {
     #[tokio::test]
     async fn test_hydrate_schema_blocking_success() {
         let server = MockServer::start().await;
-        let sse_body =
-            "data: {\"status\": \"Completed\", \"hydrated_schema\": {\"type\": \"string\"}}\n\n";
+        let query = MockServer::start().await;
+        let event = |status: &str, schema: serde_json::Value| {
+            let event = json!({
+                "status": status,
+                "hydrated_schema": schema,
+                "query_status": {},
+                "validation_errors": [],
+            });
+            format!("data: {event}\n\n")
+        };
+        let sse_body = event("Update pending", json!({"type": "object"}))
+            + &event("Completed", json!({"type": "string"}));
         Mock::given(method("POST"))
             .and(path("/api/v1/schema/hydrate-direct"))
             .respond_with(ResponseTemplate::new(200).set_body_string(sse_body))
-            .mount(&server)
+            .mount(&query)
             .await;
 
+        // Hydration goes to the query service, not the API.
         let (tx, _) = tokio::sync::mpsc::channel(1);
-        let app = App::new(server.uri(), server.uri(), Some("token".to_string()), tx);
+        let app = App::new(server.uri(), query.uri(), Some("token".to_string()), tx);
 
         let schema = json!({"type": "object"});
         let inputs = json!({});

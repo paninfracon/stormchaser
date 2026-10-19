@@ -1,11 +1,13 @@
 use super::*;
 use std::time::Duration;
+use stormchaser_client::Client;
+use stormchaser_model::api::{AuthExchangeRequest, AuthRefreshRequest};
 use stormchaser_model::login_flow::{wait_for_code, LoginAttempt};
 
 async fn handle_oauth_callback(
     listener: tokio::net::TcpListener,
     tx: tokio::sync::mpsc::Sender<AppEvent>,
-    url: String,
+    api: Client,
     callback_url: String,
     attempt: LoginAttempt,
 ) {
@@ -20,48 +22,22 @@ async fn handle_oauth_callback(
     };
     drop(listener);
 
-    let client = crate::http::client();
-    match client
-        .post(format!("{}/api/v1/auth/exchange", url))
-        .json(&serde_json::json!({
-            "sso_token": code,
-            "callback_url": callback_url,
-            "code_verifier": attempt.code_verifier,
-        }))
-        .send()
-        .await
-    {
-        Ok(res) => {
-            if res.status().is_success() {
-                if let Ok(auth_res) = res.json::<crate::app::AuthExchangeResponse>().await {
-                    let _ = tx
-                        .send(AppEvent::LoginSuccessful(
-                            auth_res.access_token,
-                            auth_res.refresh_token,
-                        ))
-                        .await;
-                } else {
-                    let _ = tx
-                        .send(AppEvent::LoginFailed(
-                            "Failed to parse token response".to_string(),
-                        ))
-                        .await;
-                }
-            } else {
-                let _ = tx
-                    .send(AppEvent::LoginFailed(format!(
-                        "Token exchange failed: {}",
-                        res.status()
-                    )))
-                    .await;
-            }
+    let request = AuthExchangeRequest {
+        sso_token: code,
+        callback_url,
+        code_verifier: Some(attempt.code_verifier),
+    };
+    let event = match api.exchange_token(&request).await {
+        Ok(auth_res) => AppEvent::LoginSuccessful(auth_res.access_token, auth_res.refresh_token),
+        Err(stormchaser_client::Error::Decode(_)) => {
+            AppEvent::LoginFailed("Failed to parse token response".to_string())
         }
-        Err(e) => {
-            let _ = tx
-                .send(AppEvent::LoginFailed(format!("Request failed: {}", e)))
-                .await;
-        }
-    }
+        Err(e) => match e.status() {
+            Some(status) => AppEvent::LoginFailed(format!("Token exchange failed: {}", status)),
+            None => AppEvent::LoginFailed(format!("Request failed: {}", e)),
+        },
+    };
+    let _ = tx.send(event).await;
 }
 
 impl<'a> App<'a> {
@@ -81,11 +57,11 @@ impl<'a> App<'a> {
             return Ok(());
         }
 
-        let url = self.url.clone();
+        let api = self.client.clone();
         let tx = self.status_tx.clone();
 
         tokio::spawn(async move {
-            handle_oauth_callback(listener, tx, url, callback_url, attempt).await;
+            handle_oauth_callback(listener, tx, api, callback_url, attempt).await;
         });
 
         Ok(())
@@ -105,10 +81,10 @@ impl<'a> App<'a> {
         let tx = self.status_tx.clone();
         let email_str = email.to_string();
         let password_str = password.to_string();
-        let url = self.url.clone();
+        let api = self.client.clone();
 
         tokio::spawn(async move {
-            handle_oauth_callback(listener, tx, url, callback_url, attempt).await;
+            handle_oauth_callback(listener, tx, api, callback_url, attempt).await;
         });
 
         let tx2 = self.status_tx.clone();
@@ -126,22 +102,20 @@ impl<'a> App<'a> {
     /// Refreshes the access token using the stored refresh token.
     pub async fn refresh_session(&mut self) -> Result<bool> {
         if let Some(refresh_token) = self.refresh_token.clone() {
-            let res = self
-                .api_request(
-                    reqwest::Method::POST,
-                    "/api/v1/auth/refresh",
-                    Some(serde_json::json!({ "refresh_token": refresh_token })),
-                )
-                .await?;
-
-            if res.status().is_success() {
-                let auth_res: crate::app::AuthExchangeResponse = res.json().await?;
-                self.token = Some(auth_res.access_token);
-                if auth_res.refresh_token.is_some() {
-                    self.refresh_token = auth_res.refresh_token;
+            // The call carries no token: the one it would carry has expired.
+            let request = AuthRefreshRequest { refresh_token };
+            match self.client.refresh_token(&request).await {
+                Ok(auth_res) => {
+                    self.token = Some(auth_res.access_token);
+                    if auth_res.refresh_token.is_some() {
+                        self.refresh_token = auth_res.refresh_token;
+                    }
+                    self.state = AppState::LoggedIn;
+                    return Ok(true);
                 }
-                self.state = AppState::LoggedIn;
-                return Ok(true);
+                Err(e) => {
+                    refused(e)?;
+                }
             }
         }
 
@@ -245,6 +219,7 @@ async fn simulate_browser_login(login_url: &str, email: &str, password: &str) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use stormchaser_model::api::AuthExchangeResponse;
     use tokio::io::AsyncWriteExt;
     use tokio::sync::mpsc;
     use wiremock::matchers::{method, path};
@@ -254,9 +229,11 @@ mod tests {
     async fn test_refresh_session_success() {
         let server = MockServer::start().await;
 
-        let response = crate::app::AuthExchangeResponse {
+        let response = AuthExchangeResponse {
             access_token: "new_access_token".to_string(),
             refresh_token: Some("new_refresh_token".to_string()),
+            token_type: "Bearer".to_string(),
+            expires_in: 3600,
         };
 
         Mock::given(method("POST"))
@@ -301,9 +278,11 @@ mod tests {
     async fn test_handle_oauth_callback_success() {
         let server = MockServer::start().await;
 
-        let response = crate::app::AuthExchangeResponse {
+        let response = AuthExchangeResponse {
             access_token: "access".to_string(),
             refresh_token: Some("refresh".to_string()),
+            token_type: "Bearer".to_string(),
+            expires_in: 3600,
         };
 
         Mock::given(method("POST"))
@@ -316,14 +295,14 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
 
         let (tx, mut rx) = mpsc::channel(10);
-        let url = server.uri();
+        let api = crate::http::api_client(&server.uri(), &server.uri());
         let callback_url = format!("http://localhost:{}/callback", port);
         let attempt = LoginAttempt::new();
         let state = attempt.state.clone();
 
         // Spawn the callback handler
         tokio::spawn(async move {
-            handle_oauth_callback(listener, tx, url, callback_url, attempt).await;
+            handle_oauth_callback(listener, tx, api, callback_url, attempt).await;
         });
 
         // Simulate the browser hitting the callback endpoint

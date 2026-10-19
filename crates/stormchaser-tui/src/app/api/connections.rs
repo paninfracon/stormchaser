@@ -1,6 +1,24 @@
 use super::*;
-use stormchaser_model::connections::Connection;
+use stormchaser_model::api::{
+    CreateStorageBackendRequest, TestConnectionRequest, UpdateStorageBackendRequest,
+};
 use stormchaser_model::connections::ConnectionType;
+
+/// The connection type the dialog's type list offers at `index`.
+fn connection_type(index: usize) -> ConnectionType {
+    match crate::app::BACKEND_TYPE_OPTIONS[index] {
+        "S3" => ConnectionType::S3,
+        "Oci" => ConnectionType::Oci,
+        "Jfrog" => ConnectionType::Jfrog,
+        "Gcs" => ConnectionType::Gcs,
+        "Azure" => ConnectionType::Azure,
+        "Postgres" => ConnectionType::Postgres,
+        "Mysql" => ConnectionType::Mysql,
+        "HttpApi" => ConnectionType::HttpApi,
+        "Git" => ConnectionType::Git,
+        _ => ConnectionType::S3, // Fallback
+    }
+}
 
 impl<'a> App<'a> {
     /// Fetches the latest list of storage backends from the API.
@@ -9,31 +27,27 @@ impl<'a> App<'a> {
             return Ok(());
         }
 
-        let res = self
-            .api_request(reqwest::Method::GET, "/api/v1/connections", None)
-            .await?;
-
-        if res.status().is_success() {
-            self.connections = res.json::<Vec<Connection>>().await?;
-            if !self.connections.is_empty() {
-                if self.connections_state.selected().is_none() {
-                    self.connections_state.select(Some(0));
-                }
-                if self.selected_connection.is_none() {
-                    if let Some(i) = self.connections_state.selected() {
-                        self.selected_connection = Some(self.connections[i].clone());
+        match self.api().list_connections().await {
+            Ok(connections) => {
+                self.connections = connections;
+                if !self.connections.is_empty() {
+                    if self.connections_state.selected().is_none() {
+                        self.connections_state.select(Some(0));
                     }
+                    if self.selected_connection.is_none() {
+                        if let Some(i) = self.connections_state.selected() {
+                            self.selected_connection = Some(self.connections[i].clone());
+                        }
+                    }
+                } else {
+                    self.connections_state.select(None);
+                    self.selected_connection = None;
                 }
-            } else {
-                self.connections_state.select(None);
-                self.selected_connection = None;
+                self.error = None;
             }
-            self.error = None;
-        } else {
-            self.error = Some(format!(
-                "Failed to fetch storage backends: {}",
-                res.status()
-            ));
+            Err(e) => {
+                self.error = Some(format!("Failed to fetch storage backends: {}", refused(e)?));
+            }
         }
         Ok(())
     }
@@ -55,58 +69,26 @@ impl<'a> App<'a> {
             }
         };
 
-        let backend_type_str = crate::app::BACKEND_TYPE_OPTIONS[self.connection_type_index];
-        let connection_type = match backend_type_str {
-            "S3" => ConnectionType::S3,
-            "Oci" => ConnectionType::Oci,
-            "Jfrog" => ConnectionType::Jfrog,
-            "Gcs" => ConnectionType::Gcs,
-            "Azure" => ConnectionType::Azure,
-            "Postgres" => ConnectionType::Postgres,
-            "Mysql" => ConnectionType::Mysql,
-            "HttpApi" => ConnectionType::HttpApi,
-            "Git" => ConnectionType::Git,
-            _ => ConnectionType::S3, // Fallback
-        };
-
-        let aws_assume_role_arn = if role_arn.trim().is_empty() {
-            None::<String>
-        } else {
-            Some(role_arn.trim().to_string())
-        };
-
-        let payload = serde_json::json!({
-            "connection_type": connection_type,
-            "config": config,
-            "aws_assume_role_arn": aws_assume_role_arn
-        });
-
-        let res = self
-            .api_request(
-                reqwest::Method::POST,
-                "/api/v1/connections/test",
-                Some(payload),
-            )
-            .await?;
-
-        if res.status().is_success() {
-            let body: Value = res.json().await?;
-            let success = body
-                .get("success")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            let msg = body
-                .get("message")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Unknown result");
-
-            if success {
-                self.error = Some(format!("Test Connection Success: {}", msg));
+        let request = TestConnectionRequest {
+            connection_type: connection_type(self.connection_type_index),
+            config,
+            aws_assume_role_arn: if role_arn.trim().is_empty() {
+                None
             } else {
-                self.error = Some(format!("Test Connection Failed: {}", msg));
+                Some(role_arn.trim().to_string())
+            },
+        };
+
+        match self.api().test_connection(&request).await {
+            Ok(result) if result.success => {
+                self.error = Some(format!("Test Connection Success: {}", result.message));
             }
-        } else {
-            self.error = Some(format!("Failed to test connection: {}", res.status()));
+            Ok(result) => {
+                self.error = Some(format!("Test Connection Failed: {}", result.message));
+            }
+            Err(e) => {
+                self.error = Some(format!("Failed to test connection: {}", refused(e)?));
+            }
         }
 
         Ok(())
@@ -136,51 +118,50 @@ impl<'a> App<'a> {
             }
         };
 
-        let backend_type_str = crate::app::BACKEND_TYPE_OPTIONS[self.connection_type_index];
-        let connection_type = match backend_type_str {
-            "S3" => ConnectionType::S3,
-            "Oci" => ConnectionType::Oci,
-            "Jfrog" => ConnectionType::Jfrog,
-            "Gcs" => ConnectionType::Gcs,
-            "Azure" => ConnectionType::Azure,
-            "Postgres" => ConnectionType::Postgres,
-            "Mysql" => ConnectionType::Mysql,
-            "HttpApi" => ConnectionType::HttpApi,
-            "Git" => ConnectionType::Git,
-            _ => ConnectionType::S3, // Fallback
-        };
-
-        let (method, path) = if let Some(id) = self.connection_edit_id {
-            (
-                reqwest::Method::PATCH,
-                format!("/api/v1/connections/{}", id),
-            )
+        let connection_type = connection_type(self.connection_type_index);
+        let description = if description.trim().is_empty() {
+            None
         } else {
-            (reqwest::Method::POST, "/api/v1/connections".to_string())
+            Some(description)
         };
-
         let aws_assume_role_arn = if role_arn.trim().is_empty() {
-            None::<String>
+            None
         } else {
             Some(role_arn.trim().to_string())
         };
 
-        let payload = serde_json::json!({
-            "name": name,
-            "description": if description.trim().is_empty() { None::<String> } else { Some(description) },
-            "connection_type": connection_type,
-            "config": config,
-            "aws_assume_role_arn": aws_assume_role_arn,
-            "is_default_sfs": self.connection_is_default
-        });
-
-        let res = self.api_request(method, &path, Some(payload)).await?;
-
-        if res.status().is_success() {
-            self.connection_dialog_active = false;
-            self.refresh_connections().await?;
+        let result = if let Some(id) = self.connection_edit_id {
+            let request = UpdateStorageBackendRequest {
+                name: Some(name),
+                description,
+                connection_type: Some(connection_type),
+                config: Some(config),
+                aws_assume_role_arn,
+                encrypted_credentials: None,
+                is_default_sfs: Some(self.connection_is_default),
+            };
+            self.api().update_connection(id, &request).await
         } else {
-            self.error = Some(format!("Failed to save storage backend: {}", res.status()));
+            let request = CreateStorageBackendRequest {
+                name,
+                description,
+                connection_type,
+                config,
+                aws_assume_role_arn,
+                encrypted_credentials: None,
+                is_default_sfs: self.connection_is_default,
+            };
+            self.api().create_connection(&request).await.map(|_| ())
+        };
+
+        match result {
+            Ok(()) => {
+                self.connection_dialog_active = false;
+                self.refresh_connections().await?;
+            }
+            Err(e) => {
+                self.error = Some(format!("Failed to save storage backend: {}", refused(e)?));
+            }
         }
 
         Ok(())
@@ -190,21 +171,12 @@ impl<'a> App<'a> {
     pub async fn delete_selected_connection(&mut self) -> Result<()> {
         if let Some(backend) = &self.selected_connection {
             if self.token.is_some() {
-                let res = self
-                    .api_request(
-                        reqwest::Method::DELETE,
-                        &format!("/api/v1/connections/{}", backend.id),
-                        None,
-                    )
-                    .await?;
-
-                if res.status().is_success() {
-                    self.refresh_connections().await?;
-                } else {
-                    self.error = Some(format!(
-                        "Failed to delete storage backend: {}",
-                        res.status()
-                    ));
+                match self.api().delete_connection(backend.id).await {
+                    Ok(()) => self.refresh_connections().await?,
+                    Err(e) => {
+                        self.error =
+                            Some(format!("Failed to delete storage backend: {}", refused(e)?));
+                    }
                 }
             }
         }
@@ -271,7 +243,9 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/api/v1/connections"))
-            .respond_with(ResponseTemplate::new(201))
+            .respond_with(
+                ResponseTemplate::new(201).set_body_json(json!({ "id": ConnectionId::new_v4() })),
+            )
             .mount(&server)
             .await;
 

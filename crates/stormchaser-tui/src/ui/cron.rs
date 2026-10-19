@@ -99,11 +99,7 @@ pub(crate) fn render_cron_dialog(f: &mut Frame, app: &mut App) {
     let area = centered_rect(80, 80, f.area());
     f.render_widget(Clear, area);
 
-    let title = if app.cron_edit_id.is_some() {
-        " Edit Cron Workflow "
-    } else {
-        " Create Cron Workflow "
-    };
+    let title = " Create Cron Workflow ";
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -119,7 +115,7 @@ pub(crate) fn render_cron_dialog(f: &mut Frame, app: &mut App) {
             Constraint::Length(3), // Description
             Constraint::Length(3), // Cron Spec
             Constraint::Length(3), // Workflow Name
-            Constraint::Length(3), // Repo URL
+            Constraint::Length(3), // Git Connection
             Constraint::Length(3), // Workflow Path
             Constraint::Length(3), // Git Ref
             Constraint::Length(6), // Inputs
@@ -133,7 +129,7 @@ pub(crate) fn render_cron_dialog(f: &mut Frame, app: &mut App) {
         "Description:",
         "Cron Spec:",
         "Workflow Name:",
-        "Repo URL:",
+        "Git Connection (Name or ID):",
         "Workflow Path:",
         "Git Ref:",
         "Inputs (JSON):",

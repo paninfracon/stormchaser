@@ -192,16 +192,16 @@ impl<'a> App<'a> {
                     self.open_connection_dialog(false)
                 }
                 Pane::WebhooksList | Pane::WebhookDetail => self.open_webhook_dialog(false),
-                Pane::EventRulesList | Pane::EventRuleDetail => self.open_event_rule_dialog(false),
-                Pane::CronWorkflowsList | Pane::CronWorkflowDetail => self.open_cron_dialog(false),
+                Pane::EventRulesList | Pane::EventRuleDetail => self.open_event_rule_dialog(),
+                Pane::CronWorkflowsList | Pane::CronWorkflowDetail => self.open_cron_dialog(),
                 Pane::RunsList | Pane::RunDetail => self.open_schedule_git_dialog(),
                 _ => {}
             },
             KeyCode::Char('e') => match self.active_pane {
                 Pane::ConnectionsList | Pane::ConnectionDetail => self.open_connection_dialog(true),
                 Pane::WebhooksList | Pane::WebhookDetail => self.open_webhook_dialog(true),
-                Pane::EventRulesList | Pane::EventRuleDetail => self.open_event_rule_dialog(true),
-                Pane::CronWorkflowsList | Pane::CronWorkflowDetail => self.open_cron_dialog(true),
+                Pane::EventRulesList | Pane::EventRuleDetail => self.refuse_event_rule_edit(),
+                Pane::CronWorkflowsList | Pane::CronWorkflowDetail => self.refuse_cron_edit(),
                 _ => {}
             },
             KeyCode::Char('d') => match self.active_pane {

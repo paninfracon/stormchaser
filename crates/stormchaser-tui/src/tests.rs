@@ -1,16 +1,17 @@
-use crate::app::WorkflowRunDetail;
-use crate::app::{App, AppState, Pane};
+use crate::app::fixtures::{run_detail, step_detail};
+use crate::app::{App, AppState, Pane, StepDetail, WorkflowRunFullDetail};
 use crate::ui::ui;
 use chrono::{TimeZone, Utc};
 use insta::assert_debug_snapshot;
 use ratatui::{backend::TestBackend, Terminal};
 use ratatui_textarea::TextArea;
+use stormchaser_model::api::TestSummaryResponse;
 use stormchaser_model::connections::ArtifactRegistry;
 use stormchaser_model::cron::CronWorkflow;
 use stormchaser_model::event_rules::EventRule;
+use stormchaser_model::step::StepStatus;
 use stormchaser_model::test_report::TestCase;
 use stormchaser_model::test_report::TestCaseStatus;
-use stormchaser_model::test_report::TestSummary;
 use stormchaser_model::workflow::RunStatus;
 use stormchaser_model::CronWorkflowId;
 use stormchaser_model::RuleId;
@@ -294,13 +295,14 @@ fn render_runs_tab_populated() {
 
     let created_at = Utc.timestamp_opt(1609459200, 0).unwrap();
 
-    app.runs = vec![WorkflowRunDetail {
-        id: RunId::new(Uuid::nil()),
-        workflow_name: "test-workflow".to_string(),
-        initiating_user: "jacrisp".to_string(),
-        status: RunStatus::Succeeded,
-        created_at,
-        finished_at: Some(created_at),
+    app.runs = vec![{
+        let mut run = run_detail(
+            RunId::new(Uuid::nil()),
+            "test-workflow",
+            RunStatus::Succeeded,
+        );
+        run.finished_at = Some(created_at);
+        run
     }];
     app.runs_state.select(Some(0));
 
@@ -316,25 +318,18 @@ fn render_run_detail_populated() {
     let mut app = create_test_app();
     app.active_pane = Pane::RunDetail;
 
-    let created_at = Utc.timestamp_opt(1609459200, 0).unwrap();
-
-    let detail = crate::app::WorkflowRunFullDetail {
-        detail: WorkflowRunDetail {
-            id: RunId::new(Uuid::nil()),
-            workflow_name: "test-workflow".to_string(),
-            initiating_user: "jacrisp".to_string(),
-            status: RunStatus::Running,
-            created_at,
-            finished_at: None,
-        },
-        steps: vec![crate::app::StepDetail {
-            instance: serde_json::json!({"step_name": "build", "status": "running"}),
-            outputs: vec![],
-            history: vec![],
+    let detail = WorkflowRunFullDetail {
+        detail: run_detail(RunId::new(Uuid::nil()), "test-workflow", RunStatus::Running),
+        steps: vec![StepDetail {
             logs: vec![
                 "Compiling source...".to_string(),
                 "Running tests...".to_string(),
             ],
+            ..step_detail(
+                StepInstanceId::new(Uuid::nil()),
+                "build",
+                StepStatus::Running,
+            )
         }],
         artifacts: vec![],
         test_summaries: vec![],
@@ -418,18 +413,15 @@ fn render_test_results_pane() {
 
     let created_at = Utc.timestamp_opt(1609459200, 0).unwrap();
 
-    let detail = crate::app::WorkflowRunFullDetail {
-        detail: WorkflowRunDetail {
-            id: RunId::new(Uuid::nil()),
-            workflow_name: "test-workflow".to_string(),
-            initiating_user: "jacrisp".to_string(),
-            status: RunStatus::Succeeded,
-            created_at,
-            finished_at: None,
-        },
+    let detail = WorkflowRunFullDetail {
+        detail: run_detail(
+            RunId::new(Uuid::nil()),
+            "test-workflow",
+            RunStatus::Succeeded,
+        ),
         steps: vec![],
         artifacts: vec![],
-        test_summaries: vec![TestSummary {
+        test_summaries: vec![TestSummaryResponse {
             id: TestReportId::new(Uuid::nil()),
             run_id: RunId::new(Uuid::nil()),
             step_instance_id: StepInstanceId::new(Uuid::nil()),
@@ -488,25 +480,17 @@ fn render_run_detail_with_artifacts() {
     let created_at = Utc.timestamp_opt(1609459200, 0).unwrap();
     let step_instance_id = StepInstanceId::new_v4();
 
-    let detail = crate::app::WorkflowRunFullDetail {
-        detail: WorkflowRunDetail {
-            id: RunId::new(Uuid::nil()),
-            workflow_name: "test-workflow".to_string(),
-            initiating_user: "jacrisp".to_string(),
-            status: RunStatus::Succeeded,
-            created_at,
-            finished_at: None,
-        },
-        steps: vec![crate::app::StepDetail {
-            instance: serde_json::json!({
-                "id": step_instance_id.to_string(),
-                "step_name": "build",
-                "status": "succeeded"
-            }),
-            outputs: vec![],
-            history: vec![],
-            logs: vec![],
-        }],
+    let detail = WorkflowRunFullDetail {
+        detail: run_detail(
+            RunId::new(Uuid::nil()),
+            "test-workflow",
+            RunStatus::Succeeded,
+        ),
+        steps: vec![step_detail(
+            step_instance_id,
+            "build",
+            StepStatus::Succeeded,
+        )],
         artifacts: vec![ArtifactRegistry {
             id: stormchaser_model::ArtifactId::new(Uuid::nil()),
             run_id: RunId::new(Uuid::nil()),
@@ -569,41 +553,32 @@ fn test_render_run_detail_auto_scrolling() {
     let mut app = create_test_app();
     app.active_pane = Pane::RunDetail;
 
-    let created_at = Utc.timestamp_opt(1609459200, 0).unwrap();
-
     let mut steps = Vec::new();
     for i in 0..50 {
-        steps.push(crate::app::StepDetail {
-            instance: serde_json::json!({"step_name": format!("step_{}", i), "status": "succeeded"}),
-            outputs: vec![],
-            history: vec![],
-            logs: vec![],
-        });
+        steps.push(step_detail(
+            StepInstanceId::new_v4(),
+            &format!("step_{}", i),
+            StepStatus::Succeeded,
+        ));
     }
 
-    let detail = crate::app::WorkflowRunFullDetail {
-        detail: WorkflowRunDetail {
-            id: RunId::new(Uuid::nil()),
-            workflow_name: "long-workflow".to_string(),
-            initiating_user: "jacrisp".to_string(),
-            status: RunStatus::Succeeded,
-            created_at,
-            finished_at: None,
-        },
+    let detail = WorkflowRunFullDetail {
+        detail: run_detail(
+            RunId::new(Uuid::nil()),
+            "long-workflow",
+            RunStatus::Succeeded,
+        ),
         steps,
         artifacts: vec![],
         test_summaries: vec![],
         test_cases: vec![],
     };
 
-    app.runs.push(crate::app::WorkflowRunDetail {
-        id: RunId::new(Uuid::nil()),
-        workflow_name: "long-workflow".to_string(),
-        initiating_user: "jacrisp".to_string(),
-        status: RunStatus::Succeeded,
-        created_at,
-        finished_at: None,
-    });
+    app.runs.push(run_detail(
+        RunId::new(Uuid::nil()),
+        "long-workflow",
+        RunStatus::Succeeded,
+    ));
 
     app.selected_run = Some(detail);
     app.runs_state.select(Some(0));

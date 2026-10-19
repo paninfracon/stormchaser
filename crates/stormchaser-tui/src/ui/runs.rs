@@ -1,4 +1,4 @@
-use crate::app::App;
+use crate::app::{step_status_name, App};
 use crate::ui::utils::*;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -89,12 +89,13 @@ pub(crate) fn render_runs_tab(f: &mut Frame, area: Rect, app: &mut App) {
         return;
     }
 
-    if let Some(run) = app.selected_run.clone() {
+    if let Some(run) = app.selected_run.take() {
         if app.active_pane == crate::app::Pane::TestResults {
             render_test_results(f, chunks[1], &run, detail_block);
         } else {
             render_run_detail(f, chunks[1], app, &run, detail_block);
         }
+        app.selected_run = Some(run);
     } else {
         if app.runs_state.selected().is_some() {
             let loading_paragraph = Paragraph::new("\n\n   Loading run details...")
@@ -165,35 +166,25 @@ pub(crate) fn render_run_detail(
             selected_step_start_line = Some(line_count);
         }
         let instance = &step_detail.instance;
-        let name = instance
-            .get("step_name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown");
-        let status = instance
-            .get("status")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown");
+        let name = &instance.step_name;
+        let status = step_status_name(&instance.status);
+        let status = status.as_str();
         let status_fmt = format_status(status);
-        let started_raw = instance
-            .get("started_at")
-            .and_then(|v| v.as_str())
-            .or_else(|| instance.get("created_at").and_then(|v| v.as_str()));
-        let started = started_raw.map(format_time_str).unwrap_or("-".to_string());
-        let finished_raw = instance.get("finished_at").and_then(|v| v.as_str());
+        let started_at = instance.started_at.unwrap_or(instance.created_at);
+        let started_raw = started_at.to_rfc3339();
+        let started = format_time_str(&started_raw);
+        let finished_raw = instance.finished_at.map(|f| f.to_rfc3339());
 
         let mut status_line = status_fmt.clone();
-        if let (Some(s_str), Some(f_str)) = (started_raw, finished_raw) {
-            if let (Ok(s), Ok(f)) = (
-                chrono::DateTime::parse_from_rfc3339(s_str),
-                chrono::DateTime::parse_from_rfc3339(f_str),
-            ) {
-                let std_dur = (f - s).to_std().unwrap_or(Duration::from_secs(0));
-                status_line = format!(
-                    "{:<15} ({})",
-                    status_fmt,
-                    humantime::format_duration(std_dur)
-                );
-            }
+        if let Some(finished_at) = instance.finished_at {
+            let std_dur = (finished_at - started_at)
+                .to_std()
+                .unwrap_or(Duration::from_secs(0));
+            status_line = format!(
+                "{:<15} ({})",
+                status_fmt,
+                humantime::format_duration(std_dur)
+            );
         }
 
         let prefix =
@@ -216,10 +207,10 @@ pub(crate) fn render_run_detail(
         }
 
         if status == "succeeded" {
-            if let (Some(s), Some(f)) = (started_raw, finished_raw) {
+            if let Some(f) = &finished_raw {
                 detail_text.push_str(&format!(
                     "       └─ Detailed Timing: Started at {}, Finished at {}\n",
-                    s, f
+                    started_raw, f
                 ));
                 line_count += 1;
             }
@@ -227,18 +218,11 @@ pub(crate) fn render_run_detail(
 
         if i == app.selected_step_index && app.active_pane == crate::app::Pane::RunDetail {
             for entry in &step_detail.history {
-                let h_status = entry
-                    .get("status")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
-                let h_time = entry
-                    .get("created_at")
-                    .and_then(|v| v.as_str())
-                    .map(format_time_str)
-                    .unwrap_or("-".to_string());
+                let h_status = step_status_name(&entry.status);
+                let h_time = format_time_str(&entry.created_at.to_rfc3339());
                 detail_text.push_str(&format!(
                     "       └─ {:<15} at {}\n",
-                    format_status(h_status),
+                    format_status(&h_status),
                     h_time
                 ));
                 line_count += 1;
@@ -248,24 +232,13 @@ pub(crate) fn render_run_detail(
                 detail_text.push_str("       └─ Outputs:\n");
                 line_count += 1;
                 for output in &step_detail.outputs {
-                    let key = output
-                        .get("key")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown");
-                    let is_sensitive = output
-                        .get("is_sensitive")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
-                    let val_str = if is_sensitive {
+                    let key = &output.key;
+                    let val_str = if output.is_sensitive {
                         "*** REDACTED ***".to_string()
-                    } else if let Some(v) = output.get("value") {
-                        if let Some(s) = v.as_str() {
-                            s.to_string()
-                        } else {
-                            v.to_string()
-                        }
+                    } else if let Some(s) = output.value.as_str() {
+                        s.to_string()
                     } else {
-                        "null".to_string()
+                        output.value.to_string()
                     };
 
                     let lines: Vec<&str> = val_str.lines().collect();
@@ -301,9 +274,8 @@ pub(crate) fn render_run_detail(
             let step_name = run
                 .steps
                 .iter()
-                .find(|s| s.instance.get("id").and_then(|v| v.as_str()) == Some(&step_instance_str))
-                .and_then(|s| s.instance.get("step_name"))
-                .and_then(|v| v.as_str())
+                .find(|s| s.instance.id == artifact.step_instance_id)
+                .map(|s| s.instance.step_name.as_str())
                 .unwrap_or(&step_instance_str);
 
             detail_text.push_str(&format!("{:<40} | {}\n", artifact.artifact_name, step_name));

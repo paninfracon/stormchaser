@@ -1,6 +1,6 @@
 ---
 source: crates/stormchaser-tui/src/tests.rs
-assertion_line: 530
+assertion_line: 516
 expression: terminal.backend()
 ---
 TestBackend {
@@ -15,7 +15,7 @@ TestBackend {
             "  │                           ││Steps:                                                          ║│  ",
             "  │                           ││Name                 | Status                              | Sta█│  ",
             "  │                           ││---------------------|-------------------------------------|----█│  ",
-            "  │                           ││>> build             | Succeeded                           | -  █│  ",
+            "  │                           ││>> build             | Succeeded                           | 202█│  ",
             "  │                           ││                                                                █│  ",
             "  │                           ││Published Artifacts:                                            █│  ",
             "  │                           ││Name                                     | Step Name            █│  ",
