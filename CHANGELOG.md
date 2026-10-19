@@ -72,6 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Run quotas read CPU and memory the way the runners do, with one parser. A fractional memory quantity (`1.5Gi`) used to count as zero, which in a run's `max_memory` meant no limit, and `1G` was read as 1 GiB rather than 10⁹ bytes. A step's request is now checked against its run's quota in the same units its runner limits it by.
 - The Kubernetes runner no longer sets a Job's `backoffLimit` from the step's `retry` count. The engine retries the step itself, and the two together ran a failing step up to (count + 1)² times. A `RunK8sJob` that sets `backoff_limit` still gets it.
 - The documentation was checked against the code and corrected throughout. Features that are parsed or documented but not built are now marked planned: workflow `on_failure` and `finally`, step `on_failure`, the `Parallel` and `Sequential` group types, `locked` affinity, storage `limits`, retention, and others. `docs/steps/WaitEvent.md` is replaced by `docs/steps/Wait.md`, and `GitCheckout`, `SlackMessage` and `TeamsMessage` have pages. `docs/environments.md` lists every environment variable the services read.
 - The example policies in `docs/enterprise-rbac/` restricted nothing with `spec.approvers` and their privileged-container rule matched no step; both are fixed and tested. `docs/opa-rbac-example.rego` was built with an entrypoint it does not define; `docs/opa-rbac.md` now builds it as `stormchaser/example/allow` and sets `OPA_ENTRYPOINT` to match.

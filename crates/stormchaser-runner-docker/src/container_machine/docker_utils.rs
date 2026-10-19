@@ -196,35 +196,6 @@ impl<S> DockerContainerMachine<S> {
             ..Default::default()
         })
     }
-
-    /// Parses a CPU string limit to Docker CPU quota representation.
-    pub fn parse_cpu_to_quota(&self, cpu: &str) -> Option<i64> {
-        if let Some(m_idx) = cpu.find('m') {
-            if let Ok(m_cores) = cpu[..m_idx].parse::<i64>() {
-                return Some(m_cores * 100);
-            }
-        } else if let Ok(cores) = cpu.parse::<f64>() {
-            return Some((cores * 100_000.0) as i64);
-        }
-        None
-    }
-
-    /// Parses a memory string limit into bytes.
-    pub fn parse_memory_to_bytes(&self, memory: &str) -> Option<i64> {
-        let mem = memory.to_lowercase();
-        if let Some(idx) = mem.find(|c: char| c.is_alphabetic()) {
-            let val = mem[..idx].trim().parse::<i64>().ok()?;
-            let suffix = &mem[idx..];
-            match suffix {
-                "gi" | "g" => Some(val * 1024 * 1024 * 1024),
-                "mi" | "m" => Some(val * 1024 * 1024),
-                "ki" | "k" => Some(val * 1024),
-                _ => Some(val),
-            }
-        } else {
-            memory.parse::<i64>().ok()
-        }
-    }
 }
 
 #[cfg(test)]
@@ -264,26 +235,6 @@ mod tests {
             registry_auth: None,
         };
         DockerContainerMachine::new(docker, metadata, None)
-    }
-
-    #[test]
-    fn test_parse_cpu_to_quota() {
-        let machine = get_dummy_machine();
-        assert_eq!(machine.parse_cpu_to_quota("500m"), Some(50000));
-        assert_eq!(machine.parse_cpu_to_quota("1.0"), Some(100000));
-    }
-
-    #[test]
-    fn test_parse_memory_to_bytes() {
-        let machine = get_dummy_machine();
-        assert_eq!(
-            machine.parse_memory_to_bytes("512Mi"),
-            Some(512 * 1024 * 1024)
-        );
-        assert_eq!(
-            machine.parse_memory_to_bytes("1Gi"),
-            Some(1024 * 1024 * 1024)
-        );
     }
 
     #[test]

@@ -74,7 +74,7 @@ step "heavy_computation" "RunContainer" {
 The Engine parses these values into a normalized format:
 
 * **CPU:** Parsed into a floating-point number of cores. `500m` becomes `0.5`, `2` becomes `2.0`.
-* **Memory:** Parsed into an integer number of bytes. `512Mi` becomes `536,870,912`, `1Gi` becomes `1,073,741,824`. `K`, `M`, `G` and `T` are read as `Ki`, `Mi`, `Gi` and `Ti`. A value with a fractional number (`1.5Gi`) or an unknown suffix cannot be parsed and counts as zero; in a run's `max_memory`, zero means no memory limit. Write whole numbers (`1536Mi`).
+* **Memory:** Parsed into an integer number of bytes, as Kubernetes reads quantities. `512Mi` becomes `536,870,912`, `1.5Gi` becomes `1,610,612,736`, and `1G` becomes `1,000,000,000`: `Ki`, `Mi`, `Gi` and `Ti` are binary units, `k`, `M`, `G` and `T` decimal ones. The runners read a step's `cpu` and `memory` the same way. A value with an unknown suffix cannot be parsed and counts as zero; in a run's `max_memory`, zero means no memory limit.
 
 #### The Claim and Release Cycle
 
