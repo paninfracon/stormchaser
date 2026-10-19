@@ -136,10 +136,7 @@ async fn test_enterprise_opa_abac_integration() {
         run_id: RunId::new_v4(),
         initiating_user: "admin@paninfracon.net".to_string(), // Admin role
         workflow_ast: json!({
-            "step_type": "RunContainer",
-            "config": {
-                "privileged": true
-            }
+            "steps": [{ "name": "build", "type": "RunContainer", "spec": { "privileged": true } }]
         }),
         inputs: json!({}),
     };
@@ -155,10 +152,7 @@ async fn test_enterprise_opa_abac_integration() {
         run_id: RunId::new_v4(),
         initiating_user: "dev@paninfracon.net".to_string(), // Developer role
         workflow_ast: json!({
-            "step_type": "RunContainer",
-            "config": {
-                "privileged": true
-            }
+            "steps": [{ "name": "build", "type": "RunContainer", "spec": { "privileged": true } }]
         }),
         inputs: json!({}),
     };
@@ -171,10 +165,7 @@ async fn test_enterprise_opa_abac_integration() {
         run_id: RunId::new_v4(),
         initiating_user: "dev@paninfracon.net".to_string(), // Developer role
         workflow_ast: json!({
-            "step_type": "RunContainer",
-            "config": {
-                "privileged": false
-            }
+            "steps": [{ "name": "build", "type": "RunContainer", "spec": { "privileged": false } }]
         }),
         inputs: json!({}),
     };

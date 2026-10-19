@@ -200,7 +200,8 @@ async fn test_enterprise_opa_rbac_integration() {
 
     // --- Security Tests ---
     let sec_view_reports_ctx = ApiOpaContext {
-        path: "/api/v1/reports",
+        // Test reports are served under their run
+        path: "/api/v1/runs/00000000-0000-0000-0000-000000000001/reports",
         method: "GET",
         subject: Some(sec.subject()),
     };
