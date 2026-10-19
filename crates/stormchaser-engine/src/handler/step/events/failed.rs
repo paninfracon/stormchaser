@@ -8,9 +8,11 @@ use chrono::Utc;
 use opentelemetry::KeyValue;
 use sqlx::PgPool;
 use std::sync::Arc;
-use stormchaser_dsl::ast::Workflow;
+use std::time::Duration;
+use stormchaser_dsl::ast::{Step, Workflow};
 use stormchaser_model::events::WorkflowFailedEvent;
 use stormchaser_model::events::{EventSource, EventType, WorkflowEventType};
+use stormchaser_model::step::StepStatus;
 use stormchaser_tls::TlsReloader;
 use tracing::{error, info};
 
@@ -77,6 +79,18 @@ pub async fn handle_step_failed(
         return archive_workflow(run_id, pool.clone()).await;
     }
 
+    // A report on an attempt that was put back for a retry, delivered again before the
+    // step ran again
+    let attempt = crate::db::step_attempt(&mut *tx, step_id).await?;
+    if instance.status == StepStatus::Pending && attempt > 1 {
+        tracing::debug!(
+            "Ignoring failure of run {} step {}: it is waiting to be retried",
+            run_id,
+            step_id
+        );
+        return Ok(());
+    }
+
     if !completion_authorized(&mut tx, &instance, event.completion_token.as_deref()).await {
         return Ok(());
     }
@@ -99,6 +113,45 @@ pub async fn handle_step_failed(
     }
 
     let _ = release_step_quota_for_instance(&mut *tx, run_id, step_id).await;
+
+    let context = fetch_run_context(run_id, &mut *tx).await?;
+    let workflow_ast: Option<Workflow> =
+        match serde_json::from_value(context.workflow_definition.clone()) {
+            Ok(workflow) => Some(workflow),
+            Err(e) => {
+                // The run cannot go on without it, so it fails
+                error!("Run {}'s workflow definition does not parse: {}", run_id, e);
+                None
+            }
+        };
+    let dsl_step = workflow_ast
+        .as_ref()
+        .and_then(|w| find_step(&w.steps, &instance.step_name));
+
+    // A step with retries left runs again once its delay is over, and its run waits
+    if let Some(delay) = retry_delay(dsl_step, &instance.step_type, attempt) {
+        crate::db::reset_step_for_retry(&mut *tx, step_id, delay).await?;
+        let ended = if lost_zombie {
+            StepStatus::LostZombie
+        } else {
+            StepStatus::Failed
+        };
+        crate::db::record_step_status_history(&mut *tx, step_id, &ended).await?;
+        crate::db::record_step_status_history(&mut *tx, step_id, &StepStatus::Pending).await?;
+        tx.commit().await?;
+        crate::STEPS_RETRIED.add(
+            1,
+            &[
+                KeyValue::new("step_name", instance.step_name.clone()),
+                KeyValue::new("step_type", instance.step_type.clone()),
+            ],
+        );
+        info!(
+            "Step {} (Run {}) failed on attempt {}; running it again in {:?}",
+            step_id, run_id, attempt, delay
+        );
+        return Ok(());
+    }
 
     let machine =
         crate::step_machine::StepMachine::<crate::step_machine::state::Running>::from_instance(
@@ -163,19 +216,7 @@ pub async fn handle_step_failed(
     // A step that sets allow_failure fails without failing its run, which goes on as if
     // the step had succeeded. A runner that is lost is not a step that failed.
     if let Some(failed) = failed {
-        let context = fetch_run_context(run_id, &mut *tx).await?;
-        let workflow_ast: Option<Workflow> =
-            match serde_json::from_value(context.workflow_definition.clone()) {
-                Ok(workflow) => Some(workflow),
-                Err(e) => {
-                    // The run cannot go on without it, so it fails
-                    error!("Run {}'s workflow definition does not parse: {}", run_id, e);
-                    None
-                }
-            };
-        let allowed = workflow_ast.as_ref().and_then(|w| {
-            find_step(&w.steps, &step_name).filter(|s| s.allow_failure == Some(true))
-        });
+        let allowed = dsl_step.filter(|s| s.allow_failure == Some(true));
         if let (Some(workflow_ast), Some(dsl_step)) = (&workflow_ast, allowed) {
             failed.ignore_failure(&mut *tx).await?;
             info!(
@@ -251,4 +292,72 @@ pub async fn handle_step_failed(
     }
 
     Ok(())
+}
+
+/// Steps that wait for a person or a timer rather than being dispatched, and are never
+/// run again.
+const NEVER_RETRIED: [&str; 2] = ["Approval", "Wait"];
+
+/// How long to wait before running a step again after its attempt number `attempt`
+/// failed, or None when it has no retries left.
+fn retry_delay(dsl_step: Option<&Step>, step_type: &str, attempt: i32) -> Option<Duration> {
+    if NEVER_RETRIED.contains(&step_type) {
+        return None;
+    }
+    let policy = dsl_step?.retry.as_ref()?;
+    // Attempt n failing calls for retry number n
+    let retry = u32::try_from(attempt).ok().filter(|n| *n >= 1)?;
+    (retry <= policy.count).then(|| policy.delay_before(retry))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use stormchaser_dsl::StormchaserParser;
+
+    fn step(step_type: &str, retry: &str) -> Step {
+        let workflow = StormchaserParser::new()
+            .parse(&format!(
+                r#"
+                stormchaser_dsl_version = "v1"
+                workflow "w" {{
+                    steps {{
+                        step "s" "{step_type}" {{
+                            {retry}
+                        }}
+                    }}
+                }}
+                "#
+            ))
+            .unwrap();
+        workflow.steps[0].clone()
+    }
+
+    #[test]
+    fn a_step_is_retried_as_many_times_as_its_policy_says() {
+        let s = step(
+            "RunContainer",
+            "retry {\n count = 2\n backoff = \"linear\"\n delay = \"3s\"\n }",
+        );
+        let delays: Vec<_> = (1..=3)
+            .map(|attempt| retry_delay(Some(&s), &s.r#type, attempt))
+            .collect();
+        assert_eq!(
+            delays,
+            vec![
+                Some(Duration::from_secs(3)),
+                Some(Duration::from_secs(6)),
+                None
+            ]
+        );
+    }
+
+    #[test]
+    fn steps_without_a_policy_or_that_wait_are_not_retried() {
+        let s = step("RunContainer", "");
+        assert_eq!(retry_delay(Some(&s), &s.r#type, 1), None);
+        assert_eq!(retry_delay(None, "RunContainer", 1), None);
+        let approval = step("Approval", "retry {\n count = 2\n }");
+        assert_eq!(retry_delay(Some(&approval), "Approval", 1), None);
+    }
 }

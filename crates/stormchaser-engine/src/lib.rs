@@ -114,6 +114,14 @@ pub static STEPS_FAILED: Lazy<Counter<u64>> = Lazy::new(|| {
         .build()
 });
 
+/// Counter metric for the failed step attempts that were put back for a retry.
+pub static STEPS_RETRIED: Lazy<Counter<u64>> = Lazy::new(|| {
+    global::meter("stormchaser-engine")
+        .u64_counter("stormchaser.v1.steps_retried")
+        .with_description("Total number of failed step attempts retried")
+        .build()
+});
+
 /// Histogram metric for the duration of step executions in seconds.
 pub static STEP_DURATION: Lazy<Histogram<f64>> = Lazy::new(|| {
     global::meter("stormchaser-engine")

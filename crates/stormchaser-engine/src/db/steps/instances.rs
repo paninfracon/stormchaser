@@ -325,12 +325,14 @@ where
             WHERE run_id = $1
               AND status = 'pending'
               AND step_type NOT IN ('Approval', 'Wait')
+              AND (retry_at IS NULL OR retry_at <= NOW())
             ORDER BY created_at ASC
             LIMIT $2
             FOR UPDATE SKIP LOCKED
         )
         UPDATE step_instances si
-        SET status = 'initializing', claimed_at = NOW(), dispatched_at = NULL, engine_id = NULL
+        SET status = 'initializing', claimed_at = NOW(), dispatched_at = NULL, engine_id = NULL,
+            retry_at = NULL
         FROM claimed
         WHERE si.id = claimed.id
         RETURNING si.id, si.run_id, si.step_name, si.step_type, si.status as "status",
@@ -828,9 +830,69 @@ where
           AND si.status = 'pending'
           AND si.step_type NOT IN ('Approval', 'Wait')
           AND si.created_at < NOW() - make_interval(secs => $1)
+          AND (si.retry_at IS NULL OR si.retry_at <= NOW())
         "#,
     )
     .bind(older_than.as_secs_f64())
+    .fetch_all(executor)
+    .await
+}
+
+/// How many times a step has been run, counting the run in progress.
+pub async fn step_attempt<'a, E>(executor: E, id: StepInstanceId) -> Result<i32, sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    sqlx::query_scalar("SELECT attempt FROM step_instances WHERE id = $1")
+        .bind(id)
+        .fetch_one(executor)
+        .await
+}
+
+/// Puts a failed step back to pending for its next attempt, to be dispatched no sooner
+/// than `delay` from now. What its last attempt left (runner, times, error) is cleared,
+/// and it gets a new completion token, as a step that never ran has: a built-in step
+/// needs one, and a late report from the last attempt does not carry it.
+pub async fn reset_step_for_retry<'a, E>(
+    executor: E,
+    id: StepInstanceId,
+    delay: std::time::Duration,
+) -> Result<PgQueryResult, sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    sqlx::query(
+        r#"
+        UPDATE step_instances
+        SET status = 'pending', attempt = attempt + 1,
+            retry_at = NOW() + make_interval(secs => $2),
+            runner_id = NULL, engine_id = NULL, started_at = NULL, finished_at = NULL,
+            exit_code = NULL, error = NULL, completion_token = gen_random_uuid()::text,
+            claimed_at = NULL, dispatched_at = NULL
+        WHERE id = $1
+        "#,
+    )
+    .bind(id)
+    .bind(delay.as_secs_f64())
+    .execute(executor)
+    .await
+}
+
+/// Running runs with a step whose wait before its next attempt is over.
+pub async fn runs_with_due_retries<'a, E>(executor: E) -> Result<Vec<RunId>, sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    sqlx::query_scalar(
+        r#"
+        SELECT DISTINCT si.run_id
+        FROM step_instances si
+        JOIN workflow_runs wr ON wr.id = si.run_id
+        WHERE si.retry_at <= NOW()
+          AND si.status = 'pending'
+          AND wr.status = 'running'
+        "#,
+    )
     .fetch_all(executor)
     .await
 }

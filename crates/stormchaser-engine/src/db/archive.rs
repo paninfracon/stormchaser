@@ -60,11 +60,13 @@ pub async fn archive_and_delete_workflow_run(
         r#"
         INSERT INTO archived_step_instances (
             id, run_id, step_name, step_type, status, iteration_index, runner_id,
-            affinity_context, started_at, finished_at, exit_code, error, spec, params, created_at
+            affinity_context, started_at, finished_at, exit_code, error, spec, params, created_at,
+            attempt
         )
         SELECT
             id, run_id, step_name, step_type, status, iteration_index, runner_id,
-            affinity_context, started_at, finished_at, exit_code, error, spec, params, created_at
+            affinity_context, started_at, finished_at, exit_code, error, spec, params, created_at,
+            attempt
         FROM step_instances WHERE run_id = $1
         "#,
     )

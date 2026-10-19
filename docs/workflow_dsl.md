@@ -439,9 +439,11 @@ step "fetch_source" "GitCheckout" {
         branch = "${input.service_name}"
     }
 
+    // Run the step again if it fails; see 4.5.1
     retry {
         count = 3
         backoff = "exponential"
+        delay = "10s"
         max_delay = "5m"
     }
 
@@ -521,6 +523,23 @@ step "fetch_source" "GitCheckout" {
     }
 }
 ```
+
+##### 4.5.1 Retries
+
+A step with a `retry` block that fails is run again, up to `count` more times, before its failure counts. Its run waits meanwhile, and the step shows as `pending` between attempts.
+
+| Attribute | Required | Meaning |
+|---|---|---|
+| `count` | yes | How many times to run the step again after its first attempt fails, at most 100. |
+| `backoff` | no | How the wait grows between attempts: `fixed` (the default) waits `delay` each time, `linear` waits `delay` times the retry's number, and `exponential` doubles the wait each time. |
+| `delay` | no | The wait before the first retry. Defaults to `10s`. |
+| `max_delay` | no | The longest any wait may be. No wait is longer than 24 hours. |
+
+With `count = 3`, `backoff = "exponential"` and `delay = "10s"`, a step that keeps failing runs four times, 10, 20 and 40 seconds apart.
+
+Every failure counts: a non-zero exit, a step-level `timeout`, a built-in step's error and a runner that is lost while running the step. A step that also sets `allow_failure` is retried first, and its failure is ignored once its retries are used up. The run's own `timeout` covers all attempts. `Approval` and `Wait` steps are never retried.
+
+A retry runs the step from the start, as it was dispatched the first time. Only retry a step that is safe to run twice: a step that changes something outside the run, such as an `SqlExecute` or a `RestApi` call, may have done so before it failed. A step's logs hold every attempt, and its outputs and test reports are those of its last attempt.
 
 #### 4.6 Parallel and Sequential Groups
 
@@ -967,7 +986,7 @@ workflow "ContainerBuildAndDeploy" {
 
 ## Step Libraries
 
-You can define reusable steps inside a workflow using the `step_library` block. A step that names the library as its `type` becomes a step of the library's type, with the library's `spec`, `params`, `timeout` and `allow_failure`. Whatever the step sets itself takes precedence: its `params` replace the library's of the same name, and its `spec` is merged into the library's. Objects merge key by key, as deep as they go. Lists of named entries, such as `env`, merge by name: the step's entry replaces the library's of the same name, and its other entries are added. Any other value the step sets, such as `command`, replaces the library's.
+You can define reusable steps inside a workflow using the `step_library` block. A step that names the library as its `type` becomes a step of the library's type, with the library's `spec`, `params`, `timeout`, `allow_failure` and `retry`. Whatever the step sets itself takes precedence: its `params` replace the library's of the same name, and its `spec` is merged into the library's. Objects merge key by key, as deep as they go. Lists of named entries, such as `env`, merge by name: the step's entry replaces the library's of the same name, and its other entries are added. Any other value the step sets, such as `command`, replaces the library's.
 
 ```hcl
 step_library "ubuntu_base" {

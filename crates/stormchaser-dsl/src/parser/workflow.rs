@@ -293,6 +293,7 @@ fn parse_step_library_block(block: &Block) -> Result<dsl::StepLibrary> {
     let mut spec_map = Map::new();
     let mut timeout = None;
     let mut allow_failure = None;
+    let mut retry = None;
 
     for attr in block.body().attributes() {
         match attr.key() {
@@ -331,6 +332,11 @@ fn parse_step_library_block(block: &Block) -> Result<dsl::StepLibrary> {
                 let value = block_to_value(inner_block)?;
                 spec_map.insert(key, value);
             }
+        } else if inner.identifier() == "retry" {
+            retry = Some(
+                super::step::parse_retry_block(inner)
+                    .with_context(|| format!("Step library '{}'", name))?,
+            );
         } else if inner.identifier() == "params" {
             for attr in inner.body().attributes() {
                 params.insert(
@@ -348,7 +354,7 @@ fn parse_step_library_block(block: &Block) -> Result<dsl::StepLibrary> {
         spec: Value::Object(spec_map),
         timeout,
         allow_failure,
-        retry: None,
+        retry,
     })
 }
 

@@ -393,3 +393,64 @@ fn hostile_workflows_are_refused_and_never_overflow_the_stack() {
         .unwrap_err();
     assert!(format!("{err:#}").contains("the limit is"), "{err:#}");
 }
+
+fn parse_retry(retry: &str) -> anyhow::Result<stormchaser_dsl::ast::Workflow> {
+    StormchaserParser::new().parse(&format!(
+        r#"
+        stormchaser_dsl_version = "0.1"
+        workflow "test_retry" {{
+            steps {{
+                step "flaky" "RunContainer" {{
+                    image = "alpine"
+                    {retry}
+                }}
+            }}
+        }}
+        "#
+    ))
+}
+
+#[test]
+fn test_parse_retry() {
+    let workflow = parse_retry(
+        r#"retry {
+            count     = 3
+            backoff   = "exponential"
+            delay     = "5s"
+            max_delay = "5m"
+        }"#,
+    )
+    .expect("Failed to parse DSL");
+    let step = &workflow.steps[0];
+    let retry = step.retry.as_ref().expect("retry is parsed");
+    assert_eq!(retry.count, 3);
+    assert_eq!(retry.backoff, "exponential");
+    assert_eq!(retry.delay.as_deref(), Some("5s"));
+    assert_eq!(retry.max_delay.as_deref(), Some("5m"));
+    // The block is not also passed on to the runner in the spec
+    assert!(step.spec.get("retry").is_none());
+
+    let workflow = parse_retry("retry {\n count = 1\n }").unwrap();
+    assert_eq!(workflow.steps[0].retry.as_ref().unwrap().backoff, "fixed");
+}
+
+#[test]
+fn test_parse_retry_refuses_what_it_cannot_follow() {
+    for retry in [
+        "retry {\n backoff = \"fixed\"\n }",
+        "retry {\n count = -1\n }",
+        "retry {\n count = \"3\"\n }",
+        "retry {\n count = 1000\n }",
+        "retry {\n count = 3\n backoff = \"random\"\n }",
+        "retry {\n count = 3\n delay = \"soon\"\n }",
+        "retry {\n count = 3\n attempts = 2\n }",
+    ] {
+        let err = parse_retry(retry).expect_err(retry);
+        assert!(
+            format!("{:#}", err).contains("retry"),
+            "{}: {:#}",
+            retry,
+            err
+        );
+    }
+}

@@ -18,6 +18,9 @@ const LIBRARY: &str = r#"
         }
         timeout       = "10m"
         allow_failure = true
+        retry {
+            count = 2
+        }
     }
 "#;
 
@@ -48,6 +51,10 @@ fn a_step_is_its_librarys_step_with_its_own_settings_on_top() {
                 cpu     = "1"
             }
             timeout = "5m"
+            retry {
+                count   = 4
+                backoff = "linear"
+            }
         }
         "#,
     )
@@ -69,6 +76,8 @@ fn a_step_is_its_librarys_step_with_its_own_settings_on_top() {
     );
     assert_eq!(step.timeout.as_deref(), Some("5m"));
     assert_eq!(step.allow_failure, Some(true));
+    let retry = step.retry.as_ref().unwrap();
+    assert_eq!((retry.count, retry.backoff.as_str()), (4, "linear"));
 }
 
 #[test]
@@ -77,6 +86,7 @@ fn a_step_that_sets_nothing_takes_the_librarys_defaults() {
     let step = &workflow.steps[0];
     assert_eq!(step.params["python_version"], "3.11");
     assert_eq!(step.timeout.as_deref(), Some("10m"));
+    assert_eq!(step.retry.as_ref().map(|r| r.count), Some(2));
 }
 
 #[test]

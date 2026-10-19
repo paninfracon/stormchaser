@@ -516,6 +516,50 @@ pub fn start_dispatch_recovery_worker(
     })
 }
 
+/// How often the engine looks for steps whose wait before a retry is over
+const RETRY_CHECK: Duration = Duration::from_secs(5);
+
+/// Dispatches the runs that have a step whose wait before its next attempt is over.
+pub async fn dispatch_due_retries(
+    pool: &sqlx::PgPool,
+    nats_client: &async_nats::Client,
+    tls_reloader: &Arc<TlsReloader>,
+) -> anyhow::Result<()> {
+    for run_id in db::runs_with_due_retries(pool).await? {
+        if let Err(e) = handler::dispatch_pending_steps(
+            run_id,
+            pool.clone(),
+            nats_client.clone(),
+            tls_reloader.clone(),
+        )
+        .await
+        {
+            tracing::warn!(
+                "Could not dispatch the steps of run {} due a retry: {:?}",
+                run_id,
+                e
+            );
+        }
+    }
+    Ok(())
+}
+
+pub fn start_retry_worker(
+    pool: sqlx::PgPool,
+    nats_client: async_nats::Client,
+    tls_reloader: Arc<TlsReloader>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(RETRY_CHECK);
+        loop {
+            interval.tick().await;
+            if let Err(e) = dispatch_due_retries(&pool, &nats_client, &tls_reloader).await {
+                tracing::warn!("Retry dispatch failed: {:?}", e);
+            }
+        }
+    })
+}
+
 #[cfg(test)]
 mod task_message_tests {
     use super::is_task_message_for;

@@ -58,6 +58,7 @@ fn start_workers(
         start_outbox_relay_worker(pool.clone(), nats_client.clone()),
         start_task_message_purge_worker(pool.clone(), nats_client.clone()),
         start_dispatch_recovery_worker(pool.clone(), nats_client.clone(), tls_reloader.clone()),
+        start_retry_worker(pool.clone(), nats_client.clone(), tls_reloader.clone()),
     ]
 }
 

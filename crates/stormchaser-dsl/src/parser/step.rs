@@ -132,6 +132,12 @@ fn apply_step_inner_blocks(
             "strategy" => {
                 step.strategy = Some(parse_step_strategy_block(inner_block)?);
             }
+            "retry" => {
+                step.retry = Some(
+                    parse_retry_block(inner_block)
+                        .with_context(|| format!("Step '{}'", step.name))?,
+                );
+            }
             "reports" => {
                 step.reports.extend(parse_step_reports_block(inner_block)?);
             }
@@ -164,6 +170,38 @@ fn apply_step_inner_blocks(
         }
     }
     Ok(())
+}
+
+/// Parses a `retry { count = 3  backoff = "exponential"  delay = "10s"  max_delay = "5m" }`
+/// block. `count` is required; `backoff` defaults to `fixed`.
+pub(super) fn parse_retry_block(block: &Block) -> Result<dsl::RetryPolicy> {
+    let mut count = None;
+    let mut retry = dsl::RetryPolicy {
+        count: 0,
+        backoff: "fixed".to_string(),
+        delay: None,
+        max_delay: None,
+    };
+    for attr in block.body().attributes() {
+        match attr.key() {
+            "count" => {
+                count = match expr_to_value(attr.expr())? {
+                    Value::Number(n) => n.as_u64().and_then(|n| u32::try_from(n).ok()),
+                    _ => None,
+                };
+                if count.is_none() {
+                    anyhow::bail!("retry count must be a whole number of retries");
+                }
+            }
+            "backoff" => retry.backoff = expr_to_string(attr.expr())?,
+            "delay" => retry.delay = Some(expr_to_string(attr.expr())?),
+            "max_delay" => retry.max_delay = Some(expr_to_string(attr.expr())?),
+            other => anyhow::bail!("retry has no attribute '{}'", other),
+        }
+    }
+    retry.count = count.context("retry needs a count")?;
+    retry.validate().map_err(anyhow::Error::msg)?;
+    Ok(retry)
 }
 
 fn parse_step_strategy_block(inner_block: &Block) -> Result<dsl::Strategy> {
