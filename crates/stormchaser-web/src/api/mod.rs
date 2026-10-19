@@ -52,25 +52,34 @@ pub(crate) async fn require_auth() -> Result<String, ServerFnError> {
     }
 }
 
-/// The session token, once the API has confirmed it is valid.
+/// A client of the API carrying the session's token. The API checks the token on each
+/// call; [`require_auth`] only finds the cookie.
+#[cfg(feature = "ssr")]
+pub(crate) async fn authed_client() -> Result<stormchaser_client::Client, ServerFnError> {
+    Ok(api_client().with_token(require_auth().await?))
+}
+
+/// A client of the API carrying the session's token, once the API has confirmed the
+/// token is valid.
 ///
-/// [`require_auth`] only finds the cookie; calls that the API makes are checked there.
 /// Work the web tier does itself, such as parsing a workflow, must not be done for
 /// whoever sends a cookie with any value in it.
 #[cfg(feature = "ssr")]
-pub(crate) async fn require_session() -> Result<String, ServerFnError> {
-    let token = require_auth().await?;
-    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
-    let res = http_client()
-        .get(format!("{}/api/v1/auth/session", api_url))
-        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
-        .send()
-        .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?;
-    if res.status().is_success() {
-        Ok(token)
-    } else {
-        Err(ServerFnError::new("Unauthorized: No active session"))
+pub(crate) async fn require_session() -> Result<stormchaser_client::Client, ServerFnError> {
+    let client = authed_client().await?;
+    match client.session().await {
+        Ok(_) => Ok(client),
+        Err(_) => Err(ServerFnError::new("Unauthorized: No active session")),
+    }
+}
+
+/// Turns a failed call into the error a server function returns: `what` and the status
+/// the API answered with, or why it could not be reached.
+#[cfg(feature = "ssr")]
+pub(crate) fn api_error(what: &'static str) -> impl Fn(stormchaser_client::Error) -> ServerFnError {
+    move |e| match e.status() {
+        Some(status) => ServerFnError::new(format!("{what}: {status}")),
+        None => ServerFnError::new(format!("{what}: {e}")),
     }
 }
 
@@ -125,42 +134,51 @@ pub(crate) fn parse_id(id: &str) -> Result<uuid::Uuid, leptos::prelude::ServerFn
         .map_err(|_| leptos::prelude::ServerFnError::new(format!("Not a valid id: {id:?}")))
 }
 
-/// A name (a step's, say) as one segment of an API path: percent-encoded, so that `/`,
-/// `?` and `#` stay inside it, and refused if empty, `.` or `..`, which would leave the
-/// segment or climb out of it.
 #[cfg(feature = "ssr")]
-pub(crate) fn path_segment(name: &str) -> Result<String, leptos::prelude::ServerFnError> {
-    if name.is_empty() || name == "." || name == ".." {
-        return Err(leptos::prelude::ServerFnError::new(format!(
-            "Not a valid name: {name:?}"
-        )));
-    }
-    Ok(urlencoding::encode(name).into_owned())
+fn ca_pem() -> Option<Vec<u8>> {
+    let path = std::env::var("TLS_CA_CERT_PATH")
+        .ok()
+        .filter(|path| !path.is_empty())?;
+    let pem =
+        std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read TLS_CA_CERT_PATH {path}: {e}"));
+    Some(pem)
 }
 
+/// The client the server functions call the API (`API_URL`) and the query service
+/// (`QUERY_URL`) with, without a token. It trusts `TLS_CA_CERT_PATH` as
+/// [`build_http_client`] does.
 #[cfg(feature = "ssr")]
-pub(crate) fn http_client() -> reqwest::Client {
-    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-    CLIENT.get_or_init(build_http_client).clone()
+pub fn api_client() -> stormchaser_client::Client {
+    static CLIENT: std::sync::OnceLock<stormchaser_client::Client> = std::sync::OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            let api_url =
+                std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+            let query_url =
+                std::env::var("QUERY_URL").unwrap_or_else(|_| "http://127.0.0.1:3001".to_string());
+            let mut builder = stormchaser_client::Client::builder(api_url).query_url(query_url);
+            if let Some(pem) = ca_pem() {
+                builder = builder.ca_pem(pem);
+            }
+            builder
+                .build()
+                .unwrap_or_else(|e| panic!("cannot build the API client: {e}"))
+        })
+        .clone()
 }
 
-/// Builds the client the web tier calls the API and the query service with.
+/// Builds the client the SSE proxies call the API with.
 ///
-/// Those services may serve TLS with a certificate from the deployment's own CA
+/// The API may serve TLS with a certificate from the deployment's own CA
 /// (`TLS_CA_CERT_PATH`). It is trusted in addition to the system's certificate
 /// authorities, not instead of them. A CA file that is named but cannot be used stops
 /// the service: carrying on without it would only fail later, on every request.
 #[cfg(feature = "ssr")]
 pub fn build_http_client() -> reqwest::Client {
     let mut builder = reqwest::Client::builder();
-    if let Some(path) = std::env::var("TLS_CA_CERT_PATH")
-        .ok()
-        .filter(|path| !path.is_empty())
-    {
-        let pem = std::fs::read(&path)
-            .unwrap_or_else(|e| panic!("cannot read TLS_CA_CERT_PATH {path}: {e}"));
+    if let Some(pem) = ca_pem() {
         let certs = reqwest::Certificate::from_pem_bundle(&pem)
-            .unwrap_or_else(|e| panic!("TLS_CA_CERT_PATH {path} is not a PEM bundle: {e}"));
+            .unwrap_or_else(|e| panic!("TLS_CA_CERT_PATH is not a PEM bundle: {e}"));
         builder = builder.tls_certs_merge(certs);
     }
     builder.build().expect("failed to build the HTTP client")
@@ -244,21 +262,5 @@ mod tests {
         ] {
             assert!(parse_id(hostile).is_err(), "{hostile}");
         }
-    }
-
-    #[test]
-    fn a_name_stays_within_its_path_segment() {
-        assert_eq!(path_segment("deploy-prod_1").unwrap(), "deploy-prod_1");
-        assert_eq!(path_segment("a/../b?c#d").unwrap(), "a%2F..%2Fb%3Fc%23d");
-        for hostile in ["", ".", ".."] {
-            assert!(path_segment(hostile).is_err(), "{hostile:?}");
-        }
-        // Joined into a URL, it never changes the path in front of it
-        let url = Url::parse(&format!(
-            "https://api/api/v1/runs/x/steps/{}/approve",
-            path_segment("../../../admin").unwrap()
-        ))
-        .unwrap();
-        assert!(url.path().starts_with("/api/v1/runs/x/steps/"), "{url}");
     }
 }

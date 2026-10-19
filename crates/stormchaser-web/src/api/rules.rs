@@ -11,32 +11,12 @@ use leptos::prelude::*;
 use leptos::server_fn::codec::Json;
 
 #[server(input = Json, output = Json)]
-pub async fn fetch_event_rules() -> Result<Vec<crate::models::EventRule>, ServerFnError> {
-    let cookie = require_auth().await?;
-    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
-
-    let client = super::http_client();
-    let url = format!("{}/api/v1/rules", api_url);
-
-    let res = client
-        .get(&url)
-        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
-        .send()
+pub async fn fetch_event_rules() -> Result<Vec<EventRule>, ServerFnError> {
+    authed_client()
+        .await?
+        .list_event_rules()
         .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?;
-
-    if res.status().is_success() {
-        let rules = res
-            .json::<Vec<crate::models::EventRule>>()
-            .await
-            .map_err(|e| ServerFnError::new(e.to_string()))?;
-        Ok(rules)
-    } else {
-        Err(ServerFnError::new(format!(
-            "Failed to fetch event rules: {}",
-            res.status()
-        )))
-    }
+        .map_err(api_error("Failed to fetch event rules"))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -53,51 +33,32 @@ pub async fn create_event_rule(
     git_ref: String,
     input_mappings: std::collections::HashMap<String, String>,
 ) -> Result<(), ServerFnError> {
-    let cookie = require_auth().await?;
-    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
-    let client = super::http_client();
-    let res = client
-        .post(format!("{}/api/v1/rules", api_url))
-        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
-        .json(&serde_json::json!({
-            "name": name,
-            "description": description,
-            "webhook_id": webhook_id,
-            "event_type_pattern": event_type_pattern,
-            "condition_expr": condition_expr,
-            "workflow_name": workflow_name,
-            "connection": connection,
-            "workflow_path": workflow_path,
-            "git_ref": git_ref,
-            "input_mappings": input_mappings
-        }))
-        .send()
+    let request = stormchaser_model::api::CreateEventRuleRequest {
+        name,
+        description,
+        webhook_id: stormchaser_model::WebhookId::new(super::parse_id(&webhook_id)?),
+        event_type_pattern,
+        condition_expr,
+        workflow_name,
+        connection,
+        workflow_path,
+        git_ref,
+        input_mappings,
+    };
+    authed_client()
+        .await?
+        .create_event_rule(&request)
         .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?;
-
-    if res.status().is_success() {
-        Ok(())
-    } else {
-        Err(ServerFnError::new(format!("Failed: {}", res.status())))
-    }
+        .map_err(api_error("Failed"))?;
+    Ok(())
 }
 
 #[server(input = Json, output = Json)]
 pub async fn delete_event_rule(id: String) -> Result<(), ServerFnError> {
-    let id = super::parse_id(&id)?;
-    let cookie = require_auth().await?;
-    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
-    let client = super::http_client();
-    let res = client
-        .delete(format!("{}/api/v1/rules/{}", api_url, id))
-        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
-        .send()
+    let id = stormchaser_model::RuleId::new(super::parse_id(&id)?);
+    authed_client()
+        .await?
+        .delete_event_rule(id)
         .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?;
-
-    if res.status().is_success() {
-        Ok(())
-    } else {
-        Err(ServerFnError::new(format!("Failed: {}", res.status())))
-    }
+        .map_err(api_error("Failed"))
 }

@@ -11,32 +11,12 @@ use leptos::prelude::*;
 use leptos::server_fn::codec::Json;
 
 #[server(input = Json, output = Json)]
-pub async fn fetch_webhooks() -> Result<Vec<crate::models::WebhookConfig>, ServerFnError> {
-    let cookie = require_auth().await?;
-    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
-
-    let client = super::http_client();
-    let url = format!("{}/api/v1/webhooks", api_url);
-
-    let res = client
-        .get(&url)
-        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
-        .send()
+pub async fn fetch_webhooks() -> Result<Vec<WebhookConfig>, ServerFnError> {
+    authed_client()
+        .await?
+        .list_webhooks()
         .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?;
-
-    if res.status().is_success() {
-        let webhooks = res
-            .json::<Vec<crate::models::WebhookConfig>>()
-            .await
-            .map_err(|e| ServerFnError::new(e.to_string()))?;
-        Ok(webhooks)
-    } else {
-        Err(ServerFnError::new(format!(
-            "Failed to fetch webhooks: {}",
-            res.status()
-        )))
-    }
+        .map_err(api_error("Failed to fetch webhooks"))
 }
 
 #[server(input = Json, output = Json)]
@@ -46,45 +26,26 @@ pub async fn create_webhook(
     source_type: String,
     secret_token: Option<String>,
 ) -> Result<(), ServerFnError> {
-    let cookie = require_auth().await?;
-    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
-    let client = super::http_client();
-    let res = client
-        .post(format!("{}/api/v1/webhooks", api_url))
-        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
-        .json(&serde_json::json!({
-            "name": name,
-            "description": description,
-            "source_type": source_type,
-            "secret_token": secret_token
-        }))
-        .send()
+    let request = stormchaser_model::api::CreateWebhookRequest {
+        name,
+        description,
+        source_type,
+        secret_token,
+    };
+    authed_client()
+        .await?
+        .create_webhook(&request)
         .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?;
-
-    if res.status().is_success() {
-        Ok(())
-    } else {
-        Err(ServerFnError::new(format!("Failed: {}", res.status())))
-    }
+        .map_err(api_error("Failed"))?;
+    Ok(())
 }
 
 #[server(input = Json, output = Json)]
 pub async fn delete_webhook(id: String) -> Result<(), ServerFnError> {
-    let id = super::parse_id(&id)?;
-    let cookie = require_auth().await?;
-    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
-    let client = super::http_client();
-    let res = client
-        .delete(format!("{}/api/v1/webhooks/{}", api_url, id))
-        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
-        .send()
+    let id = stormchaser_model::WebhookId::new(super::parse_id(&id)?);
+    authed_client()
+        .await?
+        .delete_webhook(id)
         .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?;
-
-    if res.status().is_success() {
-        Ok(())
-    } else {
-        Err(ServerFnError::new(format!("Failed: {}", res.status())))
-    }
+        .map_err(api_error("Failed"))
 }

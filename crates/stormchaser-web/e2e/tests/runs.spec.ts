@@ -135,20 +135,27 @@ test.describe('Workflow Runs', () => {
             },
             steps: [{
               instance: {
-                id: "step-123",
+                id: "22222222-2222-2222-2222-222222222222",
+                run_id: "11111111-1111-1111-1111-111111111111",
                 step_name: "approval-step",
+                step_type: "approval",
                 status: "waiting_for_event",
-                requires_approval: true,
-                depends_on: [],
+                iteration_index: null,
+                runner_id: null,
+                affinity_context: null,
                 started_at: "2024-01-01T00:01:00Z",
-                finished_at: null
+                finished_at: null,
+                exit_code: null,
+                error: null,
+                spec: {},
+                params: {},
+                created_at: "2024-01-01T00:01:00Z"
               },
               outputs: [],
               history: [],
               logs: []
             }],
             artifacts: [],
-            test_summaries: [],
             test_cases: []
           })
         });

@@ -20,7 +20,7 @@ leptos_axum = { version = "0.8", optional = true }
 tokio = { workspace = true, optional = true }
 tower = { workspace = true, optional = true }
 wasm-bindgen = "0.2"
-console_error_panic_hook = "0.1"
+console_error_panic_hook = { version = "0.1", optional = true }
 tracing.workspace = true
 
 uuid = { workspace = true, features = ["js"] }
@@ -33,6 +33,7 @@ urlencoding = "2.1"
 futures = { workspace = true, optional = true }
 stormchaser-dsl = { version = "1.5.1", path = "../stormchaser-dsl", optional = true }
 stormchaser-model = { version = "1.5.1", path = "../stormchaser-model" }
+stormchaser-client = { workspace = true, optional = true }
 anyhow = { workspace = true, optional = true }
 stormchaser-tls = { version = "1.5.1", path = "../stormchaser-tls", features = ["listener"], optional = true }
 
@@ -52,6 +53,7 @@ features = [
 
 [features]
 hydrate = [
+    "dep:console_error_panic_hook",
     "leptos/hydrate",
 ]
 ssr = [
@@ -64,6 +66,7 @@ ssr = [
     "dep:reqwest",
     "dep:futures",
     "dep:stormchaser-dsl",
+    "dep:stormchaser-client",
     "leptos/ssr",
     "leptos/nonce",
     "leptos_meta/ssr",
