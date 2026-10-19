@@ -1,26 +1,14 @@
-use crate::utils::{handle_response, require_token};
+use crate::utils::print_json;
 use anyhow::Result;
-use reqwest::header::AUTHORIZATION;
+use stormchaser_client::Client;
 
-pub async fn list_artifacts(
-    url: &str,
-    token: Option<&str>,
-    http_client: &reqwest_middleware::ClientWithMiddleware,
-    id: stormchaser_model::RunId,
-) -> Result<()> {
-    let token = require_token(token)?;
-    let res = http_client
-        .get(format!("{}/api/v1/runs/{}/artifacts", url, id))
-        .header(AUTHORIZATION, format!("Bearer {}", token))
-        .send()
-        .await?;
-    handle_response(res).await
+pub async fn list_artifacts(client: &Client, id: stormchaser_model::RunId) -> Result<()> {
+    print_json(&client.run_artifacts(id).await?)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reqwest_middleware::ClientBuilder;
     use serde_json::json;
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -31,14 +19,18 @@ mod tests {
         let id = stormchaser_model::RunId::new_v4();
         Mock::given(method("GET"))
             .and(path(format!("/api/v1/runs/{}/artifacts", id)))
-            .and(header(AUTHORIZATION, "Bearer test-token"))
+            .and(header("authorization", "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+            .expect(1)
             .mount(&server)
             .await;
 
-        let client = ClientBuilder::new(reqwest::Client::new()).build();
+        let client = Client::builder(server.uri())
+            .token("test-token")
+            .build()
+            .unwrap();
 
-        let result = list_artifacts(&server.uri(), Some("test-token"), &client, id).await;
+        let result = list_artifacts(&client, id).await;
         result.unwrap();
     }
 }

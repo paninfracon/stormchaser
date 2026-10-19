@@ -1,7 +1,7 @@
-use crate::utils::{handle_run_response, parse_key_val_list, require_token};
+use crate::utils::{follow_run, parse_key_val_list};
 use anyhow::Result;
-use reqwest::header::AUTHORIZATION;
-use serde_json::json;
+use stormchaser_client::Client;
+use stormchaser_model::api::EnqueueRequest;
 
 pub struct EnqueueRunParams {
     pub workflow_name: String,
@@ -13,36 +13,29 @@ pub struct EnqueueRunParams {
     pub watch: bool,
 }
 
-pub async fn enqueue_run(
-    url: &str,
-    token: Option<&str>,
-    http_client: &reqwest_middleware::ClientWithMiddleware,
-    params: EnqueueRunParams,
-) -> Result<()> {
+pub async fn enqueue_run(client: &Client, params: EnqueueRunParams) -> Result<()> {
     let inputs = parse_key_val_list(params.input);
-    let token_str = require_token(token)?;
-    let res = http_client
-        .post(format!("{}/api/v1/runs", url))
-        .header(AUTHORIZATION, format!("Bearer {}", token_str))
-        .json(&json!({
-            "workflow_name": params.workflow_name,
-            "connection": params.connection,
-            "workflow_path": params.path,
-            "git_ref": params.git_ref,
-            "inputs": inputs,
-        }))
-        .send()
-        .await?;
+    let run = client
+        .enqueue(&EnqueueRequest {
+            workflow_name: params.workflow_name,
+            connection: params.connection,
+            workflow_path: params.path,
+            git_ref: params.git_ref,
+            inputs: inputs.into(),
+            overrides: None,
+            sops_file: None,
+            sops_role_arn: None,
+        })
+        .await;
 
-    handle_run_response(http_client, url, token_str, res, params.tail, params.watch).await
+    follow_run(client, run, params.tail, params.watch).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reqwest_middleware::ClientBuilder;
-    use stormchaser_model::RunStatus;
-    use wiremock::matchers::{header, method, path};
+    use serde_json::json;
+    use wiremock::matchers::{body_partial_json, header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
@@ -50,18 +43,29 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/api/v1/runs"))
-            .and(header(AUTHORIZATION, "Bearer test-token"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "id": "12345678-1234-1234-1234-123456789012",
-                "status": RunStatus::Queued
+            .and(header("authorization", "Bearer test-token"))
+            .and(body_partial_json(json!({
+                "workflow_name": "test",
+                "connection": "git",
+                "workflow_path": "main.storm",
+                "git_ref": "main",
+                "inputs": {}
             })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "run_id": "12345678-1234-1234-1234-123456789012",
+                "status": "queued"
+            })))
+            .expect(1)
             .mount(&server)
             .await;
 
-        let client = ClientBuilder::new(reqwest::Client::new()).build();
+        let client = Client::builder(server.uri())
+            .token("test-token")
+            .build()
+            .unwrap();
         let params = EnqueueRunParams {
             workflow_name: "test".to_string(),
-            connection: "http://git".to_string(),
+            connection: "git".to_string(),
             path: "main.storm".to_string(),
             git_ref: "main".to_string(),
             input: vec![],
@@ -69,7 +73,7 @@ mod tests {
             watch: false,
         };
 
-        let result = enqueue_run(&server.uri(), Some("test-token"), &client, params).await;
+        let result = enqueue_run(&client, params).await;
         result.unwrap();
     }
 }

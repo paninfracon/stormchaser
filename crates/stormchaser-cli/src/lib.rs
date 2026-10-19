@@ -7,9 +7,8 @@ pub mod utils;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use reqwest_middleware::ClientBuilder;
-use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use stormchaser_client::Client;
 
 use crate::commands::{auth, connections, cron, lint, rules, run, runs, schema, webhooks};
 
@@ -130,30 +129,45 @@ pub enum Commands {
     },
 }
 
-/// The HTTP client, trusting the CA certificates in `ca_cert` as well as the system's.
-pub fn http_client(ca_cert: Option<&std::path::Path>) -> Result<reqwest::Client> {
-    let mut builder = reqwest::Client::builder();
+/// The API client for `url`, carrying `token` and trusting the CA certificates in
+/// `ca_cert` as well as the system's. Transient failures are retried three times.
+pub fn api_client(url: &str, token: Option<&str>, ca_cert: Option<&Path>) -> Result<Client> {
+    let mut builder = Client::builder(url).retries(3);
+    if let Some(token) = token {
+        builder = builder.token(token);
+    }
     if let Some(path) = ca_cert {
         let pem = std::fs::read(path)
             .with_context(|| format!("cannot read the CA certificate {}", path.display()))?;
-        let certs = reqwest::Certificate::from_pem_bundle(&pem)
-            .with_context(|| format!("{} is not a PEM bundle", path.display()))?;
-        anyhow::ensure!(!certs.is_empty(), "{} holds no certificate", path.display());
-        builder = builder.tls_certs_merge(certs);
+        builder = builder.ca_pem(pem);
     }
-    Ok(builder.build()?)
+    builder.build().with_context(|| match ca_cert {
+        Some(path) => format!("cannot use the CA certificate {}", path.display()),
+        None => "cannot build the HTTP client".to_string(),
+    })
+}
+
+/// Whether `command` calls the API as a signed-in user.
+fn needs_token(command: &Commands) -> bool {
+    match command {
+        Commands::Runs { command } => !matches!(command, runs::RunCommands::ApproveLink { .. }),
+        Commands::Run { .. }
+        | Commands::Webhooks { .. }
+        | Commands::Rules { .. }
+        | Commands::Connections { .. }
+        | Commands::Cron { .. } => true,
+        Commands::Lint(_)
+        | Commands::Schema { .. }
+        | Commands::Auth { .. }
+        | Commands::Login { .. } => false,
+    }
 }
 
 /// Executes the specified CLI command.
 ///
-/// This function sets up the HTTP client and dispatches the command logic
+/// This function sets up the API client and dispatches the command logic
 /// to the appropriate handler based on the parsed CLI options.
 pub async fn run_cli(cli: Cli) -> Result<()> {
-    let retry_policy = ExponentialBackoff::builder().build_with_max_retries(3);
-    let http_client = ClientBuilder::new(http_client(cli.ca_cert.as_deref())?)
-        .with(RetryTransientMiddleware::new_with_policy(retry_policy))
-        .build();
-
     let mut final_url = cli.url.clone();
     let mut final_token = cli.token.clone();
 
@@ -172,7 +186,14 @@ pub async fn run_cli(cli: Cli) -> Result<()> {
     }
 
     let resolved_url = final_url.unwrap_or_else(|| "http://localhost:3000".to_string());
-    let token_opt = final_token.as_deref();
+    if needs_token(&cli.command) {
+        utils::require_token(final_token.as_deref())?;
+    }
+    let client = api_client(
+        &resolved_url,
+        final_token.as_deref(),
+        cli.ca_cert.as_deref(),
+    )?;
 
     match cli.command {
         Commands::Run {
@@ -181,40 +202,31 @@ pub async fn run_cli(cli: Cli) -> Result<()> {
             tail,
             watch,
         } => {
-            run::handle(
-                &resolved_url,
-                token_opt,
-                &http_client,
-                file,
-                input,
-                tail,
-                watch,
-            )
-            .await?;
+            run::handle(&client, file, input, tail, watch).await?;
         }
 
         Commands::Runs { command } => {
-            runs::handle(&resolved_url, token_opt, &http_client, command).await?;
+            runs::handle(&client, command).await?;
         }
 
         Commands::Webhooks { command } => {
-            webhooks::handle(&resolved_url, token_opt, &http_client, command).await?;
+            webhooks::handle(&client, command).await?;
         }
 
         Commands::Rules { command } => {
-            rules::handle(&resolved_url, token_opt, &http_client, command).await?;
+            rules::handle(&client, command).await?;
         }
 
         Commands::Connections { command } => {
-            connections::handle(&resolved_url, token_opt, &http_client, command).await?;
+            connections::handle(&client, command).await?;
         }
 
         Commands::Cron { command } => {
-            cron::handle(&resolved_url, token_opt, &http_client, command).await?;
+            cron::handle(&client, command).await?;
         }
 
         Commands::Lint(command) => {
-            lint::handle(&resolved_url, &http_client, command).await?;
+            lint::handle(&client, command).await?;
         }
 
         Commands::Schema { command } => {
@@ -222,7 +234,7 @@ pub async fn run_cli(cli: Cli) -> Result<()> {
         }
 
         Commands::Auth { command } => {
-            auth::handle(&resolved_url, &http_client, command).await?;
+            auth::handle(&client, command).await?;
         }
 
         Commands::Login {
@@ -234,7 +246,7 @@ pub async fn run_cli(cli: Cli) -> Result<()> {
             if issuer.is_some() || client_id.is_some() {
                 eprintln!("--issuer and --client-id are ignored: login goes through the API.");
             }
-            auth::handle_login(&resolved_url, callback_port, print_token, &http_client).await?;
+            auth::handle_login(&client, &resolved_url, callback_port, print_token).await?;
         }
     }
 
@@ -259,5 +271,34 @@ mod tests {
             .unwrap();
         assert_eq!(cli.url, Some("http://test".to_string()));
         assert!(matches!(cli.command, Commands::Webhooks { .. }));
+    }
+
+    #[test]
+    fn only_api_commands_need_a_token() {
+        let parse = |args: &[&str]| {
+            let mut argv = vec!["stormchaser"];
+            argv.extend_from_slice(args);
+            Cli::try_parse_from(argv).unwrap().command
+        };
+        let id = stormchaser_model::RunId::new_v4().to_string();
+        assert!(needs_token(&parse(&["runs", "get", &id])));
+        assert!(needs_token(&parse(&["webhooks", "list"])));
+        assert!(!needs_token(&parse(&["runs", "approve-link", "sealed"])));
+        assert!(!needs_token(&parse(&["schema", "generate"])));
+    }
+
+    #[test]
+    fn a_ca_certificate_that_is_not_pem_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ca.pem");
+        std::fs::write(&path, "not a certificate").unwrap();
+        let err = api_client("https://example.com", None, Some(&path)).unwrap_err();
+        assert!(format!("{err:#}").contains("ca.pem"), "{err:#}");
+        api_client(
+            "https://example.com",
+            None,
+            Some(&dir.path().join("missing")),
+        )
+        .unwrap_err();
     }
 }

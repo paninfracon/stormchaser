@@ -3,6 +3,7 @@ use schemars::Schema;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use stormchaser_client::Client;
 use stormchaser_dsl::StormchaserParser;
 use stormchaser_model::schema_gen::{apply_step_extensibility, generate_dsl_schema};
 
@@ -42,20 +43,9 @@ fn parse_step_schema(s: &str) -> Result<(String, String)> {
 }
 
 /// Handles the `lint` command logic.
-pub async fn handle(
-    url: &str,
-    http_client: &reqwest_middleware::ClientWithMiddleware,
-    command: LintCommand,
-) -> Result<()> {
+pub async fn handle(client: &Client, command: LintCommand) -> Result<()> {
     if command.prepare && command.file.is_none() {
-        let req_url = format!("{}/api/v1/schema", url);
-        let resp = http_client
-            .get(&req_url)
-            .send()
-            .await?
-            .error_for_status()
-            .with_context(|| format!("Failed to fetch remote schema from {}", req_url))?;
-        let json: Value = resp.json().await?;
+        let json = fetch_schema(client).await?;
         std::fs::write(SCHEMA_CACHE_FILE, serde_json::to_string_pretty(&json)?)?;
         println!(
             "✓ Downloaded and saved remote schema to {}",
@@ -81,7 +71,7 @@ pub async fn handle(
     let instance = serde_json::to_value(&workflow)?;
 
     // Generate base schema
-    let mut root_schema = resolve_base_schema(&command, url, http_client).await?;
+    let mut root_schema = resolve_base_schema(&command, client).await?;
 
     let mut spec_schemas = HashMap::new();
 
@@ -113,20 +103,18 @@ pub async fn handle(
     Ok(())
 }
 
-async fn resolve_base_schema(
-    command: &LintCommand,
-    url: &str,
-    http_client: &reqwest_middleware::ClientWithMiddleware,
-) -> Result<Schema> {
+async fn fetch_schema(client: &Client) -> Result<Value> {
+    client.schema().await.with_context(|| {
+        format!(
+            "Failed to fetch remote schema from {}/api/v1/schema",
+            client.api_url()
+        )
+    })
+}
+
+async fn resolve_base_schema(command: &LintCommand, client: &Client) -> Result<Schema> {
     if command.remote || command.prepare {
-        let req_url = format!("{}/api/v1/schema", url);
-        let resp = http_client
-            .get(&req_url)
-            .send()
-            .await?
-            .error_for_status()
-            .with_context(|| format!("Failed to fetch remote schema from {}", req_url))?;
-        let json: Value = resp.json().await?;
+        let json = fetch_schema(client).await?;
 
         if command.prepare {
             std::fs::write(SCHEMA_CACHE_FILE, serde_json::to_string_pretty(&json)?)?;
@@ -201,7 +189,6 @@ fn load_schema(path: &str) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reqwest_middleware::ClientBuilder;
     use std::io::Write;
     use tempfile::NamedTempFile;
 
@@ -260,8 +247,8 @@ workflow "test_workflow" {{
             prepare: false,
         };
 
-        let http_client = ClientBuilder::new(reqwest::Client::new()).build();
-        handle("http://localhost", &http_client, cmd)
+        let client = Client::builder("http://localhost").build()?;
+        handle(&client, cmd)
             .await
             .expect("Valid workflow should lint successfully");
         Ok(())
@@ -295,8 +282,8 @@ workflow "test_workflow" {{
             prepare: false,
         };
 
-        let http_client = ClientBuilder::new(reqwest::Client::new()).build();
-        let result = handle("http://localhost", &http_client, cmd).await;
+        let client = Client::builder("http://localhost").build()?;
+        let result = handle(&client, cmd).await;
         let err = result.expect_err("Expected invalid schema to fail validation");
         assert!(
             err.to_string().contains("schema validation"),
@@ -341,8 +328,8 @@ workflow "test_workflow" {{
             prepare: true,
         };
 
-        let http_client = ClientBuilder::new(reqwest::Client::new()).build();
-        handle(&server.uri(), &http_client, cmd).await.unwrap();
+        let client = Client::builder(server.uri()).build()?;
+        handle(&client, cmd).await.unwrap();
 
         let saved = std::fs::read_to_string(SCHEMA_CACHE_FILE)?;
 

@@ -1,8 +1,9 @@
-use crate::utils::{handle_response, parse_key_val_list, require_token};
+use crate::utils::print_json;
 use anyhow::Result;
 use clap::Subcommand;
-use reqwest::header::AUTHORIZATION;
-use serde_json::json;
+use std::collections::HashMap;
+use stormchaser_client::Client;
+use stormchaser_model::api::CreateEventRuleRequest;
 
 #[derive(Subcommand)]
 pub enum RuleCommands {
@@ -17,7 +18,8 @@ pub enum RuleCommands {
         event_pattern: String,
         #[arg(long)]
         workflow: String,
-        #[arg(long)]
+        /// The Git connection (ID or name) holding the workflow
+        #[arg(long, visible_alias = "connection")]
         repo: String,
         #[arg(long)]
         path: String,
@@ -33,21 +35,10 @@ pub enum RuleCommands {
     Delete { id: stormchaser_model::RuleId },
 }
 
-pub async fn handle(
-    url: &str,
-    token: Option<&str>,
-    http_client: &reqwest_middleware::ClientWithMiddleware,
-    command: RuleCommands,
-) -> Result<()> {
+pub async fn handle(client: &Client, command: RuleCommands) -> Result<()> {
     match command {
         RuleCommands::List => {
-            let token = require_token(token)?;
-            let res = http_client
-                .get(format!("{}/api/v1/rules", url))
-                .header(AUTHORIZATION, format!("Bearer {}", token))
-                .send()
-                .await?;
-            handle_response(res).await?;
+            print_json(&client.list_event_rules().await?)?;
         }
         RuleCommands::Create {
             name,
@@ -60,44 +51,43 @@ pub async fn handle(
             description,
             mapping,
         } => {
-            let mappings = parse_key_val_list(mapping);
-            let token = require_token(token)?;
-            let res = http_client
-                .post(format!("{}/api/v1/rules", url))
-                .header(AUTHORIZATION, format!("Bearer {}", token))
-                .json(&json!({
-                    "name": name,
-                    "webhook_id": webhook_id,
-                    "event_type_pattern": event_pattern,
-                    "workflow_name": workflow,
-                    "repo_url": repo,
-                    "workflow_path": path,
-                    "git_ref": git_ref,
-                    "description": description,
-                    "input_mappings": mappings,
-                }))
-                .send()
+            let created = client
+                .create_event_rule(&CreateEventRuleRequest {
+                    name,
+                    description,
+                    webhook_id,
+                    event_type_pattern: event_pattern,
+                    condition_expr: None,
+                    workflow_name: workflow,
+                    connection: repo,
+                    workflow_path: path,
+                    git_ref,
+                    input_mappings: parse_mappings(mapping),
+                })
                 .await?;
-            handle_response(res).await?;
+            print_json(&created)?;
         }
         RuleCommands::Delete { id } => {
-            let token = require_token(token)?;
-            let res = http_client
-                .delete(format!("{}/api/v1/rules/{}", url, id))
-                .header(AUTHORIZATION, format!("Bearer {}", token))
-                .send()
-                .await?;
-            handle_response(res).await?;
+            client.delete_event_rule(id).await?;
+            println!("Success");
         }
     }
     Ok(())
 }
 
+/// `name=HCL_EXPR` pairs. The expression is kept as written, not read as JSON.
+fn parse_mappings(list: Vec<String>) -> HashMap<String, String> {
+    list.iter()
+        .filter_map(|pair| pair.split_once('='))
+        .map(|(name, expr)| (name.to_string(), expr.to_string()))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reqwest_middleware::ClientBuilder;
-    use wiremock::matchers::{header, method, path};
+    use serde_json::json;
+    use wiremock::matchers::{body_partial_json, header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
@@ -105,15 +95,18 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/api/v1/rules"))
-            .and(header(AUTHORIZATION, "Bearer test-token"))
+            .and(header("authorization", "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
             .mount(&server)
             .await;
 
-        let client = ClientBuilder::new(reqwest::Client::new()).build();
+        let client = Client::builder(server.uri())
+            .token("test-token")
+            .build()
+            .unwrap();
         let cmd = RuleCommands::List;
 
-        let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
+        let result = handle(&client, cmd).await;
         result.unwrap();
     }
 
@@ -122,25 +115,36 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/api/v1/rules"))
-            .and(header(AUTHORIZATION, "Bearer test-token"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "created"})))
+            .and(header("authorization", "Bearer test-token"))
+            .and(body_partial_json(json!({
+                "connection": "my-repo",
+                "event_type_pattern": "push",
+                "input_mappings": { "key": "event.ref", "quoted": "\"main\"" }
+            })))
+            .respond_with(
+                ResponseTemplate::new(201).set_body_json(json!({"id": uuid::Uuid::new_v4()})),
+            )
+            .expect(1)
             .mount(&server)
             .await;
 
-        let client = ClientBuilder::new(reqwest::Client::new()).build();
+        let client = Client::builder(server.uri())
+            .token("test-token")
+            .build()
+            .unwrap();
         let cmd = RuleCommands::Create {
             name: "test-rule".to_string(),
             webhook_id: stormchaser_model::WebhookId::new_v4(),
             event_pattern: "push".to_string(),
             workflow: "my-wf".to_string(),
-            repo: "https://github.com/a/b".to_string(),
+            repo: "my-repo".to_string(),
             path: "wf.storm".to_string(),
             git_ref: "main".to_string(),
             description: Some("desc".to_string()),
-            mapping: vec!["key=value".to_string()],
+            mapping: vec!["key=event.ref".to_string(), "quoted=\"main\"".to_string()],
         };
 
-        let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
+        let result = handle(&client, cmd).await;
         result.unwrap();
     }
 
@@ -150,15 +154,18 @@ mod tests {
         let id = stormchaser_model::RuleId::new_v4();
         Mock::given(method("DELETE"))
             .and(path(format!("/api/v1/rules/{}", id)))
-            .and(header(AUTHORIZATION, "Bearer test-token"))
+            .and(header("authorization", "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "deleted"})))
             .mount(&server)
             .await;
 
-        let client = ClientBuilder::new(reqwest::Client::new()).build();
+        let client = Client::builder(server.uri())
+            .token("test-token")
+            .build()
+            .unwrap();
         let cmd = RuleCommands::Delete { id };
 
-        let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
+        let result = handle(&client, cmd).await;
         result.unwrap();
     }
 }

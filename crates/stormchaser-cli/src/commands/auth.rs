@@ -1,8 +1,8 @@
-use crate::utils::handle_response;
+use crate::utils::print_json;
 use anyhow::{Context, Result};
 use clap::Subcommand;
-use serde_json::json;
-use serde_json::Value;
+use stormchaser_client::Client;
+use stormchaser_model::api::AuthExchangeRequest;
 
 #[derive(Subcommand)]
 pub enum AuthCommands {
@@ -24,27 +24,21 @@ pub enum AuthCommands {
     },
 }
 
-pub async fn handle(
-    url: &str,
-    http_client: &reqwest_middleware::ClientWithMiddleware,
-    command: AuthCommands,
-) -> Result<()> {
+pub async fn handle(client: &Client, command: AuthCommands) -> Result<()> {
     match command {
         AuthCommands::Exchange {
             sso_token,
             callback_url,
             code_verifier,
         } => {
-            let res = http_client
-                .post(format!("{}/api/v1/auth/exchange", url))
-                .json(&json!({
-                    "sso_token": sso_token,
-                    "callback_url": callback_url,
-                    "code_verifier": code_verifier,
-                }))
-                .send()
+            let response = client
+                .exchange_token(&AuthExchangeRequest {
+                    sso_token,
+                    callback_url,
+                    code_verifier: Some(code_verifier),
+                })
                 .await?;
-            handle_response(res).await?;
+            print_json(&response)?;
         }
         AuthCommands::Profiles { command } => {
             crate::commands::auth_profiles::handle(command).await?;
@@ -63,10 +57,10 @@ const LOGIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 /// exchanges it. A random `state` ties the callback to this login and a PKCE verifier
 /// ties the code to this process.
 pub async fn handle_login(
+    client: &Client,
     cli_url: &str,
     callback_port: u16,
     print_token: bool,
-    http_client: &reqwest_middleware::ClientWithMiddleware,
 ) -> Result<()> {
     use stormchaser_model::login_flow::{wait_for_code, LoginAttempt};
 
@@ -94,34 +88,26 @@ pub async fn handle_login(
     let code = wait_for_code(&listener, &attempt, LOGIN_TIMEOUT).await?;
     drop(listener);
 
-    let res = http_client
-        .post(format!(
-            "{}/api/v1/auth/exchange",
-            cli_url.trim_end_matches('/')
-        ))
-        .json(&json!({
-            "sso_token": code,
-            "callback_url": callback_url,
-            "code_verifier": attempt.code_verifier,
-        }))
-        .send()
-        .await?;
-
-    let status = res.status();
-    if !status.is_success() {
-        anyhow::bail!("Login failed: the API answered {}", status);
-    }
-    let body: Value = res.json().await.context("Login response was not JSON")?;
-    let access_token = body
-        .get("access_token")
-        .and_then(|t| t.as_str())
-        .context("Login response had no access_token")?;
+    let response = client
+        .exchange_token(&AuthExchangeRequest {
+            sso_token: code,
+            callback_url,
+            code_verifier: Some(attempt.code_verifier),
+        })
+        .await;
+    let access_token = match response {
+        Ok(response) => response.access_token,
+        Err(e) => match e.status() {
+            Some(status) => anyhow::bail!("Login failed: the API answered {}", status),
+            None => return Err(e).context("Login failed"),
+        },
+    };
 
     if print_token {
         println!("{}", access_token);
         return Ok(());
     }
-    let profile = crate::commands::auth_profiles::store_token(cli_url, access_token)?;
+    let profile = crate::commands::auth_profiles::store_token(cli_url, &access_token)?;
     println!(
         "Logged in. The token is stored in profile '{}', which is now active.",
         profile
@@ -132,7 +118,7 @@ pub async fn handle_login(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reqwest_middleware::ClientBuilder;
+    use serde_json::json;
     use wiremock::matchers::{body_json, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -146,18 +132,23 @@ mod tests {
                 "callback_url": "http://localhost:8080/callback",
                 "code_verifier": "verifier",
             })))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"access_token": "test"})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "access_token": "test",
+                "refresh_token": null,
+                "token_type": "Bearer",
+                "expires_in": 3600,
+            })))
             .mount(&server)
             .await;
 
-        let client = ClientBuilder::new(reqwest::Client::new()).build();
+        let client = Client::builder(server.uri()).build().unwrap();
         let cmd = AuthCommands::Exchange {
             sso_token: "test_sso".to_string(),
             callback_url: "http://localhost:8080/callback".to_string(),
             code_verifier: "verifier".to_string(),
         };
 
-        let result = handle(&server.uri(), &client, cmd).await;
+        let result = handle(&client, cmd).await;
         result.unwrap();
     }
 }

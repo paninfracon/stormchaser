@@ -1,52 +1,31 @@
-use crate::utils::{handle_response, require_token};
+use crate::utils::print_json;
 use anyhow::Result;
-use reqwest::header::AUTHORIZATION;
+use stormchaser_client::Client;
 
-pub async fn list_reports(
-    url: &str,
-    token: Option<&str>,
-    http_client: &reqwest_middleware::ClientWithMiddleware,
-    id: stormchaser_model::RunId,
-) -> Result<()> {
-    let token = require_token(token)?;
-    let res = http_client
-        .get(format!("{}/api/v1/runs/{}/reports", url, id))
-        .header(AUTHORIZATION, format!("Bearer {}", token))
-        .send()
-        .await?;
-    handle_response(res).await
+pub async fn list_reports(client: &Client, id: stormchaser_model::RunId) -> Result<()> {
+    print_json(&client.run_test_reports(id).await?)
 }
 
 pub async fn get_report(
-    url: &str,
-    token: Option<&str>,
-    http_client: &reqwest_middleware::ClientWithMiddleware,
+    client: &Client,
     id: stormchaser_model::RunId,
     report_id: stormchaser_model::TestReportId,
 ) -> Result<()> {
-    let token = require_token(token)?;
-    let res = http_client
-        .get(format!("{}/api/v1/runs/{}/reports/{}", url, id, report_id))
-        .header(AUTHORIZATION, format!("Bearer {}", token))
-        .send()
-        .await?;
-    handle_response(res).await
+    print_json(&client.test_report(id, report_id).await?)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reqwest_retry::policies::ExponentialBackoff;
-    use reqwest_retry::RetryTransientMiddleware;
     use stormchaser_model::RunId;
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    fn build_client() -> reqwest_middleware::ClientWithMiddleware {
-        let retry_policy = ExponentialBackoff::builder().build_with_max_retries(0);
-        reqwest_middleware::ClientBuilder::new(reqwest::Client::new())
-            .with(RetryTransientMiddleware::new_with_policy(retry_policy))
+    fn build_client(server: &MockServer) -> Client {
+        Client::builder(server.uri())
+            .token("test_token")
             .build()
+            .unwrap()
     }
 
     #[tokio::test]
@@ -56,23 +35,14 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path(format!("/api/v1/runs/{}/reports", id)))
-            .and(header(AUTHORIZATION, "Bearer test_token"))
+            .and(header("authorization", "Bearer test_token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .expect(1)
             .mount(&mock_server)
             .await;
 
-        let client = build_client();
-        let res = list_reports(&mock_server.uri(), Some("test_token"), &client, id).await;
+        let res = list_reports(&build_client(&mock_server), id).await;
         res.unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_list_reports_no_token() {
-        let mock_server = MockServer::start().await;
-        let id = RunId::new_v4();
-        let client = build_client();
-        let res = list_reports(&mock_server.uri(), None, &client, id).await;
-        res.unwrap_err();
     }
 
     #[tokio::test]
@@ -83,30 +53,38 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path(format!("/api/v1/runs/{}/reports/{}", id, report_id)))
-            .and(header(AUTHORIZATION, "Bearer test_token"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+            .and(header("authorization", "Bearer test_token"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "content": "<testsuites/>" })),
+            )
+            .expect(1)
             .mount(&mock_server)
             .await;
 
-        let client = build_client();
-        let res = get_report(
-            &mock_server.uri(),
-            Some("test_token"),
-            &client,
-            id,
-            report_id,
-        )
-        .await;
+        let res = get_report(&build_client(&mock_server), id, report_id).await;
         res.unwrap();
     }
 
     #[tokio::test]
-    async fn test_get_report_no_token() {
+    async fn a_server_error_is_returned_with_its_status() {
         let mock_server = MockServer::start().await;
         let id = RunId::new_v4();
-        let report_id = stormchaser_model::TestReportId::new_v4();
-        let client = build_client();
-        let res = get_report(&mock_server.uri(), None, &client, id, report_id).await;
-        res.unwrap_err();
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v1/runs/{}/reports", id)))
+            .respond_with(ResponseTemplate::new(404).set_body_string("Run not found"))
+            .mount(&mock_server)
+            .await;
+
+        let err = list_reports(&build_client(&mock_server), id)
+            .await
+            .unwrap_err();
+        match err.downcast_ref::<stormchaser_client::Error>() {
+            Some(stormchaser_client::Error::Status { status, body }) => {
+                assert_eq!(status.as_u16(), 404);
+                assert_eq!(body, "Run not found");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 }

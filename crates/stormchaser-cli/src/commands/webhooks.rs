@@ -1,8 +1,8 @@
-use crate::utils::{handle_response, require_token};
+use crate::utils::print_json;
 use anyhow::Result;
 use clap::Subcommand;
-use reqwest::header::AUTHORIZATION;
-use serde_json::json;
+use stormchaser_client::Client;
+use stormchaser_model::api::{CreateWebhookRequest, UpdateWebhookRequest};
 
 #[derive(Subcommand)]
 pub enum WebhookCommands {
@@ -40,21 +40,10 @@ pub enum WebhookCommands {
     Delete { id: stormchaser_model::WebhookId },
 }
 
-pub async fn handle(
-    url: &str,
-    token: Option<&str>,
-    http_client: &reqwest_middleware::ClientWithMiddleware,
-    command: WebhookCommands,
-) -> Result<()> {
+pub async fn handle(client: &Client, command: WebhookCommands) -> Result<()> {
     match command {
         WebhookCommands::List => {
-            let token = require_token(token)?;
-            let res = http_client
-                .get(format!("{}/api/v1/webhooks", url))
-                .header(AUTHORIZATION, format!("Bearer {}", token))
-                .send()
-                .await?;
-            handle_response(res).await?;
+            print_json(&client.list_webhooks().await?)?;
         }
         WebhookCommands::Create {
             name,
@@ -62,37 +51,22 @@ pub async fn handle(
             secret,
             description,
         } => {
-            let token = require_token(token)?;
-            let res = http_client
-                .post(format!("{}/api/v1/webhooks", url))
-                .header(AUTHORIZATION, format!("Bearer {}", token))
-                .json(&json!({
-                    "name": name,
-                    "source_type": source_type,
-                    "secret_token": secret,
-                    "description": description,
-                }))
-                .send()
+            let created = client
+                .create_webhook(&CreateWebhookRequest {
+                    name,
+                    description,
+                    source_type,
+                    secret_token: secret,
+                })
                 .await?;
-            handle_response(res).await?;
+            print_json(&created)?;
         }
         WebhookCommands::Get { id } => {
-            let token = require_token(token)?;
-            let res = http_client
-                .get(format!("{}/api/v1/webhooks/{}", url, id))
-                .header(AUTHORIZATION, format!("Bearer {}", token))
-                .send()
-                .await?;
-            handle_response(res).await?;
+            print_json(&client.get_webhook(id).await?)?;
         }
         WebhookCommands::Delete { id } => {
-            let token = require_token(token)?;
-            let res = http_client
-                .delete(format!("{}/api/v1/webhooks/{}", url, id))
-                .header(AUTHORIZATION, format!("Bearer {}", token))
-                .send()
-                .await?;
-            handle_response(res).await?;
+            client.delete_webhook(id).await?;
+            println!("Success");
         }
         WebhookCommands::Update {
             id,
@@ -102,31 +76,19 @@ pub async fn handle(
             description,
             is_active,
         } => {
-            let token = require_token(token)?;
-            let mut body = serde_json::Map::new();
-            if let Some(n) = name {
-                body.insert("name".to_string(), json!(n));
-            }
-            if let Some(st) = source_type {
-                body.insert("source_type".to_string(), json!(st));
-            }
-            if let Some(sec) = secret {
-                body.insert("secret_token".to_string(), json!(sec));
-            }
-            if let Some(desc) = description {
-                body.insert("description".to_string(), json!(desc));
-            }
-            if let Some(ia) = is_active {
-                body.insert("is_active".to_string(), json!(ia));
-            }
-
-            let res = http_client
-                .patch(format!("{}/api/v1/webhooks/{}", url, id))
-                .header(AUTHORIZATION, format!("Bearer {}", token))
-                .json(&body)
-                .send()
+            client
+                .update_webhook(
+                    id,
+                    &UpdateWebhookRequest {
+                        name,
+                        description,
+                        source_type,
+                        secret_token: secret,
+                        is_active,
+                    },
+                )
                 .await?;
-            handle_response(res).await?;
+            println!("Success");
         }
     }
     Ok(())
@@ -135,8 +97,8 @@ pub async fn handle(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reqwest_middleware::ClientBuilder;
-    use wiremock::matchers::{header, method, path};
+    use serde_json::json;
+    use wiremock::matchers::{body_json, header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
@@ -144,15 +106,18 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/api/v1/webhooks"))
-            .and(header(AUTHORIZATION, "Bearer test-token"))
+            .and(header("authorization", "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
             .mount(&server)
             .await;
 
-        let client = ClientBuilder::new(reqwest::Client::new()).build();
+        let client = Client::builder(server.uri())
+            .token("test-token")
+            .build()
+            .unwrap();
         let cmd = WebhookCommands::List;
 
-        let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
+        let result = handle(&client, cmd).await;
         result.unwrap();
     }
 
@@ -161,12 +126,17 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/api/v1/webhooks"))
-            .and(header(AUTHORIZATION, "Bearer test-token"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "created"})))
+            .and(header("authorization", "Bearer test-token"))
+            .respond_with(
+                ResponseTemplate::new(201).set_body_json(json!({"id": uuid::Uuid::new_v4()})),
+            )
             .mount(&server)
             .await;
 
-        let client = ClientBuilder::new(reqwest::Client::new()).build();
+        let client = Client::builder(server.uri())
+            .token("test-token")
+            .build()
+            .unwrap();
         let cmd = WebhookCommands::Create {
             name: "test-webhook".to_string(),
             source_type: "github".to_string(),
@@ -174,7 +144,7 @@ mod tests {
             description: None,
         };
 
-        let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
+        let result = handle(&client, cmd).await;
         result.unwrap();
     }
 
@@ -184,15 +154,30 @@ mod tests {
         let id = stormchaser_model::WebhookId::new_v4();
         Mock::given(method("GET"))
             .and(path(format!("/api/v1/webhooks/{}", id)))
-            .and(header(AUTHORIZATION, "Bearer test-token"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": id})))
+            .and(header("authorization", "Bearer test-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": id,
+                "name": "hook",
+                "description": null,
+                "source_type": "github",
+                "secret_token": null,
+                "is_active": true,
+                "ca_cert": null,
+                "client_cert": null,
+                "client_key": null,
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z"
+            })))
             .mount(&server)
             .await;
 
-        let client = ClientBuilder::new(reqwest::Client::new()).build();
+        let client = Client::builder(server.uri())
+            .token("test-token")
+            .build()
+            .unwrap();
         let cmd = WebhookCommands::Get { id };
 
-        let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
+        let result = handle(&client, cmd).await;
         result.unwrap();
     }
 
@@ -202,12 +187,22 @@ mod tests {
         let id = stormchaser_model::WebhookId::new_v4();
         Mock::given(method("PATCH"))
             .and(path(format!("/api/v1/webhooks/{}", id)))
-            .and(header(AUTHORIZATION, "Bearer test-token"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "updated"})))
+            .and(header("authorization", "Bearer test-token"))
+            .and(body_json(json!({
+                "name": "new-name",
+                "description": null,
+                "source_type": null,
+                "secret_token": null,
+                "is_active": false
+            })))
+            .respond_with(ResponseTemplate::new(204))
             .mount(&server)
             .await;
 
-        let client = ClientBuilder::new(reqwest::Client::new()).build();
+        let client = Client::builder(server.uri())
+            .token("test-token")
+            .build()
+            .unwrap();
         let cmd = WebhookCommands::Update {
             id,
             name: Some("new-name".to_string()),
@@ -217,7 +212,7 @@ mod tests {
             is_active: Some(false),
         };
 
-        let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
+        let result = handle(&client, cmd).await;
         result.unwrap();
     }
 
@@ -227,15 +222,18 @@ mod tests {
         let id = stormchaser_model::WebhookId::new_v4();
         Mock::given(method("DELETE"))
             .and(path(format!("/api/v1/webhooks/{}", id)))
-            .and(header(AUTHORIZATION, "Bearer test-token"))
+            .and(header("authorization", "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "deleted"})))
             .mount(&server)
             .await;
 
-        let client = ClientBuilder::new(reqwest::Client::new()).build();
+        let client = Client::builder(server.uri())
+            .token("test-token")
+            .build()
+            .unwrap();
         let cmd = WebhookCommands::Delete { id };
 
-        let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
+        let result = handle(&client, cmd).await;
         result.unwrap();
     }
 }

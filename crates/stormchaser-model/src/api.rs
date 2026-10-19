@@ -12,7 +12,7 @@ use crate::step::{StepInstance, StepOutput, StepStatusHistory};
 use crate::test_report;
 use crate::workflow::RunStatus;
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 /// Authexchangerequest.
 pub struct AuthExchangeRequest {
     /// The sso token.
@@ -24,7 +24,7 @@ pub struct AuthExchangeRequest {
     pub code_verifier: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 /// Authexchangeresponse.
 pub struct AuthExchangeResponse {
     /// The access token.
@@ -37,14 +37,14 @@ pub struct AuthExchangeResponse {
     pub expires_in: usize,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 /// Authrefreshrequest.
 pub struct AuthRefreshRequest {
     /// The refresh token.
     pub refresh_token: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 /// Who a valid token identifies.
 pub struct SessionResponse {
     /// The token's subject.
@@ -54,7 +54,7 @@ pub struct SessionResponse {
 }
 
 /// Where a workflow file is: a Git connection, a path in its repository and a ref.
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ParseGitRequest {
     /// The connection (ID or name) to the repository.
     pub connection: String,
@@ -64,7 +64,7 @@ pub struct ParseGitRequest {
     pub git_ref: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 /// Enqueuerequest.
 pub struct EnqueueRequest {
     /// The workflow name.
@@ -86,14 +86,14 @@ pub struct EnqueueRequest {
     pub sops_role_arn: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 /// Runoverrides.
 pub struct RunOverrides {
     /// The timeout.
     pub timeout: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 /// Enqueueresponse.
 pub struct EnqueueResponse {
     /// The run id.
@@ -128,7 +128,7 @@ pub struct ListRunsQuery {
     pub offset: Option<usize>,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, sqlx::FromRow)]
 /// Workflowrundetail.
 pub struct WorkflowRunDetail {
     /// The id.
@@ -207,7 +207,7 @@ impl WorkflowRunDetail {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 /// Workflowrunfulldetail.
 pub struct WorkflowRunFullDetail {
     /// The detail.
@@ -224,7 +224,7 @@ pub struct WorkflowRunFullDetail {
     pub test_cases: Vec<test_report::TestCase>,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 /// Stepdetail.
 pub struct StepDetail {
     /// The instance.
@@ -237,7 +237,7 @@ pub struct StepDetail {
     pub logs: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 /// Directrunrequest.
 pub struct DirectRunRequest {
     /// The dsl.
@@ -247,7 +247,7 @@ pub struct DirectRunRequest {
     pub inputs: Value,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 /// Createwebhookrequest.
 pub struct CreateWebhookRequest {
     /// The name.
@@ -260,7 +260,7 @@ pub struct CreateWebhookRequest {
     pub secret_token: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 /// Updatewebhookrequest.
 pub struct UpdateWebhookRequest {
     /// The name.
@@ -275,7 +275,7 @@ pub struct UpdateWebhookRequest {
     pub is_active: Option<bool>,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 /// Createeventrulerequest.
 pub struct CreateEventRuleRequest {
     /// The name.
@@ -300,7 +300,7 @@ pub struct CreateEventRuleRequest {
     pub input_mappings: HashMap<String, String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 /// Createcronworkflowrequest.
 pub struct CreateCronWorkflowRequest {
     /// The name.
@@ -322,7 +322,7 @@ pub struct CreateCronWorkflowRequest {
     pub inputs: Value,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 /// Cronworkflowresponse.
 pub struct CronWorkflowResponse {
     /// The id.
@@ -333,7 +333,7 @@ pub struct CronWorkflowResponse {
     pub external_job_id: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 /// Test connection request.
 pub struct TestConnectionRequest {
     /// The backend type.
@@ -345,7 +345,7 @@ pub struct TestConnectionRequest {
     pub aws_assume_role_arn: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 /// Test connection response.
 pub struct TestConnectionResponse {
     /// Whether the connection was successful.
@@ -354,7 +354,7 @@ pub struct TestConnectionResponse {
     pub message: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 /// Createstoragebackendrequest.
 pub struct CreateStorageBackendRequest {
     /// The name.
@@ -374,7 +374,7 @@ pub struct CreateStorageBackendRequest {
     pub is_default_sfs: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 /// Updatestoragebackendrequest.
 pub struct UpdateStorageBackendRequest {
     /// The name.
@@ -394,7 +394,7 @@ pub struct UpdateStorageBackendRequest {
     pub is_default_sfs: Option<bool>,
 }
 
-#[derive(Debug, Serialize, Deserialize, sqlx::FromRow, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, ToSchema)]
 /// Testreportsummary.
 pub struct TestReportSummary {
     /// The id.
@@ -415,7 +415,7 @@ pub struct TestReportSummary {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Serialize, Deserialize, sqlx::FromRow, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, ToSchema)]
 /// Testsummaryresponse.
 pub struct TestSummaryResponse {
     /// The id.
@@ -443,14 +443,14 @@ pub struct TestSummaryResponse {
 }
 
 /// A test report file as stored: its text, such as a JUnit XML document.
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct TestReportContent {
     /// The file's content.
     pub content: String,
 }
 
 /// The id of an object the API created.
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CreatedResponse {
     /// The new object's id.
     pub id: uuid::Uuid,

@@ -1,9 +1,10 @@
 use anyhow::{Context, Result};
-use eventsource_stream::Eventsource;
-use futures::stream::StreamExt;
-use reqwest::header::AUTHORIZATION;
+use futures::{Stream, StreamExt};
 use serde_json::json;
 use serde_json::Value;
+use stormchaser_client::{Client, Event};
+use stormchaser_model::api::EnqueueResponse;
+use stormchaser_model::RunId;
 
 pub fn parse_key_val_list(list: Vec<String>) -> serde_json::Map<String, Value> {
     let mut map = serde_json::Map::new();
@@ -65,7 +66,7 @@ pub(crate) fn for_stdout(text: &str) -> std::borrow::Cow<'_, str> {
     }
 }
 
-pub(crate) fn for_stderr(text: &str) -> std::borrow::Cow<'_, str> {
+pub fn for_stderr(text: &str) -> std::borrow::Cow<'_, str> {
     use std::io::IsTerminal;
     if std::io::stderr().is_terminal() {
         strip_control(text)
@@ -74,53 +75,31 @@ pub(crate) fn for_stderr(text: &str) -> std::borrow::Cow<'_, str> {
     }
 }
 
-pub async fn handle_response(res: reqwest::Response) -> Result<()> {
-    let status = res.status();
-    if status.is_success() {
-        let body = res.text().await?;
-        if !body.is_empty() {
-            if let Ok(val) = serde_json::from_str::<Value>(&body) {
-                println!("{}", serde_json::to_string_pretty(&val)?);
-            } else {
-                println!("{}", for_stdout(&body));
-            }
-        } else {
-            println!("Success ({})", status);
-        }
-    } else {
-        let error_text = res.text().await.unwrap_or_default();
-        eprintln!("Error ({}): {}", status, for_stderr(&error_text));
-        std::process::exit(1);
-    }
+/// Prints a response as pretty JSON.
+pub fn print_json<T: serde::Serialize>(value: &T) -> Result<()> {
+    println!("{}", serde_json::to_string_pretty(value)?);
     Ok(())
 }
 
-pub async fn stream_run_logs(
-    http_client: &reqwest_middleware::ClientWithMiddleware,
-    cli_url: &str,
-    token: &str,
-    run_id: stormchaser_model::RunId,
+/// Prints a stream's events until it ends, breaks off or sends an `error` event. With
+/// `named`, each line starts with the event's name.
+pub async fn print_events(
+    events: impl Stream<Item = stormchaser_client::Result<Event>>,
+    named: bool,
 ) -> Result<()> {
-    let res = http_client
-        .get(format!("{}/api/v1/runs/{}/logs/stream", cli_url, run_id))
-        .header(AUTHORIZATION, format!("Bearer {}", token))
-        .send()
-        .await?;
-
-    if !res.status().is_success() {
-        handle_response(res).await?;
-        return Ok(());
-    }
-
-    let mut stream = res.bytes_stream().eventsource();
-    while let Some(event) = stream.next().await {
+    let mut events = std::pin::pin!(events);
+    while let Some(event) = events.next().await {
         match event {
             Ok(event) => {
                 if event.event == "error" {
                     eprintln!("Error from stream: {}", for_stderr(&event.data));
                     break;
                 }
-                println!("{}", for_stdout(&event.data));
+                if named {
+                    println!("{}: {}", for_stdout(&event.event), for_stdout(&event.data));
+                } else {
+                    println!("{}", for_stdout(&event.data));
+                }
             }
             Err(e) => {
                 eprintln!("Stream error: {}", e);
@@ -131,79 +110,33 @@ pub async fn stream_run_logs(
     Ok(())
 }
 
-pub async fn stream_run_status(
-    http_client: &reqwest_middleware::ClientWithMiddleware,
-    cli_url: &str,
-    token: &str,
-    run_id: stormchaser_model::RunId,
-) -> Result<()> {
-    let res = http_client
-        .get(format!("{}/api/v1/runs/{}/status/stream", cli_url, run_id))
-        .header(AUTHORIZATION, format!("Bearer {}", token))
-        .send()
-        .await?;
+pub async fn stream_run_logs(client: &Client, run_id: RunId) -> Result<()> {
+    print_events(client.stream_run_logs(run_id).await?, false).await
+}
 
-    if !res.status().is_success() {
-        handle_response(res).await?;
-        return Ok(());
-    }
-
-    let mut stream = res.bytes_stream().eventsource();
-    while let Some(event) = stream.next().await {
-        match event {
-            Ok(event) => {
-                if event.event == "error" {
-                    eprintln!("Error from stream: {}", for_stderr(&event.data));
-                    break;
-                }
-                println!("{}: {}", for_stdout(&event.event), for_stdout(&event.data));
-            }
-            Err(e) => {
-                eprintln!("Stream error: {}", e);
-                break;
-            }
-        }
-    }
-    Ok(())
+pub async fn stream_run_status(client: &Client, run_id: RunId) -> Result<()> {
+    print_events(client.stream_run_status(run_id).await?, true).await
 }
 
 pub fn require_token(token: Option<&str>) -> Result<&str> {
     token.context("Authentication token required (use --token or STORMCHASER_TOKEN env var)")
 }
 
-pub async fn handle_run_response(
-    http_client: &reqwest_middleware::ClientWithMiddleware,
-    url: &str,
-    token: &str,
-    res: reqwest::Response,
+/// Prints a started run, then follows its logs (`tail`) or its status (`watch`).
+pub async fn follow_run(
+    client: &Client,
+    run: stormchaser_client::Result<EnqueueResponse>,
     tail: bool,
     watch: bool,
 ) -> Result<()> {
-    let status = res.status();
-    let body = res.text().await.unwrap_or_default();
-    if status.is_success() {
-        if let Ok(val) = serde_json::from_str::<Value>(&body) {
-            println!("{}", serde_json::to_string_pretty(&val)?);
-            if tail {
-                if let Some(id_str) = val.get("run_id").and_then(|i| i.as_str()) {
-                    if let Ok(run_id) = id_str.parse::<stormchaser_model::RunId>() {
-                        println!("Streaming logs for run {}...", run_id);
-                        stream_run_logs(http_client, url, token, run_id).await?;
-                    }
-                }
-            } else if watch {
-                if let Some(id_str) = val.get("run_id").and_then(|i| i.as_str()) {
-                    if let Ok(run_id) = id_str.parse::<stormchaser_model::RunId>() {
-                        println!("Watching status for run {}...", run_id);
-                        stream_run_status(http_client, url, token, run_id).await?;
-                    }
-                }
-            }
-        } else {
-            println!("{}", for_stdout(&body));
-        }
-    } else {
-        eprintln!("Error ({}): {}", status, for_stderr(&body));
+    let run = run?;
+    print_json(&run)?;
+    if tail {
+        println!("Streaming logs for run {}...", run.run_id);
+        stream_run_logs(client, run.run_id).await?;
+    } else if watch {
+        println!("Watching status for run {}...", run.run_id);
+        stream_run_status(client, run.run_id).await?;
     }
     Ok(())
 }
