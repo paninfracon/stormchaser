@@ -140,14 +140,9 @@ pub fn do_build_job_spec(
         },
         spec: Some(JobSpec {
             template: pod_template,
-            backoff_limit: Some(step_spec.backoff_limit.unwrap_or_else(|| {
-                metadata
-                    .step_dsl
-                    .retry
-                    .as_ref()
-                    .map(|r| r.count as i32)
-                    .unwrap_or(0)
-            })),
+            // The engine retries a step as its `retry` policy says; Kubernetes retrying
+            // the pod as well would multiply the attempts
+            backoff_limit: Some(step_spec.backoff_limit.unwrap_or(0)),
             completions: Some(step_spec.completions.unwrap_or(1)),
             parallelism: Some(step_spec.parallelism.unwrap_or(1)),
             // Kubernetes ends the Job, and its pods, when this runs out
