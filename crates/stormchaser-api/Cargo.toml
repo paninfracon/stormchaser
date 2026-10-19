@@ -72,6 +72,7 @@ aws-sdk-sts = { workspace = true }
 git2 = { version = "0.21", features = ["vendored-openssl", "https", "ssh"] }
 
 [dev-dependencies]
+stormchaser-client = { workspace = true }
 # The route tests drive a run through the engine's handlers
 stormchaser-engine = { version = "1.5.1", path = "../stormchaser-engine" }
 rand = "0.10"

@@ -24,7 +24,7 @@ use validate::validate_connection;
     post,
     path = "/api/v1/connections",
     responses(
-        (status = 200, description = "Success"),
+        (status = 201, description = "Created", body = crate::CreatedResponse),
         (status = 400, description = "Bad Request"),
         (status = 404, description = "Not Found"),
         (status = 500, description = "Internal Server Error")
@@ -76,7 +76,12 @@ pub async fn create_connection(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    Ok((StatusCode::CREATED, Json(serde_json::json!({ "id": id }))))
+    Ok((
+        StatusCode::CREATED,
+        Json(crate::CreatedResponse {
+            id: id.into_inner(),
+        }),
+    ))
 }
 
 /// List storage backends.

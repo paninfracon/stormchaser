@@ -179,6 +179,8 @@ cargo publish -p stormchaser-core
 sleep 15
 cargo publish -p stormchaser-runner-core
 sleep 15
+cargo publish -p stormchaser-client
+sleep 15
 
 # Publish dependent crates
 cargo publish -p stormchaser-engine

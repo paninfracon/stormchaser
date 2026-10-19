@@ -27,6 +27,7 @@ than YAML.
 | Crate | Version | Docs |
 |---|---|---|
 | `stormchaser-cli` | [![Crates.io](https://img.shields.io/crates/v/stormchaser-cli.svg)](https://crates.io/crates/stormchaser-cli) | [![Docs.rs](https://docs.rs/stormchaser-cli/badge.svg)](https://docs.rs/stormchaser-cli) |
+| `stormchaser-client` | [![Crates.io](https://img.shields.io/crates/v/stormchaser-client.svg)](https://crates.io/crates/stormchaser-client) | [![Docs.rs](https://docs.rs/stormchaser-client/badge.svg)](https://docs.rs/stormchaser-client) |
 | `stormchaser-core` | [![Crates.io](https://img.shields.io/crates/v/stormchaser-core.svg)](https://crates.io/crates/stormchaser-core) | [![Docs.rs](https://docs.rs/stormchaser-core/badge.svg)](https://docs.rs/stormchaser-core) |
 | `stormchaser-engine` | [![Crates.io](https://img.shields.io/crates/v/stormchaser-engine.svg)](https://crates.io/crates/stormchaser-engine) | [![Docs.rs](https://docs.rs/stormchaser-engine/badge.svg)](https://docs.rs/stormchaser-engine) |
 | `stormchaser-model` | [![Crates.io](https://img.shields.io/crates/v/stormchaser-model.svg)](https://crates.io/crates/stormchaser-model) | [![Docs.rs](https://docs.rs/stormchaser-model/badge.svg)](https://docs.rs/stormchaser-model) |

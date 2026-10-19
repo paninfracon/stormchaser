@@ -98,6 +98,7 @@ The same diagram is in `architecture.mmd`.
 | `stormchaser-runner-core` | What the runners share: the runner's life (NATS, session key, registration, orphan adoption, heartbeat, task and cancellation consumers, shutdown) around a `Backend` trait each runner implements, the encryption of the step definitions kept on workloads, and reading the agent's marked log lines. |
 | `stormchaser-agent` | Runs beside a step to park and unpark storage and push artifacts. |
 | `stormchaser-query` | Hydrates run forms from a workflow's schema and queries, read from Git. |
+| `stormchaser-client` | Typed client of the API and the query service, over the request and response types in `stormchaser_model::api`. |
 | `stormchaser-cli`, `stormchaser-tui`, `stormchaser-web` | Clients. |
 | `stormchaser-dsl` | HCL parser for `.storm` workflows. |
 | `stormchaser-model` | Shared types (runs, steps, events, DSL AST), plus the NATS helpers and runner identity code the services and runners share. On native targets it depends on `tokio`, `sqlx` and `async-nats`. |
