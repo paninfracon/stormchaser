@@ -2,6 +2,7 @@ use chrono::Utc;
 use serde_json::Value;
 use stormchaser_dsl::ast;
 use stormchaser_model::dsl;
+use stormchaser_model::dsl::step_types;
 use stormchaser_model::step::StepStatus;
 use stormchaser_model::{EventId, RunId, StepInstanceId};
 
@@ -108,9 +109,10 @@ pub async fn schedule_step(
         );
 
         let step_instance_id = StepInstanceId::new(Uuid::new_v4());
-        let initial_status = match resolved_type.as_str() {
-            "Approval" | "Wait" => StepStatus::WaitingForEvent,
-            _ => StepStatus::Pending,
+        let initial_status = if step_types::waits(&resolved_type) {
+            StepStatus::WaitingForEvent
+        } else {
+            StepStatus::Pending
         };
 
         let affinity_context = step_dsl.strategy.as_ref().and_then(|s| s.affinity.clone());
@@ -243,7 +245,7 @@ async fn schedule_iterated_steps(
         );
         let resolved_type = resolved_type.as_str();
         let status = match resolved_type {
-            "Approval" | "Wait" => StepStatus::WaitingForEvent,
+            t if step_types::waits(t) => StepStatus::WaitingForEvent,
             _ => {
                 if (idx as u32) < max_parallel
                     && current_running_count < quotas.max_concurrency as i64

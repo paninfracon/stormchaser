@@ -33,6 +33,24 @@ pub fn find_step<'a>(steps: &'a [Step], name: &str) -> Option<&'a Step> {
     None
 }
 
+/// Why a step of type `dispatched` (after the engine's rewrites) cannot be handed to a
+/// runner, or `None` when it can.
+fn undispatchable(dispatched: &str) -> Option<String> {
+    use stormchaser_model::dsl::step_types::{step_type, Executor};
+    let executor = step_type(dispatched)?.executor;
+    let reason = match executor {
+        Executor::Runner => return None,
+        Executor::Engine => format!("this engine build does not run {} steps", dispatched),
+        Executor::Rewritten => format!(
+            "a {} step needs a spec the engine can turn into a container step",
+            dispatched
+        ),
+        Executor::Waits => format!("a {} step only waits, and cannot be dispatched", dispatched),
+        Executor::Planned => format!("{} steps are not supported yet", dispatched),
+    };
+    Some(reason)
+}
+
 /// Dispatches a step instance, handling intrinsic types or forwarding to runners via NATS.
 #[allow(clippy::too_many_arguments)]
 pub async fn dispatch_step_instance(
@@ -78,6 +96,21 @@ pub async fn dispatch_step_instance(
         tls_reloader: tls_reloader.clone(),
     };
     if try_dispatch_intrinsic(built_in).await? {
+        return Ok(());
+    }
+
+    // Only runners take what is left. A built-in type that no runner runs would wait for
+    // one until its run timed out; a type that is not built in may be a runner's own.
+    if let Some(reason) = undispatchable(&step_type) {
+        tracing::warn!("Run {}: step {}: {}", run_id, step_name, reason);
+        crate::handler::integrations::utils::report_step_failed(
+            &pool,
+            run_id,
+            step_instance_id,
+            fencing_token,
+            reason,
+        )
+        .await?;
         return Ok(());
     }
 

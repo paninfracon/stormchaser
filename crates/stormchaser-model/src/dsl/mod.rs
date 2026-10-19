@@ -5,6 +5,8 @@ pub mod connections;
 pub mod limits;
 pub mod specs;
 pub mod step;
+/// Every step type Stormchaser knows, and who carries a step of that type out.
+pub mod step_types;
 pub mod workflow;
 
 pub use connections::*;

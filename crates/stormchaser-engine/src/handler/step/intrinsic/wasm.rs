@@ -6,38 +6,9 @@ use futures::FutureExt;
 use serde_json::Value;
 use std::collections::HashMap;
 
-/// Step types the engine and its runners implement themselves.
-const BUILTIN_STEP_TYPES: [&str; 23] = [
-    "Approval",
-    "EmailSend",
-    "GitCheckout",
-    "JQ",
-    "JinjaRender",
-    "LambdaInvoke",
-    "Parallel",
-    "RestApi",
-    "RunContainer",
-    "RunK8sJob",
-    "Sequential",
-    "SlackMessage",
-    "SqlExecute",
-    "TeamsMessage",
-    "TerraformApply",
-    "TerraformApproval",
-    "TerraformPlan",
-    "TestReportEmail",
-    "Wait",
-    "WaitEvent",
-    "Wasm",
-    "WebhookInvoke",
-    "DryRun",
-];
-
 /// True for step types that a registered WASM definition must not take over.
 pub(crate) fn is_builtin_step_type(step_type: &str) -> bool {
-    BUILTIN_STEP_TYPES
-        .iter()
-        .any(|builtin| builtin.eq_ignore_ascii_case(step_type))
+    stormchaser_model::dsl::step_types::is_builtin(step_type)
 }
 
 /// The work of a Wasm step, or of a step whose type is registered with a WASM module.

@@ -184,7 +184,7 @@ pub fn generate_dsl_schema() -> Schema {
         generator.subschema_for::<ApprovalSpec>(),
     );
     spec_schemas.insert(
-        "WaitEvent".to_string(),
+        "Wait".to_string(),
         generator.subschema_for::<WaitEventSpec>(),
     );
     spec_schemas.insert(
@@ -219,7 +219,10 @@ pub fn generate_dsl_schema() -> Schema {
         "SqlExecute".to_string(),
         generator.subschema_for::<SqlExecuteSpec>(),
     );
-    spec_schemas.insert("Email".to_string(), generator.subschema_for::<EmailSpec>());
+    spec_schemas.insert(
+        "EmailSend".to_string(),
+        generator.subschema_for::<EmailSpec>(),
+    );
     spec_schemas.insert(
         "JinjaRender".to_string(),
         generator.subschema_for::<JinjaRenderSpec>(),
@@ -228,7 +231,12 @@ pub fn generate_dsl_schema() -> Schema {
         "TestReportEmail".to_string(),
         generator.subschema_for::<TestReportEmailSpec>(),
     );
-    spec_schemas.insert("Jq".to_string(), generator.subschema_for::<JqSpec>());
+    spec_schemas.insert("JQ".to_string(), generator.subschema_for::<JqSpec>());
+
+    // Keyed by the names workflows use, which the step type list holds
+    debug_assert!(spec_schemas
+        .keys()
+        .all(|name| crate::dsl::step_types::step_type(name).is_some()));
 
     let mut root_schema = generator.root_schema_for::<Workflow>();
 
@@ -370,6 +378,28 @@ pub fn flatten_schema_for_ui(schema: &Value, inputs: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::generate_dsl_schema;
+
+    #[test]
+    fn spec_schemas_are_keyed_by_step_types_workflows_use() {
+        let schema = serde_json::to_value(generate_dsl_schema()).unwrap();
+        let keys: Vec<String> = schema["definitions"]["Step"]["allOf"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|rule| rule["if"]["properties"]["type"]["const"].as_str())
+            .map(str::to_string)
+            .collect();
+        assert!(keys.len() >= 15, "{keys:?}");
+        for key in &keys {
+            assert!(
+                crate::dsl::step_types::step_type(key).is_some(),
+                "{key} is not a step type"
+            );
+        }
+        for name in ["EmailSend", "JQ", "Wait"] {
+            assert!(keys.iter().any(|k| k == name), "{name} has no spec schema");
+        }
+    }
 
     #[test]
     fn test_generate_dsl_schema_registers_rest_api_spec() {

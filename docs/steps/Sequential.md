@@ -2,7 +2,7 @@
 
 `Sequential` is planned as a group step that runs a nested `steps` block of child steps in order, one after the other. It is not implemented.
 
-The parser accepts a step with a nested `steps` block and stores the children, but the engine never schedules them, and no runner or engine handler takes a step of type `Sequential`. A run that reaches one waits until it times out.
+The parser accepts a step with a nested `steps` block and stores the children, but the engine never schedules them. When a `Sequential` step is dispatched it fails with "Sequential steps are not supported yet", and its run fails unless the step sets `allow_failure`.
 
 ## What works today
 

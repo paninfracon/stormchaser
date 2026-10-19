@@ -16,7 +16,7 @@ The `spec` block for `GitCheckout` supports the following fields:
 * `storage_mounts` (list of objects, optional): Storage to mount, as for [RunContainer](RunContainer.md).
 * `connection` (string, optional): The name of a `git` connection with credentials for the repository. The run's user must be allowed to use it. A connection with a `username` in its config sends its credential as that user's password; one without sends it as a bearer token; one with an `ssh_key` in its config uses the key for SSH. The credentials are masked in logs.
 
-A spec without `repo` is not turned into a container step, and no runner takes it.
+A spec without `repo` cannot be turned into a container step, and the step fails when it is dispatched, saying so.
 
 ## Example
 

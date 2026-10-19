@@ -294,14 +294,11 @@ pub async fn handle_step_failed(
     Ok(())
 }
 
-/// Steps that wait for a person or a timer rather than being dispatched, and are never
-/// run again.
-const NEVER_RETRIED: [&str; 2] = ["Approval", "Wait"];
-
 /// How long to wait before running a step again after its attempt number `attempt`
 /// failed, or None when it has no retries left.
 fn retry_delay(dsl_step: Option<&Step>, step_type: &str, attempt: i32) -> Option<Duration> {
-    if NEVER_RETRIED.contains(&step_type) {
+    // Steps that wait for a person or an event are never run again
+    if stormchaser_model::dsl::step_types::waits(step_type) {
         return None;
     }
     let policy = dsl_step?.retry.as_ref()?;
