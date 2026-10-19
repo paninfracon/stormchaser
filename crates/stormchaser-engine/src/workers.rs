@@ -516,6 +516,80 @@ pub fn start_dispatch_recovery_worker(
     })
 }
 
+/// How long finished runs are kept after they are archived, as a duration such as `30d`.
+/// Unset keeps them for good.
+pub const ARCHIVE_RETENTION_ENV: &str = "STORMCHASER_ARCHIVE_RETENTION";
+/// The shortest retention the engine accepts, so that a slip such as `30s` for `30d`
+/// cannot empty the archive.
+const MIN_ARCHIVE_RETENTION: Duration = Duration::from_secs(60 * 60);
+const RETENTION_CHECK: Duration = Duration::from_secs(60 * 60);
+const RETENTION_BATCH: i64 = 500;
+
+/// The archive retention `STORMCHASER_ARCHIVE_RETENTION` sets, or `None` when it is unset.
+pub fn archive_retention() -> anyhow::Result<Option<Duration>> {
+    match std::env::var(ARCHIVE_RETENTION_ENV) {
+        Ok(value) => parse_archive_retention(&value).map(Some),
+        Err(_) => Ok(None),
+    }
+}
+
+fn parse_archive_retention(value: &str) -> anyhow::Result<Duration> {
+    let retention = humantime::parse_duration(value.trim()).map_err(|e| {
+        anyhow::anyhow!(
+            "{} is not a duration ({}): {}",
+            ARCHIVE_RETENTION_ENV,
+            value,
+            e
+        )
+    })?;
+    anyhow::ensure!(
+        retention >= MIN_ARCHIVE_RETENTION,
+        "{} is {}; the shortest allowed is 1h",
+        ARCHIVE_RETENTION_ENV,
+        value
+    );
+    Ok(retention)
+}
+
+/// Deletes the archived runs that finished more than `retention` ago, in batches, and
+/// returns how many it deleted.
+pub async fn purge_expired_runs(pool: &sqlx::PgPool, retention: Duration) -> anyhow::Result<u64> {
+    let mut purged = 0;
+    loop {
+        let mut tx = pool.begin().await?;
+        let deleted = db::purge_archived_runs(&mut tx, retention, RETENTION_BATCH).await?;
+        tx.commit().await?;
+        purged += deleted;
+        if deleted < RETENTION_BATCH as u64 {
+            return Ok(purged);
+        }
+    }
+}
+
+/// Deletes expired archived runs every hour, if `STORMCHASER_ARCHIVE_RETENTION` is set.
+pub fn start_retention_worker(pool: sqlx::PgPool) -> Option<tokio::task::JoinHandle<()>> {
+    let retention = match archive_retention() {
+        Ok(Some(retention)) => retention,
+        Ok(None) => return None,
+        Err(e) => {
+            // Keeping the archive is the safe outcome of a bad setting
+            tracing::error!("Archived runs are kept: {:#}", e);
+            return None;
+        }
+    };
+    Some(tokio::spawn(async move {
+        let mut interval = tokio::time::interval(RETENTION_CHECK);
+        loop {
+            interval.tick().await;
+            match purge_expired_runs(&pool, retention).await {
+                Ok(0) => {}
+                Ok(purged) => tracing::info!("Deleted {} expired archived runs", purged),
+                Err(e) => tracing::warn!("Archive retention failed: {:?}", e),
+            }
+        }
+    }))
+}
+
 /// How often the engine looks for steps whose wait before a retry is over
 const RETRY_CHECK: Duration = Duration::from_secs(5);
 
@@ -558,6 +632,23 @@ pub fn start_retry_worker(
             }
         }
     })
+}
+
+#[cfg(test)]
+mod retention_tests {
+    use super::parse_archive_retention;
+    use std::time::Duration;
+
+    #[test]
+    fn a_retention_is_a_duration_of_an_hour_or_more() {
+        assert_eq!(
+            parse_archive_retention("30d").unwrap(),
+            Duration::from_secs(30 * 86400)
+        );
+        assert!(parse_archive_retention("1h").is_ok());
+        assert!(parse_archive_retention("30s").is_err());
+        assert!(parse_archive_retention("a month").is_err());
+    }
 }
 
 #[cfg(test)]

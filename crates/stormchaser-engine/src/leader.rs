@@ -60,6 +60,9 @@ fn start_workers(
         start_dispatch_recovery_worker(pool.clone(), nats_client.clone(), tls_reloader.clone()),
         start_retry_worker(pool.clone(), nats_client.clone(), tls_reloader.clone()),
     ]
+    .into_iter()
+    .chain(start_retention_worker(pool.clone()))
+    .collect()
 }
 
 /// Competes for leadership for as long as the engine runs, running the background

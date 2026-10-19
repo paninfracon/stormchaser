@@ -180,3 +180,40 @@ pub async fn archive_and_delete_workflow_run(
 
     Ok(())
 }
+
+/// Deletes up to `limit` archived runs that finished more than `older_than` ago, with
+/// everything archived with them, and returns how many it deleted.
+pub async fn purge_archived_runs(
+    conn: &mut sqlx::PgConnection,
+    older_than: std::time::Duration,
+    limit: i64,
+) -> Result<u64, sqlx::Error> {
+    let runs: Vec<uuid::Uuid> = sqlx::query_scalar(
+        r#"
+        SELECT id FROM archived_workflow_runs
+        WHERE COALESCE(finished_at, created_at) < NOW() - make_interval(secs => $1)
+        ORDER BY COALESCE(finished_at, created_at)
+        LIMIT $2
+        "#,
+    )
+    .bind(older_than.as_secs_f64())
+    .bind(limit)
+    .fetch_all(&mut *conn)
+    .await?;
+    if runs.is_empty() {
+        return Ok(0);
+    }
+    // These do not cascade from the archived run; everything else does
+    for statement in [
+        "DELETE FROM archived_step_status_history WHERE step_instance_id IN (SELECT id FROM archived_step_instances WHERE run_id = ANY($1))",
+        "DELETE FROM archived_step_test_cases WHERE run_id = ANY($1)",
+        "DELETE FROM archived_step_test_summaries WHERE run_id = ANY($1)",
+    ] {
+        sqlx::query(statement).bind(&runs).execute(&mut *conn).await?;
+    }
+    let deleted = sqlx::query("DELETE FROM archived_workflow_runs WHERE id = ANY($1)")
+        .bind(&runs)
+        .execute(&mut *conn)
+        .await?;
+    Ok(deleted.rows_affected())
+}

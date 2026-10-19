@@ -410,13 +410,16 @@ exits so that it is restarted. Shard assignment does not affect leadership.
   `archived_step_outputs`, `archived_step_status_history`, the archived test report
   tables, `archived_artifact_registry` and `archived_run_storage_states`. The
   `combined_*` views read live and archived rows together.
-* **Nothing expires archived rows.** They are kept until deleted with
-  `DELETE /api/v1/runs/{id}`, which removes the run from both live and archived
-  tables.
+* **Archive retention**: with `STORMCHASER_ARCHIVE_RETENTION` set (such as `30d`, at
+  least `1h`), the leader deletes archived runs that finished longer ago than that,
+  with everything archived with them, every hour. Unset, archived runs are kept until
+  deleted with `DELETE /api/v1/runs/{id}`, which removes a run from both live and
+  archived tables.
 * **NATS**: task messages are erased once their step is finished or archived. Other
   messages age out with the stream's maximum age.
-* **Parked SFS archives** in object storage are not deleted by Stormchaser; use the
-  bucket's lifecycle rules.
+* **Parked SFS archives, test report files and artifacts** in object storage are not
+  deleted by Stormchaser, by the retention or otherwise; use the bucket's lifecycle
+  rules.
 * Runners reap containers or Jobs they manage that are older than 24 hours, checking
   every hour.
 
@@ -510,8 +513,8 @@ so that the gap is visible.
   stored only.
 * **Multi-approval**: `require_approvals`, `on_partial` and `on_reject` blocks, and
   de-duplicating approvals by identity.
-* **Retention policy engine**: a configurable retention period (30 days by
-  default), a long-term audit table, and hard-deleting execution detail.
+* **Retention policy engine**: a long-term audit table that outlives the archive
+  retention, and deleting a run's objects in storage with it.
 * **Log redaction in the pipeline**: a log shipper that redacts registered secrets
   before they are stored, and `::add-mask::` with real-time masking in the agent.
 * **Storage quotas and I/O throttling**: enforcing `max_storage`, cgroup `blkio`

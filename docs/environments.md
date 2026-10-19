@@ -462,6 +462,7 @@ there).
 | Variable | Default | Description |
 |---|---|---|
 | `GIT_CACHE_DIR` | `/tmp/stormchaser/git-cache` | Where the engine keeps cloned repositories. Helm: `engine.gitCacheDir`. |
+| `STORMCHASER_ARCHIVE_RETENTION` | unset | How long finished runs are kept after they are archived, such as `30d` (at least `1h`). The leader deletes older archived runs every hour. Unset keeps them; an invalid value is logged and keeps them. Objects in storage (SFS archives, reports, artifacts) are not deleted. |
 | `VAULT_ADDR` | `http://localhost:8200` | Vault server for `secret()` lookups. |
 | `VAULT_TOKEN` | unset | Vault token. Without one, `secret()` lookups are refused. |
 | `STORMCHASER_VAULT_ALLOWED_PATHS` | empty | Comma-separated secret paths workflows may read with `secret()`; a trailing `*` matches a prefix. Empty refuses every lookup. |
