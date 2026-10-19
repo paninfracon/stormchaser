@@ -9,8 +9,11 @@ use opa_wasm::Runtime;
 use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::Arc;
-use stormchaser_model::auth::{OpaClient, OpaWasmExecutor};
 use wasmtime::*;
+
+/// The policy client and the trait services ask policy questions through.
+pub mod client;
+pub use client::{OpaAuthorizer, OpaClient, OpaWasmExecutor};
 
 /// The shipped policy, `deploy/opa/policy.rego`, compiled by `scripts/build-opa-policy.sh`.
 /// Services enforce it when no other policy is configured.

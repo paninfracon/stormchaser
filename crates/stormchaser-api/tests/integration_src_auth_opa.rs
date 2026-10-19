@@ -7,7 +7,8 @@ use std::sync::Arc;
 use stormchaser_api::auth::opa::opa_middleware;
 use stormchaser_api::AppState;
 use stormchaser_model::auth::ApprovalOpaContext;
-use stormchaser_model::auth::{ApiOpaContext, OpaAuthorizer, ResourceOpaContext};
+use stormchaser_model::auth::{ApiOpaContext, ResourceOpaContext};
+use stormchaser_opa::OpaAuthorizer;
 use tower::ServiceExt;
 
 struct MockAuthorizer {

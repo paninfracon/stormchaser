@@ -4,8 +4,8 @@ use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use std::env::var;
 use std::sync::Arc;
-use stormchaser_model::auth::OpaClient;
 use stormchaser_model::RunId;
+use stormchaser_opa::OpaClient;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

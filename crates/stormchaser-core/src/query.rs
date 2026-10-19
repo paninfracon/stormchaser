@@ -135,7 +135,7 @@ async fn execute_api_query(params: &HashMap<String, String>) -> Result<Vec<Value
         .map(|s| s.to_uppercase())
         .unwrap_or_else(|| "GET".to_string());
 
-    let (client, url) = stormchaser_model::net_guard::guarded_client(&url).await?;
+    let (client, url) = crate::net_guard::guarded_client(&url).await?;
     let mut req = match method_str.as_str() {
         "POST" => client.post(url),
         "PUT" => client.put(url),
@@ -156,11 +156,8 @@ async fn execute_api_query(params: &HashMap<String, String>) -> Result<Vec<Value
     }
 
     let res = req.send().await?.error_for_status()?;
-    let body = stormchaser_model::net_guard::read_body_capped(
-        res,
-        stormchaser_model::net_guard::MAX_RESPONSE_BYTES,
-    )
-    .await?;
+    let body =
+        crate::net_guard::read_body_capped(res, crate::net_guard::MAX_RESPONSE_BYTES).await?;
     let response: Value = serde_json::from_slice(&body)?;
 
     if let Some(jq_filter_str) = params.get("jq_filter") {
@@ -324,7 +321,7 @@ mod tests {
 
     /// The mock servers listen on loopback, which the SSRF guard blocks by default.
     fn allow_loopback() {
-        std::env::set_var(stormchaser_model::net_guard::ALLOWED_HOSTS_ENV, "127.0.0.1");
+        std::env::set_var(crate::net_guard::ALLOWED_HOSTS_ENV, "127.0.0.1");
     }
 
     #[tokio::test]

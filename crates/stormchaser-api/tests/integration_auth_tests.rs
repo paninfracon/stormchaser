@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::sync::Once;
 use stormchaser_api::auth::jwks::OidcConfig;
 use stormchaser_api::{app, AppState};
-use stormchaser_model::auth::OpaClient;
+use stormchaser_opa::OpaClient;
 use tower::ServiceExt;
 use wiremock::{
     matchers::{method, path},

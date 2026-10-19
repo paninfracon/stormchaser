@@ -3,7 +3,7 @@
 use crate::auth::jwks::{JwksCache, OidcConfig};
 use sqlx::PgPool;
 use std::sync::Arc;
-use stormchaser_model::auth::OpaAuthorizer;
+use stormchaser_opa::OpaAuthorizer;
 use tokio::sync::RwLock;
 
 /// The parts of an HTTP service's state that token checks, policy and access control

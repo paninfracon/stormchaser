@@ -13,7 +13,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::Once;
 use stormchaser_api::{app, AppState, Claims, JWT_SECRET};
-use stormchaser_model::auth::OpaClient;
+use stormchaser_opa::OpaClient;
 
 use stormchaser_model::RunId;
 use tower::ServiceExt;

@@ -8,7 +8,8 @@ use std::collections::HashMap;
 use std::env::var;
 use std::sync::Arc;
 use stormchaser_api::{app, AppState, EnqueueResponse};
-use stormchaser_model::auth::{Claims, OpaClient};
+use stormchaser_model::auth::Claims;
+use stormchaser_opa::OpaClient;
 use tower::ServiceExt;
 use uuid::Uuid;
 

@@ -4,11 +4,11 @@ use serde_json::Value;
 use sqlx::PgPool;
 use std::sync::Arc;
 use stormchaser_dsl::StormchaserParser;
-use stormchaser_model::auth::OpaClient;
 use stormchaser_model::events::WorkflowStartPendingEvent;
 use stormchaser_model::events::{EventSource, EventType, SchemaVersion, WorkflowEventType};
 use stormchaser_model::workflow::{RunStatus, WorkflowRun};
 use stormchaser_model::RunId;
+use stormchaser_opa::OpaClient;
 use tracing::{debug, info};
 
 use super::resolve::{check_policy, run_queries, validate_inputs};

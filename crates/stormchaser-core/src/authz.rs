@@ -8,8 +8,9 @@
 use anyhow::{bail, Context, Result};
 use sqlx::PgPool;
 use std::sync::{Arc, OnceLock};
-use stormchaser_model::auth::{OpaClient, OpaResource, OpaSubject, ResourceOpaContext};
+use stormchaser_model::auth::{OpaResource, OpaSubject, ResourceOpaContext};
 use stormchaser_model::{Connection, RunId};
+use stormchaser_opa::OpaClient;
 
 static POLICY: OnceLock<Arc<OpaClient>> = OnceLock::new();
 

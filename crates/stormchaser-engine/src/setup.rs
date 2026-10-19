@@ -3,8 +3,8 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::ConnectOptions;
 use std::sync::Arc;
 use std::time::Duration;
-use stormchaser_model::auth::OpaClient;
-use stormchaser_model::LogBackend;
+use stormchaser_core::LogBackend;
+use stormchaser_opa::OpaClient;
 use stormchaser_opa::PolicyConfig;
 use stormchaser_tls::TlsConfig;
 use stormchaser_tls::TlsReloader;
@@ -29,16 +29,16 @@ pub async fn setup_database(config: &Config) -> anyhow::Result<sqlx::PgPool> {
 
 /// The database pool, with nothing done to the schema.
 pub async fn connect_database(config: &Config) -> anyhow::Result<sqlx::PgPool> {
-    let mut db_options = stormchaser_model::db_tls::connect_options(
+    let mut db_options = stormchaser_core::db_tls::connect_options(
         &config.database_url,
-        &stormchaser_model::db_tls::DbTls {
+        &stormchaser_core::db_tls::DbTls {
             setting: config.db_ssl,
             ca: config.tls_ca_cert_path.as_deref(),
             cert: &config.tls_cert_path,
             key: &config.tls_key_path,
         },
     )?;
-    if !stormchaser_model::db_tls::is_verified(&db_options) {
+    if !stormchaser_core::db_tls::is_verified(&db_options) {
         tracing::warn!(
             "The database connection is not verified TLS, because STORMCHASER_DB_SSL=false \
              or DATABASE_URL asks for a weaker sslmode. Only do this where the database \
@@ -51,7 +51,7 @@ pub async fn connect_database(config: &Config) -> anyhow::Result<sqlx::PgPool> {
         .log_slow_statements(log::LevelFilter::Warn, Duration::from_secs(1));
 
     let pool = PgPoolOptions::new()
-        .max_connections(stormchaser_model::db_tls::max_connections()?)
+        .max_connections(stormchaser_core::db_tls::max_connections()?)
         .connect_with(db_options)
         .await?;
 

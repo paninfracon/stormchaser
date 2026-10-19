@@ -11,9 +11,9 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
 use stormchaser_engine::handler;
-use stormchaser_model::auth::OpaClient;
 use stormchaser_model::workflow::RunStatus;
 use stormchaser_model::RunId;
+use stormchaser_opa::OpaClient;
 use tokio::time::sleep;
 
 /// Starts a run of `dsl`, feeds each step result the engine publishes back through the

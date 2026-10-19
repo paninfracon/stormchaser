@@ -6,9 +6,10 @@ use chrono::Utc;
 use opentelemetry::KeyValue;
 use sqlx::PgPool;
 use std::sync::Arc;
+use stormchaser_core::LogBackend;
 use stormchaser_dsl::ast::{Step, Workflow};
 use stormchaser_model::workflow::RunContext;
-use stormchaser_model::{LogBackend, RunId};
+use stormchaser_model::RunId;
 use stormchaser_tls::TlsReloader;
 use tracing::{debug, info};
 

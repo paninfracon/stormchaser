@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::env::var;
 use std::sync::Arc;
 use stormchaser_api::{app, AppState};
-use stormchaser_model::auth::OpaClient;
+use stormchaser_opa::OpaClient;
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -159,7 +159,7 @@ struct RecordingAuthorizer {
 }
 
 #[async_trait::async_trait]
-impl stormchaser_model::auth::OpaAuthorizer for RecordingAuthorizer {
+impl stormchaser_opa::OpaAuthorizer for RecordingAuthorizer {
     async fn check(
         &self,
         context: stormchaser_model::auth::ApiOpaContext<'_>,

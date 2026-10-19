@@ -6,9 +6,9 @@ use std::collections::HashMap;
 use std::env::var;
 use std::sync::Arc;
 use stormchaser_model::auth::Claims;
-use stormchaser_model::auth::OpaClient;
 use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
+use stormchaser_opa::OpaClient;
 use uuid::Uuid;
 
 use axum::extract::{Path, State};

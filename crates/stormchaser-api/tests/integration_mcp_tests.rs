@@ -16,7 +16,7 @@ use std::str;
 use std::sync::Arc;
 use std::sync::Once;
 use stormchaser_api::{app, AppState, Claims, JWT_SECRET};
-use stormchaser_model::auth::OpaClient;
+use stormchaser_opa::OpaClient;
 use tokio::sync::RwLock;
 use tower::ServiceExt;
 

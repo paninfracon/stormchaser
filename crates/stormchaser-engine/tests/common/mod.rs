@@ -84,7 +84,7 @@ pub fn start_relay(pool: PgPool, nats: async_nats::Client) -> Relay {
 pub async fn run_direct(
     payload: serde_json::Value,
     pool: &PgPool,
-    opa_client: Arc<stormchaser_model::auth::OpaClient>,
+    opa_client: Arc<stormchaser_opa::OpaClient>,
     nats_client: async_nats::Client,
 ) -> anyhow::Result<()> {
     let run_id: RunId = serde_json::from_value(payload["run_id"].clone())?;

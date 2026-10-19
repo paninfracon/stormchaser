@@ -3,7 +3,8 @@ use std::net::TcpListener;
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
-use stormchaser_model::auth::{ApiOpaContext, OpaAuthorizer, OpaClient, OpaSubject};
+use stormchaser_model::auth::{ApiOpaContext, OpaSubject};
+use stormchaser_opa::{OpaAuthorizer, OpaClient};
 use uuid::Uuid;
 
 /// Pinned OPA image used by integration tests.

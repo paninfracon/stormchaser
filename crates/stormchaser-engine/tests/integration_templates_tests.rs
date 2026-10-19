@@ -9,7 +9,7 @@ use stormchaser_model::RunId;
 mod common {
     use std::env::var;
     use std::sync::Arc;
-    use stormchaser_model::auth::{self, OpaClient};
+    use stormchaser_opa::OpaClient;
     /// Get pool.
     pub async fn get_pool() -> sqlx::PgPool {
         let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
@@ -24,7 +24,11 @@ mod common {
     }
 
     /// Setup test env.
-    pub async fn setup_test_env() -> (sqlx::PgPool, async_nats::Client, Arc<auth::OpaClient>) {
+    pub async fn setup_test_env() -> (
+        sqlx::PgPool,
+        async_nats::Client,
+        Arc<stormchaser_opa::OpaClient>,
+    ) {
         let pool = get_pool().await;
         let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
         let nats_client = stormchaser_model::nats::connect(&nats_url).await.unwrap();

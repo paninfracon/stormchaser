@@ -8,11 +8,11 @@ use tokio::task::JoinHandle;
 
 use stormchaser_engine::handler;
 use stormchaser_engine::handler::runner::handle_runner_heartbeat;
-use stormchaser_model::auth::OpaClient;
 use stormchaser_model::events::RunnerHeartbeatEvent;
 use stormchaser_model::runner::RunnerStatus;
 use stormchaser_model::step::StepInstance;
 use stormchaser_model::RunId;
+use stormchaser_opa::OpaClient;
 use stormchaser_tls::{TlsConfig, TlsReloader};
 
 struct RelayWorkerGuard(JoinHandle<()>);

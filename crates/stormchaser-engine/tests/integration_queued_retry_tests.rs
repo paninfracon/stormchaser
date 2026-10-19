@@ -11,9 +11,9 @@ use std::path::Path;
 use std::sync::Arc;
 use stormchaser_engine::git_cache::{GitCache, GIT_ALLOWED_SCHEMES_ENV};
 use stormchaser_engine::handler;
-use stormchaser_model::auth::OpaClient;
 use stormchaser_model::workflow::RunStatus;
 use stormchaser_model::RunId;
+use stormchaser_opa::OpaClient;
 
 /// An OPA client for a server that is not there: nothing listens on port 1
 fn unreachable_opa() -> Arc<OpaClient> {

@@ -14,7 +14,7 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 use stormchaser_api::{app, AppState};
-use stormchaser_model::auth::OpaClient;
+use stormchaser_opa::OpaClient;
 use tower::ServiceExt;
 use uuid::Uuid;
 

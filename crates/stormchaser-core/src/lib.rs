@@ -15,6 +15,8 @@ pub mod aws_guard;
 pub mod config;
 /// Database access shared by the services.
 pub mod db;
+/// How services connect to PostgreSQL over TLS.
+pub mod db_tls;
 /// Git caching and cloning utilities.
 pub mod git_cache;
 /// Reading a workflow file from a Git connection's repository.
@@ -23,8 +25,13 @@ pub mod git_source;
 pub mod hitl;
 /// Runs workflow-supplied jq programs in a child process that can be stopped.
 pub mod jq_sandbox;
+/// Where step logs are read from: Loki or Elasticsearch.
+pub mod logging;
+pub use logging::LogBackend;
 /// The HTTPS or plain HTTP listener of the HTTP services.
 pub mod listener;
+/// SSRF protection for outbound HTTP requests.
+pub mod net_guard;
 /// Queries that fill in a workflow's input options (SQL, REST, AWS Cloud Control, mock).
 pub mod query;
 /// Ceilings on the quotas a run may give itself.

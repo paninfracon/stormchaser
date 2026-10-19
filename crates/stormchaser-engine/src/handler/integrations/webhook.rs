@@ -71,7 +71,7 @@ async fn execute_webhook_request(
     rendered_body: Option<String>,
     pool: PgPool,
 ) -> Result<()> {
-    let (client, url) = stormchaser_model::net_guard::guarded_client(&spec.url).await?;
+    let (client, url) = stormchaser_core::net_guard::guarded_client(&spec.url).await?;
     let method = match spec
         .method
         .as_deref()
@@ -109,9 +109,9 @@ async fn execute_webhook_request(
     let status = res.status();
 
     if status.is_success() {
-        let body_bytes = stormchaser_model::net_guard::read_body_capped(
+        let body_bytes = stormchaser_core::net_guard::read_body_capped(
             res,
-            stormchaser_model::net_guard::MAX_RESPONSE_BYTES,
+            stormchaser_core::net_guard::MAX_RESPONSE_BYTES,
         )
         .await?;
         let body_val: Value = serde_json::from_slice(&body_bytes).unwrap_or_else(

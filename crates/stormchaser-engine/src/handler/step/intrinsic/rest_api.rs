@@ -287,7 +287,7 @@ async fn execute_request(
     rendered_body: Option<String>,
     pool: PgPool,
 ) -> Result<()> {
-    let (client, url) = stormchaser_model::net_guard::guarded_client(&spec.url).await?;
+    let (client, url) = stormchaser_core::net_guard::guarded_client(&spec.url).await?;
     let method = build_request_method(spec);
 
     let mut builder = client.request(method, url);
@@ -310,9 +310,9 @@ async fn execute_request(
 
     let res = builder.timeout(timeout).send().await?;
     let status = res.status();
-    let body_bytes = stormchaser_model::net_guard::read_body_capped(
+    let body_bytes = stormchaser_core::net_guard::read_body_capped(
         res,
-        stormchaser_model::net_guard::MAX_RESPONSE_BYTES,
+        stormchaser_core::net_guard::MAX_RESPONSE_BYTES,
     )
     .await?;
 

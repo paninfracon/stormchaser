@@ -24,6 +24,9 @@ reqwest = { workspace = true }
 reqwest-middleware = { workspace = true }
 reqwest-retry = { workspace = true }
 urlencoding = "2.1"
+url = { workspace = true }
+tokio-tungstenite = "0.30.0"
+tungstenite = "0.30.0"
 utoipa = { version = "6.0", features = ["axum_extras", "uuid", "chrono"] }
 aes-gcm = { workspace = true }
 anyhow = { workspace = true }
@@ -49,5 +52,6 @@ aws-sdk-sts = { workspace = true, optional = true }
 aws-sdk-cloudcontrol = { version = "1.65.0", default-features = false, features = ["default-https-client", "rt-tokio"], optional = true }
 
 [dev-dependencies]
+rustls = { version = "0.23.46", features = ["ring"] }
 wiremock = "0.6"
 tempfile = "3.10"

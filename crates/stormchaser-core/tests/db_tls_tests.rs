@@ -16,7 +16,7 @@
 
 use sqlx::ConnectOptions;
 use std::path::{Path, PathBuf};
-use stormchaser_model::db_tls::{connect_options, is_verified, DbTls};
+use stormchaser_core::db_tls::{connect_options, is_verified, DbTls};
 
 fn certs() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/certs")

@@ -8,9 +8,9 @@ use serde_json::json;
 use std::sync::Arc;
 use stormchaser_engine::git_cache::GitCache;
 use stormchaser_engine::handler;
-use stormchaser_model::auth::OpaClient;
 use stormchaser_model::workflow::RunStatus;
 use stormchaser_model::RunId;
+use stormchaser_opa::OpaClient;
 
 async fn status_and_version(pool: &sqlx::PgPool, run_id: RunId) -> (RunStatus, i32) {
     sqlx::query_as("SELECT status, version FROM workflow_runs WHERE id = $1")

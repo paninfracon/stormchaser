@@ -4,8 +4,8 @@ use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use std::env::var;
 use std::sync::Arc;
-use stormchaser_model::auth::OpaClient;
 use stormchaser_model::RunId;
+use stormchaser_opa::OpaClient;
 
 async fn setup_db() -> sqlx::PgPool {
     let db_url = var("DATABASE_URL").unwrap_or_else(|_| {

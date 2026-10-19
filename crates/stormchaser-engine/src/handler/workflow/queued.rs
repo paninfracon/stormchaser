@@ -9,13 +9,13 @@ use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use stormchaser_dsl::StormchaserParser;
-use stormchaser_model::auth::OpaClient;
 use stormchaser_model::dsl::{self, Workflow};
 use stormchaser_model::events::WorkflowStartPendingEvent;
 use stormchaser_model::events::{EventSource, EventType, SchemaVersion, WorkflowEventType};
 use stormchaser_model::nats::NatsSubject;
 use stormchaser_model::workflow::{RunStatus, WorkflowRun};
 use stormchaser_model::RunId;
+use stormchaser_opa::OpaClient;
 use stormchaser_tls::TlsReloader;
 use tracing::{debug, info};
 

@@ -10,9 +10,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use stormchaser_engine::git_cache::GitCache;
 use stormchaser_engine::router::handle_message;
-use stormchaser_model::auth::OpaClient;
 use stormchaser_model::nats::NatsSubject;
 use stormchaser_model::RunId;
+use stormchaser_opa::OpaClient;
 use stormchaser_tls::TlsReloader;
 
 /// How long the consumer waits for an acknowledgement before delivering an event again

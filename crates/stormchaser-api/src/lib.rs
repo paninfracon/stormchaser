@@ -30,8 +30,8 @@ use sqlx::PgPool;
 use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use stormchaser_core::LogBackend;
 pub use stormchaser_core::{access as authz, auth, config, listener};
-use stormchaser_model::auth::OpaAuthorizer;
 use stormchaser_model::connections::ArtifactRegistry;
 use stormchaser_model::connections::Connection;
 use stormchaser_model::connections::ConnectionType;
@@ -42,7 +42,7 @@ use stormchaser_model::test_report::TestCase;
 use stormchaser_model::test_report::TestCaseStatus;
 use stormchaser_model::test_report::TestReport;
 use stormchaser_model::test_report::TestSummary;
-use stormchaser_model::LogBackend;
+use stormchaser_opa::OpaAuthorizer;
 use tokio::sync;
 /// Rate limiting middleware and configuration
 pub mod rate_limit;

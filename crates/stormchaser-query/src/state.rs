@@ -6,7 +6,7 @@ use stormchaser_core::auth::jwks::{JwksCache, OidcConfig};
 use stormchaser_core::config::Config;
 use stormchaser_core::service::ServiceState;
 use stormchaser_core::setup;
-use stormchaser_model::auth::OpaAuthorizer;
+use stormchaser_opa::OpaAuthorizer;
 use tokio::sync::RwLock;
 
 #[derive(Clone)]

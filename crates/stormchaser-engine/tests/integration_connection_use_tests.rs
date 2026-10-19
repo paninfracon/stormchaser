@@ -12,8 +12,8 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 use stormchaser_engine::authz;
-use stormchaser_model::auth::OpaClient;
 use stormchaser_model::{Connection, RunId};
+use stormchaser_opa::OpaClient;
 use uuid::Uuid;
 
 const OPA_IMAGE: &str = "openpolicyagent/opa:0.68.0";

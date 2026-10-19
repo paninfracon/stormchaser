@@ -6,8 +6,8 @@ use std::env::var;
 use std::sync::Arc;
 use std::time::Duration;
 use stormchaser_engine::handler;
-use stormchaser_model::auth::OpaClient;
 use stormchaser_model::RunId;
+use stormchaser_opa::OpaClient;
 use tokio::time::sleep;
 
 use stormchaser_tls::TlsConfig;

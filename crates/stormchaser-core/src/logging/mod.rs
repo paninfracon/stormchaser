@@ -4,14 +4,14 @@ pub mod elasticsearch;
 pub mod loki;
 
 #[cfg(not(target_arch = "wasm32"))]
-use crate::id::*;
-#[cfg(not(target_arch = "wasm32"))]
 use anyhow::Result;
 #[cfg(not(target_arch = "wasm32"))]
 use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 #[cfg(not(target_arch = "wasm32"))]
 use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
 use serde::{Deserialize, Serialize};
+#[cfg(not(target_arch = "wasm32"))]
+use stormchaser_model::id::*;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::sync::mpsc;
 

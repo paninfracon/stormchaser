@@ -12,10 +12,10 @@ use std::sync::Arc;
 use stormchaser_engine::engine_instance::ENGINE_ID;
 use stormchaser_engine::handler;
 use stormchaser_engine::workers::fail_lost_engine_steps;
-use stormchaser_model::auth::OpaClient;
 use stormchaser_model::events::StepFailedEvent;
 use stormchaser_model::step::StepStatus;
 use stormchaser_model::{RunId, StepInstanceId};
+use stormchaser_opa::OpaClient;
 use uuid::Uuid;
 
 use stormchaser_engine::engine_instance::LOST_AFTER;

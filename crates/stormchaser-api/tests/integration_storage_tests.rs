@@ -15,7 +15,7 @@ use stormchaser_api::{app, AppState, Claims, JWT_SECRET};
 use stormchaser_model::connections::ConnectionType;
 use stormchaser_model::step::StepStatus;
 use stormchaser_model::workflow::RunStatus;
-use stormchaser_model::OpaClient;
+use stormchaser_opa::OpaClient;
 use tower::ServiceExt;
 use uuid::Uuid;
 

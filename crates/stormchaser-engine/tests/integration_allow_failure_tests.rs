@@ -7,11 +7,11 @@ use common::{delete_run, nats, setup_db, tls_reloader};
 use serde_json::json;
 use std::sync::Arc;
 use stormchaser_engine::handler;
-use stormchaser_model::auth::OpaClient;
 use stormchaser_model::events::{StepCompletedEvent, StepFailedEvent};
 use stormchaser_model::step::StepStatus;
 use stormchaser_model::workflow::RunStatus;
 use stormchaser_model::{RunId, StepInstanceId};
+use stormchaser_opa::OpaClient;
 
 const RUNNER: &str = "test-allow-failure-runner";
 

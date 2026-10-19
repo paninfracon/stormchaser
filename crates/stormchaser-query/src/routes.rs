@@ -150,7 +150,7 @@ workflow "hydration-test" {
             .ok()?;
         let state = AppState {
             pool: pool.clone(),
-            opa: Arc::new(stormchaser_model::OpaClient::new(None, None)),
+            opa: Arc::new(stormchaser_opa::OpaClient::new(None, None)),
             oidc_config: None,
             jwks: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         };

@@ -93,14 +93,14 @@ The same diagram is in `architecture.mmd`.
 | :--- | :--- |
 | `stormchaser-api` | HTTP API: runs, approvals, webhooks, cron triggers, connections, logs. |
 | `stormchaser-engine` | Orchestration engine: resolves runs, schedules and dispatches steps, runs built-in steps, background workers. |
-| `stormchaser-core` | Code the API, the engine and the query service share, so none depends on another: HTTP service settings and start-up, token checks and the policy middleware, object authorization, the Git cache, input queries and the jq sandbox, approval links, the outbox inserts. |
+| `stormchaser-core` | Code the API, the engine and the query service share, so none depends on another: HTTP service settings and start-up, Postgres TLS, migrations, the log backends, the SSRF guard, token checks and the policy middleware, object authorization, the Git cache, input queries and the jq sandbox, approval links, the outbox inserts. |
 | `stormchaser-runner-docker`, `stormchaser-runner-k8s` | Pull tasks from NATS and run them as containers or Kubernetes Jobs. |
 | `stormchaser-agent` | Runs beside a step to park and unpark storage and push artifacts. |
 | `stormchaser-query` | Hydrates run forms from a workflow's schema and queries, read from Git. |
 | `stormchaser-cli`, `stormchaser-tui`, `stormchaser-web` | Clients. |
 | `stormchaser-dsl` | HCL parser for `.storm` workflows. |
-| `stormchaser-model` | Shared types (runs, steps, events, DSL AST) and shared client code: NATS subjects and publishing, Postgres TLS, log backends, the policy client. On native targets it depends on `tokio`, `sqlx`, `async-nats` and `reqwest`. |
-| `stormchaser-opa` | Policy client that evaluates a WASM policy, the shipped one by default. |
+| `stormchaser-model` | Shared types (runs, steps, events, DSL AST), plus the NATS helpers and runner identity code the services and runners share. On native targets it depends on `tokio`, `sqlx` and `async-nats`. |
+| `stormchaser-opa` | The policy client (`OpaClient`, `OpaAuthorizer`): asks OPA over HTTP, or evaluates a WASM policy, the shipped one by default. |
 | `stormchaser-tls` | Certificate loading and reload. |
 
 ## Triggering & Scheduling

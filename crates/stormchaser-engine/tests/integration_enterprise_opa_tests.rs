@@ -2,8 +2,9 @@ use serde_json::json;
 use std::net::TcpListener;
 use std::process::Command;
 use std::time::Duration;
-use stormchaser_model::auth::{EngineOpaContext, OpaClient};
+use stormchaser_model::auth::EngineOpaContext;
 use stormchaser_model::RunId;
+use stormchaser_opa::OpaClient;
 
 /// Pinned OPA image used by integration tests.  Update this constant (and re-run
 /// the tests locally) when upgrading OPA to ensure CI remains reproducible.

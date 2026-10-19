@@ -7,8 +7,7 @@ use serde_json::Value;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
-use stormchaser_model::auth;
-use stormchaser_model::LogBackend;
+use stormchaser_core::LogBackend;
 use stormchaser_tls::TlsReloader;
 use uuid::Uuid;
 
@@ -107,7 +106,7 @@ async fn handle_run_events(
     message: async_nats::jetstream::message::Message,
     pool: sqlx::PgPool,
     git_cache: Arc<git_cache::GitCache>,
-    opa_client: Arc<auth::OpaClient>,
+    opa_client: Arc<stormchaser_opa::OpaClient>,
     nats_client: async_nats::Client,
     tls_reloader: Arc<TlsReloader>,
 ) {
@@ -310,7 +309,7 @@ pub async fn handle_message(
     message: async_nats::jetstream::message::Message,
     pool: sqlx::PgPool,
     git_cache: Arc<git_cache::GitCache>,
-    opa_client: Arc<auth::OpaClient>,
+    opa_client: Arc<stormchaser_opa::OpaClient>,
     nats_client: async_nats::Client,
     tls_reloader: Arc<TlsReloader>,
     log_backend: Arc<Option<LogBackend>>,

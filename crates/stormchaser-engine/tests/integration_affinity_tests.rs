@@ -9,8 +9,8 @@ use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
 use stormchaser_engine::handler;
-use stormchaser_model::auth::OpaClient;
 use stormchaser_model::RunId;
+use stormchaser_opa::OpaClient;
 
 /// A shared-affinity group's later steps go to the runner its first step landed on, on
 /// the subject for that runner's kind; a container step can land on a Kubernetes runner.

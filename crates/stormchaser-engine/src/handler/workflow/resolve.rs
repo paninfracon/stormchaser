@@ -6,9 +6,10 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde_json::Value;
 use sqlx::PgPool;
 use std::collections::HashMap;
-use stormchaser_model::auth::{EngineOpaContext, OpaClient};
+use stormchaser_model::auth::EngineOpaContext;
 use stormchaser_model::dsl::Workflow;
 use stormchaser_model::RunId;
+use stormchaser_opa::OpaClient;
 use tracing::debug;
 
 /// Asks policy whether the run may go ahead. Before any query runs, so that a denied

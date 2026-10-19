@@ -10,18 +10,15 @@ Any time a domain name which is not `example.com` needs to be used in tests etc 
 
 The project is divided into specialized crates to ensure a clear separation of concerns. Each crate's internal modules have specific roles. Code more than one service needs lives in `stormchaser-core`: the API, the engine and the query service depend on it and never on each other. Keep it that way: when one service needs another's code, move that code into `stormchaser-core`.
 
-- **`stormchaser-model`**: Shared domain types, plus the infrastructure code every service needs. The aim was a pure types crate; it is not one. Outside `wasm32` it depends on `tokio`, `sqlx` (Postgres), `async-nats`, `reqwest`, `oci-distribution` and `rustls`, and contains I/O. Keep new execution logic out of it; put shared types and small shared helpers here.
+- **`stormchaser-model`**: Shared domain types, plus the infrastructure code every service needs. The aim is a pure types crate; it is not one yet. Server-only I/O (database TLS, log backends, the SSRF guard, the policy client) has moved out to `stormchaser-core` and `stormchaser-opa`; the NATS helpers and runner identity code that runners share are still here, outside `wasm32`. Keep new I/O and execution logic out of it; put shared types and small shared helpers here.
   - `workflow.rs` / `step.rs`: Run and step instance models and their status enums.
   - `dsl/`: Types that map from `*.storm` HCL definitions (`workflow.rs`, `step.rs`, `specs.rs` for built-in step specs, `connections.rs`, `limits.rs` for parser limits).
-  - `auth.rs`: OPA input contexts, identity claims and authorization types.
+  - `auth.rs`: OPA input contexts and identity claims.
   - `connections.rs`: Connection, storage backend and artifact registry models.
   - `event.rs` / `events.rs` / `event_rules.rs`: CloudEvents envelopes, NATS event payloads and event rules.
   - `nats.rs`: NATS connection and JetStream setup shared by the services.
   - `outbox.rs`: Outbox models for publishing events in the same transaction as the state change.
-  - `db_tls.rs`: Postgres connection options, including `STORMCHASER_DB_SSL` and the pool size.
-  - `net_guard.rs`: SSRF protection for outbound HTTP to user-supplied URLs.
   - `hcl_eval.rs` / `hcl_guard.rs`: Shared HCL expression helpers, and the nesting limits that keep workflow HCL from overflowing the stack.
-  - `logging/`: Loki and Elasticsearch log backends.
   - `runner.rs` / `runner_auth.rs`: Runner models, and runner identity on NATS messages.
   - `schema_gen.rs` / `schema_cache.rs`: JSON Schema generation for the DSL, and the OCI-backed event schema cache.
   - `id.rs`: Typed ids (`RunId`, `StepInstanceId`, ...).
@@ -60,7 +57,8 @@ The project is divided into specialized crates to ensure a clear separation of c
   - `git_cache.rs` / `git_source.rs`: Cloning and caching Git sources, and reading a workflow file through a Git connection.
   - `query.rs` / `jq_sandbox.rs`: Input queries (SQL, REST, AWS Cloud Control, mock), and jq programs run in a separate, limited worker process.
   - `hitl.rs`: Sealing and opening approval links.
-  - `db/`: The outbox inserts and the lookups more than one service makes.
+  - `db/`: Migrations (`migrations.rs`), the outbox inserts and the lookups more than one service makes.
+  - `db_tls.rs` / `net_guard.rs` / `logging/`: Postgres connection options (`STORMCHASER_DB_SSL`, pool size), SSRF protection for outbound HTTP, and the Loki and Elasticsearch log backends.
 
 - **`stormchaser-query`**: Separate service for workflow input schema hydration and dynamic option resolution.
   - `main.rs`: Axum server exposing `/api/v1/schema/hydrate` and `/api/v1/schema/hydrate-direct`. It uses the same configuration, token checks and policy middleware as the API, from `stormchaser-core`.
@@ -87,6 +85,7 @@ The project is divided into specialized crates to ensure a clear separation of c
 - **`stormchaser-web`**: Leptos web UI. The `ssr` feature builds the Axum server, which proxies to the API; the `hydrate` feature builds the WASM frontend. Build it with `cargo leptos`.
 
 - **`stormchaser-opa`**: Shared Open Policy Agent integration.
+  - `client.rs`: `OpaClient` and the `OpaAuthorizer` trait services ask policy questions through, over HTTP or of a WASM policy.
   - `lib.rs`: Evaluates OPA policies compiled to WASM, chooses the policy a service enforces (`OPA_WASM_PATH`, else `OPA_URL`, else the built-in copy of `deploy/opa/policy.rego` in `policy/stormchaser.wasm`, rebuilt with `scripts/build-opa-policy.sh`), and loads policy data from `OPA_DATA_PATH`.
 
 - **`stormchaser-tls`**: Shared TLS configuration.

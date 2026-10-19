@@ -5,8 +5,8 @@ use futures::StreamExt;
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
-use stormchaser_model::auth::OpaClient;
-use stormchaser_model::LogBackend;
+use stormchaser_core::LogBackend;
+use stormchaser_opa::OpaClient;
 use tokio::time::sleep;
 use tracing::info;
 

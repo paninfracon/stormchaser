@@ -1,5 +1,6 @@
 use serde_json::json;
-use stormchaser_model::{logging::LogBackend, StepInstanceId};
+use stormchaser_core::logging::LogBackend;
+use stormchaser_model::StepInstanceId;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

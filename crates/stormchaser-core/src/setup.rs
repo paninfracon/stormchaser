@@ -3,12 +3,12 @@
 
 use crate::auth::jwks::{fetch_jwks, JwksCache, OidcConfig};
 use crate::config::Config;
+use crate::LogBackend;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{ConnectOptions, PgPool};
 use std::sync::Arc;
 use std::time::Duration;
-use stormchaser_model::auth::OpaAuthorizer;
-use stormchaser_model::LogBackend;
+use stormchaser_opa::OpaAuthorizer;
 use stormchaser_opa::PolicyConfig;
 use stormchaser_tls::{TlsConfig, TlsReloader};
 
@@ -25,16 +25,16 @@ pub async fn tls_reloader(config: &Config) -> anyhow::Result<Arc<TlsReloader>> {
 
 /// The database pool, connected with TLS as `STORMCHASER_DB_SSL` and `DATABASE_URL` say.
 pub async fn connect_database(config: &Config) -> anyhow::Result<PgPool> {
-    let mut db_options = stormchaser_model::db_tls::connect_options(
+    let mut db_options = crate::db_tls::connect_options(
         &config.database_url,
-        &stormchaser_model::db_tls::DbTls {
+        &crate::db_tls::DbTls {
             setting: config.db_ssl,
             ca: config.tls_ca_cert_path.as_deref(),
             cert: &config.tls_cert_path,
             key: &config.tls_key_path,
         },
     )?;
-    if !stormchaser_model::db_tls::is_verified(&db_options) {
+    if !crate::db_tls::is_verified(&db_options) {
         tracing::warn!(
             "The database connection is not verified TLS, because STORMCHASER_DB_SSL=false \
              or DATABASE_URL asks for a weaker sslmode. Only do this where the database \
@@ -47,7 +47,7 @@ pub async fn connect_database(config: &Config) -> anyhow::Result<PgPool> {
         .log_slow_statements(log::LevelFilter::Warn, Duration::from_secs(1));
 
     Ok(PgPoolOptions::new()
-        .max_connections(stormchaser_model::db_tls::max_connections()?)
+        .max_connections(crate::db_tls::max_connections()?)
         .connect_with(db_options)
         .await?)
 }
