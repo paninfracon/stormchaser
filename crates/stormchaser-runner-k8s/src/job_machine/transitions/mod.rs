@@ -11,6 +11,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::env::var;
 use std::time::Duration;
+use stormchaser_runner_core::markers;
 use tokio::time::sleep;
 use tracing::{error, info, warn};
 
@@ -476,16 +477,10 @@ impl K8sJobMachine<state::Running> {
                 )
                 .await?;
 
-            for line in logs.lines() {
-                if line.contains("Parked storage hashes:") {
-                    if let Some(json_start) = line.find('{') {
-                        let json_part = &line[json_start..];
-                        if let Ok(hashes) = serde_json::from_str(json_part) {
-                            return Ok(Some(hashes));
-                        }
-                    }
-                }
-            }
+            return Ok(markers::find_marked_json(
+                logs.lines(),
+                markers::PARKED_STORAGE_HASHES,
+            ));
         }
         Ok(None)
     }
@@ -512,16 +507,10 @@ impl K8sJobMachine<state::Running> {
                 )
                 .await?;
 
-            for line in logs.lines() {
-                if line.contains("Parked artifacts:") {
-                    if let Some(json_start) = line.find('{') {
-                        let json_part = &line[json_start..];
-                        if let Ok(meta) = serde_json::from_str(json_part) {
-                            return Ok(Some(meta));
-                        }
-                    }
-                }
-            }
+            return Ok(markers::find_marked_json(
+                logs.lines(),
+                markers::PARKED_ARTIFACTS,
+            ));
         }
         Ok(None)
     }
@@ -547,16 +536,10 @@ impl K8sJobMachine<state::Running> {
                 )
                 .await?;
 
-            for line in logs.lines() {
-                if line.contains("Collected test reports JSON:") {
-                    if let Some(json_start) = line.find('{') {
-                        let json_part = &line[json_start..];
-                        if let Ok(reports) = serde_json::from_str(json_part) {
-                            return Ok(Some(reports));
-                        }
-                    }
-                }
-            }
+            return Ok(markers::find_marked_json(
+                logs.lines(),
+                markers::COLLECTED_TEST_REPORTS,
+            ));
         }
         Ok(None)
     }

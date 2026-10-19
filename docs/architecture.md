@@ -95,6 +95,7 @@ The same diagram is in `architecture.mmd`.
 | `stormchaser-engine` | Orchestration engine: resolves runs, schedules and dispatches steps, runs built-in steps, background workers. |
 | `stormchaser-core` | Code the API, the engine and the query service share, so none depends on another: HTTP service settings and start-up, Postgres TLS, migrations, the log backends, the SSRF guard, token checks and the policy middleware, object authorization, the Git cache, input queries and the jq sandbox, approval links, the outbox inserts. |
 | `stormchaser-runner-docker`, `stormchaser-runner-k8s` | Pull tasks from NATS and run them as containers or Kubernetes Jobs. |
+| `stormchaser-runner-core` | What the runners share: the runner's life (NATS, session key, registration, orphan adoption, heartbeat, task and cancellation consumers, shutdown) around a `Backend` trait each runner implements, the encryption of the step definitions kept on workloads, and reading the agent's marked log lines. |
 | `stormchaser-agent` | Runs beside a step to park and unpark storage and push artifacts. |
 | `stormchaser-query` | Hydrates run forms from a workflow's schema and queries, read from Git. |
 | `stormchaser-cli`, `stormchaser-tui`, `stormchaser-web` | Clients. |

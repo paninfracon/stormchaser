@@ -65,8 +65,9 @@ The project is divided into specialized crates to ensure a clear separation of c
   - `hydration.rs`: Runs a workflow's input queries (SQL, API, AWS Cloud Control) as the calling user, after a policy check on the connection.
 
 - **`stormchaser-runner-*`**: Environment-specific executors.
-  - `stormchaser-runner-docker`: `container_machine/` is a typestate machine for Docker container lifecycles; `handler/` handles tasks, cancellation and orphaned containers; `reaper.rs` cleans up.
-  - `stormchaser-runner-k8s`: `job_machine/` is a typestate machine for Kubernetes Job lifecycles; `task/`, `scanner.rs`, `cancel.rs` and `reaper.rs` handle tasks, adoption and cleanup.
+  - `stormchaser-runner-core`: the runner's life around the `Backend` trait (`runner.rs`), state encryption (`crypto.rs`) and the agent's marked log lines (`markers.rs`). Anything both runners do belongs here; a runner implements only how it runs, adopts, cancels and reaps workloads.
+  - `stormchaser-runner-docker`: `backend.rs` implements `Backend`; `container_machine/` is a typestate machine for Docker container lifecycles; `handler/` handles tasks, cancellation and orphaned containers; `reaper.rs` cleans up.
+  - `stormchaser-runner-k8s`: `backend.rs` implements `Backend`; `job_machine/` is a typestate machine for Kubernetes Job lifecycles; `task/`, `scanner.rs`, `cancel.rs` and `reaper.rs` handle tasks, adoption and cleanup.
 
 - **`stormchaser-agent`**: Runner-side helper that runs inside step containers or as a sidecar.
   - `main.rs`: Subcommands `run` (runs the step's command, then parks storage), `park` (waits for the step container, then uploads storage and artifacts) and `unpark` (downloads and extracts storage with hash verification).
@@ -108,7 +109,7 @@ The project is divided into specialized crates to ensure a clear separation of c
 
 - **Low entrophy**: Make changes in small, well defined chunks, avoid changing entire files. Aggressively run the compiler to catch errors early.
 - **The 500-Line Rule**: Any file exceeding 500 lines is considered "at capacity." Before adding new logic to such a file, you MUST refactor it into logical sub-modules. (Exception: Grafana dashboard JSON files are exempt from this rule). About 25 source files are over the limit today (for example `runner-docker/src/container_machine/transitions/running.rs`, `engine/src/db/steps/instances.rs`, `api/src/routes/webhook.rs`); split them before adding to them.
-- **Wiring vs. Logic**: `main.rs` and `lib.rs` must act strictly as wiring facades (configuration, DI, route definitions). All business logic MUST reside in sub-modules. Some do not yet: `stormchaser-web/src/main.rs` holds its proxy and auth handlers, and the agent's and runners' `main.rs` hold command logic.
+- **Wiring vs. Logic**: `main.rs` and `lib.rs` must act strictly as wiring facades (configuration, DI, route definitions). All business logic MUST reside in sub-modules. Some do not yet: `stormchaser-web/src/main.rs` holds its proxy and auth handlers, and the agent's `main.rs` holds command logic.
 - **Domain Isolation**: Every new functional domain (e.g., a new integration, backend type, or API category) MUST start in its own file from inception.
 - **Structure First**: When writing new code write method stubs first then incrementally complete the methods.
 - **Idiomatic Rust**: Follow `clippy` recommendations. Do not arbitrarily disable clippy checks without confirming with the user.

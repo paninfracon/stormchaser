@@ -1,0 +1,27 @@
+[package]
+publish = true
+name = "stormchaser-runner-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+stormchaser-model = { workspace = true }
+aes-gcm = { workspace = true }
+anyhow = { workspace = true }
+async-nats = { workspace = true }
+async-trait = { workspace = true }
+axum = { workspace = true }
+base64 = { workspace = true }
+chrono = { workspace = true }
+cloudevents-sdk = "0.9.0"
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }

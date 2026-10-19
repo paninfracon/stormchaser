@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use stormchaser_model::dsl::Step;
 
 /// Cryptographic utilities for job state.
-pub mod crypto;
+pub use stormchaser_runner_core::crypto;
 /// Kubernetes utility functions for job management.
 pub mod k8s_utils;
 /// State transitions for the job machine.

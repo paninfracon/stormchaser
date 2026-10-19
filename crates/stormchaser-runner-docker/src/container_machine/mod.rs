@@ -7,7 +7,7 @@ use stormchaser_model::dsl::Step;
 /// Stopping the containers of a cancelled run.
 pub mod cancel;
 /// Cryptographic utilities for container state encryption.
-pub mod crypto;
+pub use stormchaser_runner_core::crypto;
 /// Docker-specific helper utilities.
 pub mod docker_utils;
 /// State machine transitions for containers.

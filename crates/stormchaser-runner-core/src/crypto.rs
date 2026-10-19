@@ -1,4 +1,4 @@
-//! Cryptographic utilities for job state.
+//! Encryption of the step definitions runners keep on their containers and Jobs.
 //!
 //! Provides functions to encrypt and decrypt sensitive state data.
 

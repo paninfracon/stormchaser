@@ -9,6 +9,7 @@ members = [
     "crates/stormchaser-model",
     "crates/stormchaser-runner-k8s",
     "crates/stormchaser-runner-docker",
+    "crates/stormchaser-runner-core",
     "crates/stormchaser-agent",
     "crates/stormchaser-tls",
     "crates/stormchaser-opa",
@@ -28,6 +29,7 @@ rust-version = "1.96"
 stormchaser-model = { version = "1.5.1", path = "crates/stormchaser-model" }
 stormchaser-dsl = { version = "1.5.1", path = "crates/stormchaser-dsl" }
 stormchaser-core = { version = "1.5.1", path = "crates/stormchaser-core" }
+stormchaser-runner-core = { version = "1.5.1", path = "crates/stormchaser-runner-core" }
 stormchaser-tls = { version = "1.5.1", path = "crates/stormchaser-tls" }
 
 tokio = { version = "1", features = ["full"] }

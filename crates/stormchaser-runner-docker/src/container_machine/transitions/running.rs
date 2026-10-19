@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 use stormchaser_model::dsl::CommonContainerSpec;
 use stormchaser_model::nats::{request_artifact_auth, HELPER_REGISTRY_CONFIG_PATH};
+use stormchaser_runner_core::markers;
 use tokio::time::sleep;
 use tracing::{error, info};
 use uuid::Uuid;
@@ -402,14 +403,9 @@ impl DockerContainerMachine<state::Running> {
 
         while let Some(log_result) = logs.next().await {
             if let Ok(output) = log_result {
-                let line = output.to_string();
-                if line.contains(prefix) {
-                    if let Some(json_start) = line.find('{') {
-                        let json_part = &line[json_start..];
-                        if let Ok(data) = serde_json::from_str(json_part) {
-                            return Ok(Some(data));
-                        }
-                    }
+                let chunk = output.to_string();
+                if let Some(data) = markers::find_marked_json(chunk.lines(), prefix) {
+                    return Ok(Some(data));
                 }
             }
         }
@@ -421,7 +417,7 @@ impl DockerContainerMachine<state::Running> {
         &self,
         container_name: &str,
     ) -> Result<Option<HashMap<String, Value>>> {
-        self.parse_log_json(container_name, "Parked artifacts:")
+        self.parse_log_json(container_name, markers::PARKED_ARTIFACTS)
             .await
     }
 
@@ -429,12 +425,12 @@ impl DockerContainerMachine<state::Running> {
         &self,
         container_name: &str,
     ) -> Result<Option<HashMap<String, String>>> {
-        self.parse_log_json(container_name, "Parked storage hashes:")
+        self.parse_log_json(container_name, markers::PARKED_STORAGE_HASHES)
             .await
     }
 
     async fn get_test_reports(&self, container_name: &str) -> Result<Option<Value>> {
-        self.parse_log_json(container_name, "Collected test reports JSON:")
+        self.parse_log_json(container_name, markers::COLLECTED_TEST_REPORTS)
             .await
     }
 
