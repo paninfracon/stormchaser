@@ -19,6 +19,19 @@ async fn run() -> anyhow::Result<()> {
 
     let config = Config::from_env(std::env::vars())?;
 
+    // `stormchaser-engine migrate` applies the database migrations and exits. It is the
+    // one thing that applies them; the services wait for it.
+    if std::env::args().nth(1).as_deref() == Some("migrate") {
+        tracing_subscriber::fmt()
+            .with_env_filter(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+            )
+            .init();
+        let pool = stormchaser_engine::setup::connect_database(&config).await?;
+        return stormchaser_core::db::migrations::run(&pool).await;
+    }
+
     init_telemetry(&config.rust_log)?;
 
     let result = run_engine(config).await;

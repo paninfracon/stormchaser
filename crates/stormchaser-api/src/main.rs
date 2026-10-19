@@ -1,4 +1,3 @@
-use sqlx::migrate;
 use std::env;
 use std::net::SocketAddr;
 use stormchaser_api::{
@@ -35,8 +34,7 @@ pub async fn run_server(config: Config) -> anyhow::Result<()> {
     let tls = stormchaser_api::listener::tls_from_config(&config).await?;
     let state = build_app_state(config).await?;
 
-    tracing::info!("Running database migrations...");
-    migrate!("./migrations").run(&state.pool).await?;
+    stormchaser_core::db::migrations::prepare(&state.pool).await?;
 
     let app = app(state);
 

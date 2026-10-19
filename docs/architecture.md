@@ -212,9 +212,13 @@ Schedules are managed through the API (`/api/v1/cron-workflows`); a workflow fil
   (`step_instances`, `step_outputs`, test reports), runners (`runners`,
   `runner_sessions`), engines (`engine_instances`), the outbox (`outbox_events`),
   task message positions (`dispatched_task_messages`), configuration (connections,
-  webhooks, event rules, cron schedules) and the `archived_*` tables. The API and the
-  engine both run migrations at start-up. `STORMCHASER_DB_MAX_CONNECTIONS` (default
-  10) sizes each service's pool.
+  webhooks, event rules, cron schedules) and the `archived_*` tables. Migrations are
+  applied by one command, `stormchaser-engine migrate`: the Helm chart runs it in an
+  init container of the engine pod, and compose in a one-shot `migrate` service. The
+  API and the engine wait at start-up until the schema has every migration they were
+  built with (`STORMCHASER_SCHEMA_WAIT`, 5 minutes by default), or apply them
+  themselves with `STORMCHASER_MIGRATE_ON_START=true`. `STORMCHASER_DB_MAX_CONNECTIONS`
+  (default 10) sizes each service's pool.
 * **Policy (OPA)**: the API asks policy about every request, with the caller's
   verified identity and, for runs, connections, webhooks, event rules and cron
   schedules, the object's owner. The engine asks it before a run is resolved

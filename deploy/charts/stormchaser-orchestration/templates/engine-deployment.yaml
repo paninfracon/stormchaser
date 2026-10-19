@@ -31,6 +31,35 @@ spec:
       automountServiceAccountToken: false
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      # The one place migrations are applied. The API and the engine wait at start-up
+      # until the schema is current (STORMCHASER_SCHEMA_WAIT, 5 minutes by default).
+      initContainers:
+        - name: migrate
+          image: "{{ .Values.engine.image.repository }}:{{ .Values.engine.image.tag | default (printf "v%s" .Chart.AppVersion) }}"
+          imagePullPolicy: {{ .Values.engine.image.pullPolicy }}
+          command: ["/usr/local/bin/stormchaser-engine", "migrate"]
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            {{- include "stormchaser-orchestration.databaseUrlEnv" . | nindent 12 }}
+            - name: STORMCHASER_DB_SSL
+              value: {{ .Values.global.database.ssl | quote }}
+            - name: RUST_LOG
+              value: "info"
+            {{- if .Values.global.tls.enabled }}
+            - name: TLS_CA_CERT_PATH
+              value: {{ .Values.global.tls.caCertPath | quote }}
+            - name: TLS_CERT_PATH
+              value: {{ .Values.global.tls.certPath | quote }}
+            - name: TLS_KEY_PATH
+              value: {{ .Values.global.tls.keyPath | quote }}
+            {{- end }}
+          {{- if .Values.global.tls.enabled }}
+          volumeMounts:
+            - name: certs
+              mountPath: /etc/stormchaser/certs
+              readOnly: true
+          {{- end }}
       containers:
         - name: engine
           image: "{{ .Values.engine.image.repository }}:{{ .Values.engine.image.tag | default (printf "v%s" .Chart.AppVersion) }}"

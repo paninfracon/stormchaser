@@ -2,6 +2,8 @@
 
 /// Connection lookups.
 pub mod connections;
+/// The database schema: applying migrations, and waiting for them.
+pub mod migrations;
 /// The transactional outbox: events written in a state change's own transaction.
 pub mod outbox;
 /// Runner session keys.

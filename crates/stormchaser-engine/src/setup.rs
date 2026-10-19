@@ -20,7 +20,15 @@ pub async fn setup_tls(config: &Config) -> anyhow::Result<Arc<TlsReloader>> {
     Ok(Arc::new(TlsReloader::new(tls_config).await?))
 }
 
+/// The database pool, once the schema is ready (see [`stormchaser_core::db::migrations::prepare`]).
 pub async fn setup_database(config: &Config) -> anyhow::Result<sqlx::PgPool> {
+    let pool = connect_database(config).await?;
+    stormchaser_core::db::migrations::prepare(&pool).await?;
+    Ok(pool)
+}
+
+/// The database pool, with nothing done to the schema.
+pub async fn connect_database(config: &Config) -> anyhow::Result<sqlx::PgPool> {
     let mut db_options = stormchaser_model::db_tls::connect_options(
         &config.database_url,
         &stormchaser_model::db_tls::DbTls {
@@ -46,10 +54,6 @@ pub async fn setup_database(config: &Config) -> anyhow::Result<sqlx::PgPool> {
         .max_connections(stormchaser_model::db_tls::max_connections()?)
         .connect_with(db_options)
         .await?;
-
-    tracing::info!("Running database migrations...");
-    sqlx::migrate!("./migrations").run(&pool).await?;
-    tracing::info!("Database migrations completed successfully");
 
     Ok(pool)
 }

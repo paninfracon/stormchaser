@@ -163,6 +163,31 @@ services:
       - ${STORMCHASER_CERT_DIR:-./tests/certs}:/src:ro
       - certs:/certs
 
+  # Applies the database migrations, then exits. The API and the engine wait for the
+  # schema at start-up, and start once this has finished.
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BINARY: stormchaser-engine
+    command: ["/usr/local/bin/stormchaser-engine", "migrate"]
+    environment:
+      DATABASE_URL: 'postgres://stormchaser:${STORMCHASER_DEV_PASSWORD?Error: STORMCHASER_DEV_PASSWORD is not set}@postgres:5432/stormchaser'
+      # No TLS on this local stack; see orchestration-engine
+      STORMCHASER_DB_SSL: 'false'
+      RUST_LOG: ${RUST_LOG:-info}
+      TLS_CA_CERT_PATH: /etc/engine/certs/ca.crt
+      TLS_CERT_PATH: /etc/engine/certs/tls.crt
+      TLS_KEY_PATH: /etc/engine/certs/tls.key
+    volumes:
+      - certs:/etc/engine/certs:ro
+    depends_on:
+      certs:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+
   orchestration-engine:
     build:
       context: .
@@ -198,6 +223,8 @@ services:
       - git-cache:/tmp/stormchaser/git-cache
       - certs:/etc/engine/certs:ro
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       certs:
         condition: service_completed_successfully
       postgres:
@@ -240,6 +267,8 @@ services:
     volumes:
       - certs:/etc/engine/certs:ro
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       certs:
         condition: service_completed_successfully
       postgres:
@@ -300,6 +329,8 @@ services:
     volumes:
       - certs:/etc/engine/certs:ro
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       certs:
         condition: service_completed_successfully
       postgres:
