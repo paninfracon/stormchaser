@@ -32,7 +32,7 @@ pub enum ConnectionCommands {
         aws_assume_role_arn: Option<String>,
         /// Optional encrypted credentials (password/token)
         #[arg(long)]
-        encrypted_credentials: Option<String>,
+        credentials: Option<String>,
         /// Validate the connection before creating it
         #[arg(long)]
         test: bool,
@@ -56,7 +56,7 @@ pub enum ConnectionCommands {
         aws_assume_role_arn: Option<String>,
         /// Optional encrypted credentials (password/token)
         #[arg(long)]
-        encrypted_credentials: Option<String>,
+        credentials: Option<String>,
     },
     /// Delete a connection
     Delete { id: stormchaser_model::ConnectionId },
@@ -96,7 +96,7 @@ pub async fn handle(client: &Client, command: ConnectionCommands) -> Result<()> 
             default_sfs,
             description,
             aws_assume_role_arn,
-            encrypted_credentials,
+            credentials,
             test,
         } => {
             let config = read_config(&config)?;
@@ -134,7 +134,7 @@ pub async fn handle(client: &Client, command: ConnectionCommands) -> Result<()> 
                     connection_type,
                     config,
                     aws_assume_role_arn,
-                    encrypted_credentials,
+                    credentials,
                     is_default_sfs: default_sfs,
                 })
                 .await?;
@@ -150,7 +150,7 @@ pub async fn handle(client: &Client, command: ConnectionCommands) -> Result<()> 
             default_sfs,
             description,
             aws_assume_role_arn,
-            encrypted_credentials,
+            credentials,
         } => {
             let config = config.as_deref().map(read_config).transpose()?;
             client
@@ -162,7 +162,7 @@ pub async fn handle(client: &Client, command: ConnectionCommands) -> Result<()> 
                         connection_type: None,
                         config,
                         aws_assume_role_arn,
-                        encrypted_credentials,
+                        credentials,
                         is_default_sfs: default_sfs,
                     },
                 )
@@ -252,7 +252,7 @@ mod tests {
             default_sfs: true,
             description: None,
             aws_assume_role_arn: None,
-            encrypted_credentials: None,
+            credentials: None,
             test: false,
         };
 
@@ -324,7 +324,7 @@ mod tests {
             default_sfs: false,
             description: None,
             aws_assume_role_arn: None,
-            encrypted_credentials: None,
+            credentials: None,
             test: true,
         };
 

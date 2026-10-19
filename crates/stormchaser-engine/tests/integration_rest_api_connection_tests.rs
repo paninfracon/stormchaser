@@ -52,7 +52,7 @@ async fn test_rest_api_with_httpapi_connection() {
     let backend_name = format!("test-httpapi-{}", connection_id);
     sqlx::query(
         r#"
-        INSERT INTO connections (id, name, connection_type, config, encrypted_credentials, is_default_sfs)
+        INSERT INTO connections (id, name, connection_type, config, credentials, is_default_sfs)
         VALUES ($1, $2, 'http_api', $3, $4, FALSE)
         "#,
     )

@@ -51,7 +51,7 @@ fn render_connections_tab() {
         description: Some("Test SFS".to_string()),
         connection_type: ConnectionType::S3,
         is_default_sfs: true,
-        encrypted_credentials: None,
+        credentials: None,
         config: serde_json::json!({"path": "/tmp/sfs"}),
         aws_assume_role_arn: None,
         ca_cert: None,

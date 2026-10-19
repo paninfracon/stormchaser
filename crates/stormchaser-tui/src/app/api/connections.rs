@@ -137,7 +137,7 @@ impl<'a> App<'a> {
                 connection_type: Some(connection_type),
                 config: Some(config),
                 aws_assume_role_arn,
-                encrypted_credentials: None,
+                credentials: None,
                 is_default_sfs: Some(self.connection_is_default),
             };
             self.api().update_connection(id, &request).await
@@ -148,7 +148,7 @@ impl<'a> App<'a> {
                 connection_type,
                 config,
                 aws_assume_role_arn,
-                encrypted_credentials: None,
+                credentials: None,
                 is_default_sfs: self.connection_is_default,
             };
             self.api().create_connection(&request).await.map(|_| ())
@@ -208,7 +208,7 @@ mod tests {
             config: json!({}),
             aws_assume_role_arn: None,
             is_default_sfs: true,
-            encrypted_credentials: None,
+            credentials: None,
             ca_cert: None,
             client_cert: None,
             client_key: None,
@@ -331,7 +331,7 @@ mod tests {
             config: json!({}),
             aws_assume_role_arn: None,
             is_default_sfs: true,
-            encrypted_credentials: None,
+            credentials: None,
             ca_cert: None,
             client_cert: None,
             client_key: None,

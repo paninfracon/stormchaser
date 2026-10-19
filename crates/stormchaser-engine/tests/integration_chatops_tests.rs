@@ -44,7 +44,7 @@ async fn test_slack_message_integration() {
     let backend_name = format!("test-slack-conn-{}", connection_id);
     sqlx::query(
         r#"
-        INSERT INTO connections (id, name, connection_type, config, encrypted_credentials, is_default_sfs)
+        INSERT INTO connections (id, name, connection_type, config, credentials, is_default_sfs)
         VALUES ($1, $2, 'http_api', $3, $4, FALSE)
         "#,
     )
@@ -162,7 +162,7 @@ async fn test_teams_message_integration() {
     let backend_name = format!("test-teams-conn-{}", connection_id);
     sqlx::query(
         r#"
-        INSERT INTO connections (id, name, connection_type, config, encrypted_credentials, is_default_sfs)
+        INSERT INTO connections (id, name, connection_type, config, credentials, is_default_sfs)
         VALUES ($1, $2, 'http_api', $3, $4, FALSE)
         "#,
     )

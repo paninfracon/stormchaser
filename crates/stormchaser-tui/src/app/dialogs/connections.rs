@@ -101,7 +101,7 @@ mod tests {
             description: Some("desc".to_string()),
             connection_type: ConnectionType::S3,
             is_default_sfs: true,
-            encrypted_credentials: None,
+            credentials: None,
             config: serde_json::json!({"region": "us-east-1"}),
             aws_assume_role_arn: None,
             ca_cert: None,

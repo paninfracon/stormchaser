@@ -368,8 +368,10 @@ pub struct CreateStorageBackendRequest {
     pub config: Value,
     /// Optional AWS role ARN.
     pub aws_assume_role_arn: Option<String>,
-    /// Optional encrypted credentials (password/token).
-    pub encrypted_credentials: Option<String>,
+    /// The connection's secret (a password or token).
+    /// Accepted under its old name, `encrypted_credentials`, too.
+    #[serde(alias = "encrypted_credentials")]
+    pub credentials: Option<String>,
     /// The is default sfs.
     pub is_default_sfs: bool,
 }
@@ -388,8 +390,10 @@ pub struct UpdateStorageBackendRequest {
     pub config: Option<Value>,
     /// Optional AWS role ARN. Set to an empty string to clear an existing ARN.
     pub aws_assume_role_arn: Option<String>,
-    /// Optional encrypted credentials (password/token). Set to an empty string to clear.
-    pub encrypted_credentials: Option<String>,
+    /// The connection's secret (a password or token). Set to an empty string to clear.
+    /// Accepted under its old name, `encrypted_credentials`, too.
+    #[serde(alias = "encrypted_credentials")]
+    pub credentials: Option<String>,
     /// The is default sfs.
     pub is_default_sfs: Option<bool>,
 }

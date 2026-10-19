@@ -86,7 +86,7 @@ async fn sessions_runs_and_schema() {
             connection_type: ConnectionType::Git,
             config: json!({ "repo_url": "https://github.com/paninfracon/stormchaser.git" }),
             aws_assume_role_arn: None,
-            encrypted_credentials: None,
+            credentials: None,
             is_default_sfs: false,
         })
         .await
@@ -148,7 +148,7 @@ async fn connections_webhooks_rules_and_cron_schedules() {
             connection_type: ConnectionType::Git,
             config: json!({ "repo_url": "https://github.com/paninfracon/stormchaser.git" }),
             aws_assume_role_arn: None,
-            encrypted_credentials: None,
+            credentials: None,
             is_default_sfs: false,
         })
         .await
@@ -167,7 +167,7 @@ async fn connections_webhooks_rules_and_cron_schedules() {
                 connection_type: None,
                 config: None,
                 aws_assume_role_arn: None,
-                encrypted_credentials: None,
+                credentials: None,
                 is_default_sfs: None,
             },
         )

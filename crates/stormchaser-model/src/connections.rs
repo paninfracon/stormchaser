@@ -43,8 +43,11 @@ pub struct Connection {
     pub connection_type: ConnectionType,
     /// JSON configuration specific to the connection type.
     pub config: Value,
-    /// Encrypted credentials (e.g. passwords, tokens).
-    pub encrypted_credentials: Option<String>,
+    /// The connection's secret (a password or token), stored as written: encryption at
+    /// rest is the database's.
+    /// Accepted under its old name, `encrypted_credentials`, too.
+    #[serde(alias = "encrypted_credentials")]
+    pub credentials: Option<String>,
     /// Optional AWS role ARN to assume via STS (primarily for S3).
     pub aws_assume_role_arn: Option<String>,
     /// Whether this connection is the default Stormchaser File System (SFS).

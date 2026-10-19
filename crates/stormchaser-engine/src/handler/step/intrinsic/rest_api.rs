@@ -91,8 +91,7 @@ fn apply_http_connection(
         // Keep legacy `url` support for existing HttpApi connections.
         .or_else(|| conn.config.get("url").and_then(|v| v.as_str()));
     let headers = conn.config.get("headers").and_then(|v| v.as_object());
-    let carries_credentials =
-        conn.encrypted_credentials.is_some() || headers.is_some_and(|h| !h.is_empty());
+    let carries_credentials = conn.credentials.is_some() || headers.is_some_and(|h| !h.is_empty());
 
     let lowered = spec.url.to_ascii_lowercase();
     let is_absolute = lowered.starts_with("http://") || lowered.starts_with("https://");
@@ -139,7 +138,7 @@ fn apply_http_connection(
             }
         }
     }
-    if let Some(auth_token) = &conn.encrypted_credentials {
+    if let Some(auth_token) = &conn.credentials {
         if !current_headers.contains_key("Authorization")
             && !current_headers.contains_key("authorization")
         {
@@ -149,7 +148,7 @@ fn apply_http_connection(
             );
         }
     }
-    if !current_headers.is_empty() || headers.is_some() || conn.encrypted_credentials.is_some() {
+    if !current_headers.is_empty() || headers.is_some() || conn.credentials.is_some() {
         spec.headers = Some(current_headers);
     }
     Ok(())
@@ -334,7 +333,7 @@ mod tests {
             "description": null,
             "connection_type": "http_api",
             "config": config,
-            "encrypted_credentials": token,
+            "credentials": token,
             "aws_assume_role_arn": null,
             "is_default_sfs": false,
             "ca_cert": null,

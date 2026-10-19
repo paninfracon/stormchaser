@@ -80,7 +80,7 @@ async fn test_storage_backend_crud() {
             "endpoint": "http://localhost:9000",
             "secret_key": "s3-secret-value"
         },
-        "encrypted_credentials": "bearer-credential",
+        "credentials": "bearer-credential",
         "is_default_sfs": false
     });
 
@@ -134,7 +134,7 @@ async fn test_storage_backend_crud() {
     assert!(!listed_text.contains("s3-secret-value"));
     assert!(!listed_text.contains("bearer-credential"));
     assert_eq!(listed["config"]["secret_key"], "********");
-    assert_eq!(listed["encrypted_credentials"], "********");
+    assert_eq!(listed["credentials"], "********");
     assert_eq!(listed["config"]["bucket"], "test-bucket");
 
     // 3. Update, the way a client does after loading the connection: it changes one
@@ -144,7 +144,7 @@ async fn test_storage_backend_crud() {
     let update_payload = json!({
         "description": "Updated Description",
         "config": edited_config,
-        "encrypted_credentials": listed["encrypted_credentials"]
+        "credentials": listed["credentials"]
     });
 
     let response = app
@@ -169,7 +169,7 @@ async fn test_storage_backend_crud() {
 
     // The masks were not written over the real secrets.
     let (stored_config, stored_credentials): (Value, Option<String>) =
-        sqlx::query_as("SELECT config, encrypted_credentials FROM connections WHERE id = $1::uuid")
+        sqlx::query_as("SELECT config, credentials FROM connections WHERE id = $1::uuid")
             .bind(connection_id)
             .fetch_one(&pool)
             .await

@@ -182,7 +182,7 @@ pub async fn dispatch_step_instance(
                 )
             })?;
         let password = conn
-            .encrypted_credentials
+            .credentials
             .filter(|v| !v.is_empty())
             .with_context(|| {
                 format!(

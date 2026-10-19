@@ -25,7 +25,7 @@ pub async fn create_storage_backend(
         connection_type,
         config,
         aws_assume_role_arn,
-        encrypted_credentials: None,
+        credentials: None,
         is_default_sfs,
     };
     authed_client()

@@ -325,7 +325,7 @@ are stored:
 | `step_instances` | `completion_token` | A per-step secret that authorises finishing an approval or other engine-handled step |
 | `step_outputs` and archived copy | `value` | Step outputs, which may contain secrets a step emitted |
 | `outbox_events` | `payload` | Events waiting to be published: task messages, with the same content as a resolved step, and the events that start runs, with their inputs (and, for a direct run, its workflow text) |
-| `connections` | `config`, `encrypted_credentials`, `client_key` | Credentials for storage, registries, databases, Git and HTTP APIs. Despite its name, `encrypted_credentials` is stored exactly as supplied |
+| `connections` | `config`, `credentials`, `client_key` | Credentials for storage, registries, databases, Git and HTTP APIs, stored exactly as supplied (`credentials` was formerly named `encrypted_credentials`, though Stormchaser never encrypted it) |
 | `webhooks` | `secret_token`, `client_key` | Webhook signing secrets and mTLS client keys |
 | `cron_workflows` | `secret_token` | Trigger tokens for scheduled workflows |
 | `runner_sessions` | `session_key` | The key the engine issued each runner, which the runner signs its reports with |

@@ -15,7 +15,7 @@ test.describe('Workflow Runs', () => {
               description: null,
               connection_type: "git",
               config: { repo_url: "https://github.com/example/repo" },
-              encrypted_credentials: null,
+              credentials: null,
               aws_assume_role_arn: null,
               is_default_sfs: false,
               ca_cert: null,

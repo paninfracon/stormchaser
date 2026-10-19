@@ -62,7 +62,7 @@ pub async fn create_connection(
         &payload.connection_type,
         &payload.config,
         &payload.aws_assume_role_arn,
-        &payload.encrypted_credentials,
+        &payload.credentials,
         payload.is_default_sfs,
     )
     .await
@@ -173,8 +173,8 @@ pub async fn update_connection(
     }
     // Responses mask stored secrets. A client that loads a connection, edits it and saves
     // it sends those masks back; they mean "unchanged", not a new value.
-    if payload.encrypted_credentials.as_deref() == Some(crate::redact::MASK) {
-        payload.encrypted_credentials = None;
+    if payload.credentials.as_deref() == Some(crate::redact::MASK) {
+        payload.credentials = None;
     }
     if let Some(config) = payload.config.as_mut() {
         let stored = db::get_connection(&state.pool, id)
