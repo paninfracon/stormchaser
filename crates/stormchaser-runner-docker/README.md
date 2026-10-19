@@ -1,10 +1,10 @@
 # stormchaser-runner-docker
 
-Docker-specific executor for Stormchaser, managing Docker container lifecycles for distributed workflow step execution.
+The Docker runner (`stormchaser-runner-docker` binary). It takes container steps from NATS and runs them on a Docker host: pulls the image, unparks storage through the agent, runs the container on a step network away from the control plane, streams logs, parks storage and publishes artifacts, and reports the result. It adopts its own containers after a restart, cleans up orphaned ones, and refuses privileged steps unless `STORMCHASER_ALLOW_PRIVILEGED=true`.
 
 ## State Machine
 
-The runner utilizes a strict Rust Typestate machine to govern the lifecycle of a Docker Container and its integration with the Docker Engine API.
+The runner uses a Rust typestate machine (`container_machine/`) to govern the lifecycle of a Docker container and its integration with the Docker Engine API.
 
 ![Docker Container State Machine](./states.png)
 
@@ -12,6 +12,6 @@ The runner utilizes a strict Rust Typestate machine to govern the lifecycle of a
 
 ## About Stormchaser
 
-Stormchaser is a robust, distributed workflow engine for event-driven and human-triggered workflows. Built in Rust for performance and reliability, it utilizes a graph-based DSL, NATS JetStream for event messaging, and PostgreSQL for state management.
+Stormchaser is a distributed workflow engine for event-driven and human-triggered workflows, written in Rust. Workflows are written in an HCL-based DSL; the engine keeps state in PostgreSQL and passes events over NATS JetStream.
 
 For more information, full documentation, and examples, please visit the [Stormchaser GitHub Repository](https://github.com/paninfracon/stormchaser) and read the [Main Project README](https://github.com/paninfracon/stormchaser/blob/trunk/README.md).

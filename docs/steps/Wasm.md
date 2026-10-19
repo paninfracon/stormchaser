@@ -1,14 +1,28 @@
 # Wasm Step
 
-The `Wasm` step executes a WebAssembly module. This provides a fast, lightweight, and secure way to execute custom logic without container overhead.
+The `Wasm` step runs a function of a WebAssembly module inside the engine. It suits small pieces of logic that do not need a container. The engine runs it itself; no runner is involved.
 
 ## DSL Specification
 
 The `spec` block for `Wasm` supports the following fields:
 
-* `module` (string, required): Where to load the WASM module from: an `http://` or `https://` URL, or `base64://` followed by the encoded module. Local paths are not accepted.
-* `function` (string, optional): The name of the exported function to call. Defaults to `run`.
-* `args` (object, optional): JSON arguments to pass into the function.
+* `module` (string, required): Where to load the module from: an `http://` or `https://` URL, or `base64://` followed by the encoded module. Local paths are not accepted.
+* `function` (string, optional): The exported function to call. Defaults to `run`.
+* `args` (any value, optional): Data for the function. It reaches the module as part of the spec (see below).
+
+## What the module receives and returns
+
+The module must export `memory`, `alloc(len: i32) -> i32`, `dealloc(ptr: i32, len: i32)`, `get_result_len() -> i32` and the function itself, `(ptr: i32, len: i32) -> i32`. The engine writes a JSON document into memory that `alloc` reserves and calls the function with its address and length:
+
+```json
+{ "spec": { "module": "...", "function": "...", "args": { } }, "params": { }, "inputs": { }, "config": null }
+```
+
+`spec` is the step's resolved spec, `params` its params and `inputs` the run's inputs. The function returns the address of a JSON result, whose length `get_result_len` gives. If the result is an object, each of its keys becomes a step output; any other result sets no outputs.
+
+## Registered step types
+
+A WASM module can also be registered as a step type of its own, by publishing to the NATS subject `stormchaser.v1.step.register_wasm` with `step_type`, `wasm_module`, and optionally `wasm_function` (default `run`), `wasm_config`, `schema` and `documentation`. A step of that type then runs the module as above, with `wasm_config` as `config`. A registration cannot take the name of a built-in step type.
 
 ## Example
 

@@ -1,34 +1,44 @@
 stateDiagram-v2
-    [*] --> Pending: new()
+    [*] --> Pending: created
+    [*] --> WaitingForEvent: created (Approval, Wait, held-back iteration)
+    [*] --> Skipped: created (condition false, empty iterate)
 
-    Pending --> Initializing: initializing(runner_id)
-    Pending --> Running: start(runner_id)
+    Pending --> Initializing: claimed for dispatch (SQL) / initializing(runner_id)
     Pending --> UnpackingSfs: start_unpacking(runner_id)
-    Pending --> Failed: fail(error)
+    Pending --> Running: start(runner_id)
+    Pending --> Failed: fail() on run timeout
 
-    Initializing --> Running: start()
+    Initializing --> Pending: no quota, dispatch failed or lost, rerunnable built-in's engine lost, or failed with a retry left (SQL)
     Initializing --> UnpackingSfs: start_unpacking(runner_id)
-    Initializing --> Failed: fail(error)
+    Initializing --> Running: start()
+    Initializing --> Succeeded: built-in step completes
+    Initializing --> Failed: built-in step fails, or its engine is lost
 
     UnpackingSfs --> Running: start_running()
-    UnpackingSfs --> Failed: fail(error)
-    UnpackingSfs --> Skipped: skip()
+    UnpackingSfs --> Failed: fail()
+    UnpackingSfs --> LostZombie: runner lost
+    UnpackingSfs --> Pending: failed with a retry left (SQL)
+    UnpackingSfs --> Skipped: skip() (defined, never called)
 
     Running --> PackingSfs: start_packing()
     Running --> Succeeded: succeed()
-    Running --> Failed: fail(error)
-    Running --> WaitingForEvent: wait_for_event()
-    Running --> Aborted: abort()
-    Running --> LostZombie: zombify()
+    Running --> Failed: fail()
+    Running --> LostZombie: zombify() when runner lost
+    Running --> Pending: failed with a retry left (SQL)
+    Running --> WaitingForEvent: wait_for_event() (defined, never called)
+    Running --> Aborted: abort() (defined, never called)
 
     PackingSfs --> Succeeded: succeed()
-    PackingSfs --> Failed: fail(error)
+    PackingSfs --> Failed: fail()
+    PackingSfs --> LostZombie: runner lost
+    PackingSfs --> Pending: failed with a retry left (SQL)
 
-    WaitingForEvent --> Running: resume()
-    WaitingForEvent --> Pending: reschedule()
-    WaitingForEvent --> Failed: fail(error)
+    WaitingForEvent --> Pending: reschedule() (held-back iteration starts)
+    WaitingForEvent --> Succeeded: approved, or correlated event arrives
+    WaitingForEvent --> Failed: rejected, or run timeout
+    WaitingForEvent --> Running: resume() (defined, never called)
 
-    Failed --> FailedIgnored: ignore_failure()
+    Failed --> FailedIgnored: ignore_failure() when allow_failure = true
 
     Succeeded --> [*]
     Skipped --> [*]

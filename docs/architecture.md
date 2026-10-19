@@ -1,6 +1,13 @@
 # Stormchaser Architecture
 
-This document describes the high-level architecture of the Stormchaser workflow engine.
+This document describes how Stormchaser is built: its components, how a run moves
+through them, and what the system guarantees. It describes the code as it is. Parts
+of the original design that are not built are listed at the end, under
+[Design targets (not yet implemented)](#design-targets-not-yet-implemented).
+
+See also: [State machines](state_machines.md), [NATS](nats.md),
+[Quotas](quotas.md), [Affinity](affinity.md), [Security](security.md),
+[Observability](observability.md).
 
 ## System Diagram
 
@@ -9,22 +16,24 @@ graph TD
     subgraph "External Systems"
         Git[Git Repository<br/>DSL + SOPS Secrets]
         Webhooks[External Webhooks]
-        Users[CLI / Operators]
+        Users[CLI / TUI / Web UI]
+        Cron[Kubernetes CronJob<br/>or own scheduler]
         OIDC[OIDC Provider<br/>Dex / Keycloak]
-        Vault[HashiCorp Vault<br/>Secrets Management]
-        SMTP[SMTP Server<br/>Email Notifications]
+        Vault[HashiCorp Vault<br/>secret lookups]
+        Notify[SMTP / Slack / Teams]
         Lambda[AWS Lambda]
     end
 
     subgraph "Control Plane (Rust)"
         API[API Server]
-        Engine[Orchestration Engine<br/>Distributed Controller Cluster]
-        DB[(Postgres<br/>State + Audit + Cache)]
-        OPA[Open Policy Agent<br/>Authz Policy]
+        Query[Query Service<br/>run form hydration]
+        Engine[Engine replicas<br/>one leader runs background workers]
+        DB[(Postgres<br/>state, outbox, archive)]
+        OPA[Policy<br/>built-in WASM or OPA server]
     end
 
     subgraph "Event Mesh"
-        NATS{NATS JetStream<br/>Events + Task Queues}
+        NATS{NATS JetStream<br/>stream: stormchaser}
     end
 
     subgraph "Execution Plane"
@@ -32,508 +41,471 @@ graph TD
             K8s[K8s Runner]
             Docker[Docker Runner]
         end
-        Agent[Stormchaser Agent<br/>SFS + Artifacts]
+        Agent[Stormchaser Agent<br/>park / unpark, artifacts]
     end
 
     subgraph "Storage & Observability"
-        S3[(S3 / GCS / Azure<br/>SFS + Artifacts)]
+        S3[(S3-compatible<br/>SFS + test reports)]
         Registry[(OCI / JFrog<br/>Artifacts)]
-        Logs[(Loki / Elasticsearch<br/>Log Storage)]
+        Shipper[Log shipper<br/>e.g. Alloy]
+        Logs[(Loki / Elasticsearch)]
     end
 
-    %% Flow and Interactions
-    Users -->|Schedule / View Runs| API
-    Webhooks -->|Inbound Events| API
+    Users -->|Runs, approvals| API
+    Webhooks -->|Event rules| API
+    Cron -->|POST /api/v1/cron-trigger/id| API
+    Users -->|Run forms| Query
     API <-->|Auth| OIDC
-    API <-->|Persistence| DB
-    API -->|Publish Events| NATS
-    API <-->|Query Logs| Logs
+    API -->|Authorize requests| OPA
+    API <-->|Runs + outbox rows| DB
+    API -->|Approvals| NATS
+    API -->|Read logs| Logs
+    Query -->|Read workflow| Git
 
-    Engine <-->|Process State| DB
-    Engine <-->|Subscribe/Publish| NATS
-    Engine -->|Authorize| OPA
-    Engine -->|Fetch Secrets| Vault
-    Engine -->|Sync| Git
-    Engine -->|Notify| SMTP
-    Engine -->|Invoke| Lambda
+    Engine <-->|State, outbox, leader lock| DB
+    Engine <-->|Events, tasks| NATS
+    Engine -->|Admit runs| OPA
+    Engine -->|secret lookups| Vault
+    Engine -->|Clone / fetch| Git
+    Engine -->|Built-in steps| Notify
+    Engine -->|Built-in steps| Lambda
     Engine -->|Pre-signed URLs| S3
+    Engine -->|Scrape outputs| Logs
 
-    NATS <-->|Dispatch Steps / Report Results| K8s
-    NATS <-->|Dispatch Steps / Report Results| Docker
+    NATS <-->|Tasks / results| K8s
+    NATS <-->|Tasks / results| Docker
 
     K8s --- Agent
     Docker --- Agent
 
     Agent <-->|Park / Unpark| S3
-    Agent -->|Upload Artifacts| Registry
-    K8s -.->|Push Logs| Logs
-    Docker -.->|Push Logs| Logs
+    Agent -->|Push artifacts| Registry
+    K8s -.->|Container logs| Shipper
+    Docker -.->|Container logs| Shipper
+    Shipper -.-> Logs
 ```
+
+The same diagram is in `architecture.mmd`.
+
+## Crates
+
+| Crate | Role |
+| :--- | :--- |
+| `stormchaser-api` | HTTP API: runs, approvals, webhooks, cron triggers, connections, logs. |
+| `stormchaser-engine` | Orchestration engine: resolves runs, schedules and dispatches steps, runs built-in steps, background workers. |
+| `stormchaser-runner-docker`, `stormchaser-runner-k8s` | Pull tasks from NATS and run them as containers or Kubernetes Jobs. |
+| `stormchaser-agent` | Runs beside a step to park and unpark storage and push artifacts. |
+| `stormchaser-query` | Hydrates run forms from a workflow's schema and queries, read from Git. |
+| `stormchaser-cli`, `stormchaser-tui`, `stormchaser-web` | Clients. |
+| `stormchaser-dsl` | HCL parser for `.storm` workflows. |
+| `stormchaser-model` | Shared types (runs, steps, events, DSL AST) and shared client code: NATS subjects and publishing, Postgres TLS, log backends, the policy client. On native targets it depends on `tokio`, `sqlx`, `async-nats` and `reqwest`. |
+| `stormchaser-opa` | Policy client that evaluates a WASM policy, the shipped one by default. |
+| `stormchaser-tls` | Certificate loading and reload. |
 
 ## Triggering & Scheduling
 
-Stormchaser supports multiple trigger mechanisms: manual (API/CLI), event-driven (Webhooks), and scheduled (Cron).
+A run starts in one of four ways:
 
-### 1. CronWorkflows
+* **API request**: `POST /api/v1/runs` names a workflow in Git. The API writes the
+  run (`queued`) and a `run.queued` event to `outbox_events` in one transaction.
+* **Direct run**: `POST /api/v1/runs/direct` (`stormchaser run <file>`) carries the
+  workflow text. The API parses it, refuses it with `400` if it does not parse, and
+  queues a `run.direct` event through the outbox. The engine creates the run when it
+  accepts it, or records it as failed with the reason.
+* **Webhook event rule**: an inbound webhook that matches an event rule queues a run
+  like an API request.
+* **Cron**: see below.
 
-Scheduled execution is handled by registering workflows with an **external cron engine**, avoiding the need for the Stormchaser core to maintain a persistent timer loop.
+### CronWorkflows
 
-* **Registration**: When a workflow with a `cron` attribute is submitted, the API registers it in the `cron_workflows` table and, if configured, creates a resource in an external engine (e.g., a Kubernetes `CronJob`).
-* **Security**: Each cron schedule is assigned a unique `secret_token`. The external engine is configured to hit a secured webhook endpoint (`POST /api/v1/cron-trigger/:id`) using an `Authorization: Bearer` header containing this token.
-* **Pluggable Engines** (Configured via `CRON_ENGINE`):
-  * **Kubernetes**: Automatically creates a `CronJob` resource in the cluster that uses `curl` to trigger the API.
-  * **None**: The system stores the schedule and shows its token once; a scheduler of the operator's own (cron, a systemd timer, a CI schedule) calls the trigger URL. The Docker quickstart uses this.
-* **Identity**: Runs triggered by cron are initiated by the system identity `system:cron`.
+Stormchaser keeps no timer loop of its own. Schedules are stored in the
+`cron_workflows` table and fired by an external scheduler.
 
-See [Workflow DSL](workflow_dsl.md) for details on specifying cron schedules in `.storm` files.
+* **Trigger**: each schedule has a `secret_token`. The scheduler calls
+  `POST /api/v1/cron-trigger/{id}` with `Authorization: Bearer <token>`.
+* **Engines** (`CRON_ENGINE`, default `kubernetes`):
+  * `kubernetes`: the API creates a `CronJob` that calls the trigger URL with `curl`.
+  * `none`: the API stores the schedule and shows its token once; a scheduler of
+    the operator's own (cron, a systemd timer, a CI schedule) calls the trigger URL.
+    The Docker quickstart uses this.
+* **Identity**: cron runs are initiated by `system:cron`.
+
+Schedules are managed through the API (`/api/v1/cron-workflows`); a workflow file has no `cron` attribute that the engine reads.
+
+## Life of a run
+
+1. The API (or the engine, for a direct run) creates the run and its `run_contexts`
+   row. The starting event goes through the outbox.
+2. The engine handles `run.queued`: it moves the run to `resolving`, reads the
+   workflow from Git, asks policy whether the run may go ahead, runs the workflow's
+   queries, validates inputs and decrypts SOPS secrets. It then moves the run to
+   `start_pending` and queues `run.start_pending`.
+3. On `run.start_pending` the engine creates the first step instances and moves the
+   run to `running`.
+4. The engine claims pending steps (`FOR UPDATE SKIP LOCKED`) up to the run's
+   concurrency and CPU/memory quotas, and dispatches each one:
+   * A runner step (`RunContainer`, `RunK8sJob`, and types that become them, such as
+     Terraform and Git checkout) is published as a task message on
+     `stormchaser.v1.<shard>.step.scheduled.<type>`. A runner pulls it, runs it, and
+     reports progress and the result as `step.*` events.
+   * A built-in step (`RestApi`, `SqlExecute`, `JQ`, `JinjaRender`, `WebhookInvoke`,
+     `EmailSend`, `TestReportEmail`, `LambdaInvoke`, `SlackMessage`, `TeamsMessage`,
+     `Wasm` and WASM-registered types) runs inside the engine. It records the engine's
+     id on the step and reports its result through the outbox.
+   * `Approval` and `Wait` steps are created `waiting_for_event` and are finished by
+     the API when someone approves or rejects, or a correlated event arrives.
+5. Each `step.completed` or `step.failed` locks the run's row, records the result,
+   creates the next steps or ends the run, and dispatches what is now pending.
+6. A finished run is archived: its rows move to the `archived_*` tables.
 
 ## Component Roles
 
 ### 1. Control Plane
 
-* **API Server:** Handles inbound requests from the CLI and Webhooks. It
-    performs authentication/authorization and manages the initial "Run"
-    creation in PostgreSQL. It also provides a **Storage Backend Registry** API
-    for configuring S3, OCI, and JFrog destinations.
-* **Orchestration Engine (Controller):** A distributed Rust application that
-    manages the workflow state machine. To ensure high availability and data
-    consistency, it employs a **Sticky Sharding** model:
-  * **SFS Coordination (Parking):** When a step requiring `storage` is
-        scheduled, the Controller:
+* **API Server** (`stormchaser-api`): authenticates callers (OIDC or the API's own
+  JWTs), asks policy about every request, and creates runs. It serves run, step and
+  log reads, and masks a run's secrets in everything it returns (see Secret masking
+  below). It manages connections (storage, registry, Git), webhooks, event rules and
+  cron schedules. Approvals and rejections are published to NATS directly as
+  `step.completed` / `step.failed` events.
+* **Query Service** (`stormchaser-query`): `POST /api/v1/schema/hydrate` and
+  `/hydrate-direct` fill a run form from the workflow's input schema and queries.
+* **Engine** (`stormchaser-engine`): consumes events from JetStream and drives the
+  run and step state machines. Each replica:
 
-    1. Identifies the default SFS storage backend (S3-compatible), which only
-        an admin may choose.
-    2. Generates short-lived **Pre-signed URLs** for both GET (unparking)
-        and PUT (parking) operations.
-    3. Retrieves the **Cryptographic Hash** (SHA-256) of the last parked
-        state for that storage volume in the current run.
-    4. Injects these URLs and the expected hash into the task dispatched to
-        the Runner.
+  * pulls from the shared durable consumers `orchestration-engine-shard-<n>` for each
+    shard in `STORMCHASER_ASSIGNED_SHARDS` (default `0`), `orchestration-engine-global`
+    (with shard 0) and the `orchestration-engine-legacy-{run,runner,step}` consumers
+    for unsharded subjects. Replicas bound to the same consumer share its messages;
+  * answers request-reply subjects outside the stream on queue group
+    `engine-query-group`: `stormchaser.rpc.step.query` (is a step a runner found
+    still wanted), `stormchaser.rpc.step.artifact_auth` (registry push credentials)
+    and `stormchaser.rpc.runner.session` (runner keys);
+  * handles each event in its own task, sends JetStream progress acks every 10 s
+    while a handler runs, and settles the event when it finishes (see
+    [Delivery and retries](#delivery-and-retries));
+  * records a heartbeat in `engine_instances` every 10 s;
+  * competes for leadership of the background workers (see
+    [Background workers](#5-background-workers-and-leader-election)).
 
-  * **DSL Transformation Engine:** Before execution, the Controller parses the
-        `stormchaser_dsl_version`. If the version is older than the current
-        engine's canonical version, it applies a series of AST-to-AST
-        transformations to map the old schema to the modern execution model. A
-        `DSL_DEPRECATED` warning is logged to the workflow's run history.
-  * **Async Step Handling (WaitForEvent):** When a workflow enters a wait
-        state:
+  `STORMCHASER_ASSIGNED_SHARDS` is a static list read at start-up. Nothing moves
+  shards between replicas, and the Helm charts and compose files do not set it, so
+  every replica consumes shard 0. `STORMCHASER_TOTAL_SHARDS` (default `1`) sets how
+  many shards run ids hash into (CRC32 of the run id); it must be the same for the
+  API, the engine and the runners.
 
-    1. **State Persistence:** The Controller persists the run's state and a
-        set of "Expected Correlation Keys" in the DB.
-    2. **Event Matching:** Incoming NATS events are matched against these
-        keys.
-    3. **Multi-Approval Logic:** For steps with `require_approvals > 1`:
-
-        * The Controller maintains an **Approval Registry** (a list of
-            unique `user_id` values from the matched events).
-        * Each incoming event is de-duplicated by identity.
-        * The `on_partial` block is executed for each valid approval that
-            doesn't reach the threshold.
-        * The workflow only proceeds to the `next` step once the
-            `require_approvals` threshold is reached.
-
-    4. **Identity Validation:** If `approvers` are defined in the DSL, the
-        Controller performs a policy check (via OPA or a built-in provider)
-        to ensure the event's `user_id` belongs to the authorized list or
-        group.
-    5. **Rejection Handling:** If an event matching the `on_reject`
-        condition arrives, the step is immediately terminated, and the
-        rejection logic is triggered.
-
-  * **Subject-Based Partitioning:** NATS JetStream is configured to
-        partition workflow events by `RunID`. Each Controller instance "owns" a
-        subset of these partitions using **Durable Pull Consumers**, ensuring
-        that all events for a specific workflow are processed reliably and in
-        order.
-  * **Optimistic Concurrency Control (OCC):** The Controller uses
-        version-based OCC for all PostgreSQL state transitions. Every `UPDATE`
-        to the workflow state includes a `version = version + 1` clause and a
-        `WHERE version = :last_seen_version` check. This prevents "lost
-        updates" if a shard rebalances and multiple controllers briefly attempt
-        to process the same workflow.
-  * **Fencing Tokens:** Every task dispatched to a runner includes a
-        monotonically increasing fencing token. If a shard moves to a new
-        controller, the token is incremented, and any late-arriving results
-        from the previous controller's tasks are rejected to prevent duplicate
-        execution.
-  * **Step Status History:** The Controller maintains a granular historical
-        record of every state transition for every step instance in the
-        `step_status_history` table. This provides a high-fidelity audit trail
-        of a step's lifecycle (e.g., `Pending` -> `Unpacking SFS` -> `Running`
-        -> `Packing SFS` -> `Succeeded`).
-
-* **PostgreSQL:** Stores the "Run Context" (DSL synced from Git), historical
-    audit logs, state history, and the current state of every active workflow.
-* **Open Policy Agent (OPA):** Used for **Policy as Code** validation. Before
-    a workflow execution starts, the Controller queries OPA to ensure the run
-    complies with organizational policies (e.g., "no production deployments
-    outside of business hours").
-  * **Fail-Closed Security Model:** If OPA is configured and unreachable or
-        returns an error, the Controller MUST NOT proceed with the workflow.
-        Inability to validate policy is treated as a hard failure, as execution
-        without policy enforcement is a critical security risk. Admission of a
-        run will be rejected with a `PolicyProviderUnavailable` error.
+* **SFS coordination**: for a step that uses `storage`, the engine picks the SFS
+  storage backend, generates pre-signed GET and PUT URLs, and includes them in the
+  task with the SHA-256 of the volume's last parked archive. The runner restores the
+  archive only if its hash matches. See [SFS testing](sfs_testing.md).
+* **Approvals and waits**: an `Approval` step waits for `POST
+  /api/v1/runs/{id}/steps/{step_id}/approve` or `/reject`, or for a signed approval
+  link sent by email. The API checks the step is an approval waiting for a decision
+  and that the caller may decide it, records the decision in `approval_registry`, and
+  publishes the result. One approval decides the step. A `Wait` step waits for
+  `POST /api/v1/events/correlate` with its correlation key and value
+  (`event_correlations`).
+* **Step status history**: every transition made through the step state machine
+  writes a row to `step_status_history`. See [State machines](state_machines.md).
+* **PostgreSQL**: runs (`workflow_runs`, `run_contexts`, `run_quotas`), steps
+  (`step_instances`, `step_outputs`, test reports), runners (`runners`,
+  `runner_sessions`), engines (`engine_instances`), the outbox (`outbox_events`),
+  task message positions (`dispatched_task_messages`), configuration (connections,
+  webhooks, event rules, cron schedules) and the `archived_*` tables. The API and the
+  engine both run migrations at start-up. `STORMCHASER_DB_MAX_CONNECTIONS` (default
+  10) sizes each service's pool.
+* **Policy (OPA)**: the API asks policy about every request, with the caller's
+  verified identity and, for runs, connections, webhooks, event rules and cron
+  schedules, the object's owner. The engine asks it before a run is resolved
+  (`check_context`, before any query runs) and before a run uses a connection.
+  * With `OPA_WASM_PATH` set, the services evaluate that WASM policy (with
+    `OPA_DATA_PATH` as its data). With only `OPA_URL` set, they ask that OPA server.
+    With neither, they enforce the shipped policy, built in as WASM.
+  * `STORMCHASER_AUTHZ_DISABLED=true` turns policy off in debug builds only; a release
+    build refuses to start with it.
+  * Policy errors deny. An OPA server that cannot be reached while a run is being
+    admitted is a transient error: the event is delivered again with backoff, and
+    after 10 deliveries the run is recorded as failed.
 
 ### 2. Event Mesh (NATS)
 
-* **JetStream:** Provides the persistent backbone for the event-driven
-    architecture. It ensures that no events or step-tasks are lost even if a
-    controller or runner restarts. Task scheduled events are stored in the
-    `stormchaser` stream.
-* **Durable Consumers:** Runners use durable pull consumers to retrieve tasks:
-    `runner-container-tasks`, which Docker and Kubernetes runners share so that
-    each `RunContainer` task is run once, and `runner-k8s-job-tasks`. This allows the NATS
-    server to track which messages have been delivered and acknowledged,
-    enabling automatic redelivery if a runner fails during a task.
-* **Task Queues:** Used to distribute workflow steps to the appropriate
-    execution engines based on their type (e.g., a "RunContainer" task is pulled
-    by the Docker or K8s runner).
+* **Stream**: every component shares one JetStream stream, `stormchaser`, capturing
+  `stormchaser.v1.>`. The engine creates it; runners only wait for it. Messages are
+  removed by the stream's maximum age (`STORMCHASER_NATS_STREAM_MAX_AGE_HOURS`,
+  default 168) unless the engine erases them sooner.
+* **Subjects**: run and step events are `stormchaser.v1.<shard>.run.*` and
+  `stormchaser.v1.<shard>.step.*`; runner lifecycle events are
+  `stormchaser.v1.global.runner.{register,heartbeat,offline}`; the engine tells
+  runners to stop a run's steps on `stormchaser.v1.runner.cancel`.
+* **Task consumers**: runners pull tasks from shared durable consumers.
+  `runner-container-tasks` (`stormchaser.v1.*.step.scheduled.runcontainer`) is shared
+  by Docker and Kubernetes runners, so each `RunContainer` task runs once.
+  `runner-k8s-job-tasks` (`stormchaser.v1.*.step.scheduled.runk8sjob`) serves
+  Kubernetes runners. Each runner also consumes its own subject,
+  `stormchaser.v1.runner.<kind>.<runner_id>`, used for `shared` affinity.
+* **Events are CloudEvents**, validated against their JSON schema before the engine
+  handles them. Runner events are signed with a per-runner key the engine issues
+  (`stormchaser.rpc.runner.session`), and the engine accepts a step's result only from
+  the runner the step is with.
+
+Users, permissions and production settings are in [NATS](nats.md).
 
 ### 3. Execution Plane
 
-* **Runners:** Lightweight agents (or sidecars) that consume tasks from NATS
-    JetStream, provision the required environment (Container, Lambda, etc.),
-    execute the step logic, and report results (including output variables) back
-    to NATS.
-* **Reliability:** By using JetStream pull consumers, runners can be safely
-    restarted or scaled. Pending tasks will remain in the stream until a runner
-    becomes available to process them.
-* **Runner Lifecycle & Heartbeats:**
-
-    1. **Registration:** When a runner starts, it registers with the Control
-        Plane via a NATS `runner.register` event, including its capabilities
-        (e.g., "docker", "k8s").
-    2. **Heartbeats:** Runners publish periodic heartbeats (e.g., every 10s) to
-        a dedicated NATS stream.
-
-* **Liveness Monitoring & Zombie Detection:**
-
-    1. **Step-Level Heartbeats:** In addition to runner-level heartbeats, every
-        active task (especially in `locked` affinity) MUST emit a per-task
-        heartbeat.
-    2. **Dead-Man-Switch:** If the Controller does not receive a per-task
-        heartbeat within its `liveness_threshold` (e.g., 60s), it enters
-        **Zombie Investigation**:
-
-        * The Controller queries the Runner for the specific task status.
-        * If the Runner is unreachable or cannot confirm the task is still
-            executing, the Controller marks the task as `lost_zombie` and
-            initiates failure logic.
-
-    3. **Static Composition Watchdog:** For `locked` groups (where multiple
-        steps run in one Pod/Task), the Runner Agent acts as a watchdog. If the
-        command for the current step hangs without resource consumption or
-        progress, the Agent signals a `SIGABRT` to the process group to ensure
-        a clean failure rather than a silent hang.
-    4. **Execution Engine Variability:** The precision of zombie detection
-        (e.g., process-level signal monitoring vs. container-level liveness
-        probes) is dependent on the execution engine's capabilities. A
-        K8s-based runner can provide granular signal propagation, whereas a
-        serverless or "Push" model runner (like Lambda) may only support
-        aggregate timeouts as a proxy for zombie detection.
+* **Runners** register on start (`runner.register`, with `runner_type`,
+  `protocol_version`, `capabilities` and the step types they serve, saved in
+  `runners`), send a heartbeat every 10 s, pull tasks, run them, and report
+  `step.initializing`, `step.unpacking_sfs`, `step.running`, `step.packing_sfs`,
+  `step.completed` and `step.failed`. A runner's id defaults to its host or pod name
+  (`docker-<host>`, `k8s-<pod>`), or `RUNNER_ID`, so a restarted runner keeps its
+  steps.
+* **Agent**: parks and unparks a step's storage and pushes its artifacts, as a
+  separate container on Docker and a sidecar on Kubernetes, so that the step's own
+  code does not hold the upload URLs or push credentials.
+* **Runner liveness**: the liveness worker marks a runner `offline` when it has sent
+  no heartbeat for 30 seconds, and fails as `lost_zombie` each of its steps in
+  `running`, `unpacking_sfs` or `packing_sfs`. Another runner may take over a
+  redelivered task once the step's runner has been silent for 12 seconds
+  (`RUNNER_QUIET_SECS`). Liveness is per runner; there is no per-task heartbeat.
+* **Engine liveness**: a built-in step records the engine running it (`engine_id`).
+  When that engine has sent no heartbeat for 60 seconds, the liveness worker fails
+  the step, except `JQ` and `JinjaRender` steps, which have no side effects and are
+  put back to `pending` to run again. Engines silent for 24 hours with no steps are
+  deleted from `engine_instances`.
+* **Cancellation**: when a running run fails or is aborted, the engine queues a
+  `stormchaser.v1.runner.cancel` message and every runner stops the containers or
+  Jobs it holds for the run.
 
 ### 4. Distributed Consistency & Persistence
 
-Stormchaser ensures reliable state transitions through a combination of
-PostgreSQL and NATS JetStream:
+* **Run row lock**: the step completed and failed handlers lock the run's row
+  (`SELECT … FOR UPDATE`) before reading or changing its steps. This serialises the
+  events of one run across handlers and replicas.
+* **Optimistic concurrency on runs**: run transitions made through `WorkflowMachine`
+  update `workflow_runs` with `WHERE version = $n` and fail on a mismatch. Step
+  updates have no version check.
+* **Completion tokens**: a built-in step has a `completion_token`, which must
+  accompany the event that finishes it. A runner step's token is cleared when its
+  task is published; from then on only its assigned runner may report on it. A retry
+  gives the step a new token, so a late report from an earlier attempt is ignored.
+* **Fencing tokens**: each run has a `fencing_token`, set once when the run is
+  created and copied into its tasks and events. Handlers drop an event whose token is
+  lower than the run's, but since the token never changes this check rejects
+  nothing in practice.
+* **Transactional outbox**: events written in the same transaction as the state
+  change they report go to `outbox_events`. This covers run-starting events from the
+  API (`run.queued`, `run.direct`), engine run events (`run.start_pending`,
+  `run.running`, `run.completed`, `run.failed`, `run.aborted`), `runner.cancel`,
+  built-in step results, and the `step.failed` events the liveness worker raises.
+  The outbox relay (see below) publishes them.
+* **Not through the outbox**: task messages to runners are published directly,
+  because they carry resolved secrets that should not be stored in Postgres. The
+  step is marked `dispatched_at` first; the dispatch recovery worker puts back a step
+  claimed for more than 5 minutes and never published. The API publishes approval
+  decisions and correlated events directly. Runners publish their events directly.
+* **Idempotent handlers**: an event delivered again for a step already finished does
+  nothing except archive the run if that is still owed. A `start_pending` event for a
+  run that has started is skipped. A failure report for an attempt already put back
+  for retry is ignored.
 
-1. **Atomic State Updates:** Every state transition (e.g., Step completion) is
-    performed within a single Postgres transaction.
-2. **Persistent Event Publication:** Orchestration events are published to
-    NATS JetStream. While direct publication is used, the use of JetStream
-    ensures that once a message is accepted by the NATS cluster, it is durably
-    stored until consumed and acknowledged by all relevant subscribers.
-3. **Historical Audit Trail:** All granular state changes are recorded in the
-    `step_status_history` table, allowing for reconstruction of the execution
-    timeline even after a run is archived.
+#### Delivery and retries
 
-### 5. GitOps & Secrets
+* An event whose handler fails transiently (database or broker unreachable, dropped
+  connection, serialization failure or deadlock, OPA unreachable) is negatively
+  acknowledged with a delay doubling from 1 s up to 60 s, and delivered again, up to
+  10 deliveries (`retry.rs`). Other failures are acknowledged and logged.
+* When the engine gives up on a run's starting event, the run is recorded as failed
+  with the reason rather than left `queued`.
+* A built-in step's result is written with retries for up to 10 minutes while the
+  database is unreachable, since no event would bring it back.
 
-* **Git Sync:** A background process within the controller that ensures the
-    PostgreSQL DSL cache is up to date with the Git repository.
-* **SOPS & Secret Lifecycle:**
+#### Step retries
 
-    1. **System Startup:** The Control Plane and Execution Plane decrypt
-        infrastructure-level secrets (DB, NATS, KMS keys) via SOPS once at
-        startup.
-    2. **Workflow Initiation:** When a workflow is triggered, the Controller
-        decrypts the SOPS-encrypted secrets defined in the DSL for that
-        specific run.
+A step's `retry` block (`count`, `backoff`, `delay`, `max_delay`) makes a failed or
+lost step run again. The failed handler puts it back to `pending` with `attempt`
+incremented and `retry_at` set, and the run waits. The retry worker dispatches it once
+`retry_at` passes. `Approval` and `Wait` steps are never retried. Retried attempts are
+counted in `stormchaser.v1.steps_retried`. See "Retries" in
+[Workflow DSL](workflow_dsl.md).
 
-    3. **Persistence:** These decrypted secrets are then stored in the PostgreSQL
-        "Run State" (encrypted at rest using the system's Master Key).
-    4. **Step Injection:** Subsequent steps within the workflow retrieve these
-        secrets directly from the database, eliminating the need for repeated
-        SOPS tool calls and preventing a CPU bottleneck during high-concurrency
-        execution.
+#### allow_failure
 
-* **Secret Masking:** To prevent accidental leakage of sensitive information,
-    the Control Plane maintains a "Sensitive Values Registry" for each active
-    run.
+A step with `allow_failure = true` that fails is marked `failed_ignored` and its run
+goes on as if it had succeeded. A `lost_zombie` step still fails its run.
 
-    1. **Registry Sources:** The registry is populated from static DSL-defined
-        secrets, outputs marked as `sensitive = true`, and dynamic
-        `::add-mask::` commands sent by runners.
-    2. **Loki Redaction:** All logs emitted by runners are intercepted by the
-        Loki-integrated log-shipper, which redacts any strings matching the
-        registry before they are persisted.
-    3. **Real-Time Masking:** The Runner Agent performs real-time redaction on
-        the local log stream immediately after a new mask is registered via
-        `::add-mask::`, ensuring even the current step's subsequent logs are
-        safe.
+### 5. Background workers and leader election
 
-### 6. Resource Quota Enforcement
+One engine replica at a time runs the background workers. The replicas compete for a
+Postgres advisory lock (`pg_try_advisory_lock`, key `0x73746f726d636872`) every 5
+seconds. The winner holds it on a connection taken out of the pool and checks every 5
+seconds that the connection answers; when it does not, the replica stops its workers
+and another takes the lock. An engine whose heartbeat or leader election task stops
+exits so that it is restarted. Shard assignment does not affect leadership.
 
-Stormchaser maintains multi-tenant stability through a distributed quota
-management system:
+| Worker | Interval | What it does |
+| :--- | :--- | :--- |
+| Liveness | 15 s | Marks silent runners offline; fails their in-flight steps as `lost_zombie`; fails or resets built-in steps of engines silent for 60 s; forgets engines gone for 24 h. |
+| Timeout | 30 s | Aborts runs past their `timeout` (default 24 h) and fails their unfinished steps, then archives them. |
+| Resolver crash recovery | 60 s | Fails runs left `resolving` for more than 5 minutes. |
+| Outbox relay | 500 ms | Publishes up to 100 `outbox_events` rows per pass, oldest first (`FOR UPDATE SKIP LOCKED`), with `Nats-Msg-Id` set to the row id so the stream drops a duplicate. A row is deleted once the stream acknowledges it, and moved to the back of the queue when publishing fails. |
+| Task message purge | 30 s | Erases the task messages of finished or archived steps from the stream, using `dispatched_task_messages`. |
+| Dispatch recovery | 60 s | Puts back to `pending` steps claimed more than 5 minutes ago and never published, giving back their quota; dispatches running runs with steps pending for more than 60 seconds. |
+| Retry | 5 s | Dispatches running runs with a step whose `retry_at` has passed. |
 
-1. **Quota Tracking:** The Control Plane tracks the "In-Flight Resource
-    Consumption" for every active run in PostgreSQL.
-2. **Validation (Pre-Execution):** Before initiating a run, the Controller
-    holds the requested `quotas` to the ceilings the operator sets
-    (`STORMCHASER_RUN_MAX_*`, see [quotas.md](quotas.md)).
-3. **Active Enforcement:**
+### 6. GitOps & Secrets
 
-    * **Concurrency Limits:** The Controller uses NATS JetStream "pull
-        consumers" with backpressure. If a run's `max_concurrency` reached, the
-        Controller stops pulling new tasks for that RunID until active steps
-        complete.
-    * **Resource Monitoring:** If the aggregate CPU/Memory request of active
-        steps exceeds `max_cpu` or `max_memory`, the Controller pauses task
-        dispatch.
-    * **Storage Quotas:** The Shared File System (SFS) provisioner monitors
-        the size of the underlying volume (e.g., EBS/EFS). If a step attempts
-        to write beyond the `max_storage` limit, the write fails, and the step
-        is terminated with a "Resource Quota Exceeded" error.
-    * **I/O Throughput Throttling:** To prevent "Noisy Neighbor" scenarios on
-        shared infrastructure:
+* **Git**: the engine clones repositories into its git cache (`GIT_CACHE_DIR`) when
+  a run is resolved. A branch or tag is fetched again after
+  `STORMCHASER_GIT_CACHE_REFRESH_SECS` (default 60); a full commit id is never
+  refetched. Clones are limited by `STORMCHASER_GIT_MAX_CLONE_MB`,
+  `STORMCHASER_GIT_CLONE_TIMEOUT_SECS` and `STORMCHASER_GIT_ALLOWED_SCHEMES`. There is
+  no background sync. In Kubernetes a `ReadWriteOnce` cache limits the engine to one
+  replica; the chart refuses more.
+* **SOPS**: when a run is resolved, the engine decrypts the run's SOPS file from the
+  repository (optionally assuming `sops_role_arn` for AWS KMS). A run whose secrets
+  cannot be decrypted fails. Decrypted secrets are stored in `run_contexts.secrets`
+  and read from there by later steps. The application does not encrypt them;
+  encrypting the database at rest is the operator's job (see [Security](security.md)).
+* **Vault**: with `VAULT_TOKEN` (and `VAULT_ADDR`) set, workflow expressions can call
+  `secret()`. Values fetched this way are recorded for masking.
+* **Secret masking**: each run has a `sensitive_values` list in `run_contexts`,
+  filled from decrypted SOPS secrets, values fetched with `secret()` (in expressions
+  and query parameters), and connection and registry credentials handed to steps. The
+  API also masks the run's `secret = true` inputs. It replaces each value, and its
+  base64, URL, JSON-escaped and hex encodings, with `********` in run details, step
+  outputs, errors and log lines it returns, and masks outright any output marked
+  sensitive (`step_outputs.is_sensitive`). Masking happens when the API reads; logs in
+  Loki or Elasticsearch, and a step's own output, are not redacted.
 
-        1. **Enforcement:** The Runner Agent uses OS-level control groups
-            (e.g., Linux `blkio` cgroup) to cap the `max_throughput` and
-            `max_iops` defined in the DSL's `storage.limits` block.
-        2. **Monitoring:** The Agent publishes periodic I/O utilization
-            metrics to NATS.
+### 7. Resource Quota Enforcement
 
-    * **Execution Engine Variability:** Note that the enforcement of these
-        quotas (especially I/O throttling and granular CPU/Memory caps) is
-        dependent on the capabilities of the underlying execution engine. For
-        example, a K8s runner may support strict cgroup-based throttling,
-        whereas a Lambda or ECS-Fargate runner may only support aggregate
-        timeouts or predefined resource tiers.
+* Each run has a row in `run_quotas`: `max_concurrency`, `max_cpu`, `max_memory`,
+  `max_storage` and `timeout`, from the workflow's `quotas` block, held to the
+  operator's ceilings (`STORMCHASER_RUN_MAX_*`). See [Quotas](quotas.md).
+* **Concurrency**: the engine claims no more pending steps than `max_concurrency`
+  minus the run's steps in `running`. Iterations also respect a step's
+  `max_parallel`.
+* **CPU and memory**: before dispatch the engine claims the step's requested CPU and
+  memory against the run's `max_cpu` and `max_memory` (`current_cpu_usage`,
+  `current_memory_usage`). A step that does not fit goes back to `pending`; a step
+  that asks for more than the whole run may use fails. The claim is given back when
+  the step finishes or its dispatch is lost.
+* **Timeout**: the timeout worker aborts a run past its `timeout`, fails its
+  unfinished steps and tells runners to stop them.
+* `max_storage` is stored but not enforced.
 
-4. **Graceful Termination:** If a run exceeds its `timeout` quota, the
-    Controller sends an `abort` signal to all active runners and initiates the
-    `on_failure` or `finally` cleanup blocks.
+### 8. Housekeeping & Data Retention
 
-### 7. Housekeeping & Data Retention
+* **Archiving**: a finished run's rows move from the live tables to
+  `archived_workflow_runs`, `archived_run_contexts`, `archived_step_instances`,
+  `archived_step_outputs`, `archived_step_status_history`, the archived test report
+  tables, `archived_artifact_registry` and `archived_run_storage_states`. The
+  `combined_*` views read live and archived rows together.
+* **Nothing expires archived rows.** They are kept until deleted with
+  `DELETE /api/v1/runs/{id}`, which removes the run from both live and archived
+  tables.
+* **NATS**: task messages are erased once their step is finished or archived. Other
+  messages age out with the stream's maximum age.
+* **Parked SFS archives** in object storage are not deleted by Stormchaser; use the
+  bucket's lifecycle rules.
+* Runners reap containers or Jobs they manage that are older than 24 hours, checking
+  every hour.
 
-To prevent storage exhaustion in PostgreSQL and NATS JetStream, the Control
-Plane implements an automated **Retention Policy Engine**:
+### 9. Affinity
 
-1. **Global Retention Period:** By default, all workflow "Run State"
-    (decrypted secrets, step outputs, and NATS event streams) is retained for
-    **30 days**. This is configurable at the organizational or workflow level.
-2. **NATS Stream Cleanup:** All runs share one stream. The Controller erases
-    a step's task message, which carries its resolved secrets, shortly after
-    the step finishes or its run is archived. Other messages are removed by the
-    stream's maximum age (one week by default; see [NATS](nats.md)).
-3. **Postgres Archiving:**
-
-    * **Audit Logs:** High-level metadata (who ran what, when, and the final
-        status) is moved to a "Long-term Audit" table and kept indefinitely
-        (or according to compliance rules).
-    * **Execution Detail:** Granular step logs, large JSON outputs, and
-        intermediate state are hard-deleted from the primary DB after the
-        retention period.
-
-4. **SFS Decommissioning:** Any "Parked" file system bundles (tarballs in
-    S3/GCS) are deleted unless explicitly marked for long-term storage in the
-    DSL `artifacts` block.
-
-### 8. Runner Protocol Versioning & Compatibility
-
-To ensure stable communication between the Control Plane and a distributed fleet
-of Runners, the system employs **Semantic Protocol Versioning**:
-
-1. **Handshake:** During the `runner.register` NATS event, the Runner MUST
-    include its `protocol_version` (e.g., `1.2.0`).
-2. **Compatibility Check:** The Controller maintains a
-    `min_supported_protocol_version`.
-
-    * If a Runner's version is lower than the minimum, registration is
-        rejected with a `VersionMismatch` error, and the Runner is blocked from
-        receiving tasks.
-    * If a Runner is within the supported range but older than the
-        Controller, the Controller may emit a `RunnerDeprecated` warning in the
-        system audit log.
-
-3. **Feature Negotiation:** The Controller only dispatches tasks to Runners
-    that advertise the required capabilities (e.g., "docker-v20",
-    "sops-support") for that specific step.
-
-### 9. Performance Tuning & Scalability
-
-Stormchaser is designed to handle high-concurrency workloads through targeted
-architectural optimizations:
-
-1. **Outbox Relay Optimization:**
-
-    * **High-Frequency Polling:** The Outbox Relay process uses a
-        sub-millisecond polling interval (via `SKIP LOCKED`) to minimize the
-        latency between database commit and NATS dispatch.
-    * **NATS-Backed Notify:** To further reduce latency, the Controller can
-        issue a "NATS Notify" signal immediately after a DB commit, prompting
-        the relay to poll the outbox instantly rather than waiting for the
-        next polling cycle.
-
-2. **Shard Rebalancing Storm Mitigation:**
-
-    * **Graceful Handoff:** When a shard moves between Controller nodes, the
-        system uses a **Staggered Reclamation** strategy. The new owner node
-        "warms up" by loading the run context from Postgres before assuming
-        control of the NATS consumer.
-    * **Exponential Backoff:** During high-traffic rebalancing events, the
-        Controller applies exponential backoff to internal state transitions to
-        prevent "Thundering Herd" pressure on the PostgreSQL instance.
-    * **Event Buffering:** NATS JetStream acts as a buffer. During a shard
-        transition, events remain in the stream and are only consumed once the
-        new shard owner is fully ready and has validated the latest fencing
-        tokens.
-
-### 10. Affinity Implementation Strategies
-
-Stormchaser employs two distinct strategies to realize the performance and
-isolation guarantees of its affinity levels:
-
-#### A. Static Composition (for `locked` affinity)
-
-When a group of steps is marked as `locked`, the Control Plane performs
-**Pre-Dispatch Synthesis**:
-
-* **Single Pod/Task:** The Controller generates a single runner manifest
-    (e.g., a K8s Pod or ECS Task).
-* **Sequential Execution:** Steps are mapped to sequential commands within
-    the same container or as a series of Init Containers sharing a common
-    `emptyDir` volume.
-* **Lifecycle:** The runner is ephemeral and terminates immediately upon the
-    completion of the final step in the locked group.
-
-#### B. Dynamic Orchestration (for `shared` affinity)
-
-To achieve the 30-50% performance optimization for `shared` steps, the system
-uses a **Warm Runner Agent**:
-
-* **Persistent Environment:** The Controller dispatches a specialized
-    "Stormchaser Runner Agent" to the execution plane.
-* **Implicit Context Purge (Soft Reset):** Between every step in a shared
-    environment, the Agent MUST perform a "Soft Reset":
-
-    1. **Reap:** SIGKILL all processes in the current cgroup/namespace,
-        **except** for the Agent itself and any processes matching the
-        `process_allow_list` defined in the workflow strategy.
-    2. **Sanitize:** Wipe all non-system environment variables.
-    3. **Wipe:** Clear `/tmp`, `/var/tmp`, and any other ephemeral scratch
-        spaces.
-
-* **Command Streaming:** Instead of terminating after one step, the Agent
-    remains active and "pulls" subsequent steps from NATS that share the same
-    affinity context.
-* **Image Caching:** The Agent maintains a local cache of container images
-    and execution layers, eliminating the "cold start" overhead for sequential
-    tasks using compatible runtimes.
-* **Cleanup:** The Agent is strictly bound to the **Workflow Execution
-    Boundary** and is automatically decommissioned by the Controller once the
-    associated workflow completes.
+`strategy { affinity = "shared" }` sends a run's shared steps to the runner the first
+of them landed on, on that runner's own subject (`stormchaser.v1.runner.<kind>.<id>`).
+Followers wait up to 30 seconds for the first step to be assigned. Each step is still
+its own container or Job. See [Affinity](affinity.md).
 
 ## Runner Feature Comparison
 
-Stormchaser provides specialized runners for different execution environments.
-While all runners aim for a consistent execution model, some features are
-specific to the underlying runtime capabilities.
-
-### Comparison Table
-
 | Feature | K8s Runner (`RunK8sJob` / `RunContainer`) | Docker Runner (`RunContainer`) |
 | :--- | :--- | :--- |
-| **Shared File System (SFS)** | ✅ Full (Init Containers + Agent Sidecar) | ✅ Full (Sequential Containers + Agent) |
-| **Orphan Adoption** | ✅ Full (Startup scan + Orchestrator sync) | ✅ Full (Startup scan + Orchestrator sync) |
-| **Metadata Encryption** | ✅ AES-256-GCM (Annotations) | ✅ AES-256-GCM (Labels) |
-| **Resource Limits** | ✅ CPU/Memory Requests & Limits | ✅ CPU Quota & Memory Bytes |
-| **Privileged Mode** | ✅ Supported | ✅ Supported |
-| **Garbage Collection** | ✅ 24h Background Reaper | ✅ 24h Background Reaper |
-| **SFS Consistency Checks** | ✅ SHA-256 Hash Verification | ✅ SHA-256 Hash Verification |
-| **Artifact & Test Reports** | ✅ Log-based Ingest | ✅ Log-based Ingest |
-| **Secret/ConfigMap Mounts** | ✅ K8s Native | ❌ Not Supported |
-| **Advanced Scheduling** | ✅ Parallelism/Completions | ❌ Not Supported |
+| **Shared File System (SFS)** | Yes (init containers + agent sidecar) | Yes (sequential containers + parking container) |
+| **SFS hash check** | Yes (SHA-256) | Yes (SHA-256) |
+| **Orphan adoption** | Yes (startup scan, asks the engine) | Yes (startup scan, asks the engine) |
+| **Metadata encryption** | AES-256-GCM in annotations | AES-256-GCM in labels |
+| **Resource limits** | CPU/memory requests and limits | CPU quota and memory bytes |
+| **Privileged mode** | Only with `STORMCHASER_ALLOW_PRIVILEGED=true` | Only with `STORMCHASER_ALLOW_PRIVILEGED=true` |
+| **Garbage collection** | Hourly reaper, 24 h age | Hourly reaper, 24 h age |
+| **Test reports** | Uploaded to engine-issued URLs | Uploaded to engine-issued URLs |
+| **Secret/ConfigMap mounts** | Yes | No |
+| **Parallelism/completions** | Yes (`RunK8sJob`) | No |
 
 ### Feature Explanations
 
 #### 1. Shared File System (SFS) & Artifacts
 
-Both runners implement the **Park/Unpark** model. Before a step starts, they
-"unpark" (download and extract) any required storage volumes from the SFS
-backend. After the step completes successfully, they "park" (compress and
-upload) the modified files and report the new SHA-256 hash back to the
-orchestrator. Parking and artifact publishing are done by a helper the step's
-own code does not share: a separate container on Docker, an agent sidecar in
-the pod on Kubernetes. See [Security](security.md) for what that protects.
+Both runners implement park and unpark. Before a step starts, they download and
+extract its storage volumes from the SFS backend, after checking the archive's
+SHA-256 against the one the engine sent. After the step succeeds, they compress and
+upload the modified files and report the new hash. Parking and artifact publishing
+are done by a helper the step's own code does not share: a separate container on
+Docker, an agent sidecar in the pod on Kubernetes. See [Security](security.md).
 
 #### 2. Orphan Adoption & Recovery
 
-To ensure high availability, both runners scan for "orphaned" tasks upon startup
-(e.g., after a runner crash or restart). They identify containers managed by
-Stormchaser, verify their current status with the Orchestration Engine via
-NATS, and "adopt" them to continue monitoring their lifecycle and reporting
-results.
+On start, a runner scans for containers or Jobs that Stormchaser manages, asks the
+engine on `stormchaser.rpc.step.query` whether each step is still wanted, and adopts
+the ones that are. The engine moves the step to the adopting runner.
 
 #### 3. Metadata Encryption
 
-Sensitive step data (the DSL and state) stored in container metadata (K8s
-Annotations or Docker Labels) can be encrypted using **AES-256-GCM**. This
-prevents sensitive information from being visible to users with only
-container-runtime-level access (e.g., `kubectl describe` or `docker inspect`).
+With `STORMCHASER_STATE_ENCRYPTION_KEY` set, step data stored in container metadata
+(Kubernetes annotations or Docker labels) is encrypted with AES-256-GCM, so it is not
+readable with `kubectl describe` or `docker inspect`.
 
 #### 4. Resource Isolation
 
-* **Kubernetes**: Uses native `requests` and `limits` for CPU and Memory,
-    allowing for granular scheduling and OOM protection.
-* **Docker**: Implements CPU isolation via `CpuQuota` (CFS quota) and Memory
-    isolation via byte limits.
-
-#### 5. Garbage Collection (Reaper)
-
-Both runners include a background "reaper" process that periodically cleans up
-stale resources (containers and metadata) older than 24 hours. This ensures
-that even in the event of catastrophic failures where standard cleanup logic
-fails, the runner host does not suffer from resource exhaustion over time.
+* **Kubernetes**: native `requests` and `limits` for CPU and memory.
+* **Docker**: `CpuQuota` (CFS quota) and memory byte limits.
 
 ### Parallelism and Scheduling Models
 
-A key distinction between the K8s and Docker runners is where the logic for
-parallel execution resides.
+#### 1. Native runtime scheduling (Kubernetes only)
 
-#### 1. Native Runtime Scheduling (K8s Only)
+`RunK8sJob` maps one step instance to one Kubernetes Job, whose `parallelism` and
+`completions` the Job controller manages.
 
-When using `RunK8sJob`, Stormchaser offloads the scheduling logic to the
-Kubernetes Job Controller. This is "Advanced Scheduling" where a single
-Stormchaser step instance maps to a single K8s Job that internally manages
-multiple Pods to reach a completion goal.
+#### 2. Workflow-level iteration (any runner)
 
-#### 2. Workflow-Level Orchestration (Runner Agnostic)
+A step's `iterate` expression creates one step instance per item, each dispatched as
+its own task. The engine enforces `max_parallel` per step and `max_concurrency` per
+run; iterations beyond those start `waiting_for_event` and are started in order as
+earlier ones finish.
 
-For both Docker and Kubernetes runners, Stormchaser provides sophisticated
-parallelism via the **Workflow Engine's `iterate` strategy**.
+## Design targets (not yet implemented)
 
-* **Fan-Out**: The Orchestration Engine evaluates the iteration list and
-    creates multiple independent `step_instances` in the database.
-* **Independent Dispatch**: Each iteration is dispatched as a separate NATS
-    task (`RunContainer`).
-* **Parallel Execution**: The Docker runner naturally executes these tasks in
-    parallel using its internal async task pool.
-* **Concurrency Control**: The Engine enforces `max_parallel` (per step) and
-    `max_concurrency` (per workflow) before dispatching tasks to any runner.
+The original design described the following. None of it is built; it is kept here
+so that the gap is visible.
 
-**Conclusion**: Users can achieve high-performance parallel execution in
-Docker-only environments by using the engine's native iteration logic, which
-provides feature parity with Kubernetes' advanced scheduling for most common
-use cases.
+* **Sticky sharding with rebalancing**: replicas owning shards, handing them over
+  with staggered reclamation and warm-up. Today shards are a static list per replica.
+* **Fencing tokens that move**: incrementing a run's token when its owner changes,
+  so that late results from the previous owner are rejected.
+* **Optimistic concurrency on step updates.**
+* **Per-task heartbeats and zombie investigation**: a dead-man switch per task and
+  asking the runner about a silent task before failing it.
+* **Runner protocol versioning**: rejecting runners below a minimum
+  `protocol_version`, deprecation warnings, and dispatching only to runners that
+  advertise a step's required capabilities. `protocol_version` and `capabilities` are
+  stored and never checked.
+* **`locked` affinity**: running a group of steps in one pod or task, with an agent
+  watchdog that aborts a hung step.
+* **Warm runner agent for `shared` affinity**: a persistent agent that pulls the
+  group's steps, soft-resets between them (reap processes, clear environment and
+  scratch space) and caches images.
+* **DSL transformation**: upgrading older `stormchaser_dsl_version` workflows with
+  AST transformations and a `DSL_DEPRECATED` warning. The version is parsed and
+  stored only.
+* **Multi-approval**: `require_approvals`, `on_partial` and `on_reject` blocks, and
+  de-duplicating approvals by identity.
+* **Retention policy engine**: a configurable retention period (30 days by
+  default), a long-term audit table, and hard-deleting execution detail.
+* **Log redaction in the pipeline**: a log shipper that redacts registered secrets
+  before they are stored, and `::add-mask::` with real-time masking in the agent.
+* **Storage quotas and I/O throttling**: enforcing `max_storage`, cgroup `blkio`
+  limits from `storage.limits`, and I/O metrics from the agent.
+* **Outbox relay notify**: waking the relay on commit instead of polling every
+  500 ms.

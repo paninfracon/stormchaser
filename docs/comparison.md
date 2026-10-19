@@ -1,9 +1,12 @@
 # Tool Comparison: Stormchaser vs. The Ecosystem
 
-Stormchaser is designed as a **DevOps Process Orchestrator**. Unlike data
-pipeline tools (Airflow, Prefect) that focus on data gravity and ETL,
-Stormchaser focuses on low-latency event response, human-in-the-loop security,
-and execution performance for modular automation.
+Stormchaser is a **DevOps process orchestrator**. Data pipeline tools such as
+Airflow and Prefect focus on throughput and ETL. Stormchaser focuses on
+responding to events, human approvals with identity and policy checks, and
+modular steps that run in containers or inside the engine.
+
+This page compares design choices, not measured performance. Where a
+Stormchaser capability is planned rather than built, it says so.
 
 ## Feature Matrix
 
@@ -11,8 +14,7 @@ and execution performance for modular automation.
 | :------------------ | :-------------------- | :------------------- | :---------------- | :-------------- | :-------------- |
 | **Primary Focus**   | DevOps Processes      | Kubernetes Native    | Event-Driven Ops  | Job Scheduling  | CI/CD Platform  |
 | **Configuration**   | HCL + HCL Expressions | YAML                 | YAML / Python     | UI / YAML / XML | YAML / UI       |
-| **Execution Model** | Affinity-Aware        | Pod-per-Step         | Local/Remote Exec | SSH / Agent     | SaaS / Delegate |
-| **Performance**     | Warm Runner Agent     | High Overhead (Cold) | Medium (Python)   | High (SSH)      | Variable        |
+| **Execution Model** | Runner per platform; built-in steps in the engine | Pod-per-Step         | Local/Remote Exec | SSH / Agent     | SaaS / Delegate |
 | **Event Mesh**      | NATS JetStream        | Webhooks / Sensor    | RabbitMQ / Sensor | Polling / API   | Webhooks        |
 | **Human-in-Loop**   | Advanced (Multi)      | Basic (Suspend)      | Basic (Inquiry)   | Manual Step     | Built-in        |
 | **Security**        | OPA Fail-Closed       | K8s RBAC             | Action Aliases    | ACLs            | RBAC / Secrets  |
@@ -26,48 +28,50 @@ and execution performance for modular automation.
 Argo is the industry standard for K8s workflows, but it treats every step as a
 separate Pod.
 
-- **Stormchaser Advantage:** **Execution Affinity**. Stormchaser can run
-  multiple modular steps (checkout, lint, build) in the same container using the
-  "Warm Runner Agent," reducing overhead by 30-50%.
-- **DSL:** Stormchaser rejects YAML's whitespace sensitivity in favor of a
-  robust native HCL-based DSL, making it far more maintainable for complex
-  logic.
+- **Built-in steps:** HTTP calls, SQL, jq, templates, WASM, email and chat
+  messages run inside the engine, with no Pod or container per step.
+- **Execution affinity:** Steps in a `shared` affinity group go to the runner
+  the group's first step landed on. Running several steps in one container
+  (`locked` affinity, and reuse of a warm container for `shared`) is planned;
+  see [Affinity](affinity.md).
+- **DSL:** Workflows are written in an HCL-based DSL rather than YAML.
 
 ## 2. vs. StackStorm (IFTTT for Ops)
 
-StackStorm pioneered event-driven automation, providing a robust Python-based
-ecosystem, though its architecture can require additional operational overhead
-to scale dynamically.
+StackStorm pioneered event-driven automation, with a large Python-based
+ecosystem of packs.
 
-- **Stormchaser Advantage:** **Native Scalability**. Using NATS JetStream and
-  "Sticky Sharding," Stormchaser handles distributed state and event persistence
-  natively in its core.
-- **Speed:** Being written in Rust with a NATS-backed event mesh, Stormchaser is
-  designed for sub-millisecond event-to-workflow latency.
+- **Scaling:** Events are persisted in NATS JetStream. Engine replicas can
+  split the event stream by shard (`STORMCHASER_ASSIGNED_SHARDS`), and one
+  replica, chosen through a Postgres advisory lock, runs the background
+  workers.
+- **Language:** The services are written in Rust. No latency figures have
+  been published.
 
 ## 3. vs. Rundeck (Traditional Job Scheduling)
 
 Rundeck excels at "turning scripts into buttons" but lacks modern GitOps and
 event-driven primitives.
 
-- **Stormchaser Advantage:** **GitOps-First**. Stormchaser treats the Git
-  repository as the source of truth for all DSL and secrets (SOPS), syncing them
-  to a high-performance DB cache rather than relying on manual UI configuration.
-- **Isolation:** Unlike Rundeck's often runner-sticky model, Stormchaser
-  provides explicit `isolated` vs `shared` affinity controls.
+- **Git as the source:** Runs read their workflow and SOPS-encrypted secrets
+  from a Git repository at a given ref. The engine keeps a local clone cache;
+  nothing is configured through the UI.
+- **Isolation:** Steps run in fresh containers by default (`isolated`); a
+  `shared` group pins its steps to one runner.
 
 ## 4. vs. Harness (Enterprise CI/CD)
 
 Harness is a comprehensive, often SaaS-based, platform. It is powerful but can
 feel like a "black box" with rigid YAML schemas.
 
-- **Stormchaser Advantage:** **Extensibility**. Stormchaser's library system
-  allows users to define custom Step types and expand the AST itself. It is
-  designed for engineers who need to build custom, highly-integrated automation
-  platforms, not just consume a CI/CD service.
-- **Resource Control:** Stormchaser provides granular **I/O Speed Governors**
-  and provisioning blocks, allowing for fine-tuned multi-tenant stability that
-  generic CI/CD tools often lack.
+- **Extensibility:** Step libraries define reusable steps with parameters,
+  and custom step types can be registered as WASM modules. It suits engineers
+  building their own automation platform rather than consuming a CI/CD
+  service.
+- **Resource control:** Per-run quotas (concurrency, CPU, memory, timeout)
+  under operator ceilings, per-step CPU and memory limits enforced by the
+  runners, and storage provisioning blocks. Storage I/O limits
+  (`max_throughput`, `max_iops`) are planned, not enforced.
 
 ---
 
@@ -75,16 +79,16 @@ feel like a "black box" with rigid YAML schemas.
 
 ### DevOps Process vs. Data Pipeline
 
-Data tools (like Airflow) are built for **throughput and data gravity**. They
-handle "Big Data" well but are often too slow or heavy for "DevOps" tasks like:
+Data tools (like Airflow) are built for throughput and large data sets. DevOps
+tasks need something else:
 
-- Responding to a "Production Incident" event in <100ms.
-- Orchestrating a complex rollout across multiple K8s clusters and AWS regions.
-- Handling nested human approvals with identity validation.
+- Starting a run from an incident or webhook event.
+- Orchestrating a rollout across several Kubernetes clusters and AWS regions.
+- Approvals that check who is approving.
 
-**Stormchaser is built for the latter.** It optimizes for the **Developer
-Experience (DX)** through its HCL-based DSL and for **Operator Confidence**
-through its Fail-Closed OPA security and rigorous resource quotas.
+Stormchaser is built for these. Workflows are written in an HCL-based DSL, and
+operators get an OPA policy that refuses what it does not recognise, plus
+resource quotas.
 
 ---
 
@@ -99,14 +103,14 @@ for real-time observability, troubleshooting, and interactive management.
 | :--- | :---: | :---: |
 | **Primary Use Case** | Scripting, CI/CD, DSL Authoring | Live Monitoring, Troubleshooting |
 | **Execution Mode** | Headless / Synchronous | Interactive / Real-time (SSE) |
-| **Workflow Execution** | `run` (file), `enqueue` (git) | Integrated File Browser & Form |
-| **Log Viewing** | Streaming (`logs` cmd) | Paginated & Streamed UI Viewer |
-| **Run Discovery** | `list` with flags | Visual List with Interactive Filters |
+| **Workflow Execution** | `run` (file), `runs enqueue` (git) | Integrated File Browser & Form |
+| **Log Viewing** | `runs logs` | Paginated & Streamed UI Viewer |
+| **Run Discovery** | `runs list` with flags | Visual List with Interactive Filters |
 | **DSL Linting & Validation**| `lint` (CLI-exclusive) | ❌ (Relies on server-side validation) |
 | **JSON Schema Export** | `schema` (CLI-exclusive) | ❌ |
-| **Human-in-the-Loop (HITL)**| `approve` command | Interactive Approval Dialog |
-| **Artifacts & Test Reports**| `artifacts`, `reports` | ❌ (Metadata view only) |
-| **Storage Backends** | Full CRUD via JSON payloads | Interactive CRUD Forms |
-| **Webhooks** | Full CRUD via JSON payloads | Interactive CRUD Forms |
+| **Human-in-the-Loop (HITL)**| `runs approve`, `runs reject`, `runs approve-link` | Pending Approvals tab and Approval Dialog |
+| **Artifacts & Test Reports**| `runs artifacts`, `runs reports`, `runs report` | Artifact list and test results pane in run details |
+| **Connections (incl. storage)** | `connections` | Interactive CRUD Forms |
+| **Webhooks** | `webhooks` | Interactive CRUD Forms |
 | **Event Rules & Cron** | Full CRUD (`rules`, `cron`) | Interactive CRUD Forms |
-| **Authentication** | OAuth Browser, Token generation | OAuth Browser Flow |
+| **Authentication** | OIDC browser login, profiles (`login`, `auth`) | OIDC browser login |

@@ -1,68 +1,74 @@
 # Stormchaser Project Status & Future Work
 
-## 1. Executive Summary
+*Status as of 2026-10-19, version 1.5.1 plus the changes under `[Unreleased]` in `CHANGELOG.md`.*
 
-Stormchaser has a solid foundational architecture with a powerful graph-based DSL and a scalable, event-driven orchestration engine. The core container execution on Kubernetes is mature, and the security model (SSO/OPA) is well-integrated. The engine supports a rich set of native steps including Webhooks, Email, Lambda, and WASM.
+## 1. Summary
 
-Recent focus has been on improving reliability, observability, and advanced data handling (SFS/Artifacts) alongside significant code quality refactoring. The documentation and testing standards have been rigorously verified and brought up to a high standard.
+The core works end to end: workflows are parsed from the HCL-based DSL, runs are resolved from Git or from workflow text, and steps run on the Docker and Kubernetes runners or inside the engine. Approvals, webhooks, event rules, cron triggers, the CLI, TUI and web UI all work against the same API.
 
-## 2. Recent Accomplishments & Completed Epics
+Since 1.5.1 the work has been on reliability, security and correctness rather than new features:
 
-* **Quality Pass & Refactoring:** Refactored multiple crates to adhere to the "500-line rule". Monolithic functions and classes were decomposed into smaller, focused modules (e.g., splitting TUI `app.rs` into specialized sub-modules).
-* **Testing Remediation:** Successfully executed a full test remediation plan. Flakiness in API rate limit tests was resolved. "Fake" assertion-less tests and tests with bypassed logic (`SQL_OFFLINE`) were identified and fully remediated with meaningful assertions.
-* **TUI Enhancements:** Replaced the unmaintained `ratatui-form` with a static JSON Schema approach (`schemaui`) for simple forms, and a Native Reactive Dependency Graph for complex workflow inputs handling SSE streams.
-* **Web UI Introduction:** A new Web UI has been developed that includes an Admin interface, Reporting functionality, and Import/Export features. (Reporting logic is centralized in the API for cross-UI consumption).
-* **NATS Schema Modernization:** All NATS messaging infrastructure has been modernized. Messages conform to CloudEvents, use an OCI Schema Registry, implement subject-based versioning, and use local caching to eliminate network bottlenecks.
-* **Integrations:** Added native `JinjaRender`, `TestReportEmail`, and AWS SES backend steps.
-* **Documentation Quality:** Documentation was reviewed and confirmed to accurately reflect Cargo feature flags, security models (OPA/Fail-Closed), state machines, and DSL grammar.
+* **Reliability.** Events and step results go through a transactional outbox and are deduplicated by the stream. Events whose handler fails for a transient reason are delivered again with backoff. Redelivered events no longer run a run twice. Lost dispatches are dispatched again. One engine replica, chosen through a Postgres advisory lock, runs the background workers; each engine records a heartbeat, and the built-in steps of a dead engine are failed (or, for `JQ` and `JinjaRender`, run again).
+* **Security.** Services serve HTTPS and connect to PostgreSQL with `verify-full` by default. There is always an authorization policy: with no OPA server, the services enforce a built-in WASM copy of the shipped policy, which refuses what it does not recognise and checks ownership of every run, connection, webhook, rule and schedule. Allow-lists cover `env()`, Vault paths, IAM roles, internal hosts and privileged steps. NATS requires credentials, with separate users per service. Approval links are sealed with their own key and expire. Steps get resource limits by default.
+* **Features that were documented but did not work now do.** Step `retry` blocks, `allow_failure`, step library parameters, and spec merging between a step and its library.
+* **Dependencies.** All dependencies upgraded (Axum 0.8, Leptos 0.8, SQLx 0.9, kube 4, MiniJinja 3, jaq 3). The minimum Rust version is 1.96.
 
-## 3. Implementation Overview
+## 2. Implementation Overview
 
 | Category | Status | Details |
 | :--- | :--- | :--- |
-| **Language** | Implemented | Rust project with workspace structure. |
-| **Data Store** | Implemented | PostgreSQL for state and audit; NATS for event-driven orchestration. |
-| **DSL** | Implemented | Graph-based DSL with Tree-sitter support and HCL expression evaluation. |
-| **Execution** | Implemented | Distributed state machine (K8s and Docker runners). Includes Optimistic Concurrency Control (OCC), Global Concurrency Enforcement, and Resource Quota/Timeout enforcement. |
-| **Auth** | Implemented | SSO (OIDC/Dex), Policy-as-Code (OPA) integration, and mTLS. |
-| **File System** | Implemented | Shared File System (SFS) with S3-compatible parking, Artifact Registry, and PVC optimizations. |
-| **Steps** | Implemented | Native support for K8sJob, Docker, Webhooks, Email (SMTP/SES), Lambda, WASM, JinjaRender, Test Reports, JQ, and Human-In-The-Loop approvals. |
+| **Language** | Implemented | Rust workspace of 13 crates. |
+| **Data Store** | Implemented | PostgreSQL for state, history and the outbox; NATS JetStream for events. |
+| **DSL** | Implemented | HCL-based DSL parsed with `hcl-rs`; HCL and MiniJinja expressions; step libraries with parameters; includes; offline linting against a JSON Schema. |
+| **Execution** | Implemented | Event-driven state machines for runs and steps. Several engine replicas with shard assignment and a leader for background workers. Per-run quotas under operator ceilings, per-step resource limits, run and step timeouts, step retries. |
+| **Auth** | Implemented | OIDC login (Dex for the quickstart) and API-signed tokens; OPA policy on every request and object, with a built-in policy as the fallback. |
+| **File System** | Implemented | Shared File System (SFS) parked as tarballs in S3-compatible storage with SHA-256 checks; artifacts to S3 or OCI registries; PVC and host-path optimisations. |
+| **Steps** | Implemented | `RunContainer`, `RunK8sJob`, `GitCheckout`, `RestApi`, `SqlExecute`, `JQ`, `JinjaRender`, `WebhookInvoke`, `Wasm`, `LambdaInvoke`, `EmailSend` (SMTP or SES), `TestReportEmail`, `SlackMessage`, `TeamsMessage`, Terraform plan/apply/approval, `Approval`, `Wait`. The `Parallel` and `Sequential` group types are planned. |
+| **Interfaces** | Implemented | CLI, TUI, Leptos web UI, REST API with OpenAPI, MCP server. |
+| **Deployment** | Implemented | docker-compose quickstart; Helm charts (umbrella, orchestration, both runners, telemetry). |
 
-## 4. Planned Features & Gap Analysis
+## 3. Known Gaps
 
-The following features are planned for future development:
+These are documented or modelled but do not work yet:
+
+* **`on_failure` and `finally` blocks** are parsed but the engine does not run them.
+* **Storage I/O limits** (`max_throughput`, `max_iops` in `docs/workflow_dsl.md`) are not enforced.
+* **`locked` affinity**, and reuse of a warm container for `shared` affinity. A `shared` group pins its steps to one runner; each step still gets its own container.
+* **`is_retry()` and `retry_count()`** expression functions.
+* **AWS Secrets Manager** and other secret backends besides SOPS and Vault.
+* **Approving from Slack or Teams.** The message steps send messages only.
+
+## 4. Planned Features
 
 ### Core Workflow & Engine Capabilities
 
-* **Workflow Templates & CronWorkflows:** Reusability of sub-workflows and periodic scheduling.
-* **Step Optimization:** Logic to run multiple small steps (e.g., Python scripts) within a single container to reduce overhead.
-* **Step Memoization/Caching:** The ability to skip execution if inputs/code haven't changed.
-* **Input Validation & Dynamic Schemas:** Complete implementation of workspace input schemas using the existing HCL embedded schema format. This includes expanding the AST, intercepting workflow executions for JSON schema payload validation, and hydrating forms via dynamic queries (e.g., SQL, AWS) to populate UI dropdowns dynamically.
+* **Step Optimization:** Run multiple small steps (e.g. Python scripts) within a single container to reduce overhead.
+* **Step Memoization/Caching:** Skip execution if inputs and code have not changed.
+* **Global and per-workflow concurrency limits**, beyond the per-run quotas.
 
 ### Advanced Step Types & Integrations
 
-* **Slack/ChatOps Integration:** Approvals and status updates directly via Slack or MS Teams.
+* **ChatOps approvals:** Approvals and status updates directly in Slack or Microsoft Teams.
 * **Continuous Verification:** Steps with health metric monitoring and automatic rollbacks.
-* **Sensors (Polling):** Implementation of background polling mechanisms for external systems (Jira, GitHub, DB) to emit NATS events automatically.
+* **Sensors (Polling):** Background polling of external systems (Jira, GitHub, databases) that emits events.
 * **Environment and Service abstractions:** For cross-context workflow reuse.
 
 ### Execution Runner Enhancements
 
-* **Native WASM on Kubernetes:** Integrate `https://kwasm.sh/` for executing Wasm steps natively within the Kubernetes runner environment.
+* **Native WASM on Kubernetes:** Integrate [kwasm](https://kwasm.sh/) for executing Wasm steps natively within the Kubernetes runner. Today `Wasm` steps run inside the engine.
 
 ### Reliability & Developer Experience
 
-* **Crash Recovery for Resolvers:** Graceful handover of workflows stuck in the `resolving` state if an engine instance dies.
-* **Dry-run and Linting Mode:** Validating workflows without triggering side effects.
-* **Built-in Mermaid Rendering:** Currently requires an external CLI container; integration directly into the application is planned.
-* **Dynamic Schema Resolution via OCI Event Streams:** Consume event streams from the OCI schema registry to trigger dynamic schema cache updates, allowing instant validation rule changes without waiting for the background sync interval.
+* **Built-in Mermaid Rendering:** Diagrams are rendered by hand with the `mermaid-cli` container; rendering workflows in the application is planned.
+* **Dynamic Schema Resolution via OCI Event Streams:** Consume event streams from the OCI schema registry to update the schema cache at once, instead of waiting for the background sync interval.
 
 ## 5. Blocked / Pending Upstream
 
-* **TUI HCL Editor:** The goal to implement `ratatui-code-editor` for syntax-highlighted editing of `.storm` files in the TUI is currently **blocked**. The `ratatui-code-editor` crate (v0.0.3) hardcodes supported languages and does not expose a public API to inject a custom `tree_sitter::Language` instance (like `tree_sitter_hcl::language()`). We must wait for upstream support for dynamic language injection.
+* **TUI HCL Editor:** Syntax-highlighted editing of `.storm` files in the TUI with `ratatui-code-editor` is **blocked**. That crate hardcodes its supported languages and has no public API to inject a custom `tree_sitter::Language` (such as `tree_sitter_hcl::language()`).
 
-## 6. Actionable Maintenance Tasks
+## 6. Maintenance Tasks
 
-* **Coverage Syncing:** Manual test coverage statistics in documentation quickly drift. Automate the injection of coverage stats into the README/documentation via CI/CD.
-* **Planned Features Tracking:** As features transition from "Planned" to "Implemented", ensure this status document and corresponding DSL documentation are updated simultaneously.
-* **Upstream Blocks:** Monitor the `ratatui-code-editor` crate for the required `tree_sitter` language injection feature.
+* **Planned Features Tracking:** As features move from planned to implemented, update this document, [Features](features.md) and the DSL documentation together.
+* **The 500-line rule:** About 25 source files are over the limit set in `GEMINI.md`; split them before adding to them.
+* **Unused dependencies:** The engine's `rustls-native-certs` feature pulls in a crate no code uses.
+* **Upstream Blocks:** Watch `ratatui-code-editor` for tree-sitter language injection.

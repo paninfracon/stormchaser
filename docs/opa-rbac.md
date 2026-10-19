@@ -10,11 +10,21 @@ one, chosen at startup:
 
 1. `OPA_WASM_PATH`: a policy compiled to WebAssembly (see section 5), evaluated
    in-process. `OPA_DATA_PATH` names a JSON file with its `data` document.
-2. `OPA_URL`: an OPA server, which loads its own policy and data.
+2. `OPA_URL`: an OPA server, which loads its own policy and data. Give the full
+   decision URL, for example `http://127.0.0.1:8181/v1/data/stormchaser/allow`.
+   The service posts `{"input": ...}` there and needs `{"result": true}` back;
+   `false` is a refusal, and anything else (an error status, an undefined result)
+   is an error, which refuses too.
 3. Neither: the **built-in policy**, `deploy/opa/policy.rego` compiled into the
-   services. `OPA_DATA_PATH` gives it its settings, in the shape of
-   `deploy/opa/settings.json`. Without settings, users can act only on what they
-   own (and on objects that predate ownership) and nobody is an admin.
+   services (crate `stormchaser-opa`). `OPA_DATA_PATH` gives it its settings, in the
+   shape of `deploy/opa/settings.json` (`{"stormchaser_settings": {...}}`). Without
+   settings, users can act only on what they own (and on objects that predate
+   ownership) and nobody is an admin.
+
+`OPA_ENTRYPOINT` (default `stormchaser/allow`) names the rule a WebAssembly or
+built-in policy is evaluated at. It has no effect with `OPA_URL`, whose path already
+names the rule. An empty `OPA_URL` counts as unset. The Helm chart always sets
+`OPA_URL` to the OPA sidecar in each pod (`global.opa.url`).
 
 There is no way to run a release build without a policy. A debug build started with
 `STORMCHASER_AUTHZ_DISABLED=true` skips every check, for local development only; a
@@ -34,15 +44,24 @@ For every protected request, the API asks:
 
 `subject` is the identity the API verified from the caller's token: its subject,
 email and the identity provider's groups. It is `null` when the request has no
-valid token (the login endpoint, or the MCP transport):
+valid token. On the API's protected routes that cannot happen, since a request
+without one is refused with `401` before policy is asked. It happens on the MCP
+transport (`/api/v1/mcp`), which takes requests without a token, and on the query
+service:
 
 ```json
 {
-  "path": "/api/v1/auth/login",
-  "method": "GET",
+  "path": "/api/v1/mcp",
+  "method": "POST",
   "subject": null
 }
 ```
+
+The API does not ask policy about `/healthz`, `/api/health`, login, token exchange
+and refresh, webhook deliveries (`POST /api/v1/webhooks/{id}`), approval links
+(`/api/v1/approve-link/...`), cron triggers (`/api/v1/cron-trigger/{id}`) or
+`GET /api/v1/schema`. Each of those authenticates its caller in its own way, or
+needs no caller.
 
 Policy is never sent the token itself, so a policy cannot read claims other than
 these three, and an OPA server's decision logs hold no credentials.
@@ -78,7 +97,9 @@ does, once any admin is configured. `resource.type` is `run`,
 identity the API verified; when the engine asks on a run's behalf, `sub` and
 `email` both hold the run's user and `groups` is empty. An approval's `approver`
 has the same shape, and is `null` for a decision made through an emailed link
-sent to several approvers.
+sent to several approvers. `step_ast` is the step as written in the workflow
+(`name`, `type`, `spec`, ...); the shipped policy reads the approvers a step names
+from `step_ast.spec.approvers`.
 
 The policy Stormchaser ships, `deploy/opa/policy.rego`, answers all four and is the
 best starting point for your own. Its tests are in `deploy/opa/policy_test.rego`
@@ -86,7 +107,7 @@ best starting point for your own. Its tests are in `deploy/opa/policy_test.rego`
 that denies by default will refuse every per-object request until it gains a rule
 for it.
 
-> 💡 **Tip:** The fastest way to learn and debug Rego policies is the
+> **Tip:** The fastest way to learn and debug Rego policies is the
 > [Rego Playground](https://play.openpolicyagent.org/). You can paste your policy
 > there, supply a mock `input` JSON, and instantly see what evaluates to true
 > or false.
@@ -143,9 +164,10 @@ This guarantees your authorization logic works before deploying it to the cluste
 
 ## 3. ABAC (Attribute-Based Access Control)
 
-Stormchaser's Orchestration Engine performs a secondary OPA check right before
-executing a workflow step. At this point, the context is richer, allowing for
-Attribute-Based Access Control. This `EngineOpaContext` is injected as:
+The engine asks policy once per run, after it has parsed the workflow and before
+anything runs, including the workflow's queries. The context is richer than a
+request's, allowing for Attribute-Based Access Control. This `EngineOpaContext`
+is sent as:
 
 ```json
 {
@@ -173,22 +195,32 @@ allow if {
 }
 ```
 
+`workflow_ast` is the whole parsed workflow. Its steps are under `steps`, each with
+`name`, `type` and `spec`; steps of a `Parallel` or `Sequential` step nest under
+that step's own `steps`, and `on_failure` and `finally` hold more. A step that uses
+a step library appears as the library's step, with the library's type and the
+merged spec.
+
 **Example 2: Prevent privileged containers.**
-Deny any workflow attempting to run a Docker container with `privileged: true`
-unless the user is a global admin.
+Deny any workflow that runs a container with `privileged = true` anywhere in it,
+unless the user is an admin (again known only by name, so the role comes from data):
 
 ```rego
+privileged_step if {
+    walk(input.workflow_ast, [_, node])
+    node.type == "RunContainer"
+    node.spec.privileged == true
+}
+
 deny if {
-    # Is the step a RunContainer step?
-    input.workflow_ast.step_type == "RunContainer"
-
-    # Is privileged set to true in the AST?
-    input.workflow_ast.config.privileged == true
-
-    # Is the user NOT an admin?
-    not user_has_role("admin")
+    privileged_step
+    not "admin" in data.user_groups[input.initiating_user]
 }
 ```
+
+A `deny` rule has effect only if your `allow` rule for the engine question says
+`not deny`. The runners refuse privileged steps anyway unless started with
+`STORMCHASER_ALLOW_PRIVILEGED=true`.
 
 ## 4. OPA Cookbook (Helpful Snippets)
 
@@ -241,10 +273,9 @@ approval_denied if {
 
 ## 5. Compiling Policies to WASM
 
-For significantly higher performance (sub-millisecond evaluation times) and to
-run policies completely locally without network hops, Stormchaser's API and
-Orchestration Engine support executing pre-compiled OPA WebAssembly (WASM)
-modules directly.
+To run policies locally without network hops, the API, the engine and the query
+service can execute pre-compiled OPA WebAssembly (WASM) modules directly, with
+Wasmtime. The built-in policy is run this way.
 
 > **Note:** While WASM execution is incredibly fast, using OPA over HTTP
 > (via `OPA_URL`) is generally more flexible. It is preferable for centrally
@@ -309,8 +340,8 @@ has_permission if {
 
 ```bash
 # Compile the entire policy targeting WASM.
-# We set 'stormchaser/allow' as the root entrypoint.
-opa build -t wasm -e stormchaser/allow docs/opa-rbac-example.rego
+# The example's package is stormchaser.example, so its rule is stormchaser/example/allow.
+opa build -t wasm -e stormchaser/example/allow docs/opa-rbac-example.rego
 
 # The build outputs a bundle.tar.gz file. Extract it to get the single policy.wasm
 tar -xzf bundle.tar.gz /policy.wasm
@@ -318,9 +349,9 @@ tar -xzf bundle.tar.gz /policy.wasm
 
 ### Configure Stormchaser Servers
 
-Once you have the `policy.wasm` file, you can configure both the
-`stormchaser-api` and `stormchaser-engine` to load it directly into memory at
-startup by setting the `OPA_WASM_PATH` environment variable.
+Once you have the `policy.wasm` file, configure the API, the engine and the query
+service to load it at startup by setting the `OPA_WASM_PATH` environment variable.
+A service that cannot read or load the file does not start.
 
 For example, when running locally or via Docker Compose, you can map the file
 and set the variable:
@@ -331,18 +362,20 @@ services:
     environment:
       # Tell the API to load the WASM module
       OPA_WASM_PATH: /etc/opa/policy.wasm
-      # Optional: Override the default entrypoint
-      # OPA_ENTRYPOINT: stormchaser/allow
+      # The rule to evaluate; the default is stormchaser/allow. The example
+      # policy's is:
+      OPA_ENTRYPOINT: stormchaser/example/allow
     volumes:
       - ./policy.wasm:/etc/opa/policy.wasm:ro
 ```
 
-When `OPA_WASM_PATH` is set, Stormchaser skips making HTTP requests to the external
-OPA server (like `OPA_URL`) and evaluates the policies directly inside its own
-process using Wasmtime.
+When `OPA_WASM_PATH` is set, `OPA_URL` is ignored and the policy is evaluated
+inside the service's own process.
 
 A policy that reads `data`, such as the shipped one's settings, gets it from the
-JSON file named by `OPA_DATA_PATH`, read at startup:
+JSON file named by `OPA_DATA_PATH`, read at startup. It must hold a JSON object.
+With `OPA_URL` the file is ignored (with a warning), since the OPA server loads its
+own data:
 
 ```yaml
       OPA_DATA_PATH: /etc/opa/settings.json

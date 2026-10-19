@@ -21,7 +21,7 @@ service) and configure it as described [below](#production-requirements).
 | Nodes | 1 | 3 or more, clustered |
 | Stream replicas | 1 | 3 |
 | Network isolation | Steps on a separate Docker network or behind a NetworkPolicy; **off** when started by `scripts/setup.sh` | Step containers cannot reach NATS |
-| Monitoring port (8222) | Open; published on the host by compose | Restricted |
+| Monitoring port (8222) | Open; compose publishes it on `127.0.0.1` | Restricted |
 | Storage | 10Gi PVC (Helm); container filesystem (compose) | Sized, persistent, encrypted |
 
 The quickstart requires a password because evaluation installs have a habit of
@@ -69,6 +69,7 @@ of preference:
 | `NATS_TOKEN` | Shared token. NATS documents this as suitable for quick internal setups only. |
 | `NATS_CA_FILE` | Root certificate used to verify the NATS server. |
 | `NATS_TLS_REQUIRED` | `true` refuses a server that does not offer TLS. |
+| `NATS_INBOX_PREFIX` | Prefix of this component's reply inboxes. Default `_INBOX_<NATS_USER>`, or `_INBOX` with no user name (see [Inboxes](#inboxes)). |
 
 A component that finds no credentials logs a warning and connects anonymously.
 Credentials embedded in `NATS_URL` (`nats://user:pass@host`) are **not** used.
@@ -78,7 +79,7 @@ In Helm, `global.nats.authSecret` (orchestration chart) and
 `password` keys. To use a `.creds` file or TLS settings, mount the file and set
 the variables above on the deployment.
 
-The API and engine also present their mTLS client certificate
+The API, the query service and the engine also present their mTLS client certificate
 (`TLS_CERT_PATH` / `TLS_KEY_PATH`) to NATS. It is only checked if the server
 sets `verify: true`. The runners do not present a client certificate; they
 authenticate with the credentials above.
@@ -99,8 +100,10 @@ authenticate with the credentials above.
   `orchestration-engine-legacy-runner`, `orchestration-engine-legacy-step`,
   `runner-container-tasks` (`RunContainer` tasks, shared by Docker and Kubernetes
   runners so that each task goes to one runner), `runner-k8s-job-tasks`
-  (`RunK8sJob` tasks), and one ephemeral consumer per running runner named
-  `runner-<type>-<runner id>`. Earlier releases used `docker-runner` and
+  (`RunK8sJob` tasks), and two ephemeral consumers per running runner:
+  `runner-<type>-<runner id>` for the tasks sent to that runner alone, and
+  `runner-cancel-<random id>` for run cancellations, which is removed five minutes
+  after its runner stops reading it. Earlier releases used `docker-runner` and
   `k8s-runner`, which nothing reads any more; remove them with
   `nats consumer rm stormchaser docker-runner` and `nats consumer rm stormchaser k8s-runner`.
 - A key-value bucket for API rate limiting (`api_rate_limit_buckets`), created by the API.
@@ -183,9 +186,12 @@ publishes one only after its policy check.
 **API**: exactly the list below. The API faces users, so it is the component
 most likely to be compromised, and with the engine's identity it could
 schedule containers on runners directly and read the resolved secrets in task
-messages. With this list it can queue runs, report the outcome of approvals
-and waits (which the engine accepts only with the step's completion token),
-watch run events for its event stream, and keep its rate-limit buckets.
+messages. With this list it can report the outcome of approvals and waits
+(which the engine accepts only with the step's completion token), watch run
+events for its event stream, and keep its rate-limit buckets. The API now queues
+runs by writing them to the database outbox, which the engine publishes, so it no
+longer uses its `run.queued` and `run.direct` grants; they remain in the shipped
+lists.
 
 ```text
 publish allow:
@@ -298,16 +304,19 @@ configuration and require TLS, because the client still sends the password
 itself.
 
 **What these permissions do not stop.** Runners share one credential, so NATS
-cannot tell them apart. The engine does check the runner named in each report:
-a step's result is accepted only from the runner the step is with, a step is
-taken over from a runner only once that runner has missed a heartbeat, and a
-step's registry token goes only to its own runner. That stops a runner that
-does not know which runner holds a step. A compromised runner that learns
-another runner's id can still name it in a report, because the name is part of
-the message and not something NATS vouches for. A runner credential can also
-read tasks scheduled for other runners of any type. It cannot finish steps the engine handles itself, such as
-approvals: those need a token that never leaves the database. Treat every
-runner host as trusted to that extent.
+cannot tell them apart. Per-runner NATS credentials are not implemented. The
+engine tells runners apart another way: each runner is issued a key of its own at
+start and signs its reports with it (HMAC-SHA256 over the subject, the time and
+the message), a step's result is accepted only from the runner the step is with,
+a step is taken over from a runner only once that runner has missed a heartbeat,
+and a step's registry token goes only to its own runner, sealed with its key. See
+"Runner identity" in [security.md](security.md#runner-identity).
+
+What the shared credential still allows: reading every task message on the
+shared queues, for runners of any type, with the secrets it carries; and taking
+the id of a runner that has stopped. It cannot finish steps the engine handles
+itself, such as approvals: those need a token that never leaves the database.
+Treat every runner host as trusted to that extent.
 
 ### 2. TLS on every link
 

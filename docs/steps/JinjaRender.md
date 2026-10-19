@@ -1,26 +1,26 @@
 # JinjaRender Step
 
-The `JinjaRender` step allows for flexible text generation using the MiniJinja templating engine. This is useful for preparing configuration files, generating custom notifications, or transforming data between steps.
+The `JinjaRender` step renders a MiniJinja template and stores the text as a step output. Use it to prepare configuration files or messages, or to reshape data between steps. The engine runs it itself; no runner is involved.
 
 ## DSL Specification
 
 The `spec` block for `JinjaRender` supports the following fields:
 
-* `template` (string, required): The MiniJinja template string to render.
-* `context` (object, optional): Additional key-value pairs to include in the template rendering context. These will be merged with the global context.
-* `output_key` (string, optional): The key under which the rendered result will be stored in the step's outputs. Defaults to "result".
+* `template` (string, required): The MiniJinja template to render.
+* `context` (object, optional): Extra values for the template. Each key is added at the root of the context, and replaces a built-in value of the same name.
+* `output_key` (string, optional): The name of the output that holds the result. Defaults to `result`.
 
 ### Template Context
 
-The following objects are automatically available in the template context:
+* `inputs`: The run's inputs.
+* `steps`: Outputs of steps that have finished, as `steps.<name>.outputs.<key>`.
+* `run`: The run, as `run.id`.
 
-* `inputs`: The workflow workflow inputs.
-* `steps`: Outputs from previous steps.
-* `run`: Metadata about the current run (e.g., `run.id`).
+Templates are rendered with MiniJinja 3, which follows Jinja2 closely: for example `tojson` writes `{"a": 1}` with a space after separators, `round` rounds half to even, and division by zero is an error.
 
-Any values provided in the `context` field of the spec will be merged directly into the root of the template context.
+A `${...}` in the template is resolved before the template is rendered, and its value goes in as text; see [`${...}` inside Jinja templates](../workflow_dsl.md#521--inside-jinja-templates).
 
-Templates are rendered with MiniJinja 3, which follows Jinja2 semantics closely: for example `tojson` emits `{"a": 1}` with a space after separators, `round` uses round-half-even, and division by zero is an error.
+If the engine rendering the template dies, the step is run again on another engine.
 
 ## Example
 
@@ -31,15 +31,15 @@ step "generate_config" "JinjaRender" {
 server {
     listen 80;
     server_name {{ inputs.domain }};
-    root {{ steps.build.path }};
+    root {{ steps.build.outputs.path }};
 }
 EOT
     context = {
-      "extra_var" = "some_value"
+      extra_var = "some_value"
     }
     output_key = "nginx_config"
   }
 }
 ```
 
-The output can then be accessed in subsequent steps using `${steps.generate_config.nginx_config}`.
+A later step reads the result as `${steps.generate_config.outputs.nginx_config}`.

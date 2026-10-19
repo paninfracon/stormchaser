@@ -1,86 +1,147 @@
 # Execution Affinity in Stormchaser
 
-Stormchaser introduces a unique scheduling concept called **Execution Affinity**. This allows workflow authors to define how steps within a group (`Sequential` or `Parallel`) should be scheduled relative to their execution environments (containers, VMs, etc.).
+Execution affinity says whether steps of a run should share an execution
+environment (a container) or each get a fresh one. A step sets it in its
+`strategy` block.
 
-## Affinity Levels
+## Status
 
-Unlike many workflow engines that enforce a single model, Stormchaser provides three distinct levels of affinity:
+Only part of this design is implemented. What works today:
 
-| Level | Intent | Scheduling Behavior | Implementation Strategy |
-| :--- | :--- | :--- | :--- |
-| `isolated` | **Must not share** | Every step is guaranteed a fresh, clean execution environment. | **Standard Runner** |
-| `shared` | **May share** | The engine attempts to reuse the same environment (e.g., container). | **Warm Sidecar/Agent** |
-| `locked` | **Must share** | All steps are guaranteed to run in the same execution environment. | **Static Composition** |
+| Level | Intent | What happens today |
+| :--- | :--- | :--- |
+| `isolated` | **Must not share** | The default. Every step gets its own container or Job. |
+| `shared` | **May share** | The engine sends all of a run's `shared` steps to the same runner. The Docker runner runs them in one long-lived container; the Kubernetes runner still starts a separate Job for each. |
+| `locked` | **Must share** | Not implemented. Accepted by the parser, but handled like `isolated`. |
 
----
-
-## Competitive Comparison
-
-Stormchaser's approach is designed to provide the flexibility that standard engines often lack.
-
-### 1. vs. Argo Workflows (Isolation-First)
-
-* **Argo:** Every step is a separate Kubernetes Pod. To "lock" steps together, you must combine them into a single, complex `script` template.
-* **Stormchaser Advantage:** You can keep your steps modular and reusable (e.g., `GitCheckout`, `RunLinter`), then use the `affinity` toggle to run them in the same Pod without rewriting the templates.
-
-### 2. vs. Tekton (Static Grouping)
-
-* **Tekton:** A `Task` is locked to a Pod; a `Pipeline` is isolated across Pods. This is a hard architectural boundary.
-* **Stormchaser Advantage:** `affinity` is a **policy toggle**. You can move from `isolated` to `locked` for a group of steps without changing the DSL structure or the step definitions themselves.
-
-### 3. vs. GitHub Actions (Runner-Sticky)
-
-* **GHA:** All steps in a `job` are locked to the same runner. There is no easy way to isolate steps within a job to prevent cross-contamination of the file system or environment variables.
-* **Stormchaser Advantage:** Provides `isolated` steps within a single logical group, ensuring a clean slate for each task while still allowing them to share a common `storage` volume.
-
----
-
-## The "Shared" (MAY) Optimization
-
-The most unique capability in Stormchaser is the `shared` affinity. It treats the execution environment as a **reusable cache**.
-
-If Step A and Step B both use the `python:3.11` image:
-
-1. **Standard Engine:** Stop Container A -> Upload Logs -> Start Container B (Pull image, start networking, etc.).
-2. **Stormchaser (Shared):** Keep Container A open -> Flush Logs -> Run Step B command in the same namespace.
-
-### Performance Impact
-
-For workflows with many small, sequential steps (e.g., a CI pipeline with 10+ linting/formatting checks), `shared` affinity can reduce total duration by **30-50%** by eliminating repeated container pull and startup overhead.
-
----
-
-## Security & Multi-Tenancy Constraints
-
-To ensure data integrity and prevent cross-contamination in a multi-tenant environment, Stormchaser enforces a strict **Workflow Execution Boundary**:
-
-1. **Run Isolation:** The `shared` and `locked` affinity levels are scoped strictly to a **single workflow execution (Run ID)**.
-2. **No Cross-Workflow Sharing:** An execution environment (e.g., a specific container or VM) MUST NEVER be reused across different workflows, even if they share the same image or originate from the same user.
-3. **Post-Execution Cleanup:** Once a workflow completes (Success, Failure, or Abort), all execution environments associated with its `shared` or `locked` steps must be immediately terminated and their local storage wiped.
-4. **Implicit Context Purge:** When moving between steps in a `shared` environment, the runner is responsible for an automated "Soft Reset" to prevent lateral movement or accidental data leakage:
-    * **Process Reaping:** The Runner Agent MUST send a `SIGKILL` to all processes in the execution environment's process group (excluding the Agent itself and any processes explicitly matched by the **Process Allow List**).
-    * **Process Allow List:** Users may define a list of process names or PID file paths that are permitted to survive the reap phase. This is intended for local sidecars (e.g., `postgres`, `redis`, `localstack`) that must persist across multiple steps in a `shared` or `locked` context.
-    * **Environment Reset:** All environment variables from the previous step MUST be cleared. Only the system-standard variables and the specific inputs/secrets for the *new* step are injected.
-    * **Temp Cleanup:** Common temporary directories (e.g., `/tmp`, `/var/tmp`) MUST be wiped between steps.
-    * **Filesystem Trust:** Users are warned that `shared` affinity does not provide a filesystem sandbox. Modifications to the root filesystem (outside of `/tmp`) will persist. For absolute filesystem isolation, `isolated` affinity MUST be used.
-
----
+Any other value is also handled like `isolated`. The cleanup and reset rules
+under [Security & Multi-Tenancy Constraints](#security--multi-tenancy-constraints)
+are the target design; most are not implemented yet.
 
 ## DSL Usage
 
-Affinity is defined within the `strategy` block of a group step:
+Affinity is a field of a step's own `strategy` block. It is not inherited: a
+`strategy` on a group step (`Sequential`, `Parallel`) does not apply to the
+steps inside it, so set it on each step that should share.
 
 ```hcl
-step "ci_pipeline" "Sequential" {
+step "lint" "RunContainer" {
     strategy {
-        // Options: "isolated", "shared", "locked"
+        // "isolated" (default), "shared"; "locked" is not implemented
         affinity = "shared"
     }
+    image   = "python:3.11"
+    command = ["sh", "-c", "make lint"]
+    next    = ["test"]
+}
 
-    steps {
-        step "lint" "RunContainer" { ... }
-        step "typecheck" "RunContainer" { ... }
-        step "test" "RunContainer" { ... }
+step "test" "RunContainer" {
+    strategy {
+        affinity = "shared"
     }
+    image   = "python:3.11"
+    command = ["sh", "-c", "make test"]
 }
 ```
+
+`tests/docker-affinity-scalability.storm` is a working example.
+
+All of a run's `shared` steps form one group. There is no way to name separate
+groups within a run.
+
+## How `shared` works
+
+### Routing (engine)
+
+1. The first `shared` step of a run is dispatched like any other step, on
+   `stormchaser.v1.<shard>.step.scheduled.<type>`, and whichever runner takes it
+   becomes the group's runner.
+2. If several `shared` steps are dispatched before any has a runner, the
+   earliest one goes first and the others wait up to 30 seconds for its runner
+   to be known.
+3. Later `shared` steps are sent to that runner only, on
+   `stormchaser.v1.runner.<kind>.<runner id>`, where `<kind>` is the kind the
+   runner registered with (`docker` or `k8s`). A container step can land on a
+   Kubernetes runner, so the kind comes from the runner's registration, not
+   from the step type.
+4. If the group's runner is not a known Docker or Kubernetes runner, the engine
+   logs a warning and dispatches the step to any runner.
+
+### Execution (Docker runner)
+
+* The first `shared` step creates a container named `storm-shared-<run id>`
+  from its image, with its storage mounts. The container runs `tail -f /dev/null`
+  and each `shared` step, including the first, runs as a `docker exec` in it,
+  with the step's `command`, `args` and `env`. The exec's output goes to the
+  runner's own log (prefixed `[exec]`), not to Loki, so the API cannot show it
+  as the step's logs and outputs cannot be extracted from it.
+* Later `shared` steps run in that container whatever `image` they name, and
+  their storage mounts are not added, since a running container cannot gain
+  mounts. Give all of a run's `shared` steps the same image and mounts.
+* The container is not removed when a step finishes. It is removed when the run
+  is cancelled or aborted, or by the runner's hourly reaper once it is 24 hours
+  old. A run that finishes normally leaves it running until then.
+
+### Execution (Kubernetes runner)
+
+Each step is still its own Job. `shared` only pins the run's steps to one
+runner; nothing is reused.
+
+## Security & Multi-Tenancy Constraints
+
+The design below is the target. The status of each rule is noted.
+
+1. **Run Isolation:** `shared` and `locked` are scoped to a single run.
+   *Implemented for `shared`:* the shared container is named after the run id and
+   the routing key is per run.
+2. **No Cross-Workflow Sharing:** an execution environment must never be reused
+   across runs, even with the same image or user. *Implemented,* as above.
+3. **Post-Execution Cleanup:** when a run ends, its shared environments must be
+   terminated and their local storage wiped. *Partly implemented:* only on
+   cancel or abort, and otherwise after 24 hours (see above).
+4. **Implicit Context Purge:** between steps in a shared environment the runner
+   should reset it. *Not implemented.* Today:
+    * **Process Reaping:** no processes are killed between steps. Background
+      processes started by one step keep running into the next.
+    * **Process Allow List:** `strategy.process_allow_list` is parsed but
+      nothing uses it.
+    * **Environment Reset:** each `exec` gets only the new step's `env`, but the
+      container keeps the environment of the step that created it.
+    * **Temp Cleanup:** `/tmp` and `/var/tmp` are not wiped.
+    * **Filesystem Trust:** `shared` gives no filesystem sandbox. Everything a
+      step writes stays for the next. Use `isolated` for steps that must not see
+      each other's files.
+
+## Competitive Comparison
+
+How the design compares with other engines. It describes the intent; see
+[Status](#status) for what exists.
+
+### 1. vs. Argo Workflows (Isolation-First)
+
+* **Argo:** Every step is a separate Kubernetes Pod. To lock steps together,
+  you combine them into one `script` template.
+* **Stormchaser:** Steps stay separate (e.g., `GitCheckout`, `RunLinter`), and
+  `affinity` decides whether they share a container. On Kubernetes this is not
+  implemented yet.
+
+### 2. vs. Tekton (Static Grouping)
+
+* **Tekton:** A `Task` is locked to a Pod; a `Pipeline` is isolated across Pods.
+* **Stormchaser:** `affinity` is a per-step setting, so steps can move between
+  `isolated` and `shared` without restructuring the workflow.
+
+### 3. vs. GitHub Actions (Runner-Sticky)
+
+* **GHA:** All steps in a `job` run on the same runner, with no way to isolate
+  steps within a job.
+* **Stormchaser:** Steps are `isolated` by default and can still share data
+  through a `storage` volume.
+
+## Why `shared`
+
+`shared` treats the container as a cache. With `isolated`, each step pulls its
+image (if needed), creates and starts a container, and removes it afterwards.
+With `shared` on Docker, later steps only `exec` into a running container, which
+saves container start-up time for runs with many short steps. The project has no
+published measurement of the saving.

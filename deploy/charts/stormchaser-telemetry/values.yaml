@@ -1,3 +1,11 @@
+# Grafana Alloy for the quickstart: it reads the logs of pods labelled
+# managed-by=stormchaser and pushes them to Loki, and receives OTLP (gRPC 4317, HTTP
+# 4318) from the API and engine, sending metrics to Prometheus and traces to Tempo.
+# It is for evaluation. In production use your own collector; the labels the API
+# needs on step logs are described in docs/observability.md.
+
+# Not read by this chart, which has no templates of its own; Alloy takes LOKI_URL
+# from alloy.alloy.extraEnv below.
 global:
   loki:
     url: "http://loki:3100"

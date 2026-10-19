@@ -8,66 +8,88 @@ Any time a domain name which is not `example.com` needs to be used in tests etc 
 
 ### 1. Module Responsibility
 
-The project is divided into specialized crates to ensure a clear separation of concerns. Each crate's internal modules have specific roles:
+The project is divided into specialized crates to ensure a clear separation of concerns. Each crate's internal modules have specific roles. The dependency graph is not strictly layered: `stormchaser-api` depends on `stormchaser-engine` (for outbox inserts, git cache, query execution, run limits and the jq sandbox), and `stormchaser-query` depends on both `stormchaser-api` and `stormchaser-engine`.
 
-- **`stormchaser-model`**: Foundational domain types. Must remain pure and free of execution logic.
-  - `workflow.rs` / `step.rs`: Core execution state models and state machine data.
-  - `dsl.rs`: Specification types that map directly from `*.storm` HCL definitions.
-  - `auth.rs`: OPA contexts, identity claims, and authorization types.
-  - `storage.rs` / `artifact.rs`: Models for storage backends and artifact metadata.
-  - `event.rs` / `event_rules.rs`: Definitions for system events and rule-based triggers.
-  - `schema_gen.rs`: Centralized generation logic for building Extensible JSON Schemas representing the DSL.
+- **`stormchaser-model`**: Shared domain types, plus the infrastructure code every service needs. The aim was a pure types crate; it is not one. Outside `wasm32` it depends on `tokio`, `sqlx` (Postgres), `async-nats`, `reqwest`, `oci-distribution` and `rustls`, and contains I/O. Keep new execution logic out of it; put shared types and small shared helpers here.
+  - `workflow.rs` / `step.rs`: Run and step instance models and their status enums.
+  - `dsl/`: Types that map from `*.storm` HCL definitions (`workflow.rs`, `step.rs`, `specs.rs` for built-in step specs, `connections.rs`, `limits.rs` for parser limits).
+  - `auth.rs`: OPA input contexts, identity claims and authorization types.
+  - `connections.rs`: Connection, storage backend and artifact registry models.
+  - `event.rs` / `events.rs` / `event_rules.rs`: CloudEvents envelopes, NATS event payloads and event rules.
+  - `nats.rs`: NATS connection and JetStream setup shared by the services.
+  - `outbox.rs`: Outbox models for publishing events in the same transaction as the state change.
+  - `db_tls.rs`: Postgres connection options, including `STORMCHASER_DB_SSL` and the pool size.
+  - `net_guard.rs`: SSRF protection for outbound HTTP to user-supplied URLs.
+  - `hcl_eval.rs` / `hcl_guard.rs`: Shared HCL expression helpers, and the nesting limits that keep workflow HCL from overflowing the stack.
+  - `logging/`: Loki and Elasticsearch log backends.
+  - `runner.rs` / `runner_auth.rs`: Runner models, and runner identity on NATS messages.
+  - `schema_gen.rs` / `schema_cache.rs`: JSON Schema generation for the DSL, and the OCI-backed event schema cache.
+  - `id.rs`: Typed ids (`RunId`, `StepInstanceId`, ...).
 
-- **`stormchaser-dsl`**: Specialized HCL parser and schema toolset.
-  - `lib.rs`: `StormchaserParser` implementation for mapping HCL blocks to `stormchaser-model` types.
+- **`stormchaser-dsl`**: HCL parser and schema toolset.
+  - `parser/`: `StormchaserParser`, mapping HCL blocks to `stormchaser-model` types (`workflow.rs`, `step.rs`, `expr.rs`, `provision.rs`).
+  - `libraries.rs`: Applies step libraries to the steps that use them (spec merge, params, retry, timeout, allow_failure).
   - `ast.rs`: Abstract Syntax Tree representation of the DSL.
-  - `hcl_schema.rs`: Bidirectional serialization logic for mapping JSON Schema to and from the functional HCL data format.
+  - `form.rs`: The JSON Schema of a workflow's inputs, used by run forms and the query service.
+  - `hcl_schema/`: Bidirectional conversion between JSON Schema and its HCL form (`hcl_to_json.rs`, `json_to_hcl.rs`).
 
-- **`stormchaser-engine`**: The core orchestration layer managing state transitions.
-  - `workflow_machine.rs` / `step_machine.rs`: State machines governing the lifecycle of workflows and individual steps.
-  - `hcl_eval.rs`: Runtime expression evaluation and variable interpolation.
-  - `git_cache.rs`: Handles cloning, caching, and resolution of Git-based workflow sources.
-  - `wasm.rs`: Logic for executing WASM-based steps.
-  - `handler.rs`: NATS message handling and event dispatching.
-  - `db.rs`: Database interaction layer for persisting engine state.
+- **`stormchaser-engine`**: The orchestration layer managing state transitions.
+  - `workflow_machine.rs` / `step_machine/`: State machines governing the lifecycle of runs and steps.
+  - `handler/`: NATS event handlers. `workflow/` (queued, direct, resolve, start_pending, timeout, abandon, sops), `step/` (scheduling, dispatch, quota, built-in steps under `intrinsic/`, step events), `integrations/` (approval, email, Slack, Teams, Lambda, webhook, Jinja) and `runner.rs`.
+  - `router.rs` / `server.rs`: Consume the JetStream stream and route events to handlers; `retry.rs` decides which handler errors are transient and get the event delivered again.
+  - `leader.rs` / `workers.rs`: A Postgres advisory lock picks one replica to run the background workers (liveness, timeouts, resolver crash recovery, the outbox relay, task message purge, dispatch recovery).
+  - `engine_instance.rs`: Per-process heartbeat, used to fail built-in steps of a dead engine.
+  - `hcl_eval.rs` / `templating.rs` / `stdlib.rs`: Runtime expression evaluation, MiniJinja templating and the expression function library.
+  - `git_cache.rs`: Cloning, caching and resolution of Git-based workflow sources.
+  - `wasm.rs` / `jq_sandbox.rs`: WASM step execution, and jq programs run in a separate, limited worker process.
+  - `secrets.rs` / `aws_guard.rs` / `run_limits.rs`: Vault and SOPS secrets, IAM role and Vault path allow-lists, and operator ceilings on run quotas.
+  - `db/`: Database layer for engine state (runs, steps, outbox, quotas, runners, task messages, archive).
 
-- **`stormchaser-api`**: REST interface for external interaction.
-  - `main.rs`: Axum server configuration and route definitions.
-  - `auth/`: OPA-backed authorization logic and middleware.
-  - `hitl.rs`: Management of Human-In-The-Loop approval flows.
-  - `telemetry.rs`: Structured logging, tracing (OpenTelemetry), and metrics.
-  - `db.rs`: API-specific database queries.
-  - `routes/schema.rs`: Serves the live DSL JSON schema for offline validation support.
+- **`stormchaser-api`**: REST interface.
+  - `main.rs` / `lib.rs` / `setup.rs` / `config.rs`: Configuration, state and route wiring.
+  - `routes/`: Route handlers (workflows and runs, steps, connections, cron, webhooks, event rules, auth, schema, MCP).
+  - `auth/` / `authz.rs`: Token verification (local HS256 and OIDC via JWKS) and OPA-backed request and object authorization.
+  - `hitl/`: Human-in-the-loop approvals and sealed approval links.
+  - `listener.rs`: HTTPS or plain HTTP listener, chosen by `STORMCHASER_LISTEN_TLS`.
+  - `rate_limit.rs` / `redact.rs` / `api_docs.rs`: Rate limiting, secret masking in responses, and the OpenAPI document and Swagger UI page.
+  - `telemetry.rs`: Structured logging, tracing (OpenTelemetry) and metrics.
+  - `db/`: API-specific database queries.
 
-- **`stormchaser-query`**: Standalone microservice for workflow schema hydration and dynamic option resolution.
-  - `main.rs`: Independent Axum server exposing `/api/v1/schema/hydrate`.
-  - Integrates securely with external data sources (SQL, API, AWS) using shared OPA contexts.
+- **`stormchaser-query`**: Separate service for workflow input schema hydration and dynamic option resolution.
+  - `main.rs`: Axum server exposing `/api/v1/schema/hydrate` and `/api/v1/schema/hydrate-direct`. It reuses the API's configuration, authentication and OPA middleware.
+  - `hydration.rs`: Runs a workflow's input queries (SQL, API, AWS Cloud Control) as the calling user, after a policy check on the connection.
 
 - **`stormchaser-runner-*`**: Environment-specific executors.
-  - `stormchaser-runner-docker`: Uses `container_machine.rs` to manage Docker container lifecycles.
-  - `stormchaser-runner-k8s`: Uses `job_machine.rs` to manage Kubernetes Job lifecycles.
+  - `stormchaser-runner-docker`: `container_machine/` is a typestate machine for Docker container lifecycles; `handler/` handles tasks, cancellation and orphaned containers; `reaper.rs` cleans up.
+  - `stormchaser-runner-k8s`: `job_machine/` is a typestate machine for Kubernetes Job lifecycles; `task/`, `scanner.rs`, `cancel.rs` and `reaper.rs` handle tasks, adoption and cleanup.
 
-- **`stormchaser-agent`**: Runner-side execution wrapper.
-  - Executes user commands within the runner environment.
-  - `main.rs`: Implements storage "parking" (packaging/uploading) and "unparking" (downloading/extracting) for SFS (Stormchaser File System).
-  - Collects and uploads artifacts and test reports.
+- **`stormchaser-agent`**: Runner-side helper that runs inside step containers or as a sidecar.
+  - `main.rs`: Subcommands `run` (runs the step's command, then parks storage), `park` (waits for the step container, then uploads storage and artifacts) and `unpark` (downloads and extracts storage with hash verification).
+  - `artifacts.rs` / `reports.rs`: Artifact publishing and test report collection.
+  - `connections.rs`: Park and unpark (tarball upload, download and extraction).
+  - `confine.rs`: Keeps what the agent reads inside the step's storage volumes.
 
-- **`stormchaser-cli`**: Primary user command-line interface. Split into a library and thin binary to support `docs.rs`.
-  - `lib.rs` / `main.rs`: Exposes the CLI parser and command router.
-  - `commands/`: Implements commands for running, linting (`lint.rs`), exporting schemas (`schema.rs`), managing runs, webhooks, rules, and authentication.
+- **`stormchaser-cli`**: Primary user command-line interface (`stormchaser` binary). Split into a library and thin binary to support `docs.rs`.
+  - `lib.rs` / `main.rs`: The CLI parser and command router.
+  - `commands/`: Running, linting (`lint.rs`), exporting schemas (`schema.rs`), managing runs, webhooks, rules, connections, cron schedules, authentication and profiles.
 
-- **`stormchaser-tui`**: Interactive terminal dashboard.
-  - `main.rs`: Ratatui-based UI for real-time monitoring of workflow state and logs.
+- **`stormchaser-tui`**: Interactive terminal dashboard (Ratatui).
+  - `app/`: Application state, API client, dialogs, key handlers and live watches.
+  - `ui/`: Rendering for each tab and dialog.
+
+- **`stormchaser-web`**: Leptos web UI. The `ssr` feature builds the Axum server, which proxies to the API; the `hydrate` feature builds the WASM frontend. Build it with `cargo leptos`.
 
 - **`stormchaser-opa`**: Shared Open Policy Agent integration.
-  - `lib.rs`: Client and data structures for policy evaluation.
+  - `lib.rs`: Evaluates OPA policies compiled to WASM, chooses the policy a service enforces (`OPA_WASM_PATH`, else `OPA_URL`, else the built-in copy of `deploy/opa/policy.rego` in `policy/stormchaser.wasm`, rebuilt with `scripts/build-opa-policy.sh`), and loads policy data from `OPA_DATA_PATH`.
 
-- **`stormchaser-tls`**: Shared security configuration.
-  - `lib.rs`: Standardized mTLS and TLS setup for secure inter-service communication.
+- **`stormchaser-tls`**: Shared TLS configuration.
+  - `reloader.rs`: `rustls` client and server configurations, with certificate hot-reloading and optional client certificates.
+  - `listener.rs` (feature `listener`): HTTPS listener for Axum services.
+  - `lib.rs`: `parse_switch` for strict `true`/`false` settings.
 
 ### 2. TUI Responsiveness
 
-- **Async First**: Use `tokio` for any I/O-heavy tasks (PATH scanning, man page parsing, command execution).
+- **Async First**: Use `tokio` for any I/O-heavy tasks (API calls, log and run streams, file browsing).
 - **Non-blocking UI**: The main event loop must never wait on long-running processes. Use channels or shared state (`Arc<Mutex<...>>` or `Atomic` types) to update the UI from background tasks.
 - **Minimal Redraws**: Optimize `terminal.draw` calls and only update affected layout chunks when possible.
 
@@ -79,8 +101,8 @@ The project is divided into specialized crates to ensure a clear separation of c
 ### 4. Coding Standards
 
 - **Low entrophy**: Make changes in small, well defined chunks, avoid changing entire files. Aggressively run the compiler to catch errors early.
-- **The 500-Line Rule**: Any file exceeding 500 lines is considered "at capacity." Before adding new logic to such a file, you MUST refactor it into logical sub-modules. (Exception: Grafana dashboard JSON files are exempt from this rule).
-- **Wiring vs. Logic**: `main.rs` and `lib.rs` must act strictly as wiring facades (configuration, DI, route definitions). All business logic MUST reside in sub-modules.
+- **The 500-Line Rule**: Any file exceeding 500 lines is considered "at capacity." Before adding new logic to such a file, you MUST refactor it into logical sub-modules. (Exception: Grafana dashboard JSON files are exempt from this rule). About 25 source files are over the limit today (for example `runner-docker/src/container_machine/transitions/running.rs`, `engine/src/db/steps/instances.rs`, `api/src/routes/webhook.rs`); split them before adding to them.
+- **Wiring vs. Logic**: `main.rs` and `lib.rs` must act strictly as wiring facades (configuration, DI, route definitions). All business logic MUST reside in sub-modules. Some do not yet: `stormchaser-web/src/main.rs` holds its proxy and auth handlers, and the agent's and runners' `main.rs` hold command logic.
 - **Domain Isolation**: Every new functional domain (e.g., a new integration, backend type, or API category) MUST start in its own file from inception.
 - **Structure First**: When writing new code write method stubs first then incrementally complete the methods.
 - **Idiomatic Rust**: Follow `clippy` recommendations. Do not arbitrarily disable clippy checks without confirming with the user.
@@ -106,14 +128,14 @@ The project is divided into specialized crates to ensure a clear separation of c
 - **Function Returns**: Don't use tuple returns from functions unless absolutely necessary, or an error type return, instead use a proper struct with named fields
 - **Secret Management**: Never hardcode passwords, even for tests or development environments.
   - **WARNING - AI Test Environments**: NEVER modify or overwrite the `.env` file with static passwords (e.g. `STORMCHASER_DEV_PASSWORD=password`) to "fix" failing tests or coverage runs. This desynchronizes the Docker volumes from the expected credentials, causing cascading authentication failures across PostgreSQL and Dex. Always rely on the project's `./scripts/setup.sh` to generate and manage secure, random credentials.
-  - **WARNING - SQL Offline**: Never inject `return;` into tests when `SQL_OFFLINE=true` is set. `SQL_OFFLINE` is an `sqlx` compiler flag, not a runtime bypass. Bypassing tests causes spurious passes.
+  - **WARNING - SQLx Offline**: Never inject `return;` into tests when `SQLX_OFFLINE=true` is set. `SQLX_OFFLINE` is an `sqlx` compile-time flag for its `query!` macros (the code uses none today), not a runtime bypass. Bypassing tests causes spurious passes.
 - **Strong Typing**: Never assemble data using string concat or low level (e.g. json types) objects, always define a struct and serialize it instead
 
 ### 5. UI/UX Guidelines
 
 - **Beginner Friendly**: Labels and descriptions should be clear.
 - **Keyboard Centric**: Design for speed. Use intuitive keybindings (e.g., `/` for search, `Tab` for focus switching, `Enter` to select).
-- **Visual Feedback**: Provide clear status indicators for background tasks (e.g., "Scanning PATH...", "Parsing Man page...").
+- **Visual Feedback**: Provide clear status indicators for background tasks (e.g., "Loading runs...", "Streaming logs...").
 
 ### 6. Quality
 
@@ -150,9 +172,11 @@ The project is divided into specialized crates to ensure a clear separation of c
 ## 4. Tech Stack Decisons
 
 - **TUI Framework**: `ratatui` (latest stable).
+- **Web UI**: `leptos` with `axum` for server-side rendering.
+- **HTTP services**: `axum`; Postgres through `sqlx`; NATS JetStream through `async-nats`.
 - **Backend**: `crossterm`.
 - **Serialization**: `serde` + `serde_json` for caching.
-- **Graph Logic**: `petgraph`.
+- **Graph Logic**: `petgraph` (chosen, but not used by any crate yet).
 - **Text Editing**: `ratatui-textarea`.
 
 ## 5. Rendering Mermaid Diagrams

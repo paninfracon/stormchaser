@@ -32,7 +32,8 @@ Before cutting a new release tag, ensure the following steps are meticulously fo
 
 6. **Verify Project Integrity (Crucial before check-in):**
     * Format code: `cargo fmt`
-    * Linting: `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+    * Linting: `cargo clippy --workspace --all-targets --all-features -- -D warnings`, then `cargo clippy -p stormchaser-engine --all-targets --no-default-features -- -D warnings` (CI runs both)
+    * Dependencies: `cargo deny check`
     * Unit Tests: `./scripts/test-unit.sh`
     * Integration Tests: `./scripts/test-integration.sh`
     * Test Coverage: `./scripts/coverage.sh` (Verify coverage has not significantly degraded).
@@ -77,7 +78,7 @@ The `.dockerignore` should include exactly these lines for Git:
 !.git/objects/
 ```
 
-Ensure that `vergen-gitcl` is listed in `[build-dependencies]` and a `build.rs` driving `vergen_gitcl::Emitter` exists for all crates that need to embed version info (including runners and the agent).
+Ensure that `vergen-gitcl` is listed in `[build-dependencies]` and a `build.rs` driving `vergen_gitcl::Emitter` exists for all crates that need to embed version info. Today these are `stormchaser-api`, `stormchaser-engine`, `stormchaser-cli`, `stormchaser-agent`, `stormchaser-runner-docker` and `stormchaser-runner-k8s`. Outside a git checkout (a source tarball), their `build.rs` sets the branch, and the commit unless `.cargo_vcs_info.json` is present, to `unknown`, so the build still compiles.
 
 The builder stage of `Dockerfile` and `Dockerfile.web` must use a Rust image that satisfies the workspace `rust-version` (currently `rust:1.96-slim-bookworm`). Raise both together whenever `rust-version` in the root `Cargo.toml` changes. Base images are pinned by digest beside the tag (`rust:1.96-slim-bookworm@sha256:...`); when changing the tag, take the new digest from `docker buildx imagetools inspect <image>:<tag>`. Dependabot moves the digests as the tags are rebuilt.
 
@@ -90,13 +91,10 @@ If the automated GitHub Actions CI (`release.yml`) fails, follow these steps to 
 These steps need Rust 1.96 or newer (`rustup update stable`).
 
 ```bash
-# 1. Apply UI patches required before building
-
-
-# 2. Build the standard dynamic binaries across the workspace
+# 1. Build the dynamically linked binaries across the workspace
 SQLX_OFFLINE=true cargo build --release --workspace
 
-# 2.5 Build the Leptos Web UI (Requires cargo-leptos and wasm32-unknown-unknown target)
+# 2. Build the Leptos Web UI (Requires cargo-leptos and wasm32-unknown-unknown target)
 # Setup: rustup target add wasm32-unknown-unknown && cargo install --locked cargo-leptos
 SQLX_OFFLINE=true cargo leptos build --release -p stormchaser-web
 
@@ -165,7 +163,7 @@ helm package deploy/charts/stormchaser
 
 Ensure your local `CARGO_REGISTRY_TOKEN` is configured or run `cargo login`.
 
-Due to index propagation delays, publish the foundational crates first and pause before publishing dependent crates.
+Due to index propagation delays, publish the foundational crates first and pause before publishing dependent crates. This is the order `release.yml` uses.
 
 ```bash
 # Publish foundational crates first
@@ -182,6 +180,8 @@ sleep 15
 cargo publish -p stormchaser-engine
 sleep 15
 cargo publish -p stormchaser-api
+sleep 15
+cargo publish -p stormchaser-query
 sleep 15
 cargo publish -p stormchaser-runner-docker
 sleep 15

@@ -1,31 +1,32 @@
 # Stormchaser Project Considerations
 
-This document outlines identified gaps, errors, omissions, and risks based on the current architectural and DSL documentation.
+This document records ideas and open questions raised while reviewing the architecture and DSL documentation, and whether each has been acted on. For what is planned, see [Project Status](project_status.md).
 
 ## 1. Architectural & Operational Risks
 
-### Github duplicate webhooks
+### Duplicate webhook deliveries
 
-If you are using JetStream, it has a built-in deduplication window. When your webhook gateway receives the payload, extract the X-GitHub-Delivery header (the unique GUID GitHub assigns to every webhook event) and set it as the Nats-Msg-Id header on your published message. JetStream will automatically drop duplicate messages with the same ID within a configurable time window. (If header doesn't exist use some other appropriate nonce)
+**Done.** GitHub and other senders deliver a webhook again when they time out or retry. The API records each accepted delivery in PostgreSQL and acknowledges a repeat without acting on it again (`STORMCHASER_WEBHOOK_DEDUPE_HOURS` sets how long a delivery is remembered). For GitHub the key is a hash of the signed body, since the `X-GitHub-Delivery` header is not covered by the signature; for `signed` (Standard Webhooks) sources it is the `webhook-id`. Separately, the engine's outbox relay sets `Nats-Msg-Id` on every event it publishes, so JetStream drops a second copy within its 2-minute window.
 
 ### Diagnosability
 
-Build a native trace command into your CLI. When a workflow fails, the developer should be able to type engine trace <GUID>. The CLI should hit your API server, pull the exact state transition history from Postgres, pull the terminal logs from the Loki proxy, and render a clean, color-coded timeline in their terminal. Show them the exact line of HCL that failed and the exact container exit code. Correlation IDs should be on all OTEL log messages too
+**Open.** A `trace <run id>` command in the CLI could pull a run's state transition history from PostgreSQL and its logs from Loki through the API, and render a timeline in the terminal, showing the HCL that failed and the container's exit code. Today `stormchaser runs get`, `runs watch` and `runs logs` show these separately, and a failed run records its reason. Correlation ids (`run_id`, `step_id`) should be on all OpenTelemetry log messages too.
 
 ### OPA bootstrap
 
-Utilize the ability of OPA to compile rulesets to WASM and use a rust wasm engine to load them. Provide a default precanned ruleset, allow external OPA API and also allow custom wasm OPA to be loaded instead of the default set
+**Done.** The services evaluate OPA policies compiled to WASM in process (`stormchaser-opa`, Wasmtime). With no `OPA_URL` or `OPA_WASM_PATH`, they enforce a built-in copy of the shipped policy (`deploy/opa/policy.rego`), with settings from `OPA_DATA_PATH`. An external OPA server (`OPA_URL`) or a custom WASM policy (`OPA_WASM_PATH`) can be used instead. See [OPA RBAC](opa-rbac.md).
 
 ## 2. DSL & Feature Omissions
 
-* (None)
+* `on_failure` and `finally` blocks are documented in [Workflow DSL](workflow_dsl.md) and parsed, but the engine does not run them.
+* Storage `limits` (`max_throughput`, `max_iops`) are documented but not enforced.
 
 ## 3. Documentation Errors & Inconsistencies
 
 ### Examples
 
-Take it a step further and embed the documentation directly into the CLI. If a developer types engine explain step docker-build, it should dump the HCL schema and a working example directly to standard out. Bring the docs to where their hands already are.
+**Open.** The documentation could be embedded in the CLI: `stormchaser explain step <type>` would print the step's spec schema and a working example. Today `stormchaser schema` exports the whole DSL schema, and the step pages are in [`docs/steps/`](steps/).
 
 ## 4. Security Risks
 
-* (None)
+See [Security](security.md) for the security controls in place and what deployments must provide.

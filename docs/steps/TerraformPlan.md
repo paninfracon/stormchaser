@@ -1,35 +1,42 @@
 # TerraformPlan Step
 
-The `TerraformPlan` step is a native intrinsic step that executes a `terraform plan` command within the official Terraform container. Under the hood, it seamlessly runs `terraform init` followed by `terraform plan` and stores the resulting plan binary into the workspace so that a subsequent `TerraformApply` step can execute it.
+The `TerraformPlan` step runs `terraform init` and `terraform plan -out=<out_file>`, and keeps the plan file for a later [TerraformApply](TerraformApply.md) step. The engine turns it into a `RunContainer` step that runs in the `hashicorp/terraform` image (1.16.6, pinned by digest; the operator can replace it with `STORMCHASER_TERRAFORM_IMAGE`).
 
-Because Stormchaser utilizes a shared Stormchaser File System (SFS) across steps within the same execution path, downloaded modules, state locks, and the `.tfplan` binary naturally persist.
+The configuration has to be in the container, and the plan file has to outlive it, so mount storage that holds the configuration (put there by a [GitCheckout](GitCheckout.md) step, for example) and point `workspace_dir` into it. The plan and apply steps must mount the same storage.
 
-**Automatic Plan Generation:** During execution, this step automatically runs `terraform show -no-color tfplan > plan.txt`. This human-readable text file is generated in the workspace and can be exposed as a step artifact.
+After planning, the step also:
 
-**Plugin Caching:** This step automatically sets the `TF_PLUGIN_CACHE_DIR` environment variable to `/tmp/.terraform_plugin_cache`. Mounting a shared persistent volume to this path can significantly speed up the `terraform init` phase across multiple runs.
+* writes `terraform show -no-color` of the plan to `plan.txt` in `workspace_dir`;
+* sets the output `plan_summary` to the plan's summary line (`Plan: 5 to add, 2 to change, 0 to destroy.` or `No changes. ...`);
+* sets the output `plan_json` to `terraform show -json` of the plan.
+
+It sets `TF_PLUGIN_CACHE_DIR=/tmp/.terraform_plugin_cache`; mounting storage there keeps provider downloads between steps.
 
 ## DSL Specification
 
 The `spec` block for `TerraformPlan` supports the following fields:
 
-* `workspace_dir` (string, optional): The directory containing the Terraform configuration files. Defaults to `.` (the root).
-* `backend_bucket` (string, optional): S3 bucket name if using an S3 remote backend.
-* `backend_key` (string, optional): State file key path within the S3 bucket.
-* `region` (string, optional): AWS Region for backend configuration and AWS provider. It also injects `AWS_REGION` into the environment.
-* `aws_assume_role_arn` (string, optional): The ARN of an IAM role to assume before running Terraform. When provided (and if the engine is built with the `aws-sdk-sts` feature), Stormchaser will natively assume this role and inject short-lived credentials (`AWS_ACCESS_KEY_ID`, etc.) into the container.
-* `aws_role_session_name` (string, optional): An optional session name to use when assuming the role. Defaults to `stormchaser-tf-<run_id>`.
-* `out_file` (string, optional): Name of the plan file to generate. Defaults to `tfplan`.
+* `workspace_dir` (string, optional): The directory with the Terraform configuration. Defaults to `.`, the container's working directory.
+* `backend_bucket` (string, optional): Passed to `terraform init` as `-backend-config="bucket=..."`.
+* `backend_key` (string, optional): Passed as `-backend-config="key=..."`.
+* `region` (string, optional): Passed as `-backend-config="region=..."`, and set as `AWS_REGION`.
+* `aws_assume_role_arn` (string, optional): An IAM role the engine assumes before the step starts. Its short-lived credentials are given to the container as `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `AWS_SESSION_TOKEN`. The operator must list the role in `STORMCHASER_AWS_ALLOWED_ROLE_ARNS`. Needs the engine's `aws-sdk-sts` feature (on by default); without it the field is ignored.
+* `aws_role_session_name` (string, optional): Session name for the assumed role. Defaults to `stormchaser-tf-<run_id>`.
+* `out_file` (string, optional): The plan file's name, relative to `workspace_dir`. Defaults to `tfplan`. It must not be empty or start with `-`.
+* `storage_mounts` (list of objects, optional): Storage to mount, as for [RunContainer](RunContainer.md).
+* `cpu`, `memory` (strings, optional): As for [RunContainer](RunContainer.md).
 
 ## Example
 
 ```hcl
 step "plan" "TerraformPlan" {
   spec {
-    workspace_dir  = "infrastructure/"
+    workspace_dir  = "/workspace/infrastructure"
     backend_bucket = "my-company-tf-state"
     backend_key    = "app/production.tfstate"
     region         = "us-east-1"
-    out_file       = "tfplan"
+    storage_mounts = [{ name = "workspace", mount_path = "/workspace" }]
   }
+  next = ["approve"]
 }
 ```

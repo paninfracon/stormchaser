@@ -1,28 +1,25 @@
-# Parallel Step
+# Parallel Step (Planned)
 
-The `Parallel` step is a structural step that executes a nested block of child steps concurrently.
+`Parallel` is planned as a group step that runs a nested `steps` block of child steps at the same time, and completes when they all have. It is not implemented.
 
-## DSL Specification
+The parser accepts a step with a nested `steps` block and stores the children, but the engine never schedules them, and no runner or engine handler takes a step of type `Parallel`. A run that reaches one waits until it times out.
 
-The `Parallel` step does not use a `spec` block. Instead, it contains a nested `steps` block, defining all the steps that will be executed at the same time. The parallel step will only complete when all of its child steps have completed.
+## What works today
 
-## Example
+Steps already run in parallel unless `next` orders them: every step that is not in another step's `next` list starts when the run starts, and a step listed in several `next` lists starts when all of those steps have finished. See [Ordering steps](../workflow_dsl.md#452-ordering-steps).
+
+To run one step over many items at once, give it `iterate` (see [Iteration](../workflow_dsl.md#46-iteration)):
 
 ```hcl
-step "run_tests" "Parallel" {
-  steps {
-    step "test_backend" "RunContainer" {
-      spec = {
-        image   = "golang:1.21"
-        command = ["go", "test", "./..."]
-      }
-    }
-    step "test_frontend" "RunContainer" {
-      spec = {
-        image   = "node:18"
-        command = ["npm", "run", "test"]
-      }
-    }
+step "test" "RunContainer" {
+  iterate = ["backend", "frontend"]
+  as      = "component"
+  strategy {
+    max_parallel = 2
+  }
+  spec = {
+    image   = "my-test-runner:latest"
+    command = ["run-tests", "${component}"]
   }
 }
 ```

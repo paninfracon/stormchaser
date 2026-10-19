@@ -1,10 +1,10 @@
 # Shared File System (SFS) PVC Optimization for Kubernetes Runner
 
-The Stormchaser Kubernetes Runner (`stormchaser-runner-k8s`) supports a high-performance optimization for the Shared File System (SFS) using Kubernetes PersistentVolumeClaims (PVCs).
+The Stormchaser Kubernetes Runner (`stormchaser-runner-k8s`) supports an optimization for the Shared File System (SFS) using Kubernetes PersistentVolumeClaims (PVCs).
 
-By default, Stormchaser's SFS works by "parking" (uploading) files to an S3-compatible backend at the end of a step and "unparking" (downloading) them at the start of the next step. While this ensures perfect data isolation and portability across different runners (e.g., mixing Docker and Kubernetes runners), it can be slow for workflows that pass large amounts of data between steps.
+By default, Stormchaser's SFS works by "parking" (uploading) files to an S3-compatible backend at the end of a step and "unparking" (downloading) them at the start of the next step. This keeps data isolated and portable across different runners (e.g., mixing Docker and Kubernetes runners), but it can be slow for workflows that pass large amounts of data between steps.
 
-To solve this, the Kubernetes runner can be configured to use a single, shared `ReadWriteMany` PVC to instantly share data between steps without needing to upload or download files from S3.
+To solve this, the Kubernetes runner can be configured to use a single, shared `ReadWriteMany` PVC to share data between steps without needing to upload or download files from S3.
 
 ## Configuration
 
@@ -12,13 +12,15 @@ The PVC optimization is configured globally at the **runner level**, not per-wor
 
 Workflow steps run in their own namespace (`rbac.targetNamespace`, by default `<release namespace>-steps`), so the PVC must be created in that namespace, not the runner's.
 
-To enable this feature, provide the `STORMCHASER_SFS_PVC_NAME` environment variable to the Kubernetes Runner deployment, pointing to an existing `ReadWriteMany` PVC in the same namespace.
+To enable this feature, provide the `STORMCHASER_SFS_PVC_NAME` environment variable to the Kubernetes Runner deployment, naming an existing PVC in the step namespace. The runner does not create the PVC or check its access mode. Steps can run on any node, so it must be `ReadWriteMany`.
 
 ```yaml
 env:
   - name: STORMCHASER_SFS_PVC_NAME
     value: "stormchaser-shared-storage"
 ```
+
+The `stormchaser-runner-k8s` Helm chart has no value for this variable and no way to add environment variables, so with the chart this mode is not available without editing the Deployment.
 
 ## Data Isolation
 
@@ -33,13 +35,19 @@ When the Kubernetes runner builds the Pod specification for a workflow step, it 
 ### Example Scenario
 
 1. You deploy the Runner with `STORMCHASER_SFS_PVC_NAME=stormchaser-shared-storage`.
-2. Workflow Run `A` (UUID: `550e8400-e29b-41d4-a716-446655440000`) starts. Its "workspace" storage is mounted into the step's container from the PVC at the sub-path: `550e8400-e29b-41d4-a716-446655440000/workspace/`.
-3. Workflow Run `B` (UUID: `123e4567-e89b-12d3-a456-426614174000`) starts concurrently. Its "workspace" storage is mounted from the *same* PVC but at the sub-path: `123e4567-e89b-12d3-a456-426614174000/workspace/`.
+2. Workflow Run `A` (UUID: `550e8400-e29b-41d4-a716-446655440000`) starts. Its `workspace` storage is mounted into the step's container from the PVC at the sub-path: `550e8400-e29b-41d4-a716-446655440000/workspace/`.
+3. Workflow Run `B` (UUID: `123e4567-e89b-12d3-a456-426614174000`) starts concurrently. Its `workspace` storage is mounted from the *same* PVC but at the sub-path: `123e4567-e89b-12d3-a456-426614174000/workspace/`.
 4. Run `A` Step 1 writes files. Run `A` Step 2 mounts `550e8400-e29b-41d4-a716-446655440000/workspace/` and sees the files instantly.
-5. Run `B` cannot see Run `A`'s files, ensuring perfect isolation.
+5. Run `B` cannot see Run `A`'s files, ensuring isolation.
 
 ## Provisioning Support
 
-If a workflow step requests `provision` URLs (to download external seed data into the volume before the step starts), the Kubernetes runner still fully supports this. It will dynamically inject Alpine-based init containers into the Pod to download and extract the provisioned data into the PVC sub-path before the main step container starts.
+If a workflow step requests `provision` URLs (to download external seed data into the volume before the step starts), the Kubernetes runner still fully supports this. It adds init containers to the Pod that download and extract the provisioned data into the PVC sub-path before the main step container starts. They use the agent image (`STORMCHASER_AGENT_IMAGE`), or `alpine:latest` if none is set. An init container fetches nothing if its destination already exists, as when an earlier step of the run provisioned it.
 
-S3 "unparking" (restoring previous step state) and "parking" (saving step state) are automatically bypassed when the PVC is enabled, as the state is already present on the disk. Artifacts declared on the volume are still published, by the agent sidecar, after the step's command has succeeded.
+S3 "unparking" (restoring previous step state) and "parking" (saving step state) are skipped when the PVC is enabled, as the state is already present on the disk. Artifacts declared on the volume are still published, by the agent sidecar, after the step's command has succeeded.
+
+## Cleanup
+
+The runner never deletes a run's directories on the PVC. Remove old
+`{run_id}/` directories yourself (for example with a CronJob that mounts the
+PVC), or the volume fills up.

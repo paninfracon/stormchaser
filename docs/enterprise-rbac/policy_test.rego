@@ -177,3 +177,39 @@ test_anyone_in_the_domain_may_check_their_session if {
 		with data.role_mappings as mock_data.role_mappings
 		with data.allowed_email_domains as mock_data.allowed_email_domains
 }
+
+# --- Approvers named by the step, and engine checks ---
+
+test_only_a_named_approver_may_approve if {
+	step := {"name": "approve", "type": "Approval", "spec": {"approvers": ["lead@paninfracon.net"]}}
+	allow with input as {
+		"initiating_user": "dev@paninfracon.net",
+		"inputs": {"env": "staging"},
+		"step_ast": step,
+		"approver": user("lead@paninfracon.net", []),
+	}
+		with data.role_mappings as mock_data.role_mappings
+		with data.allowed_email_domains as mock_data.allowed_email_domains
+	not allow with input as {
+		"initiating_user": "dev@paninfracon.net",
+		"inputs": {"env": "staging"},
+		"step_ast": step,
+		"approver": user("other@paninfracon.net", ["Okta-Engineering"]),
+	}
+		with data.role_mappings as mock_data.role_mappings
+		with data.allowed_email_domains as mock_data.allowed_email_domains
+}
+
+test_a_nested_privileged_container_needs_an_admin if {
+	workflow := {"name": "w", "steps": [{
+		"name": "group",
+		"type": "Parallel",
+		"steps": [{"name": "build", "type": "RunContainer", "spec": {"image": "alpine", "privileged": true}}],
+	}]}
+	not allow with input as {"run_id": "1", "initiating_user": "dev@paninfracon.net", "workflow_ast": workflow, "inputs": {"env": "staging"}}
+		with data.role_mappings as mock_data.role_mappings
+		with data.allowed_email_domains as mock_data.allowed_email_domains
+	allow with input as {"run_id": "1", "initiating_user": "admin@paninfracon.net", "workflow_ast": workflow, "inputs": {"env": "staging"}}
+		with data.role_mappings as mock_data.role_mappings
+		with data.allowed_email_domains as mock_data.allowed_email_domains
+}
