@@ -85,10 +85,9 @@ impl DockerContainerMachine<state::Initialized> {
         let container_name = if is_shared {
             format!("storm-shared-{}", self.metadata.run_id)
         } else {
-            format!(
-                "storm-{}-{}",
-                self.metadata.step_dsl.name.to_lowercase().replace('_', "-"),
-                self.metadata.step_id
+            stormchaser_model::runner::workload_name(
+                &self.metadata.step_dsl.name,
+                self.metadata.step_id,
             )
         };
 

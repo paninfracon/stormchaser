@@ -5,22 +5,9 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 
 use super::*;
 
-/// The name of a step's Job: `storm-`, as much of the step's name as fits, and the
-/// step's full id. Kubernetes limits Job names to 63 characters; the id is what keeps
-/// them apart, so it is never shortened.
+/// The name of a step's Job (see [`stormchaser_model::runner::workload_name`]).
 pub fn job_name(step_name: &str, step_id: uuid::Uuid) -> String {
-    let readable: String = step_name
-        .to_lowercase()
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .take(20)
-        .collect();
-    let readable = readable.trim_matches('-');
-    if readable.is_empty() {
-        format!("storm-{step_id}")
-    } else {
-        format!("storm-{readable}-{step_id}")
-    }
+    stormchaser_model::runner::workload_name(step_name, step_id)
 }
 
 pub fn do_build_job_spec(

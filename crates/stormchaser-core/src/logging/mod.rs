@@ -37,17 +37,8 @@ pub enum LogBackend {
 /// The name goes into a log query, and a step name is whatever the workflow author
 /// wrote. Anything outside the characters a runner can use in a container or job name
 /// becomes `-`, so a name cannot close the label matcher and select other steps' logs.
-#[cfg(not(target_arch = "wasm32"))]
 fn log_job_name(step_name: &str, step_id: StepInstanceId) -> String {
-    let name: String = step_name
-        .to_lowercase()
-        .chars()
-        .map(|c| match c {
-            'a'..='z' | '0'..='9' | '-' | '.' => c,
-            _ => '-',
-        })
-        .collect();
-    format!("storm-{}-{}", name, &step_id.to_string()[..8])
+    stormchaser_model::runner::workload_name(step_name, step_id)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -114,13 +105,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_step_name_cannot_break_out_of_the_log_query() {
+    fn logs_are_looked_up_by_the_name_runners_give_a_step() {
         let step_id = StepInstanceId::new_v4();
-        let short = &step_id.to_string()[..8];
+        // The whole id: the lookup once used the first 8 characters, and found nothing
         assert_eq!(
             log_job_name("Build_Image", step_id),
-            format!("storm-build-image-{short}")
+            format!("storm-build-image-{step_id}")
         );
+    }
+
+    #[test]
+    fn a_step_name_cannot_break_out_of_the_log_query() {
+        let step_id = StepInstanceId::new_v4();
         let hostile = log_job_name("x\"} or {job_name=~\".+", step_id);
         assert!(hostile
             .chars()

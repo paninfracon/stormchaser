@@ -90,6 +90,29 @@ pub async fn task_consumer(
         .with_context(|| format!("Failed to create the JetStream consumer {name}"))
 }
 
+/// The name of the container or Kubernetes Job a runner starts for a step: `storm-`, as
+/// much of the step's name as fits, and the step's full id.
+///
+/// Both runners name their workloads this way, and step logs are found by this name, so
+/// the API looks a step's logs up with the same function. Anything but letters and
+/// digits becomes `-`, which keeps the name valid for Docker and Kubernetes and keeps a
+/// step name from reaching into a log query. Kubernetes limits Job names to 63
+/// characters; the id is what keeps them apart, so it is never shortened.
+pub fn workload_name(step_name: &str, step_id: impl std::fmt::Display) -> String {
+    let readable: String = step_name
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .take(20)
+        .collect();
+    let readable = readable.trim_matches('-');
+    if readable.is_empty() {
+        format!("storm-{step_id}")
+    } else {
+        format!("storm-{readable}-{step_id}")
+    }
+}
+
 /// Chooses the id a runner registers under.
 ///
 /// An id the operator sets (`RUNNER_ID`) always wins. Otherwise the id is built from the
