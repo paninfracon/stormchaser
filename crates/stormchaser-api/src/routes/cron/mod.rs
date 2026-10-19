@@ -22,7 +22,7 @@ use axum::{
     post,
     path = "/api/v1/cron-workflows",
     responses(
-        (status = 200, description = "Success"),
+        (status = 200, description = "Success", body = crate::CronWorkflowResponse),
         (status = 400, description = "Bad Request"),
         (status = 404, description = "Not Found"),
         (status = 500, description = "Internal Server Error")
@@ -106,7 +106,7 @@ pub async fn create_cron_workflow(
     get,
     path = "/api/v1/cron-workflows",
     responses(
-        (status = 200, description = "Success"),
+        (status = 200, description = "Success", body = [stormchaser_model::cron::CronWorkflow]),
         (status = 400, description = "Bad Request"),
         (status = 404, description = "Not Found"),
         (status = 500, description = "Internal Server Error")

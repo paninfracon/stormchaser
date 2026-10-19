@@ -86,7 +86,7 @@ pub async fn create_webhook(
     get,
     path = "/api/v1/webhooks",
     responses(
-        (status = 200, description = "Success"),
+        (status = 200, description = "Success", body = [stormchaser_model::WebhookConfig]),
         (status = 400, description = "Bad Request"),
         (status = 404, description = "Not Found"),
         (status = 500, description = "Internal Server Error")
@@ -115,7 +115,7 @@ pub async fn list_webhooks(
     path = "/api/v1/webhooks/{id}",
     params(("id" = stormchaser_model::WebhookId, Path, description="Webhook ID")),
     responses(
-        (status = 200, description = "Success"),
+        (status = 200, description = "Success", body = stormchaser_model::WebhookConfig),
         (status = 400, description = "Bad Request"),
         (status = 404, description = "Not Found"),
         (status = 500, description = "Internal Server Error")

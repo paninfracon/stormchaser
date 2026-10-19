@@ -148,6 +148,22 @@ pub(crate) async fn resolve_fencing_token_or_response(
 }
 
 /// Approves a step.
+#[utoipa::path(
+    post,
+    path = "/api/v1/runs/{id}/steps/{step_id}/approve",
+    params(
+        ("id" = RunId, Path, description = "Run ID"),
+        ("step_id" = StepInstanceId, Path, description = "The approval step's ID")
+    ),
+    request_body(content = Object, description = "Values that become the step's outputs; `{}` for none"),
+    responses(
+        (status = 200, description = "Approved"),
+        (status = 400, description = "The step is not waiting for approval"),
+        (status = 403, description = "The caller is not one of the step's approvers"),
+        (status = 404, description = "No such run or step")
+    ),
+    tag = "hitl"
+)]
 pub async fn approve_step(
     State(state): State<AppState>,
     AuthClaims(claims): AuthClaims,
@@ -207,6 +223,21 @@ pub async fn approve_step(
 }
 
 /// Rejects a step.
+#[utoipa::path(
+    post,
+    path = "/api/v1/runs/{id}/steps/{step_id}/reject",
+    params(
+        ("id" = RunId, Path, description = "Run ID"),
+        ("step_id" = StepInstanceId, Path, description = "The approval step's ID")
+    ),
+    responses(
+        (status = 200, description = "Rejected"),
+        (status = 400, description = "The step is not waiting for approval"),
+        (status = 403, description = "The caller is not one of the step's approvers"),
+        (status = 404, description = "No such run or step")
+    ),
+    tag = "hitl"
+)]
 pub async fn reject_step(
     State(state): State<AppState>,
     AuthClaims(claims): AuthClaims,
@@ -263,7 +294,17 @@ pub async fn reject_step(
     }
 }
 
-/// Correlates an event.
+/// Resumes the `Wait` step whose correlation key and value an event carries.
+#[utoipa::path(
+    post,
+    path = "/api/v1/events/correlate",
+    request_body(content = Object, description = "`key` and `value` equal to a waiting step's `correlation_key` and `correlation_value`; every top-level field becomes one of the step's outputs"),
+    responses(
+        (status = 200, description = "Event Correlated"),
+        (status = 404, description = "No waiting step has that correlation")
+    ),
+    tag = "hitl"
+)]
 pub async fn correlate_event(
     State(state): State<AppState>,
     Json(payload): Json<Value>,

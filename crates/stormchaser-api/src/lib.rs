@@ -104,7 +104,12 @@ pub use routes::*;
         routes::step::stream_run_status_api,
         routes::schema::get_schema,
         hitl::approve_step_link_page,
-        hitl::approve_step_link
+        hitl::approve_step_link,
+        hitl::approve_step,
+        hitl::reject_step,
+        hitl::correlate_event,
+        routes::webhook::update_webhook,
+        routes::schema::parse_git
     ),
     components(
         schemas(
@@ -121,7 +126,9 @@ pub use routes::*;
             TestSummary, TestReport,
             CreateWebhookRequest, CreateEventRuleRequest,
             WebhookConfig, EventRule,
-            DirectRunRequest
+            DirectRunRequest, UpdateWebhookRequest, ParseGitRequest,
+            TestReportSummary, TestSummaryResponse, TestReportContent,
+            TestConnectionRequest, TestConnectionResponse
         )
     ),
     tags(
@@ -136,10 +143,33 @@ pub use routes::*;
     ),
     security(
         ("bearer_auth" = [])
-    )
+    ),
+    modifiers(&BearerAuth)
 )]
 /// OpenAPI documentation struct for the API
 pub struct ApiDoc;
+
+/// Defines the `bearer_auth` scheme the operations name: a token from `/auth/exchange`
+/// or the identity provider, sent as `Authorization: Bearer <token>`.
+struct BearerAuth;
+
+impl utoipa::Modify for BearerAuth {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
+        openapi
+            .components
+            .get_or_insert_with(Default::default)
+            .add_security_scheme(
+                "bearer_auth",
+                SecurityScheme::Http(
+                    HttpBuilder::new()
+                        .scheme(HttpAuthScheme::Bearer)
+                        .bearer_format("JWT")
+                        .build(),
+                ),
+            );
+    }
+}
 
 /// Counter metric for tracking the total number of enqueued workflow runs
 pub static RUNS_ENQUEUED: Lazy<Counter<u64>> = Lazy::new(|| {

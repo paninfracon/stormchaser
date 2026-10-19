@@ -104,7 +104,7 @@ pub async fn create_event_rule(
     get,
     path = "/api/v1/rules",
     responses(
-        (status = 200, description = "Success"),
+        (status = 200, description = "Success", body = [stormchaser_model::EventRule]),
         (status = 400, description = "Bad Request"),
         (status = 404, description = "Not Found"),
         (status = 500, description = "Internal Server Error")

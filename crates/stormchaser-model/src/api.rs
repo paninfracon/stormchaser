@@ -442,6 +442,13 @@ pub struct TestSummaryResponse {
     pub created_at: DateTime<Utc>,
 }
 
+/// A test report file as stored: its text, such as a JUnit XML document.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct TestReportContent {
+    /// The file's content.
+    pub content: String,
+}
+
 #[cfg(test)]
 mod run_detail_tests {
     use super::*;

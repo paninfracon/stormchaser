@@ -84,7 +84,7 @@ pub async fn create_connection(
     get,
     path = "/api/v1/connections",
     responses(
-        (status = 200, description = "Success"),
+        (status = 200, description = "Success", body = [stormchaser_model::Connection]),
         (status = 400, description = "Bad Request"),
         (status = 404, description = "Not Found"),
         (status = 500, description = "Internal Server Error")
@@ -117,7 +117,7 @@ pub async fn list_connections(
     path = "/api/v1/connections/{id}",
     params(("id" = stormchaser_model::ConnectionId, Path, description="Backend ID")),
     responses(
-        (status = 200, description = "Success"),
+        (status = 200, description = "Success", body = stormchaser_model::Connection),
         (status = 400, description = "Bad Request"),
         (status = 404, description = "Not Found"),
         (status = 500, description = "Internal Server Error")
@@ -288,7 +288,7 @@ pub async fn list_run_artifacts(
     path = "/api/v1/runs/{run_id}/reports",
     params(("run_id" = stormchaser_model::RunId, Path, description="Run ID")),
     responses(
-        (status = 200, description = "Success"),
+        (status = 200, description = "Success", body = [crate::TestReportSummary]),
         (status = 400, description = "Bad Request"),
         (status = 404, description = "Not Found"),
         (status = 500, description = "Internal Server Error")
@@ -310,10 +310,10 @@ pub async fn list_run_test_reports(
 /// Lists run test summaries.
 #[utoipa::path(
     get,
-    path = "/api/v1/runs/{run_id}/test-summaries",
+    path = "/api/v1/runs/{run_id}/summaries",
     params(("run_id" = stormchaser_model::RunId, Path, description="Run ID")),
     responses(
-        (status = 200, description = "Success"),
+        (status = 200, description = "Success", body = [crate::TestSummaryResponse]),
         (status = 400, description = "Bad Request"),
         (status = 404, description = "Not Found"),
         (status = 500, description = "Internal Server Error")
@@ -340,7 +340,7 @@ pub async fn list_run_test_summaries(
         ("report_id" = stormchaser_model::TestReportId, Path, description = "Report ID")
     ),
     responses(
-        (status = 200, description = "Test report content"),
+        (status = 200, description = "Test report content", body = crate::TestReportContent),
         (status = 404, description = "Report not found"),
         (status = 500, description = "Internal Server Error")
     ),
@@ -360,7 +360,7 @@ pub async fn get_test_report(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)
-        .map(|c: String| serde_json::json!({ "content": c }))?;
+        .map(|content: String| crate::TestReportContent { content })?;
 
     Ok(Json(report))
 }
