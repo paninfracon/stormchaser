@@ -9,6 +9,8 @@ pub const APPLICATION_JSON: &str = "application/json";
 pub mod id;
 pub use id::*;
 
+/// The API's requests and responses, shared with its clients.
+pub mod api;
 /// Authentication and authorization models.
 pub mod auth;
 /// Storage backend and artifact registry models.

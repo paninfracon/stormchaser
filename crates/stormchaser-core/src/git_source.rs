@@ -1,19 +1,8 @@
 //! Reading a workflow file from the repository of a Git connection.
 
 use crate::service::ServiceState;
-use serde::Deserialize;
-use utoipa::ToSchema;
 
-/// Where a workflow file is: a Git connection, a path in its repository and a ref.
-#[derive(Debug, Deserialize, ToSchema)]
-pub struct ParseGitRequest {
-    /// The connection (ID or name) to the repository.
-    pub connection: String,
-    /// The workflow path.
-    pub workflow_path: String,
-    /// The git ref.
-    pub git_ref: String,
-}
+pub use stormchaser_model::api::ParseGitRequest;
 
 /// Reads a workflow file from the repository of a Git connection, as `caller`.
 ///
