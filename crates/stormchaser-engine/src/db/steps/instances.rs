@@ -121,22 +121,6 @@ where
     .await
 }
 
-/// Record step status history.
-pub async fn record_step_status_history<'a, E>(
-    executor: E,
-    step_instance_id: StepInstanceId,
-    status: &StepStatus,
-) -> Result<PgQueryResult, sqlx::Error>
-where
-    E: Executor<'a, Database = Postgres>,
-{
-    sqlx::query("INSERT INTO step_status_history (step_instance_id, status) VALUES ($1, $2)")
-        .bind(step_instance_id)
-        .bind(status)
-        .execute(executor)
-        .await
-}
-
 #[allow(clippy::too_many_arguments)]
 /// Insert step instance.
 pub async fn insert_step_instance<'a, E>(
@@ -153,14 +137,9 @@ where
 {
     sqlx::query(
         r#"
-                WITH inserted AS (
-                    INSERT INTO step_instances (id, run_id, step_name, step_type, status, created_at)
+                INSERT INTO step_instances (id, run_id, step_name, step_type, status, created_at)
                     VALUES ($1, $2, $3, $4, $5, $6)
                     ON CONFLICT DO NOTHING
-                    RETURNING id
-                )
-                INSERT INTO step_status_history (step_instance_id, status)
-                SELECT id, $5 FROM inserted
                 "#,
     )
     .bind(id)
@@ -212,13 +191,8 @@ where
 {
     sqlx::query(
         r#"
-                WITH inserted AS (
-                    INSERT INTO step_instances (id, run_id, step_name, step_type, status, iteration_index, affinity_context, spec, params, created_at)
+                INSERT INTO step_instances (id, run_id, step_name, step_type, status, iteration_index, affinity_context, spec, params, created_at)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                    RETURNING id
-                )
-                INSERT INTO step_status_history (step_instance_id, status)
-                SELECT id, $5 FROM inserted
                 "#,
     )
     .bind(id)
@@ -255,14 +229,9 @@ where
 {
     sqlx::query(
         r#"
-            WITH inserted AS (
-                INSERT INTO step_instances (id, run_id, step_name, step_type, status, iteration_index, affinity_context, spec, params, created_at)
+            INSERT INTO step_instances (id, run_id, step_name, step_type, status, iteration_index, affinity_context, spec, params, created_at)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                 ON CONFLICT DO NOTHING
-                RETURNING id
-            )
-            INSERT INTO step_status_history (step_instance_id, status)
-            SELECT id, $5 FROM inserted
             "#,
     )
     .bind(id)

@@ -91,8 +91,7 @@ pub async fn persist_step_instance(
         }
     }
 
-    // Record status history
-    crate::db::record_step_status_history(executor, instance.id, &instance.status).await?;
+    // The database records the change in the step's history
 
     Ok(())
 }

@@ -291,14 +291,16 @@ Users, permissions and production settings are in [NATS](nats.md).
 * **Optimistic concurrency on runs**: run transitions made through `WorkflowMachine`
   update `workflow_runs` with `WHERE version = $n` and fail on a mismatch. Step
   updates have no version check.
+* **Guarded step transitions**: a trigger on `step_instances` refuses a move a step
+  may not make, so a finished step is never changed again, and records every status
+  change in `step_status_history` (see [State machines](state_machines.md)).
 * **Completion tokens**: a built-in step has a `completion_token`, which must
   accompany the event that finishes it. A runner step's token is cleared when its
   task is published; from then on only its assigned runner may report on it. A retry
   gives the step a new token, so a late report from an earlier attempt is ignored.
 * **Fencing tokens**: each run has a `fencing_token`, set once when the run is
-  created and copied into its tasks and events. Handlers drop an event whose token is
-  lower than the run's, but since the token never changes this check rejects
-  nothing in practice.
+  created and copied into its tasks and events. It never changes, so the engine no
+  longer compares it; the field stays in events for compatibility.
 * **Transactional outbox**: events written in the same transaction as the state
   change they report go to `outbox_events`. This covers run-starting events from the
   API (`run.queued`, `run.direct`), engine run events (`run.start_pending`,

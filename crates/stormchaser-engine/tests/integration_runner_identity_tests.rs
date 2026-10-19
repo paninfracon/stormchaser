@@ -436,12 +436,17 @@ async fn storage_reports_move_a_step_only_for_the_runner_that_holds_it() {
         Some((StepStatus::Succeeded, Some(holder.clone())))
     );
 
-    // A pending step is claimed by the runner that unpacks it, and then runs for it
-    sqlx::query("UPDATE step_instances SET status = 'pending', runner_id = NULL WHERE id = $1")
+    // A pending step is claimed by the runner that unpacks it, and then runs for it. A
+    // step of its own (another iteration of the same step): the database does not let a
+    // finished step be reopened.
+    let step_id = StepInstanceId::new_v4();
+    sqlx::query("INSERT INTO step_instances (id, run_id, step_name, iteration_index, status, step_type, spec, completion_token) VALUES ($1, $2, 'build', 1, 'pending', 'RunContainer', '{}', NULL)")
         .bind(step_id)
+        .bind(run_id)
         .execute(&pool)
         .await
         .unwrap();
+    let report = |runner: &str| json!({"run_id": run_id, "step_id": step_id, "runner_id": runner});
     handler::handle_step_unpacking_sfs(report(&holder), pool.clone())
         .await
         .unwrap();

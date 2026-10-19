@@ -20,6 +20,15 @@ Two things the typestate does not do:
   Step updates do not. What serialises a run's events is the lock the completed and
   failed handlers take on the run's row (`SELECT … FOR UPDATE`).
 
+The database checks every step transition, whichever code makes it. A trigger on
+`step_instances` refuses a move a step may not make (`step_status_transition_allowed`
+in the `guard_step_transitions` migration): a step that has not finished may move to
+any status, except that only a `pending` step is claimed (`initializing`), only a
+`running` step packs its storage, and only a step that was handed out can become
+`lost_zombie`. A finished step (`succeeded`, `failed_ignored`, `skipped`, `aborted`,
+`lost_zombie`) never moves, and a `failed` one only to `failed_ignored`. A refused move
+fails its statement with `check_violation`.
+
 The diagram sources are `workflow_machine.mmd` and `step_machine.mmd` in this
 directory.
 
@@ -201,7 +210,7 @@ Where each transition happens:
 - **Retry** (SQL, `reset_step_for_retry`): when a step fails or is lost and its
   `retry` block has attempts left, the step goes straight back to `pending` with
   `attempt` incremented, `retry_at` set and a new `completion_token`. Its status
-  history records `failed` (or `lost_zombie`) and then `pending`. The retry worker
+  history records the move back to `pending`; `attempt` counts the tries. The retry worker
   dispatches runs whose `retry_at` has passed. `Approval` and `Wait` steps are never
   retried.
 - **`failed` to `failed_ignored`**: the failed handler, for a step with
@@ -216,8 +225,10 @@ Transitions defined in `StepMachine` but never called: `UnpackingSfs::skip()`,
 
 ## Status history
 
-`persist_step_instance` writes a row to `step_status_history` for every transition
-made through `StepMachine`, and the retry path writes its two rows explicitly. The
-SQL transitions above (claiming, putting back to `pending`) do not write history.
+A trigger on `step_instances` writes a row to `step_status_history` when a step is
+created and whenever its status changes, whichever statement changes it: the
+`StepMachine` methods and the SQL transitions above (claiming, putting back to
+`pending`, retries) alike. Writing a step again with the status it has records
+nothing.
 Archived runs keep their history in `archived_step_status_history`;
 `combined_step_status_history` reads both.

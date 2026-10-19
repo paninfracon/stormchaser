@@ -52,20 +52,10 @@ pub async fn handle_step_failed(
         return Ok(());
     }
 
-    let workflow_run = fetch_run(run_id, &mut *tx).await?;
-    if event.fencing_token == 0 {
-        tracing::debug!(
-            "Failure event for run {} step {} arrived without fencing token; allowing for compatibility",
-            run_id, step_id
-        );
-    }
-    if event.fencing_token > 0 && event.fencing_token < workflow_run.fencing_token {
-        tracing::warn!(
-            "Rejecting stale failure event for run {} step {} due to fencing token mismatch (event: {}, run: {})",
-            run_id, step_id, event.fencing_token, workflow_run.fencing_token
-        );
-        return Ok(());
-    }
+    // Events carry the run's fencing token, but the run's token never changes, so
+    // comparing them rejects nothing. What keeps a late or forged result out is the run's
+    // row lock, the step's completion token and assigned runner, and the database
+    // refusing to move a finished step (see the guard_step_transitions migration).
 
     let instance = fetch_step_instance(step_id, &mut *tx).await?;
     if !step_belongs_to_run(&instance, run_id) {
@@ -131,13 +121,6 @@ pub async fn handle_step_failed(
     // A step with retries left runs again once its delay is over, and its run waits
     if let Some(delay) = retry_delay(dsl_step, &instance.step_type, attempt) {
         crate::db::reset_step_for_retry(&mut *tx, step_id, delay).await?;
-        let ended = if lost_zombie {
-            StepStatus::LostZombie
-        } else {
-            StepStatus::Failed
-        };
-        crate::db::record_step_status_history(&mut *tx, step_id, &ended).await?;
-        crate::db::record_step_status_history(&mut *tx, step_id, &StepStatus::Pending).await?;
         tx.commit().await?;
         crate::STEPS_RETRIED.add(
             1,

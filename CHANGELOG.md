@@ -74,6 +74,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The database owns a step's status. A trigger refuses a move a step may not make, so a finished step is never changed again (a late or repeated report used to be able to move one), and every status change is recorded in the step's history, including the claims, put-backs and retries the engine makes in bulk, which used to leave no record. The engine no longer compares events' fencing tokens with the run's: the run's token never changes, so the comparison rejected nothing.
 - The CLI, the TUI and the web UI call the API through the shared client, which fixed calls that never worked:
   - `stormchaser rules create`, `stormchaser cron create` and the TUI's rule and cron dialogs sent `repo_url`, which the API does not read; they now send the Git `connection` (`--repo` fills it, and `--connection` is an alias).
   - `stormchaser runs logs <run> --step <name>` streamed with the step's name where the API expects its id; the CLI now looks the name up (the latest instance, listing earlier ones) and accepts an id too.
