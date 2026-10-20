@@ -43,11 +43,11 @@ pub async fn handle_workflow_queued(
     // nothing to do, or after a transient failure left it resolving, to try again
     let machine = match run.status {
         RunStatus::Queued => {
-            WorkflowMachine::<state::Queued>::new(run)
+            WorkflowMachine::<state::Queued>::load(run)?
                 .start_resolving(&mut *pool.acquire().await?)
                 .await?
         }
-        RunStatus::Resolving => WorkflowMachine::<state::Resolving>::new_from_run(run),
+        RunStatus::Resolving => WorkflowMachine::<state::Resolving>::load(run)?,
         status => {
             debug!(
                 "Run {} is {:?}, not queued; skipping its queued event",
@@ -57,7 +57,7 @@ pub async fn handle_workflow_queued(
         }
     };
 
-    let resolved = match resolve(&machine.run, &payload, &pool, &git_cache, &opa_client).await {
+    let resolved = match resolve(machine.run(), &payload, &pool, &git_cache, &opa_client).await {
         Ok(resolved) => resolved,
         Err(e) if crate::retry::is_transient(&e) => return Err(e),
         Err(e) => {

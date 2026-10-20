@@ -1,6 +1,6 @@
+use crate::handler::fetch_inputs;
 use crate::handler::integrations::utils::{report_step_completed, report_step_failed};
 use crate::handler::step::dispatch::intrinsic::{BuiltInStep, BuiltInWork};
-use crate::handler::{fetch_inputs, fetch_step_instance};
 use anyhow::{Context, Result};
 use futures::FutureExt;
 use serde_json::Value;
@@ -59,15 +59,7 @@ async fn execute_wasm_step(
         ..
     } = step;
     let executor = crate::wasm::WasmExecutor::new();
-    if let Ok(instance) = fetch_step_instance(step_instance_id, &pool).await {
-        let machine =
-            crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::from_instance(
-                instance,
-            );
-        if let Ok(mut conn) = pool.acquire().await {
-            let _ = machine.start("wasm".to_string(), &mut *conn).await;
-        }
-    }
+    crate::handler::integrations::utils::start_built_in(&pool, step_instance_id, "wasm").await?;
 
     match executor.execute(&module, &function, input).await {
         Ok(outputs) => {

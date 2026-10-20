@@ -2,6 +2,7 @@ use crate::handler::step::dispatch::find_step;
 use crate::handler::{
     archive_workflow, dispatch_pending_steps, fetch_run, fetch_run_context, fetch_step_instance,
 };
+use crate::step_machine::{state as step_state, StepMachine};
 use crate::workflow_machine::{state, WorkflowMachine};
 use anyhow::Result;
 use chrono::Utc;
@@ -102,6 +103,16 @@ pub async fn handle_step_failed(
         return Ok(());
     }
 
+    // A step's end can find it anywhere between being handed out and finishing; a
+    // pending step has not been handed out, so a report on it is out of turn
+    let machine = match StepMachine::<step_state::Unfinished>::load(instance.clone()) {
+        Ok(machine) => machine,
+        Err(wrong) => {
+            tracing::warn!("Ignoring failure of run {}: {}", run_id, wrong);
+            return Ok(());
+        }
+    };
+
     let _ = release_step_quota_for_instance(&mut *tx, run_id, step_id).await;
 
     let context = fetch_run_context(run_id, &mut *tx).await?;
@@ -120,7 +131,7 @@ pub async fn handle_step_failed(
 
     // A step with retries left runs again once its delay is over, and its run waits
     if let Some(delay) = retry_delay(dsl_step, &instance.step_type, attempt) {
-        crate::db::reset_step_for_retry(&mut *tx, step_id, delay).await?;
+        machine.retry(delay, &mut tx).await?;
         tx.commit().await?;
         crate::STEPS_RETRIED.add(
             1,
@@ -135,11 +146,6 @@ pub async fn handle_step_failed(
         );
         return Ok(());
     }
-
-    let machine =
-        crate::step_machine::StepMachine::<crate::step_machine::state::Running>::from_instance(
-            instance.clone(),
-        );
 
     let failed = if lost_zombie {
         let _ = machine.zombify(&mut *tx).await?;
@@ -225,9 +231,17 @@ pub async fn handle_step_failed(
     }
 
     let run = fetch_run(run_id, &mut *tx).await?;
-    let run_machine = WorkflowMachine::<state::Running>::new_from_run(run.clone());
-    let _ = run_machine
-        .fail(format!("Step {} failed: {}", step_id, error_msg), &mut *tx)
+    let run_machine = match WorkflowMachine::<state::Running>::load(run.clone()) {
+        Ok(machine) => machine,
+        Err(wrong) => {
+            // It has already ended (it timed out, say); the step's failure is recorded
+            tracing::warn!("Not failing run {} for step {}: {}", run_id, step_id, wrong);
+            tx.commit().await?;
+            return Ok(());
+        }
+    };
+    run_machine
+        .fail(format!("Step {} failed: {}", step_id, error_msg), &mut tx)
         .await?;
 
     use stormchaser_model::nats::NatsSubject;

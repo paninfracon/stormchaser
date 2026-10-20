@@ -1,5 +1,5 @@
 use crate::handler::integrations::utils::report_step_completed;
-use crate::handler::{fetch_outputs, fetch_run_context, fetch_step_instance};
+use crate::handler::{fetch_outputs, fetch_run_context};
 use anyhow::{Context, Result};
 use serde_json::Value;
 use sqlx::Connection;
@@ -26,14 +26,7 @@ pub(crate) async fn handle_sql_execute(
     );
 
     // 1. Mark as Running
-    let instance = fetch_step_instance(step_id, &pool).await?;
-    let machine =
-        crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::from_instance(
-            instance,
-        );
-    let _ = machine
-        .start("sql_execute".to_string(), &mut *pool.acquire().await?)
-        .await?;
+    crate::handler::integrations::utils::start_built_in(&pool, step_id, "sql_execute").await?;
 
     let conn = crate::db::connections::get_storage_backend_by_name::<
         _,

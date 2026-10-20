@@ -5,7 +5,6 @@ use sqlx::PgPool;
 #[cfg(feature = "aws-lambda")]
 use super::utils::{report_step_failed, report_step_output_and_completion};
 #[cfg(feature = "aws-lambda")]
-use crate::handler::fetch_step_instance;
 #[cfg(feature = "aws-lambda")]
 use anyhow::Context;
 #[cfg(feature = "aws-lambda")]
@@ -34,14 +33,7 @@ pub async fn handle_lambda_invoke(
     );
 
     // 1. Mark as Running
-    let instance = fetch_step_instance(step_id, &pool).await?;
-    let machine =
-        crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::from_instance(
-            instance,
-        );
-    let _ = machine
-        .start("aws-lambda".to_string(), &mut *pool.acquire().await?)
-        .await?;
+    crate::handler::integrations::utils::start_built_in(&pool, step_id, "aws-lambda").await?;
 
     // With no role to assume the function is invoked as the engine itself.
     if spec.assume_role_arn.is_none() {

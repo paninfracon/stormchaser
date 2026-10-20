@@ -5,7 +5,7 @@ use std::sync::Arc;
 use stormchaser_tls::TlsReloader;
 
 #[cfg(feature = "email")]
-use crate::handler::{fetch_outputs, fetch_run_context, fetch_step_instance};
+use crate::handler::{fetch_outputs, fetch_run_context};
 #[cfg(feature = "email")]
 use stormchaser_model::dsl::{self, EmailBackend};
 #[cfg(feature = "email")]
@@ -30,13 +30,7 @@ pub async fn handle_test_report_email(
     info!("Sending test report email for run {}", run_id);
 
     // 1. Mark as Running
-    let instance = fetch_step_instance(step_id, &pool).await?;
-    let machine =
-        crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::from_instance(
-            instance,
-        );
-    let _ = machine
-        .start("test-report-email".to_string(), &mut *pool.acquire().await?)
+    crate::handler::integrations::utils::start_built_in(&pool, step_id, "test-report-email")
         .await?;
 
     // 2. Fetch Test Data

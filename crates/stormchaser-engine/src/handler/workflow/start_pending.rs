@@ -103,8 +103,9 @@ pub async fn handle_workflow_start_pending(
     }
 
     // 5. Transition Workflow to Running
-    let machine = WorkflowMachine::<state::StartPending>::new_from_run(run.clone());
-    let _ = machine.start(&mut *tx).await?;
+    WorkflowMachine::<state::StartPending>::load(run.clone())?
+        .start(&mut *tx)
+        .await?;
 
     use stormchaser_model::nats::NatsSubject;
     if let Err(e) = crate::db::outbox::insert_outbox_event(

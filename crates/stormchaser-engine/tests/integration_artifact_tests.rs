@@ -120,6 +120,15 @@ async fn test_artifact_persistence_on_completion() {
     stormchaser_engine::db::clear_step_completion_token(&pool, step.id)
         .await
         .unwrap();
+    // and claimed, if dispatch has not got to it yet: a report on a step that was
+    // never handed out is ignored
+    sqlx::query(
+        "UPDATE step_instances SET status = 'initializing' WHERE id = $1 AND status = 'pending'",
+    )
+    .bind(step.id)
+    .execute(&pool)
+    .await
+    .unwrap();
     let fencing_token: i64 =
         sqlx::query_scalar("SELECT fencing_token FROM workflow_runs WHERE id = $1")
             .bind(run_id)
@@ -268,6 +277,15 @@ async fn test_test_report_persistence_on_completion() {
     stormchaser_engine::db::clear_step_completion_token(&pool, step.id)
         .await
         .unwrap();
+    // and claimed, if dispatch has not got to it yet: a report on a step that was
+    // never handed out is ignored
+    sqlx::query(
+        "UPDATE step_instances SET status = 'initializing' WHERE id = $1 AND status = 'pending'",
+    )
+    .bind(step.id)
+    .execute(&pool)
+    .await
+    .unwrap();
     let fencing_token: i64 =
         sqlx::query_scalar("SELECT fencing_token FROM workflow_runs WHERE id = $1")
             .bind(run_id)

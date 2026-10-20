@@ -134,3 +134,15 @@ pub async fn queue_step_failed(
     };
     crate::db::outbox::insert_step_failed(conn, &event).await
 }
+
+/// Moves a built-in step the engine has claimed from initializing to running, before
+/// the engine runs it. `label` names the built-in in the step's `runner_id`.
+pub async fn start_built_in(pool: &PgPool, step_id: StepInstanceId, label: &str) -> Result<()> {
+    use crate::step_machine::{state, StepMachine};
+    let mut conn = pool.acquire().await?;
+    let instance = crate::handler::fetch_step_instance(step_id, &mut *conn).await?;
+    StepMachine::<state::Initializing>::load(instance)?
+        .start(Some(label.to_string()), &mut conn)
+        .await?;
+    Ok(())
+}

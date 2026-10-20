@@ -66,7 +66,7 @@ async fn test_lambda_handler_invoke() {
         .await
         .unwrap();
 
-    sqlx::query("INSERT INTO step_instances (id, run_id, step_name, step_type, status, spec, params) VALUES ($1, $2, 'test-step', 'LambdaInvoke', 'pending', '{}', '{}')")
+    sqlx::query("INSERT INTO step_instances (id, run_id, step_name, step_type, status, spec, params) VALUES ($1, $2, 'test-step', 'LambdaInvoke', 'initializing', '{}', '{}')")
         .bind(step_id)
         .bind(run_id)
         .execute(&pool)
@@ -75,7 +75,7 @@ async fn test_lambda_handler_invoke() {
 
     // The engine only invokes functions the operator has allow-listed for its own identity.
     let refused_step_id = StepInstanceId::new_v4();
-    sqlx::query("INSERT INTO step_instances (id, run_id, step_name, step_type, status, spec, params) VALUES ($1, $2, 'refused-step', 'LambdaInvoke', 'pending', '{}', '{}')")
+    sqlx::query("INSERT INTO step_instances (id, run_id, step_name, step_type, status, spec, params) VALUES ($1, $2, 'refused-step', 'LambdaInvoke', 'initializing', '{}', '{}')")
         .bind(refused_step_id)
         .bind(run_id)
         .execute(&pool)

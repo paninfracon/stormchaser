@@ -93,8 +93,12 @@ pub async fn fail_lost_engine_steps(
     lost_after: Duration,
 ) -> anyhow::Result<usize> {
     let mut tx = pool.begin().await?;
-    for (step_id, run_id) in
-        db::reset_lost_engine_steps(&mut tx, lost_after, RERUNNABLE_BUILT_INS).await?
+    for (step_id, run_id) in crate::step_machine::bulk::requeue_lost_engine_steps(
+        &mut tx,
+        lost_after,
+        RERUNNABLE_BUILT_INS,
+    )
+    .await?
     {
         tracing::warn!(
             "Step {} of run {} was running in an engine that has stopped; it has no side effects, so it runs again",
@@ -102,7 +106,7 @@ pub async fn fail_lost_engine_steps(
             run_id
         );
     }
-    let lost = db::take_lost_engine_steps(&mut tx, lost_after).await?;
+    let lost = db::take_lost_engine_steps(&mut tx, lost_after, RERUNNABLE_BUILT_INS).await?;
     for step in &lost {
         tracing::warn!(
             "Step {} of run {} was running in an engine that has stopped; failing it",
@@ -236,7 +240,7 @@ async fn fail_crashed_resolution(pool: &sqlx::PgPool, run_id: RunId) -> anyhow::
     tracing::warn!("Recovering crashed resolution for run {}", run_id);
     let machine = crate::workflow_machine::WorkflowMachine::<
         crate::workflow_machine::state::Resolving,
-    >::new_from_run(run);
+    >::load(run)?;
     let mut tx = pool.begin().await?;
     machine
         .fail("Engine crashed during resolution".to_string(), &mut tx)
@@ -463,7 +467,7 @@ pub async fn recover_dispatches(
 /// step is put back without its quota.
 async fn put_back_lost_dispatches(pool: &sqlx::PgPool, lost_after: Duration) -> anyhow::Result<()> {
     let mut tx = pool.begin().await?;
-    let lost = db::reset_lost_dispatches(&mut *tx, lost_after).await?;
+    let lost = crate::step_machine::bulk::requeue_lost_dispatches(&mut tx, lost_after).await?;
     let mut limits = std::collections::HashMap::new();
     for step in lost {
         tracing::warn!(

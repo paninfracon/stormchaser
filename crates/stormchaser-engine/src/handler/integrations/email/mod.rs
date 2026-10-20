@@ -11,7 +11,7 @@ use std::sync::Arc;
 use stormchaser_tls::TlsReloader;
 
 #[cfg(feature = "email")]
-use crate::handler::{fetch_outputs, fetch_run_context, fetch_step_instance};
+use crate::handler::{fetch_outputs, fetch_run_context};
 #[cfg(feature = "email")]
 use stormchaser_model::dsl::{self, EmailBackend};
 #[cfg(feature = "email")]
@@ -36,14 +36,7 @@ pub async fn handle_email_send(
     );
 
     // 1. Mark as Running
-    let instance = fetch_step_instance(step_id, &pool).await?;
-    let machine =
-        crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::from_instance(
-            instance,
-        );
-    let _ = machine
-        .start("email".to_string(), &mut *pool.acquire().await?)
-        .await?;
+    crate::handler::integrations::utils::start_built_in(&pool, step_id, "email").await?;
 
     // 2. Prepare Context for Template Rendering
     let run_context: workflow::RunContext = fetch_run_context(run_id, &pool).await?;

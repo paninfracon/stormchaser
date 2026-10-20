@@ -135,31 +135,31 @@ async fn test_db_layer_functions() {
         .unwrap();
     assert_eq!(count, 0);
 
-    let mut tx = pool.begin().await.unwrap();
-    db::steps::update_step_instance_running(
-        &mut *tx,
-        &StepStatus::Running,
-        Some(&runner_id),
-        step_id,
-    )
-    .await
-    .unwrap();
-    tx.commit().await.unwrap();
+    // Status changes go through the step machine
+    use stormchaser_engine::step_machine::{state, StepMachine};
+    let fetch = |pool: sqlx::PgPool| async move {
+        db::steps::get_step_instances_by_run_id::<_, StepInstance>(&pool, run_id)
+            .await
+            .unwrap()
+            .remove(0)
+    };
+    let mut conn = pool.acquire().await.unwrap();
+    StepMachine::<state::Pending>::load(fetch(pool.clone()).await)
+        .unwrap()
+        .start(runner_id.clone(), &mut conn)
+        .await
+        .unwrap();
 
     let count: i64 = db::steps::count_running_steps_for_run(&pool, run_id)
         .await
         .unwrap();
     assert_eq!(count, 1);
 
-    db::steps::fail_step_instance_with_error(
-        &pool,
-        StepStatus::Failed,
-        "failed msg",
-        Some(1),
-        step_id,
-    )
-    .await
-    .unwrap();
+    StepMachine::<state::Unfinished>::load(fetch(pool.clone()).await)
+        .unwrap()
+        .fail("failed msg".to_string(), Some(1), &mut conn)
+        .await
+        .unwrap();
 
     let steps: Vec<StepInstance> = db::steps::get_step_instances_by_run_id(&pool, run_id)
         .await

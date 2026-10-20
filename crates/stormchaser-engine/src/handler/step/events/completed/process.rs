@@ -117,8 +117,8 @@ async fn schedule_iterated_batches(
                 for next_instance in waiting_instances.iter().take(to_schedule as usize) {
                     let machine = crate::step_machine::StepMachine::<
                         crate::step_machine::state::WaitingForEvent,
-                    >::from_instance((**next_instance).clone());
-                    let _ = machine.reschedule(&mut *tx).await?;
+                    >::load((**next_instance).clone())?;
+                    machine.reschedule(&mut *tx).await?;
                 }
             }
         }

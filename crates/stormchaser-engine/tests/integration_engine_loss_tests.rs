@@ -261,3 +261,39 @@ async fn a_runner_step_never_records_an_engine() {
 
     delete_run(&pool, run_id).await;
 }
+
+/// A side-effect-free step that becomes lost after the sweep has put back the ones it
+/// found is left for the next sweep, not failed: the sweep's second query sees rows
+/// other transactions committed after its first.
+#[tokio::test]
+async fn a_side_effect_free_step_lost_between_the_sweeps_queries_is_not_failed() {
+    let pool = setup_db().await;
+    let run_id = RunId::new_v4();
+    let (step_id, engine) = step_on_test_engine(&pool, run_id).await;
+    heartbeat_at(&pool, engine, 2.0 * LOST_AFTER.as_secs_f64()).await;
+
+    // The second query alone, as if the step became lost after the first ran
+    let mut tx = pool.begin().await.unwrap();
+    let taken =
+        stormchaser_engine::db::take_lost_engine_steps(&mut tx, LOST_AFTER, &["JQ", "JinjaRender"])
+            .await
+            .unwrap();
+    tx.commit().await.unwrap();
+    assert!(
+        taken.iter().all(|step| step.id != step_id),
+        "a JinjaRender step was taken to be failed"
+    );
+
+    // The next sweep runs it again
+    fail_lost_engine_steps(&pool, LOST_AFTER).await.unwrap();
+    assert!(queued_failures(&pool, step_id).await.is_empty());
+    let status: StepStatus = sqlx::query_scalar("SELECT status FROM step_instances WHERE id = $1")
+        .bind(step_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(status, StepStatus::Pending);
+
+    delete_run(&pool, run_id).await;
+    delete_engine(&pool, engine).await;
+}

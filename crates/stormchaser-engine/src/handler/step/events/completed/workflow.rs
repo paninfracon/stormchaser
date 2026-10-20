@@ -45,8 +45,15 @@ pub async fn check_workflow_completion(
 
     if all_dsl_steps_done {
         let run = fetch_run(run_id, &mut *tx).await?;
-        let machine = WorkflowMachine::<state::Running>::new_from_run(run.clone());
-        let _ = machine.succeed(&mut *tx).await?;
+        let machine = match WorkflowMachine::<state::Running>::load(run.clone()) {
+            Ok(machine) => machine,
+            Err(wrong) => {
+                // It has already ended (it timed out, say)
+                tracing::warn!("Not completing run {}: {}", run_id, wrong);
+                return Ok(false);
+            }
+        };
+        machine.succeed(&mut *tx).await?;
 
         use stormchaser_model::nats::NatsSubject;
         if let Err(e) = crate::db::outbox::insert_outbox_event(

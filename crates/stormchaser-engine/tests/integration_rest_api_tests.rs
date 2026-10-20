@@ -165,7 +165,7 @@ async fn test_rest_api_step_execution() {
         run_id,
         "fetch_data",
         "RestApi",
-        stormchaser_model::step::StepStatus::Pending,
+        stormchaser_model::step::StepStatus::Initializing,
         None,
         None,
         spec.clone(),

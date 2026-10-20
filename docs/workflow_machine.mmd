@@ -3,7 +3,7 @@ stateDiagram-v2
     [*] --> StartPending: engine accepts a direct run
 
     Queued --> Resolving: start_resolving()
-    Queued --> Failed: engine gives up on run.queued (SQL)
+    Queued --> Failed: fail() (direct run refused, or engine gives up on run.queued)
     Queued --> Aborted: abort() on run timeout
 
     Resolving --> StartPending: start_pending()
@@ -11,7 +11,7 @@ stateDiagram-v2
     Resolving --> Aborted: abort() on run timeout
 
     StartPending --> Running: start()
-    StartPending --> Failed: engine gives up on run.start_pending (SQL)
+    StartPending --> Failed: fail() (engine gives up on run.start_pending)
     StartPending --> Aborted: abort() on run timeout
 
     Running --> Succeeded: succeed()

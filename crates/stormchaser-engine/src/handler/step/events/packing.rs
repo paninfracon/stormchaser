@@ -39,9 +39,7 @@ pub async fn handle_step_packing_sfs(payload: Value, pool: PgPool) -> Result<()>
     info!("Step {} (Run {}) is now packing SFS", step_id, run_id);
 
     let machine =
-        crate::step_machine::StepMachine::<crate::step_machine::state::Running>::from_instance(
-            instance,
-        );
+        crate::step_machine::StepMachine::<crate::step_machine::state::Running>::load(instance)?;
     let _ = machine.start_packing(&mut *pool.acquire().await?).await?;
 
     Ok(())

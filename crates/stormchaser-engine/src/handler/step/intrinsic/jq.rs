@@ -1,4 +1,3 @@
-use crate::handler::fetch_step_instance;
 use crate::handler::integrations::utils::{report_step_completed, report_step_failed};
 use anyhow::Result;
 use serde_json::Value;
@@ -63,15 +62,8 @@ pub(crate) async fn run_jq(
     pool: PgPool,
 ) -> Result<()> {
     // 1. Transition to running
-    if let Ok(instance) = fetch_step_instance(step_instance_id, &pool).await {
-        let machine =
-            crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::from_instance(
-                instance,
-            );
-        if let Ok(mut conn) = pool.acquire().await {
-            let _ = machine.start("intrinsic-jq".to_string(), &mut *conn).await;
-        }
-    }
+    crate::handler::integrations::utils::start_built_in(&pool, step_instance_id, "intrinsic-jq")
+        .await?;
 
     let actual_spec = spec.get("spec").unwrap_or(&spec).clone();
     let jq_spec: Result<dsl::JqSpec, _> = serde_json::from_value(actual_spec.clone());

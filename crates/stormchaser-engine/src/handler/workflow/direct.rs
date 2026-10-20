@@ -262,7 +262,12 @@ impl<'a> Rejected<'a> {
             self.inputs.clone(),
         )
         .await?;
-        crate::db::fail_workflow_run(&mut *tx, RunStatus::Failed, reason, self.run_id).await?;
+        let run = crate::handler::fetch_run(self.run_id, &mut *tx).await?;
+        crate::workflow_machine::WorkflowMachine::<crate::workflow_machine::state::Queued>::load(
+            run,
+        )?
+        .fail(reason.to_string(), &mut tx)
+        .await?;
         tx.commit().await?;
         crate::handler::archive_workflow(self.run_id, pool.clone()).await
     }

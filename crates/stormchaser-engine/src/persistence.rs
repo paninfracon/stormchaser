@@ -1,20 +1,35 @@
+//! Where the state machines save. Each save is a compare-and-set on the status the
+//! machine loaded, so a machine never overwrites a change it has not seen.
+
 use anyhow::{Context, Result};
 use stormchaser_model::step::{StepInstance, StepStatus};
 use stormchaser_model::workflow::WorkflowRun;
 
-/// Persist run.
-pub async fn persist_run(run: &mut WorkflowRun, executor: &mut sqlx::PgConnection) -> Result<()> {
-    let result = crate::db::update_workflow_run_status_full(
-        executor,
-        &run.status,
-        run.updated_at,
-        run.started_resolving_at,
-        run.started_at,
-        run.finished_at,
-        run.error.as_deref(),
-        run.id,
-        run.version,
+/// Saves a run's new status and times, if the row is still at the version and status
+/// the machine loaded.
+pub async fn persist_run(
+    run: &mut WorkflowRun,
+    expected: &stormchaser_model::workflow::RunStatus,
+    executor: &mut sqlx::PgConnection,
+) -> Result<()> {
+    let result = sqlx::query(
+        r#"
+        UPDATE workflow_runs
+        SET status = $1, updated_at = $2, started_resolving_at = $3, started_at = $4,
+            finished_at = $5, error = $6, version = version + 1
+        WHERE id = $7 AND version = $8 AND status = $9
+        "#,
     )
+    .bind(&run.status)
+    .bind(run.updated_at)
+    .bind(run.started_resolving_at)
+    .bind(run.started_at)
+    .bind(run.finished_at)
+    .bind(run.error.as_deref())
+    .bind(run.id)
+    .bind(run.version)
+    .bind(expected)
+    .execute(executor)
     .await;
 
     // The database error stays in the chain, so a caller can tell a lost connection
@@ -24,8 +39,9 @@ pub async fn persist_run(run: &mut WorkflowRun, executor: &mut sqlx::PgConnectio
 
     if res.rows_affected() == 0 {
         anyhow::bail!(
-            "Optimistic concurrency control failure for run {}: version mismatch (expected {})",
+            "Optimistic concurrency control failure for run {}: it is no longer {:?} at version {}",
             run.id,
+            expected,
             run.version
         );
     }
@@ -35,63 +51,40 @@ pub async fn persist_run(run: &mut WorkflowRun, executor: &mut sqlx::PgConnectio
     Ok(())
 }
 
-/// Persists a `StepInstance` state change to the database, along with logs and outputs.
+/// Saves a step's new status and what a transition sets with it, if its stored status
+/// is still `expected`. The database records the change in the step's history.
 pub async fn persist_step_instance(
     instance: &StepInstance,
+    expected: &StepStatus,
     executor: &mut sqlx::PgConnection,
 ) -> Result<()> {
-    match instance.status {
-        StepStatus::Running | StepStatus::UnpackingSfs => {
-            crate::db::update_step_instance_running(
-                &mut *executor,
-                &instance.status,
-                instance.runner_id.as_deref(),
-                instance.id,
-            )
-            .await?;
-        }
-        StepStatus::Failed | StepStatus::LostZombie | StepStatus::FailedIgnored => {
-            if let Some(ref err) = instance.error {
-                crate::db::fail_step_instance_with_error(
-                    &mut *executor,
-                    instance.status.clone(),
-                    err,
-                    instance.exit_code,
-                    instance.id,
-                )
-                .await?;
-            } else {
-                crate::db::complete_step_instance(
-                    &mut *executor,
-                    &instance.status,
-                    instance.exit_code,
-                    instance.runner_id.as_deref(),
-                    instance.id,
-                )
-                .await?;
-            }
-        }
-        StepStatus::Succeeded => {
-            crate::db::complete_step_instance(
-                &mut *executor,
-                &instance.status,
-                instance.exit_code,
-                instance.runner_id.as_deref(),
-                instance.id,
-            )
-            .await?;
-        }
-        StepStatus::Skipped | StepStatus::Aborted => {
-            crate::db::update_step_instance_terminal(&mut *executor, &instance.status, instance.id)
-                .await?;
-        }
-        _ => {
-            crate::db::update_step_instance_status(&mut *executor, &instance.status, instance.id)
-                .await?;
-        }
+    let saved = sqlx::query(
+        r#"
+        UPDATE step_instances
+        SET status = $2, runner_id = $3, started_at = $4, finished_at = $5,
+            exit_code = $6, error = $7
+        WHERE id = $1 AND status = $8
+        "#,
+    )
+    .bind(instance.id)
+    .bind(&instance.status)
+    .bind(instance.runner_id.as_deref())
+    .bind(instance.started_at)
+    .bind(instance.finished_at)
+    .bind(instance.exit_code)
+    .bind(instance.error.as_deref())
+    .bind(expected)
+    .execute(executor)
+    .await
+    .with_context(|| format!("Failed to save step {}", instance.id))?;
+
+    if saved.rows_affected() == 0 {
+        anyhow::bail!(
+            "step {} is no longer {:?}; not moving it to {:?}",
+            instance.id,
+            expected,
+            instance.status
+        );
     }
-
-    // The database records the change in the step's history
-
     Ok(())
 }

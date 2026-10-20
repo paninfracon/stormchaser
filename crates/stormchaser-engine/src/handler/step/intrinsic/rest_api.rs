@@ -1,5 +1,5 @@
 use crate::handler::integrations::utils::report_step_completed;
-use crate::handler::{fetch_outputs, fetch_run_context, fetch_step_instance};
+use crate::handler::{fetch_outputs, fetch_run_context};
 use anyhow::{Context, Result};
 use serde_json::Value;
 use sqlx::PgPool;
@@ -52,14 +52,7 @@ pub(crate) async fn handle_rest_api_invoke(
     info!("Invoking REST API {} for run {}", spec.url, run_id);
 
     // 1. Mark as Running
-    let instance = fetch_step_instance(step_id, &pool).await?;
-    let machine =
-        crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::from_instance(
-            instance,
-        );
-    let _ = machine
-        .start("rest_api".to_string(), &mut *pool.acquire().await?)
-        .await?;
+    crate::handler::integrations::utils::start_built_in(&pool, step_id, "rest_api").await?;
 
     // 2. Prepare Context for Template Rendering
     let run_context = fetch_run_context(run_id, &pool).await?;

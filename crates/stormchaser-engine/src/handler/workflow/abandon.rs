@@ -36,8 +36,7 @@ async fn abandon(subject: &str, payload: &Value, pool: &PgPool, reason: &str) ->
     let reason = format!("The engine gave up starting this run: {}", reason);
     match subject {
         "stormchaser.v1.run.queued" | "stormchaser.v1.run.start_pending" => {
-            let failed = crate::db::fail_starting_workflow_run(pool, &reason, run_id).await?;
-            if failed.rows_affected() > 0 {
+            if fail_unstarted_run(pool, run_id, &reason).await? {
                 info!("Run {} failed: {}", run_id, reason);
                 crate::handler::archive_workflow(run_id, pool.clone()).await?;
             }
@@ -63,4 +62,34 @@ async fn abandon(subject: &str, payload: &Value, pool: &PgPool, reason: &str) ->
         _ => {}
     }
     Ok(())
+}
+
+/// Fails a run that is still queued or start_pending. Whether it was.
+async fn fail_unstarted_run(pool: &PgPool, run_id: RunId, reason: &str) -> Result<bool> {
+    use crate::workflow_machine::{state, WorkflowMachine};
+    use stormchaser_model::workflow::RunStatus;
+
+    let mut tx = pool.begin().await?;
+    if crate::db::lock_workflow_run(&mut *tx, run_id)
+        .await?
+        .is_none()
+    {
+        return Ok(false);
+    }
+    let run = crate::handler::fetch_run(run_id, &mut *tx).await?;
+    match run.status {
+        RunStatus::Queued => {
+            WorkflowMachine::<state::Queued>::load(run)?
+                .fail(reason.to_string(), &mut tx)
+                .await?;
+        }
+        RunStatus::StartPending => {
+            WorkflowMachine::<state::StartPending>::load(run)?
+                .fail(reason.to_string(), &mut tx)
+                .await?;
+        }
+        _ => return Ok(false),
+    }
+    tx.commit().await?;
+    Ok(true)
 }

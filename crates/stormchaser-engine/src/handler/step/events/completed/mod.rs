@@ -85,13 +85,23 @@ pub async fn handle_step_completed(
         return Ok(());
     }
 
+    // A step's end can find it anywhere between being handed out and finishing; a
+    // pending step has not been handed out, so a report on it is out of turn (a late
+    // result of an attempt that was put back for a retry, say)
+    let machine =
+        match crate::step_machine::StepMachine::<crate::step_machine::state::Unfinished>::load(
+            instance.clone(),
+        ) {
+            Ok(machine) => machine,
+            Err(wrong) => {
+                tracing::warn!("Ignoring completion of run {}: {}", run_id, wrong);
+                return Ok(());
+            }
+        };
+
     let _ = release_step_quota_for_instance(&mut *tx, run_id, step_id).await;
 
-    let machine =
-        crate::step_machine::StepMachine::<crate::step_machine::state::Running>::from_instance(
-            instance.clone(),
-        );
-    let _ = machine.succeed(&mut *tx).await?;
+    machine.succeed(&mut tx).await?;
 
     let attributes = [
         KeyValue::new("step_name", instance.step_name),

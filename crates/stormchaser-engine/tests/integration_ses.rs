@@ -86,7 +86,7 @@ async fn test_ses_handler_invoke() {
         .await
         .unwrap();
 
-    sqlx::query("INSERT INTO step_instances (id, run_id, step_name, step_type, status, spec, params) VALUES ($1, $2, 'test-step', 'Email', 'pending', '{}', '{}')")
+    sqlx::query("INSERT INTO step_instances (id, run_id, step_name, step_type, status, spec, params) VALUES ($1, $2, 'test-step', 'Email', 'initializing', '{}', '{}')")
         .bind(step_id)
         .bind(run_id)
         .execute(&pool)
@@ -124,7 +124,7 @@ async fn test_ses_handler_invoke() {
     });
 
     let step_id_2 = StepInstanceId::new_v4();
-    sqlx::query("INSERT INTO step_instances (id, run_id, step_name, step_type, status, spec, params) VALUES ($1, $2, 'test-step2', 'Email', 'pending', '{}', '{}')")
+    sqlx::query("INSERT INTO step_instances (id, run_id, step_name, step_type, status, spec, params) VALUES ($1, $2, 'test-step2', 'Email', 'initializing', '{}', '{}')")
         .bind(step_id_2)
         .bind(run_id)
         .execute(&pool)

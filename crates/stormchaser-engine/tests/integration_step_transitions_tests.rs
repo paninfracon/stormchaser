@@ -113,3 +113,121 @@ async fn only_a_pending_step_is_claimed() {
     delete_run(&pool, run_id).await;
     delete_run(&pool, other_run).await;
 }
+
+/// Steps move only as the step machine moves them: a pending step cannot succeed
+/// without being handed out, and a waiting step has no runner to lose.
+#[tokio::test]
+async fn a_step_moves_only_as_the_diagram_allows() {
+    let pool = setup_db().await;
+    for (from, to) in [
+        ("pending", "succeeded"),
+        ("pending", "packing_sfs"),
+        ("pending", "waiting_for_event"),
+        ("initializing", "waiting_for_event"),
+        ("unpacking_sfs", "packing_sfs"),
+        ("running", "waiting_for_event"),
+        ("running", "initializing"),
+        ("waiting_for_event", "running"),
+        ("waiting_for_event", "lost_zombie"),
+        ("running", "aborted"),
+        ("running", "skipped"),
+    ] {
+        let (run_id, step_id) = insert_run_and_step(&pool, from).await;
+        let refused = set_status(&pool, step_id, to).await.unwrap_err();
+        assert_eq!(
+            refused
+                .as_database_error()
+                .and_then(|e| e.code())
+                .as_deref(),
+            Some("23514"),
+            "{from} -> {to}"
+        );
+        delete_run(&pool, run_id).await;
+    }
+    for (from, to) in [
+        ("pending", "failed"),
+        ("initializing", "pending"),
+        ("initializing", "succeeded"),
+        ("unpacking_sfs", "succeeded"),
+        ("running", "pending"),
+        ("packing_sfs", "lost_zombie"),
+        ("waiting_for_event", "pending"),
+        ("waiting_for_event", "succeeded"),
+    ] {
+        let (run_id, step_id) = insert_run_and_step(&pool, from).await;
+        set_status(&pool, step_id, to)
+            .await
+            .unwrap_or_else(|e| panic!("{from} -> {to}: {e}"));
+        delete_run(&pool, run_id).await;
+    }
+}
+
+/// A run moves forward one status at a time, may fail or time out until it finishes,
+/// and never moves once finished.
+#[tokio::test]
+async fn a_run_moves_only_as_the_diagram_allows() {
+    let pool = setup_db().await;
+    let insert = |status: &'static str| {
+        let pool = pool.clone();
+        async move {
+            let run_id = RunId::new_v4();
+            sqlx::query("INSERT INTO workflow_runs (id, workflow_name, status, fencing_token, repo_url, workflow_path, git_ref) VALUES ($1, 'run-transitions-test', $2::run_status, 1, '', '', '')")
+                .bind(run_id)
+                .bind(status)
+                .execute(&pool)
+                .await
+                .unwrap();
+            run_id
+        }
+    };
+    let set = |run_id: RunId, status: &'static str| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query("UPDATE workflow_runs SET status = $2::run_status WHERE id = $1")
+                .bind(run_id)
+                .bind(status)
+                .execute(&pool)
+                .await
+                .map(|_| ())
+        }
+    };
+    for (from, to) in [
+        ("queued", "running"),
+        ("queued", "succeeded"),
+        ("resolving", "running"),
+        ("resolving", "queued"),
+        ("start_pending", "succeeded"),
+        ("running", "queued"),
+        ("succeeded", "failed"),
+        ("failed", "running"),
+        ("aborted", "failed"),
+    ] {
+        let run_id = insert(from).await;
+        let refused = set(run_id, to).await.unwrap_err();
+        assert_eq!(
+            refused
+                .as_database_error()
+                .and_then(|e| e.code())
+                .as_deref(),
+            Some("23514"),
+            "{from} -> {to}"
+        );
+        delete_run(&pool, run_id).await;
+    }
+    for (from, to) in [
+        ("queued", "resolving"),
+        ("queued", "failed"),
+        ("queued", "aborted"),
+        ("resolving", "start_pending"),
+        ("start_pending", "running"),
+        ("start_pending", "failed"),
+        ("running", "succeeded"),
+        ("running", "aborted"),
+    ] {
+        let run_id = insert(from).await;
+        set(run_id, to)
+            .await
+            .unwrap_or_else(|e| panic!("{from} -> {to}: {e}"));
+        delete_run(&pool, run_id).await;
+    }
+}

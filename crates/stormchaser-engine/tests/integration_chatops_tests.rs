@@ -86,7 +86,7 @@ async fn test_slack_message_integration() {
         .unwrap();
 
     // Insert mock step instance
-    sqlx::query("INSERT INTO step_instances (id, run_id, step_name, step_type, status) VALUES ($1, $2, 'slack_step', 'SlackMessage', 'pending')")
+    sqlx::query("INSERT INTO step_instances (id, run_id, step_name, step_type, status) VALUES ($1, $2, 'slack_step', 'SlackMessage', 'initializing')")
         .bind(step_instance_id)
         .bind(run_id)
         .execute(&pool)
@@ -225,7 +225,7 @@ async fn test_teams_message_integration() {
         .unwrap();
 
     // Insert mock step instance
-    sqlx::query("INSERT INTO step_instances (id, run_id, step_name, step_type, status) VALUES ($1, $2, 'teams_step', 'TeamsMessage', 'pending')")
+    sqlx::query("INSERT INTO step_instances (id, run_id, step_name, step_type, status) VALUES ($1, $2, 'teams_step', 'TeamsMessage', 'initializing')")
         .bind(step_instance_id)
         .bind(run_id)
         .execute(&pool)

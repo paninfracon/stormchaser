@@ -56,7 +56,6 @@ fn build_teams_payload(spec: &stormchaser_model::dsl::TeamsMessageSpec) -> Value
     serde_json::to_value(payload).unwrap()
 }
 
-use crate::handler::fetch_step_instance;
 use anyhow::Result;
 use sqlx::PgPool;
 pub async fn handle_teams_message(
@@ -66,18 +65,13 @@ pub async fn handle_teams_message(
     spec: Value,
     pool: PgPool,
 ) -> Result<()> {
-    use crate::step_machine::{state::Pending, StepMachine};
     use std::collections::HashMap;
     use stormchaser_model::dsl::TeamsMessageSpec;
 
     let spec: TeamsMessageSpec = serde_json::from_value(spec)?;
 
     // Fetch instance
-    let instance = fetch_step_instance(step_instance_id, &pool).await?;
-
-    let machine = StepMachine::<Pending>::from_instance(instance);
-    let mut conn = pool.acquire().await?;
-    let _machine = machine.start("system".to_string(), &mut *conn).await?;
+    crate::handler::integrations::utils::start_built_in(&pool, step_instance_id, "teams").await?;
 
     let webhook_url =
         super::utils::fetch_http_api_url_from_connection(&pool, run_id, &spec.connection).await?;

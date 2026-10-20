@@ -34,9 +34,9 @@ pub async fn handle_step_initializing(
             return Ok(());
         }
         let machine =
-            crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::from_instance(
+            crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::load(
                 instance.clone(),
-            );
+            )?;
         let _ = machine
             .initializing(runner_id.to_string(), &mut *pool.acquire().await?)
             .await?;

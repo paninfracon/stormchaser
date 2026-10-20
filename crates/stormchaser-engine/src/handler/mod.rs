@@ -147,10 +147,11 @@ pub async fn dispatch_pending_steps(
     // 2. Fetch and atomically claim Pending steps (sets status to Initializing,
     //    excluding Approval/Wait which are handled via events). Using FOR UPDATE SKIP LOCKED
     //    ensures that concurrent engine processes never double-dispatch the same step.
-    let claimed_steps: Vec<StepInstance> =
-        crate::db::claim_pending_step_instances_for_run(&pool, run_id, available_slots).await?;
+    let claimed_steps =
+        crate::step_machine::bulk::claim_for_run(&pool, run_id, available_slots).await?;
 
-    for step in claimed_steps {
+    for machine in claimed_steps {
+        let step = machine.instance().clone();
         info!("Run {}: Evaluating queued step {}", run_id, step.step_name);
         // We need to fetch the resolved spec and params for this step
         let inst_data: (Value, Value) = crate::db::get_step_spec_and_params(&pool, step.id).await?;
@@ -187,13 +188,9 @@ pub async fn dispatch_pending_steps(
                 "Run {}: Insufficient CPU/Memory quota to dispatch step {}",
                 run_id, step.step_name
             );
-            // Reset the step back to Pending so it can be retried in a future dispatch cycle.
-            let _ = crate::db::update_step_instance_status(
-                &pool,
-                &stormchaser_model::StepStatus::Pending,
-                step.id,
-            )
-            .await;
+            // Put back to pending, to be dispatched once the run has room. Nothing has
+            // been published, so it cannot be running anywhere.
+            requeue_or_fail(machine, "the run had no room for it", &pool).await?;
             continue; // Try next step, maybe it's smaller and fits
         }
 
@@ -221,16 +218,51 @@ pub async fn dispatch_pending_steps(
                 let _ =
                     crate::db::release_step_quota(&mut *conn, run_id, req.cpu, req.memory).await;
             }
-            // Reset back to Pending so the step can be retried.
-            let _ = crate::db::update_step_instance_status(
-                &pool,
-                &stormchaser_model::StepStatus::Pending,
-                step.id,
-            )
-            .await;
+            requeue_or_fail(machine, &format!("dispatching it failed: {e:#}"), &pool).await?;
         }
     }
 
+    Ok(())
+}
+
+/// Puts a claimed step back to pending if its task was never published. One whose task
+/// may have been published is failed instead: putting it back could run it twice.
+async fn requeue_or_fail(
+    machine: crate::step_machine::StepMachine<crate::step_machine::state::Initializing>,
+    why: &str,
+    pool: &PgPool,
+) -> Result<()> {
+    use crate::step_machine::transitions::initializing::Requeue;
+    let step_id = machine.instance().id;
+    let run_id = machine.instance().run_id;
+    let mut conn = pool.acquire().await?;
+    // Built from the stored row: the dispatch attempt may have changed it
+    let stored = fetch_step_instance(step_id, &mut *conn).await?;
+    let Ok(machine) =
+        crate::step_machine::StepMachine::<crate::step_machine::state::Initializing>::load(stored)
+    else {
+        // A runner has already reported on it; its own events carry it on
+        return Ok(());
+    };
+    match machine.requeue(&mut conn).await? {
+        Requeue::Requeued(_) => {
+            debug!("Run {}: step {} is pending again: {}", run_id, step_id, why);
+        }
+        Requeue::HandedOver(_) => {
+            warn!(
+                "Run {}: step {} may have reached a runner and {}; failing it rather than risk running it twice",
+                run_id, step_id, why
+            );
+            crate::handler::integrations::utils::report_step_failed(
+                pool,
+                run_id,
+                step_id,
+                0,
+                format!("The step's dispatch may have reached a runner, and {why}"),
+            )
+            .await?;
+        }
+    }
     Ok(())
 }
 

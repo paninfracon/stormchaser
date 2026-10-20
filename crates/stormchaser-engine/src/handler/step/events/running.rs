@@ -48,26 +48,23 @@ pub async fn handle_step_running(
     }
     if instance.status == stormchaser_model::step::StepStatus::UnpackingSfs {
         let machine =
-            crate::step_machine::StepMachine::<crate::step_machine::state::UnpackingSfs>::from_instance(
+            crate::step_machine::StepMachine::<crate::step_machine::state::UnpackingSfs>::load(
                 instance.clone(),
-            );
+            )?;
         let _ = machine.start_running(&mut *conn).await?;
     } else if instance.status == stormchaser_model::step::StepStatus::Initializing {
         let machine =
-            crate::step_machine::StepMachine::<crate::step_machine::state::Initializing>::from_instance(
+            crate::step_machine::StepMachine::<crate::step_machine::state::Initializing>::load(
                 instance.clone(),
-            );
-        let _ = machine.start(&mut *conn).await?;
+            )?;
+        machine.start(None, &mut conn).await?;
     } else if instance.status == stormchaser_model::step::StepStatus::Pending {
-        // Fallback in case Initializing was missed
-        let machine =
-            crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::from_instance(
-                instance.clone(),
-            );
-        let machine = machine
-            .initializing(runner_id.to_string(), &mut *conn)
-            .await?;
-        let _ = machine.start(&mut *conn).await?;
+        // Its report that it took the step has not arrived yet
+        crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::load(
+            instance.clone(),
+        )?
+        .start(runner_id.to_string(), &mut conn)
+        .await?;
     } else {
         // Already running. If another runner now reports it, that runner picked the step
         // up (it adopted the container or job after a restart, or took the redelivered
