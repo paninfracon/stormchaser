@@ -122,24 +122,18 @@ pub async fn dispatch_pending_steps(
     tls_reloader: Arc<TlsReloader>,
 ) -> Result<()> {
     let quotas = fetch_quotas(run_id, &pool).await?;
-    let running_count: i64 = crate::db::count_running_steps_for_run(&pool, run_id).await?;
+    let in_flight: i64 = crate::db::count_in_flight_steps_for_run(&pool, run_id).await?;
 
     debug!(
-        "dispatch_pending_steps: running_count = {}, quotas.max_concurrency = {}",
-        running_count, quotas.max_concurrency
+        "dispatch_pending_steps: {} steps in flight, quotas.max_concurrency = {}",
+        in_flight, quotas.max_concurrency
     );
 
-    if running_count >= quotas.max_concurrency as i64 {
-        debug!("Run {}: Max concurrency {} reached", run_id, running_count);
+    // A shortcut; claim_for_run is what holds the run to its limit
+    if in_flight >= quotas.max_concurrency as i64 {
+        debug!("Run {}: Max concurrency {} reached", run_id, in_flight);
         return Ok(());
     }
-
-    let available_slots = (quotas.max_concurrency as i64) - running_count;
-
-    debug!(
-        "Run {}: {} slots available for concurrent steps",
-        run_id, available_slots
-    );
 
     let max_cpu = crate::resource_utils::parse_cpu(&quotas.max_cpu).unwrap_or(0.0);
     let max_mem = crate::resource_utils::parse_memory(&quotas.max_memory).unwrap_or(0);
@@ -148,7 +142,8 @@ pub async fn dispatch_pending_steps(
     //    excluding Approval/Wait which are handled via events). Using FOR UPDATE SKIP LOCKED
     //    ensures that concurrent engine processes never double-dispatch the same step.
     let claimed_steps =
-        crate::step_machine::bulk::claim_for_run(&pool, run_id, available_slots).await?;
+        crate::step_machine::bulk::claim_for_run(&pool, run_id, quotas.max_concurrency as i64)
+            .await?;
 
     for machine in claimed_steps {
         let step = machine.instance().clone();

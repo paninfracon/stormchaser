@@ -208,8 +208,8 @@ async fn schedule_iterated_steps(
     let run_context = fetch_run_context(run_id, &mut *executor).await?;
     let steps_outputs = fetch_outputs(run_id, &mut *executor).await?;
     let quotas = fetch_quotas(run_id, &mut *executor).await?;
-    let current_running_count: i64 =
-        crate::db::count_running_steps_for_run(&mut *executor, run_id).await?;
+    let current_in_flight: i64 =
+        crate::db::count_in_flight_steps_for_run(&mut *executor, run_id).await?;
 
     for (idx, item) in items.into_iter().enumerate() {
         let step_instance_id = StepInstanceId::new(Uuid::new_v4());
@@ -247,8 +247,7 @@ async fn schedule_iterated_steps(
         let status = match resolved_type {
             t if step_types::waits(t) => StepStatus::WaitingForEvent,
             _ => {
-                if (idx as u32) < max_parallel
-                    && current_running_count < quotas.max_concurrency as i64
+                if (idx as u32) < max_parallel && current_in_flight < quotas.max_concurrency as i64
                 {
                     StepStatus::Pending
                 } else {

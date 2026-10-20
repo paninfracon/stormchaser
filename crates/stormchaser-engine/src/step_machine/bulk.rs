@@ -7,16 +7,35 @@ use serde_json::Value;
 use stormchaser_model::step::StepInstance;
 use stormchaser_model::{RunId, StepInstanceId};
 
-/// Claims up to `limit` of a run's pending steps for dispatch, oldest first. `FOR
-/// UPDATE SKIP LOCKED` means two engines never claim the same step. Approval and Wait
-/// steps are left to their events, and a step waiting for its next attempt until
-/// `retry_at`.
+/// Claims a run's pending steps for dispatch, oldest first, as many as keep the steps it
+/// has in flight within `max_concurrency`. `FOR UPDATE SKIP LOCKED` means two engines
+/// never claim the same step. Approval and Wait steps are left to their events, and a
+/// step waiting for its next attempt until `retry_at`.
+///
+/// Every step that finishes dispatches its run again, so claims for one run come in
+/// bursts. They are taken one at a time, under a lock on the run, so that each counts
+/// the steps the one before it claimed; otherwise each would hand out the run's whole
+/// allowance (a run limited to 50 had 469 steps in flight).
 pub async fn claim_for_run(
     pool: &sqlx::PgPool,
     run_id: RunId,
-    limit: i64,
+    max_concurrency: i64,
 ) -> Result<Vec<StepMachine<state::Initializing>>, sqlx::Error> {
     let mut tx = pool.begin().await?;
+    // A transaction-level advisory lock, not the run's row lock, which the step event
+    // handlers hold while they decide what comes next
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
+        .bind(run_id)
+        .execute(&mut *tx)
+        .await?;
+    let in_flight: i64 = sqlx::query_scalar(IN_FLIGHT)
+        .bind(run_id)
+        .fetch_one(&mut *tx)
+        .await?;
+    let limit = max_concurrency - in_flight;
+    if limit <= 0 {
+        return Ok(vec![]);
+    }
     let rows: Vec<StepInstance> = sqlx::query_as(
         r#"
         WITH claimed AS (
@@ -47,6 +66,11 @@ pub async fn claim_for_run(
     tx.commit().await?;
     Ok(rows.into_iter().map(claimed).collect())
 }
+
+/// How many of a run's steps are in flight: claimed for dispatch, or with a runner or
+/// the engine, and not finished. What `max_concurrency` limits.
+pub const IN_FLIGHT: &str = "SELECT COUNT(*) FROM step_instances WHERE run_id = $1 \
+     AND status IN ('initializing', 'unpacking_sfs', 'running', 'packing_sfs')";
 
 /// The machine of a step a statement here has just moved to `S`'s status.
 fn claimed<S: StepState>(instance: StepInstance) -> StepMachine<S> {

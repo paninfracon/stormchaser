@@ -82,8 +82,8 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-/// Count running steps for run.
-pub async fn count_running_steps_for_run<'a, E, O>(
+/// How many of a run's steps are in flight (see [`crate::step_machine::bulk::IN_FLIGHT`]).
+pub async fn count_in_flight_steps_for_run<'a, E, O>(
     executor: E,
     run_id: RunId,
 ) -> Result<O, sqlx::Error>
@@ -92,12 +92,10 @@ where
     O: Send + Unpin,
     (O,): for<'r> sqlx::FromRow<'r, PgRow>,
 {
-    sqlx::query_scalar::<_, O>(
-        r#"SELECT COUNT(*) FROM step_instances WHERE run_id = $1 AND status = 'running'"#,
-    )
-    .bind(run_id)
-    .fetch_one(executor)
-    .await
+    sqlx::query_scalar::<_, O>(crate::step_machine::bulk::IN_FLIGHT)
+        .bind(run_id)
+        .fetch_one(executor)
+        .await
 }
 
 #[allow(clippy::too_many_arguments)]

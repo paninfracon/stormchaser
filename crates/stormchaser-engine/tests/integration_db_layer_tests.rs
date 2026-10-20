@@ -130,7 +130,7 @@ async fn test_db_layer_functions() {
 
     tx.commit().await.unwrap();
 
-    let count: i64 = db::steps::count_running_steps_for_run(&pool, run_id)
+    let count: i64 = db::steps::count_in_flight_steps_for_run(&pool, run_id)
         .await
         .unwrap();
     assert_eq!(count, 0);
@@ -150,7 +150,7 @@ async fn test_db_layer_functions() {
         .await
         .unwrap();
 
-    let count: i64 = db::steps::count_running_steps_for_run(&pool, run_id)
+    let count: i64 = db::steps::count_in_flight_steps_for_run(&pool, run_id)
         .await
         .unwrap();
     assert_eq!(count, 1);
