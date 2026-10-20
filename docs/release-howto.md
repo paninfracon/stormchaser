@@ -26,6 +26,7 @@ Before cutting a new release tag, ensure the following steps are meticulously fo
 4. **Update Helm Chart Versions:**
     * In all `Chart.yaml` files under `deploy/charts/` (e.g., `stormchaser`, `stormchaser-orchestration`, `stormchaser-runner-k8s`, `stormchaser-runner-docker`, `stormchaser-telemetry`), update the `version` and `appVersion` fields to `"X.Y.Z"`.
     * Run `helm dependency update deploy/charts/stormchaser` to regenerate the `Chart.lock` file.
+    * Run `./scripts/check-charts.sh`. It fails if a subchart archive under `deploy/charts/stormchaser/charts/` no longer matches its source; CI runs it too. Any change to a subchart needs `helm package deploy/charts/<chart> -d deploy/charts/stormchaser/charts`, not only a release.
 
 5. **Update GitHub Issue Templates:**
     * In `.github/ISSUE_TEMPLATE/bug_report.md`, bump the version placeholder (e.g., `- Stormchaser Version: [e.g. X.Y.Z]`).

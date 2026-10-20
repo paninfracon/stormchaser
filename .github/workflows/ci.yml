@@ -1,10 +1,22 @@
 name: CI
 
 on:
+  # Every branch, so long-lived branches are checked before they reach a pull request
   push:
-    branches: [ "trunk" ]
+    branches: [ "**" ]
   pull_request:
     branches: [ "trunk" ]
+  # Nightly, so a new advisory or a dependency release that breaks the build shows up
+  # the next morning: Cargo.lock is not committed, and cargo-deny fetches a fresh
+  # advisory database on every run
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+# A newer push to the same branch supersedes a run still in progress
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/trunk' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -41,6 +53,17 @@ jobs:
     # Cargo.lock is not committed, so this resolves the versions a build would get now
     - name: Check advisories, bans, licenses and sources
       run: cargo deny check
+
+  charts:
+    name: Check Helm Charts
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      with:
+        persist-credentials: false
+    # The runner image ships Helm
+    - name: Lint, render and check the vendored subchart archives
+      run: ./scripts/check-charts.sh
 
   clippy:
     name: Run Clippy
