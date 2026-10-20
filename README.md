@@ -53,39 +53,41 @@ workflow "example_workflow" {
     size = "1Gi"
   }
 
-  # First step: builds the app into the shared storage, retrying twice on failure
-  step "build_app" "RunContainer" {
-    spec {
-      image   = "node:18"
-      command = ["npm", "run", "build"]
-      storage_mounts = [
-        { name = "workspace", mount_path = "/app/dist" }
-      ]
+  steps {
+    # First step: builds the app into the shared storage, retrying twice on failure
+    step "build_app" "RunContainer" {
+      spec {
+        image   = "node:18"
+        command = ["npm", "run", "build"]
+        storage_mounts = [
+          { name = "workspace", mount_path = "/app/dist" }
+        ]
+      }
+      retry {
+        count   = 2
+        backoff = "exponential"
+      }
+      next = ["require_approval"]
     }
-    retry {
-      count   = 2
-      backoff = "exponential"
-    }
-    next = ["require_approval"]
-  }
 
-  # Second step: waits for a member of the admins group, or alice, to approve
-  step "require_approval" "Approval" {
-    spec {
-      approvers = ["admins", "alice@example.com"]
-      timeout   = "24h"
+    # Second step: waits for a member of the admins group, or alice, to approve
+    step "require_approval" "Approval" {
+      spec {
+        approvers = ["admins", "alice@example.com"]
+        timeout   = "24h"
+      }
+      next = ["deploy_app"]
     }
-    next = ["deploy_app"]
-  }
 
-  # Third step: mounts the same storage and deploys what was built
-  step "deploy_app" "RunContainer" {
-    spec {
-      image   = "node:18"
-      command = ["npm", "run", "deploy"]
-      storage_mounts = [
-        { name = "workspace", mount_path = "/app/dist" }
-      ]
+    # Third step: mounts the same storage and deploys what was built
+    step "deploy_app" "RunContainer" {
+      spec {
+        image   = "node:18"
+        command = ["npm", "run", "deploy"]
+        storage_mounts = [
+          { name = "workspace", mount_path = "/app/dist" }
+        ]
+      }
     }
   }
 }

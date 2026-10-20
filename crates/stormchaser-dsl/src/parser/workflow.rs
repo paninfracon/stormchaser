@@ -7,7 +7,10 @@ use stormchaser_model::dsl;
 
 use crate::ast::Step;
 
-use super::expr::{block_to_value, expr_to_param, expr_to_string, expr_to_value, merge_spec_attr};
+use super::expr::{
+    block_to_value, expr_to_bool, expr_to_param, expr_to_strict_string_list, expr_to_string,
+    expr_to_u32, expr_to_value, merge_spec_attr, unknown_attribute, unknown_block,
+};
 use super::provision::{parse_provision_legacy_block, parse_provision_sub_block};
 use super::step::parse_steps;
 
@@ -107,7 +110,7 @@ pub fn parse_workflow_blocks(body: &Body) -> Result<ParsedWorkflowBlocks> {
                     aliases.insert(attr.key().to_string(), expr_to_string(attr.expr())?);
                 }
             }
-            _ => {}
+            other => return Err(unknown_block("A workflow", other)),
         }
     }
 
@@ -143,16 +146,23 @@ fn parse_query_block(block: &Block) -> Result<dsl::Query> {
     for attr in block.body().attributes() {
         match attr.key() {
             "type" => r#type = expr_to_string(attr.expr())?,
-            "params" => {
-                if let Value::Object(obj) = expr_to_value(attr.expr())? {
+            "params" => match expr_to_value(attr.expr())? {
+                Value::Object(obj) => {
                     for (k, v) in obj {
-                        if let Value::String(s) = v {
-                            params.insert(k, s);
-                        }
+                        match v {
+                            Value::String(s) => params.insert(k, s),
+                            other => anyhow::bail!(
+                                "Query '{}' param '{}' must be a string, not {}",
+                                name,
+                                k,
+                                other
+                            ),
+                        };
                     }
                 }
-            }
-            _ => {}
+                other => anyhow::bail!("Query '{}' params must be an object, not {}", name, other),
+            },
+            other => return Err(unknown_attribute(&format!("Query '{}'", name), other)),
         }
     }
 
@@ -174,11 +184,12 @@ fn parse_storage_block(block: &Block) -> Result<dsl::Storage> {
     let mut provision = Vec::new();
     let mut artifacts = Vec::new();
 
+    let context = format!("Storage '{}'", name);
     for attr in block.body().attributes() {
-        if attr.key() == "size" {
-            size = expr_to_string(attr.expr())?;
-        } else if attr.key() == "backend" {
-            backend = Some(expr_to_string(attr.expr())?);
+        match attr.key() {
+            "size" => size = expr_to_string(attr.expr())?,
+            "backend" => backend = Some(expr_to_string(attr.expr())?),
+            other => return Err(unknown_attribute(&context, other)),
         }
     }
 
@@ -192,10 +203,15 @@ fn parse_storage_block(block: &Block) -> Result<dsl::Storage> {
             let mut path = String::new();
             let mut retention = "on_success".to_string();
             for attr in inner.body().attributes() {
-                if attr.key() == "path" {
-                    path = expr_to_string(attr.expr())?;
-                } else if attr.key() == "retention" {
-                    retention = expr_to_string(attr.expr())?;
+                match attr.key() {
+                    "path" => path = expr_to_string(attr.expr())?,
+                    "retention" => retention = expr_to_string(attr.expr())?,
+                    other => {
+                        return Err(unknown_attribute(
+                            &format!("Artifact '{}'", art_name),
+                            other,
+                        ))
+                    }
                 }
             }
             artifacts.push(dsl::Artifact {
@@ -211,6 +227,8 @@ fn parse_storage_block(block: &Block) -> Result<dsl::Storage> {
             } else {
                 provision.push(parse_provision_legacy_block(inner)?);
             }
+        } else {
+            return Err(unknown_block(&context, inner.identifier()));
         }
     }
 
@@ -237,25 +255,20 @@ fn parse_input_block(block: &Block) -> Result<dsl::Input> {
     let mut validation = None;
     let mut options = None;
     for attr in block.body().attributes() {
-        if attr.key() == "type" {
-            r#type = expr_to_string(attr.expr())?;
-        } else if attr.key() == "default" {
-            default = Some(expr_to_value(attr.expr())?);
-        } else if attr.key() == "description" {
-            description = Some(expr_to_string(attr.expr())?);
-        } else if attr.key() == "validation" {
-            validation = Some(expr_to_string(attr.expr())?);
-        } else if attr.key() == "options" {
-            if let Value::Array(arr) = expr_to_value(attr.expr())? {
-                let mut opts = Vec::new();
-                for v in arr {
-                    if let Value::String(s) = v {
-                        opts.push(s);
-                    }
-                }
-                options = Some(opts);
-            }
+        match attr.key() {
+            "type" => r#type = expr_to_string(attr.expr())?,
+            "default" => default = Some(expr_to_value(attr.expr())?),
+            "description" => description = Some(expr_to_string(attr.expr())?),
+            "validation" => validation = Some(expr_to_string(attr.expr())?),
+            "options" => options = Some(expr_to_strict_string_list("options", attr.expr())?),
+            other => return Err(unknown_attribute(&format!("Input '{}'", name), other)),
         }
+    }
+    if let Some(inner) = block.body().blocks().next() {
+        return Err(unknown_block(
+            &format!("Input '{}'", name),
+            inner.identifier(),
+        ));
     }
     Ok(dsl::Input {
         name,
@@ -275,8 +288,9 @@ fn parse_output_block(block: &Block) -> Result<dsl::Output> {
         .context("Output block must have a name label")?;
     let mut value = String::new();
     for attr in block.body().attributes() {
-        if attr.key() == "value" {
-            value = expr_to_string(attr.expr())?;
+        match attr.key() {
+            "value" => value = expr_to_string(attr.expr())?,
+            other => return Err(unknown_attribute(&format!("Output '{}'", name), other)),
         }
     }
     Ok(dsl::Output { name, value })
@@ -312,13 +326,14 @@ fn parse_step_library_block(block: &Block) -> Result<dsl::StepLibrary> {
                 _ => anyhow::bail!("params of step library {} must be an object", name),
             },
             "timeout" => timeout = Some(expr_to_string(attr.expr())?),
-            "allow_failure" => {
-                if let Value::Bool(b) = expr_to_value(attr.expr())? {
-                    allow_failure = Some(b);
-                }
-            }
+            "allow_failure" => allow_failure = Some(expr_to_bool("allow_failure", attr.expr())?),
             "spec" => merge_spec_attr(&mut spec_map, attr.expr())?,
-            _ => {}
+            other => {
+                return Err(unknown_attribute(
+                    &format!("Step library '{}'", name),
+                    other,
+                ))
+            }
         }
     }
 
@@ -344,6 +359,11 @@ fn parse_step_library_block(block: &Block) -> Result<dsl::StepLibrary> {
                     expr_to_param(attr.key(), attr.expr())?,
                 );
             }
+        } else {
+            return Err(unknown_block(
+                &format!("Step library '{}'", name),
+                inner.identifier(),
+            ));
         }
     }
 
@@ -368,18 +388,23 @@ fn parse_include_block(block: &Block) -> Result<dsl::Include> {
     let mut inputs_map = HashMap::new();
 
     for attr in block.body().attributes() {
-        if attr.key() == "workflow" {
-            workflow = expr_to_string(attr.expr())?;
-        } else if attr.key() == "inputs" {
-            if let Value::Object(obj) = expr_to_value(attr.expr())? {
-                for (k, v) in obj {
-                    if let Value::String(s) = v {
-                        inputs_map.insert(k, s);
-                    } else {
-                        inputs_map.insert(k, v.to_string());
+        match attr.key() {
+            "workflow" => workflow = expr_to_string(attr.expr())?,
+            "inputs" => match expr_to_value(attr.expr())? {
+                Value::Object(obj) => {
+                    for (k, v) in obj {
+                        if let Value::String(s) = v {
+                            inputs_map.insert(k, s);
+                        } else {
+                            inputs_map.insert(k, v.to_string());
+                        }
                     }
                 }
-            }
+                other => {
+                    anyhow::bail!("Include '{}' inputs must be an object, not {}", name, other)
+                }
+            },
+            other => return Err(unknown_attribute(&format!("Include '{}'", name), other)),
         }
     }
 
@@ -401,12 +426,11 @@ fn parse_library_block(block: &Block) -> Result<dsl::Library> {
     let mut checksum = String::new();
 
     for attr in block.body().attributes() {
-        if attr.key() == "source" {
-            source = expr_to_string(attr.expr())?;
-        } else if attr.key() == "version" {
-            version = expr_to_string(attr.expr())?;
-        } else if attr.key() == "checksum" {
-            checksum = expr_to_string(attr.expr())?;
+        match attr.key() {
+            "source" => source = expr_to_string(attr.expr())?,
+            "version" => version = expr_to_string(attr.expr())?,
+            "checksum" => checksum = expr_to_string(attr.expr())?,
+            other => return Err(unknown_attribute(&format!("Library '{}'", name), other)),
         }
     }
 
@@ -425,28 +449,17 @@ fn parse_strategy_block(block: &Block) -> Result<dsl::Strategy> {
     let mut process_allow_list = None;
 
     for attr in block.body().attributes() {
-        if attr.key() == "affinity" {
-            affinity = Some(expr_to_string(attr.expr())?);
-        } else if attr.key() == "fail_fast" {
-            if let Value::Bool(b) = expr_to_value(attr.expr())? {
-                fail_fast = Some(b);
+        match attr.key() {
+            "affinity" => affinity = Some(expr_to_string(attr.expr())?),
+            "fail_fast" => fail_fast = Some(expr_to_bool("fail_fast", attr.expr())?),
+            "max_parallel" => max_parallel = Some(expr_to_u32("max_parallel", attr.expr())?),
+            "process_allow_list" => {
+                process_allow_list = Some(expr_to_strict_string_list(
+                    "process_allow_list",
+                    attr.expr(),
+                )?)
             }
-        } else if attr.key() == "max_parallel" {
-            if let Value::Number(n) = expr_to_value(attr.expr())? {
-                if let Some(num) = n.as_u64() {
-                    max_parallel = Some(num as u32);
-                }
-            }
-        } else if attr.key() == "process_allow_list" {
-            if let Value::Array(arr) = expr_to_value(attr.expr())? {
-                let mut list = Vec::new();
-                for v in arr {
-                    if let Value::String(s) = v {
-                        list.push(s);
-                    }
-                }
-                process_allow_list = Some(list);
-            }
+            other => return Err(unknown_attribute("A workflow's strategy", other)),
         }
     }
 
@@ -466,20 +479,15 @@ fn parse_quotas_block(block: &Block) -> Result<dsl::Quotas> {
     let mut timeout = None;
 
     for attr in block.body().attributes() {
-        if attr.key() == "max_concurrency" {
-            if let Value::Number(n) = expr_to_value(attr.expr())? {
-                if let Some(num) = n.as_u64() {
-                    max_concurrency = Some(num as u32);
-                }
+        match attr.key() {
+            "max_concurrency" => {
+                max_concurrency = Some(expr_to_u32("max_concurrency", attr.expr())?)
             }
-        } else if attr.key() == "max_cpu" {
-            max_cpu = Some(expr_to_string(attr.expr())?);
-        } else if attr.key() == "max_memory" {
-            max_memory = Some(expr_to_string(attr.expr())?);
-        } else if attr.key() == "max_storage" {
-            max_storage = Some(expr_to_string(attr.expr())?);
-        } else if attr.key() == "timeout" {
-            timeout = Some(expr_to_string(attr.expr())?);
+            "max_cpu" => max_cpu = Some(expr_to_string(attr.expr())?),
+            "max_memory" => max_memory = Some(expr_to_string(attr.expr())?),
+            "max_storage" => max_storage = Some(expr_to_string(attr.expr())?),
+            "timeout" => timeout = Some(expr_to_string(attr.expr())?),
+            other => return Err(unknown_attribute("A workflow's quotas", other)),
         }
     }
 
@@ -503,12 +511,11 @@ fn parse_handler_block(block: &Block) -> Result<dsl::Handler> {
     let mut action = String::new();
 
     for attr in block.body().attributes() {
-        if attr.key() == "event_type" {
-            event_type = expr_to_string(attr.expr())?;
-        } else if attr.key() == "condition" {
-            condition = Some(expr_to_string(attr.expr())?);
-        } else if attr.key() == "action" {
-            action = expr_to_string(attr.expr())?;
+        match attr.key() {
+            "event_type" => event_type = expr_to_string(attr.expr())?,
+            "condition" => condition = Some(expr_to_string(attr.expr())?),
+            "action" => action = expr_to_string(attr.expr())?,
+            other => return Err(unknown_attribute(&format!("Handler '{}'", name), other)),
         }
     }
 

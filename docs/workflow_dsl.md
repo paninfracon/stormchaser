@@ -108,7 +108,7 @@ These are parsed and stored with the run, but nothing acts on them yet:
 * `output "<name>" { value = "..." }`: **(Planned)** Workflow outputs. The values are not evaluated.
 * `input "<name>" { type, default, description, validation, options }`: an older way to declare inputs. The TUI's scheduling dialog reads these blocks to build a form, but the engine neither validates inputs against them nor fills in their defaults. Use `inputs { ... }`.
 
-Blocks and attributes the parser does not know are ignored without an error.
+A block or attribute the parser does not know, a `step` block outside `steps`, and a value of the wrong type (such as `allow_failure = "yes"` or `max_concurrency = "2"`) are errors when the workflow is parsed. Inside a step the rule is different: an attribute or block that is not one of the step's own becomes part of its spec (see [Base Step Structure](#45-base-step-structure)). `stormchaser lint` checks a spec against the step type's schema, but the engine does not yet refuse a spec setting it does not know.
 
 ---
 
@@ -287,7 +287,7 @@ Artifacts:
 * An `artifact "<name>" { path }` block declares a file to publish. `path` is relative to the root of the volume. Only steps that list the artifact in their `artifacts` attribute publish it (see [Mounting Storage](#43-mounting-storage-in-steps)).
 * `retention` (default `on_success`) is passed to the runner and stored with the artifact, but nothing deletes artifacts when it runs out. **(Planned)**
 
-**(Planned)** These storage settings are not in the model and are ignored: `limits { max_throughput, max_iops }` (an I/O governor), `preserve` (globs to keep between steps; the storage mount's own `preserve` field is not read either) and `retainment` (when to keep the volume after the run).
+**(Planned)** These storage settings are not implemented, and a workflow that sets them is refused: `limits { max_throughput, max_iops }` (an I/O governor), `preserve` (globs to keep between steps; the storage mount's own `preserve` field is not read either) and `retainment` (when to keep the volume after the run).
 
 #### 4.3 Mounting Storage in Steps
 

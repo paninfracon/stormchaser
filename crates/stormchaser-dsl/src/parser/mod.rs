@@ -61,15 +61,31 @@ impl StormchaserParser {
 
         let mut dsl_version = String::new();
         for attribute in body.attributes() {
-            if attribute.key() == "stormchaser_dsl_version" {
-                dsl_version = expr::expr_to_string(attribute.expr())?;
+            match attribute.key() {
+                "stormchaser_dsl_version" => dsl_version = expr::expr_to_string(attribute.expr())?,
+                other => return Err(expr::unknown_attribute("A workflow file", other)),
             }
         }
 
-        let workflow_block = body
-            .blocks()
-            .find(|b| b.identifier() == "workflow" || b.identifier() == "workflow_template")
+        let mut workflow_blocks = body.blocks();
+        let workflow_block = workflow_blocks
+            .next()
             .context("Missing 'workflow' or 'workflow_template' block")?;
+        if !matches!(
+            workflow_block.identifier(),
+            "workflow" | "workflow_template"
+        ) {
+            return Err(expr::unknown_block(
+                "A workflow file",
+                workflow_block.identifier(),
+            ));
+        }
+        if let Some(extra) = workflow_blocks.next() {
+            anyhow::bail!(
+                "A workflow file holds one 'workflow' or 'workflow_template' block; found another block '{}'",
+                extra.identifier()
+            );
+        }
 
         let is_template = workflow_block.identifier() == "workflow_template";
 
@@ -83,10 +99,15 @@ impl StormchaserParser {
         let mut cron = None;
 
         for attribute in workflow_block.body().attributes() {
-            if attribute.key() == "description" {
-                description = Some(expr::expr_to_string(attribute.expr())?);
-            } else if attribute.key() == "cron" {
-                cron = Some(expr::expr_to_string(attribute.expr())?);
+            match attribute.key() {
+                "description" => description = Some(expr::expr_to_string(attribute.expr())?),
+                "cron" => cron = Some(expr::expr_to_string(attribute.expr())?),
+                other => {
+                    return Err(expr::unknown_attribute(
+                        &format!("Workflow '{}'", name),
+                        other,
+                    ))
+                }
             }
         }
 

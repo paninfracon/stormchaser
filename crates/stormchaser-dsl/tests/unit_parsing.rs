@@ -454,3 +454,68 @@ fn test_parse_retry_refuses_what_it_cannot_follow() {
         );
     }
 }
+
+/// What the parser does not understand is refused, not dropped: a dropped setting
+/// looks as if it worked.
+#[test]
+fn unknown_or_mistyped_settings_are_refused() {
+    let parser = StormchaserParser::new();
+    let step = "step \"a\" \"RunContainer\" {\n spec {\n image = \"alpine\"\n }\n}";
+    let steps = format!("steps {{\n{step}\n}}");
+    let workflow = |inner: &str| format!("workflow \"w\" {{\n{inner}\n}}\n");
+    let with_step = |settings: &str| {
+        workflow(&format!(
+            "steps {{\nstep \"a\" \"RunContainer\" {{\n{settings}\n}}\n}}"
+        ))
+    };
+    let cases = [
+        // A step outside `steps` used to vanish, leaving a workflow with none
+        (workflow(step), "has no block 'step'"),
+        (
+            workflow(&format!("version = \"1\"\n{steps}")),
+            "has no attribute 'version'",
+        ),
+        (
+            format!("{}{}", workflow(&steps), workflow(&steps)),
+            "found another block 'workflow'",
+        ),
+        (
+            workflow(&format!("quotas {{\nmax_concurrency = \"2\"\n}}\n{steps}")),
+            "'max_concurrency' must be a whole number",
+        ),
+        (
+            workflow(&format!("quotas {{\nmax_cpus = \"2\"\n}}\n{steps}")),
+            "has no attribute 'max_cpus'",
+        ),
+        (
+            workflow(&format!(
+                "storage \"s\" {{\npreserve = [\"/\"]\n}}\n{steps}"
+            )),
+            "has no attribute 'preserve'",
+        ),
+        (
+            workflow(&format!("input \"i\" {{\nrequired = true\n}}\n{steps}")),
+            "Input 'i' has no attribute 'required'",
+        ),
+        (
+            with_step("allow_failure = \"yes\""),
+            "'allow_failure' must be true or false",
+        ),
+        (with_step("next = \"b\""), "expected a list of strings"),
+        (
+            with_step("outputs {\noutput \"o\" {\nregx = \"x\"\n}\n}"),
+            "Output 'o' has no attribute 'regx'",
+        ),
+        (
+            with_step("strategy {\nmax_parallel = -1\n}"),
+            "'max_parallel' must be a whole number",
+        ),
+    ];
+    for (workflow, expected) in cases {
+        let error = format!("{:#}", parser.parse(&workflow).unwrap_err());
+        assert!(
+            error.contains(expected),
+            "{workflow}\nexpected an error containing {expected:?}, got {error:?}"
+        );
+    }
+}

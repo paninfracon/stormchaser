@@ -8,9 +8,11 @@ workflow "main" {
     }
   }
 
-  step "build" "common_build" {
-    params = {
-      tag = "v1"
+  steps {
+    step "build" "common_build" {
+      params = {
+        tag = "v1"
+      }
     }
   }
 

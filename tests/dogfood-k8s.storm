@@ -38,8 +38,7 @@ workflow "dogfood" {
   }
 
   storage "workspace" {
-    size     = "10Gi"
-    preserve = ["/"]
+    size = "10Gi"
     provision "repo" {
       resource_type = "download"
       url           = inputs.repo_url
@@ -60,7 +59,6 @@ workflow "dogfood" {
     }
     provision "api_binary" {
       resource_type = "artifact"
-      name          = "api_binary"
       destination   = "/target/release/stormchaser-api"
     }
   }

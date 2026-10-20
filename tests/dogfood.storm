@@ -118,7 +118,6 @@ workflow "dogfood" {
     }
     provision "api_binary" {
       resource_type = "artifact"
-      name          = "api_binary"
       destination   = "/target/release/stormchaser-api"
     }
   }

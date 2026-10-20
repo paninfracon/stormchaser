@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use hcl::{Block, Expression};
 use serde_json::{json, Map, Value};
 
@@ -13,18 +13,55 @@ pub fn expr_to_string(expr: &Expression) -> Result<String> {
 
 pub fn expr_to_string_vec(expr: &Expression) -> Result<Vec<String>> {
     match expr {
-        Expression::Array(arr) => {
-            let mut result = Vec::new();
-            for item in arr {
-                if let Expression::String(s) = item {
-                    result.push(s.clone());
-                } else if let Ok(s) = expr_to_string(item) {
-                    result.push(s);
-                }
-            }
-            Ok(result)
-        }
-        _ => Ok(vec![]),
+        Expression::Array(arr) => arr.iter().map(expr_to_string).collect(),
+        other => anyhow::bail!("expected a list of strings, not {}", other),
+    }
+}
+
+// The parser refuses what it does not understand. An attribute or block it skipped, or
+// a value of the wrong type it dropped, would look as if it had worked: `retry` and
+// `allow_failure` were documented and accepted for months before anything read them.
+
+/// The error for an attribute `context` does not define.
+pub fn unknown_attribute(context: &str, key: &str) -> anyhow::Error {
+    anyhow!("{} has no attribute '{}'", context, key)
+}
+
+/// The error for a block `context` does not define.
+pub fn unknown_block(context: &str, identifier: &str) -> anyhow::Error {
+    anyhow!("{} has no block '{}'", context, identifier)
+}
+
+/// A boolean attribute; anything else is refused.
+pub fn expr_to_bool(name: &str, expr: &Expression) -> Result<bool> {
+    match expr_to_value(expr)? {
+        Value::Bool(b) => Ok(b),
+        other => anyhow::bail!("'{}' must be true or false, not {}", name, other),
+    }
+}
+
+/// A whole, non-negative number that fits in 32 bits; anything else is refused.
+pub fn expr_to_u32(name: &str, expr: &Expression) -> Result<u32> {
+    match expr_to_value(expr)? {
+        Value::Number(n) => n
+            .as_u64()
+            .and_then(|n| u32::try_from(n).ok())
+            .ok_or_else(|| anyhow!("'{}' must be a whole number, not {}", name, n)),
+        other => anyhow::bail!("'{}' must be a whole number, not {}", name, other),
+    }
+}
+
+/// A list of strings; anything else, including a list holding other values, is refused.
+pub fn expr_to_strict_string_list(name: &str, expr: &Expression) -> Result<Vec<String>> {
+    match expr_to_value(expr)? {
+        Value::Array(items) => items
+            .into_iter()
+            .map(|item| match item {
+                Value::String(s) => Ok(s),
+                other => anyhow::bail!("'{}' must hold only strings, not {}", name, other),
+            })
+            .collect(),
+        other => anyhow::bail!("'{}' must be a list of strings, not {}", name, other),
     }
 }
 

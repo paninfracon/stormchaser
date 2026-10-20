@@ -12,15 +12,15 @@ TestBackend {
             "  │       ╭ 📁  File Explorer ───────────────────╮┌ Preview ─────────────────────────────┐       │  ", // hidden by multi-width symbols: [(13, " ")]
             "  │       │ ../../tests/fixtures/file_browser    ││workflow "test" {                     │       │  ",
             "  │       ╰────────────────────────────── v3.0.2 ╯│  description = "Valid workflow for li│       │  ",
-            "  │       ╭ Files 1/1 ───────────────────────────╮│  step "hello" {                      │       │  ",
-            "  │       │ 📄 test.storm  155 B                 ││    type   = "docker"                 │       │  ", // hidden by multi-width symbols: [(13, " ")]
-            "  │       │                                      ││    image  = "alpine"                 │       │  ",
-            "  │       │                                      ││    script = "echo hello"             │       │  ",
+            "  │       ╭ Files 1/1 ───────────────────────────╮│  steps {                             │       │  ",
+            "  │       │ 📄 test.storm  202 B                 ││    step "hello" "RunContainer" {     │       │  ", // hidden by multi-width symbols: [(13, " ")]
+            "  │       │                                      ││      spec {                          │       │  ",
+            "  │       │                                      ││        image   = "alpine"            │       │  ",
+            "  │       │                                      ││        command = ["echo", "hello"]   │       │  ",
+            "  │       │                                      ││      }                               │       │  ",
+            "  │       │                                      ││    }                                 │       │  ",
             "  │       │                                      ││  }                                   │       │  ",
             "  │       │                                      ││}                                     │       │  ",
-            "  │       │                                      ││                                      │       │  ",
-            "  │       │                                      ││                                      │       │  ",
-            "  │       │                                      ││                                      │       │  ",
             "  │       │                                      ││                                      │       │  ",
             "  │       │                                      ││                                      │       │  ",
             "  │       │                                      ││                                      │       │  ",
