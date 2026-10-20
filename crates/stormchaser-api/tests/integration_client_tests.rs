@@ -129,7 +129,9 @@ async fn sessions_runs_and_schema() {
 
     assert!(client.schema().await.unwrap().get("properties").is_some());
 
-    client.delete_run(run.run_id).await.unwrap();
+    // The run has not finished, so it cannot be deleted
+    let refused = client.delete_run(run.run_id).await.unwrap_err();
+    assert_eq!(refused.status().map(|s| s.as_u16()), Some(409));
     client
         .delete_connection(ConnectionId::new(connection.id))
         .await

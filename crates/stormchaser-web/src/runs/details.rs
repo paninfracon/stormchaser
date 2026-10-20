@@ -1,5 +1,5 @@
 use crate::api::{approve_step, delete_workflow_run, fetch_workflow_run_detail, reject_step};
-use crate::models::{step_status_name, StepStatus, TestCaseStatus};
+use crate::models::{step_status_name, RunStatus, StepStatus, TestCaseStatus};
 use crate::runs::StepLogsPanel;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -86,8 +86,13 @@ pub fn RunDetailsPanel(
                                         <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                                             <h3 style="margin: 0 0 0.5rem 0;">{detail.detail.workflow_name.clone()}</h3>
                                             {
+                                                // Only a finished run can be deleted
+                                                let finished = matches!(
+                                                    detail.detail.status,
+                                                    RunStatus::Succeeded | RunStatus::Failed | RunStatus::Aborted
+                                                );
                                                 let delete_run_id = active_run_id.clone();
-                                                view! {
+                                                finished.then(move || view! {
                                                     <button
                                                         class="btn btn-secondary"
                                                         style="color: var(--status-error); border-color: var(--status-error); padding: 0.25rem 0.75rem; font-size: 0.85rem;"
@@ -103,7 +108,7 @@ pub fn RunDetailsPanel(
                                                     >
                                                         "Delete Run"
                                                     </button>
-                                                }
+                                                })
                                             }
                                         </div>
                                     <div style="display: flex; flex-direction: column; gap: 0.25rem; color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1.5rem;">

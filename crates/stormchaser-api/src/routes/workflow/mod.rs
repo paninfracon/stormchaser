@@ -341,15 +341,17 @@ pub async fn get_workflow_run(
     }))
 }
 
-/// Deletes a workflow run.
+/// Deletes a finished run. A run that has not finished cannot be deleted: its steps
+/// would go on running with no run to report to.
 #[utoipa::path(
     delete,
     path = "/api/v1/runs/{run_id}",
     params(("run_id" = stormchaser_model::RunId, Path, description="Run ID")),
     responses(
-        (status = 200, description = "Success"),
+        (status = 204, description = "Deleted"),
         (status = 400, description = "Bad Request"),
         (status = 404, description = "Not Found"),
+        (status = 409, description = "The run has not finished"),
         (status = 500, description = "Internal Server Error")
     ),
     tag = "workflow"
@@ -359,14 +361,22 @@ pub async fn delete_workflow_run_api(
     State(state): State<AppState>,
     Path(run_id): Path<RunId>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    db::delete_workflow_run(&state.pool, run_id)
+    let deletion = db::delete_workflow_run(&state.pool, run_id)
         .await
         .map_err(|e| {
             tracing::error!("Failed to delete workflow run {}: {:?}", run_id, e);
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    Ok(StatusCode::NO_CONTENT)
+    Ok(match deletion {
+        db::RunDeletion::Deleted => StatusCode::NO_CONTENT.into_response(),
+        db::RunDeletion::NotFinished => (
+            StatusCode::CONFLICT,
+            "The run has not finished; only a finished run can be deleted",
+        )
+            .into_response(),
+        db::RunDeletion::NotFound => StatusCode::NOT_FOUND.into_response(),
+    })
 }
 
 #[utoipa::path(

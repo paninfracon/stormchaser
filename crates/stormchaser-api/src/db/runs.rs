@@ -235,19 +235,46 @@ pub async fn get_workflow_run_fencing_token(
         .await
 }
 
-/// Deletes a workflow run completely from the system (active and archived).
-pub async fn delete_workflow_run(pool: &PgPool, id: RunId) -> Result<(), sqlx::Error> {
-    // Delete from active table
-    sqlx::query("DELETE FROM workflow_runs WHERE id = $1")
-        .bind(id)
-        .execute(pool)
-        .await?;
+/// What deleting a run did.
+#[derive(Debug, PartialEq, Eq)]
+pub enum RunDeletion {
+    Deleted,
+    /// The run has not finished. Deleting it would leave its steps running with no
+    /// run to report to, and nothing would tell the runners to stop them.
+    NotFinished,
+    NotFound,
+}
 
-    // Delete from archived table
-    sqlx::query("DELETE FROM archived_workflow_runs WHERE id = $1")
+/// Deletes a finished run, active (about to be archived) or archived. A run that has
+/// not finished is left alone.
+pub async fn delete_workflow_run(pool: &PgPool, id: RunId) -> Result<RunDeletion, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let active: Option<RunStatus> =
+        sqlx::query_scalar("SELECT status FROM workflow_runs WHERE id = $1 FOR UPDATE")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    if let Some(status) = &active {
+        if !matches!(
+            status,
+            RunStatus::Succeeded | RunStatus::Failed | RunStatus::Aborted
+        ) {
+            return Ok(RunDeletion::NotFinished);
+        }
+        sqlx::query("DELETE FROM workflow_runs WHERE id = $1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    let archived = sqlx::query("DELETE FROM archived_workflow_runs WHERE id = $1")
         .bind(id)
-        .execute(pool)
-        .await?;
-
-    Ok(())
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    tx.commit().await?;
+    Ok(if active.is_some() || archived > 0 {
+        RunDeletion::Deleted
+    } else {
+        RunDeletion::NotFound
+    })
 }

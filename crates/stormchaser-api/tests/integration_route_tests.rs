@@ -742,6 +742,7 @@ async fn test_get_workflow_run_not_found() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
+/// Only a finished run can be deleted: a running one keeps its steps on runners.
 #[tokio::test]
 async fn test_delete_workflow_run() {
     let app = match setup_app().await {
@@ -749,7 +750,6 @@ async fn test_delete_workflow_run() {
         None => return,
     };
 
-    let run_id = Uuid::new_v4();
     let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
@@ -760,27 +760,47 @@ async fn test_delete_workflow_run() {
     });
     let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
 
+    let delete = |run_id: Uuid| {
+        let app = app.clone();
+        async move {
+            app.oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!("/api/v1/runs/{}", run_id))
+                    .header(AUTHORIZATION, format!("Bearer {}", get_token()))
+                    .extension(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 12345))))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .status()
+        }
+    };
+
+    let run_id = Uuid::new_v4();
     sqlx::query("INSERT INTO workflow_runs (id, workflow_name, initiating_user, repo_url, workflow_path, git_ref, status, fencing_token) VALUES ($1, 'wf', 'u', 'r', 'p', 'g', 'running'::run_status, 1)")
         .bind(run_id)
         .execute(&pool)
         .await
         .unwrap();
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("DELETE")
-                .uri(format!("/api/v1/runs/{}", run_id))
-                .header(AUTHORIZATION, format!("Bearer {}", get_token()))
-                .extension(ConnectInfo(addr))
-                .body(Body::empty())
-                .unwrap(),
-        )
+    assert_eq!(delete(run_id).await, StatusCode::CONFLICT);
+    let still_there: bool =
+        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM workflow_runs WHERE id = $1)")
+            .bind(run_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(still_there, "a running run was deleted");
+
+    sqlx::query("UPDATE workflow_runs SET status = 'failed' WHERE id = $1")
+        .bind(run_id)
+        .execute(&pool)
         .await
         .unwrap();
-
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert_eq!(delete(run_id).await, StatusCode::NO_CONTENT);
+    assert_eq!(delete(run_id).await, StatusCode::NOT_FOUND);
 }
 
 async fn post_direct_run(app: axum::Router, dsl: &str) -> axum::response::Response {
