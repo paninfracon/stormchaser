@@ -76,12 +76,10 @@ workflow "e2e_load_test" {
 
   steps {
     step "process" "RunContainer" {
+      iterate = "__ITERATE_ARRAY__"
       image = "alpine:latest"
       command = ["/bin/sh", "-c"]
-      args = ["echo 'Running iteration ${step.iterate.value}'"]
-      strategy {
-        iterate = "__ITERATE_ARRAY__"
-      }
+      args = ["echo 'Running iteration ${item}'"]
     }
   }
 }
