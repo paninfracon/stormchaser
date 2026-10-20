@@ -224,43 +224,28 @@ fn cancel_payload(run_id: RunId) -> Vec<u8> {
     payload.into_bytes()
 }
 
+/// Connects as one of the users in `deploy/nats/nats-server.conf`, which the test stack
+/// runs, with the password `scripts/test-env.sh` gives it. Each user may read only its
+/// own inbox prefix, as stormchaser_model::nats sets it.
+async fn connect_as(user: &str, password_var: &str) -> async_nats::Client {
+    let url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+    let password = var(password_var).unwrap_or_else(|_| panic!("{password_var} must be set"));
+    let options = async_nats::ConnectOptions::new()
+        .user_and_password(user.to_string(), password)
+        .custom_inbox_prefix(format!("_INBOX_{user}"));
+    async_nats::connect_with_options(url, options)
+        .await
+        .unwrap_or_else(|e| panic!("cannot connect to NATS as {user}: {e}"))
+}
+
 /// Checks the server's permissions, which are what make a cancellation trustworthy:
 /// a runner can read the cancel subject, and neither it nor the API can publish there.
-///
-/// Ignored by default. Needs a NATS server running `deploy/nats/nats-server.conf`:
-///
-/// ```text
-/// STORMCHASER_PERM_NATS_URL=nats://127.0.0.1:4299 NATS_CONTROL_PASSWORD=... \
-///   NATS_API_PASSWORD=... NATS_RUNNER_PASSWORD=... \
-///   cargo test -p stormchaser-engine --test integration_run_cancel_tests -- --ignored
-/// ```
 #[tokio::test]
-#[ignore = "needs a NATS server with the per-role users"]
 async fn only_the_engine_can_cancel_a_run() {
-    let url = var("STORMCHASER_PERM_NATS_URL").expect("STORMCHASER_PERM_NATS_URL must be set");
-    let connect = |user: &str, password_var: &str| {
-        // Each user may read only its own inbox prefix, as stormchaser_model::nats sets it
-        let options = async_nats::ConnectOptions::new()
-            .user_and_password(user.to_string(), var(password_var).expect(password_var))
-            .custom_inbox_prefix(format!("_INBOX_{user}"));
-        async_nats::connect_with_options(url.clone(), options)
-    };
-    let engine = connect("stormchaser", "NATS_CONTROL_PASSWORD")
-        .await
-        .unwrap();
-    let api = connect("stormchaser-api", "NATS_API_PASSWORD")
-        .await
-        .unwrap();
-    let runner = connect("stormchaser-runner", "NATS_RUNNER_PASSWORD")
-        .await
-        .unwrap();
-
-    async_nats::jetstream::new(engine.clone())
-        .get_or_create_stream(async_nats::jetstream::stream::Config {
-            name: "stormchaser".to_string(),
-            subjects: vec!["stormchaser.>".to_string()],
-            ..Default::default()
-        })
+    let engine = connect_as("stormchaser", "STORMCHASER_NATS_PASSWORD").await;
+    let api = connect_as("stormchaser-api", "STORMCHASER_NATS_API_PASSWORD").await;
+    let runner = connect_as("stormchaser-runner", "STORMCHASER_NATS_RUNNER_PASSWORD").await;
+    stormchaser_engine::nats::init_jetstream(&engine)
         .await
         .unwrap();
 
@@ -290,36 +275,35 @@ async fn only_the_engine_can_cancel_a_run() {
         .unwrap();
     engine.flush().await.unwrap();
 
-    // The first cancellation the runner sees is the engine's: the forgeries were
-    // published earlier and would have arrived first had the server accepted them
-    let first = tokio::time::timeout(Duration::from_secs(20), cancellations.next())
-        .await
-        .expect("the runner saw no cancellation")
-        .unwrap()
-        .unwrap();
-    assert_eq!(run_cancel::parse(&first).unwrap().run_id, real);
+    // The forgeries were published first, so had the server accepted either the runner
+    // would see it before the engine's. Cancellations other tests published within the
+    // replay window are passed over.
+    tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            let message = cancellations
+                .next()
+                .await
+                .expect("the cancellation stream ended")
+                .unwrap();
+            let run_id = run_cancel::parse(&message).unwrap().run_id;
+            assert_ne!(run_id, forged_by_runner, "a runner cancelled a run");
+            assert_ne!(run_id, forged_by_api, "the API cancelled a run");
+            if run_id == real {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("the runner did not see the engine's cancellation");
 }
 
 /// Checks that each user reads only its own inbox prefix: a runner cannot read the
 /// engine's deliveries or the API's answers, while its own inbox works.
 ///
-/// Ignored by default; needs the same server as [`only_the_engine_can_cancel_a_run`].
 #[tokio::test]
-#[ignore = "needs a NATS server with the per-role users"]
 async fn a_user_reads_only_its_own_inbox() {
-    let url = var("STORMCHASER_PERM_NATS_URL").expect("STORMCHASER_PERM_NATS_URL must be set");
-    let connect = |user: &str, password_var: &str| {
-        let options = async_nats::ConnectOptions::new()
-            .user_and_password(user.to_string(), var(password_var).expect(password_var))
-            .custom_inbox_prefix(format!("_INBOX_{user}"));
-        async_nats::connect_with_options(url.clone(), options)
-    };
-    let engine = connect("stormchaser", "NATS_CONTROL_PASSWORD")
-        .await
-        .unwrap();
-    let runner = connect("stormchaser-runner", "NATS_RUNNER_PASSWORD")
-        .await
-        .unwrap();
+    let engine = connect_as("stormchaser", "STORMCHASER_NATS_PASSWORD").await;
+    let runner = connect_as("stormchaser-runner", "STORMCHASER_NATS_RUNNER_PASSWORD").await;
 
     let mut own = runner
         .subscribe("_INBOX_stormchaser-runner.probe")
@@ -361,23 +345,10 @@ async fn a_user_reads_only_its_own_inbox() {
 /// reconfigure) one of the engine's consumers. A refused publish gets no answer, while an
 /// allowed JetStream request is always answered, even with an error.
 ///
-/// Ignored by default; needs the same server as [`only_the_engine_can_cancel_a_run`].
 #[tokio::test]
-#[ignore = "needs a NATS server with the per-role users"]
 async fn a_runner_cannot_create_the_stream_or_the_engines_consumers() {
-    let url = var("STORMCHASER_PERM_NATS_URL").expect("STORMCHASER_PERM_NATS_URL must be set");
-    let connect = |user: &str, password_var: &str| {
-        let options = async_nats::ConnectOptions::new()
-            .user_and_password(user.to_string(), var(password_var).expect(password_var))
-            .custom_inbox_prefix(format!("_INBOX_{user}"));
-        async_nats::connect_with_options(url.clone(), options)
-    };
-    let engine = connect("stormchaser", "NATS_CONTROL_PASSWORD")
-        .await
-        .unwrap();
-    let runner = connect("stormchaser-runner", "NATS_RUNNER_PASSWORD")
-        .await
-        .unwrap();
+    let engine = connect_as("stormchaser", "STORMCHASER_NATS_PASSWORD").await;
+    let runner = connect_as("stormchaser-runner", "STORMCHASER_NATS_RUNNER_PASSWORD").await;
     stormchaser_engine::nats::init_jetstream(&engine)
         .await
         .unwrap();
