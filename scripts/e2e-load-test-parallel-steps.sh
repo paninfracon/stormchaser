@@ -27,25 +27,19 @@ echo '  description = "A workflow with many parallel steps joined at the end."' 
 echo '  steps {' >> "$STORM_FILE"
 
 # Generate parallel steps
-DEPENDENCIES=""
+# Every step names the join step in next, so it runs once all of them are done
 for i in $(seq 1 $NUM_STEPS); do
   echo "    step \"step_$i\" \"JQ\" {" >> "$STORM_FILE"
   echo "      program = \".text\"" >> "$STORM_FILE"
   echo "      input = { text = \"Hello World $i!\" }" >> "$STORM_FILE"
+  echo "      next = [\"join_step\"]" >> "$STORM_FILE"
   echo "    }" >> "$STORM_FILE"
-
-  if [ -z "$DEPENDENCIES" ]; then
-    DEPENDENCIES="\"step_$i\""
-  else
-    DEPENDENCIES="$DEPENDENCIES, \"step_$i\""
-  fi
 done
 
 # Generate join step
 echo "    step \"join_step\" \"JQ\" {" >> "$STORM_FILE"
 echo "      program = \".text\"" >> "$STORM_FILE"
 echo "      input = { text = \"All parallel steps completed!\" }" >> "$STORM_FILE"
-echo "      depends_on = [$DEPENDENCIES]" >> "$STORM_FILE"
 echo "    }" >> "$STORM_FILE"
 
 echo '  }' >> "$STORM_FILE"

@@ -34,9 +34,9 @@ for i in $(seq 1 $NUM_STEPS); do
   echo "      program = \".text\"" >> "$STORM_FILE"
   echo "      input = { text = \"Hello World $i!\" }" >> "$STORM_FILE"
 
-  if [ "$i" -gt 1 ]; then
-    prev=$((i - 1))
-    echo "      depends_on = [\"step_$prev\"]" >> "$STORM_FILE"
+  # Each step starts the next: a step runs once every step naming it in next is done
+  if [ "$i" -lt "$NUM_STEPS" ]; then
+    echo "      next = [\"step_$((i + 1))\"]" >> "$STORM_FILE"
   fi
   echo "    }" >> "$STORM_FILE"
 done
@@ -79,7 +79,8 @@ echo -e "${GREEN}>>> Successfully spawned workflow $RUN_ID.${NC}"
 
 echo ">>> Polling for completion of workflow..."
 
-for attempt in {1..120}; do
+# One step at a time, so this takes minutes: up to 15 (450 polls, 2 s apart)
+for attempt in {1..450}; do
     # We check if the workflow reached a terminal state
     STATUS=$(docker exec "$POSTGRES_CONTAINER" psql -U stormchaser -d stormchaser -t -c "
         SELECT status FROM workflow_runs WHERE id = '$RUN_ID'
@@ -87,7 +88,7 @@ for attempt in {1..120}; do
         SELECT status FROM archived_workflow_runs WHERE id = '$RUN_ID'
     " | xargs)
 
-    echo "Attempt $attempt/120 - Status: $STATUS"
+    echo "Attempt $attempt/450 - Status: $STATUS"
 
     if [ "$STATUS" == "succeeded" ]; then
         END_TIME=$(date +%s)
