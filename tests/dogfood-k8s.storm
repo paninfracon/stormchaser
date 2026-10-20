@@ -143,8 +143,10 @@ workflow "dogfood" {
         # assets. Docker copies nothing when the pattern matches nothing; buildah fails.
         mkdir -p target/site
         ls -la /app/target/release/ || true
-        buildah bud --storage-driver vfs -t registry.container-registry.svc.cluster.local:5000/stormchaser-api:dogfood -f Dockerfile.prebuilt --build-arg BINARY=stormchaser-api .
-        buildah push --storage-driver vfs --tls-verify=false registry.container-registry.svc.cluster.local:5000/stormchaser-api:dogfood
+        # A tag of this run's own: deploy names it, so the Deployment changes and Kubernetes
+        # replaces the API's pod. The same tag every run left the old pod serving.
+        buildah bud --storage-driver vfs -t registry.container-registry.svc.cluster.local:5000/stormchaser-api:dogfood-${run.id} -f Dockerfile.prebuilt --build-arg BINARY=stormchaser-api .
+        buildah push --storage-driver vfs --tls-verify=false registry.container-registry.svc.cluster.local:5000/stormchaser-api:dogfood-${run.id}
       EOF
       ]
       next = ["setup_certs"]
@@ -201,7 +203,7 @@ workflow "dogfood" {
           --namespace stormchaser-dogfood \
           --create-namespace \
           --set api.image.repository=localhost:32000/stormchaser-api \
-          --set api.image.tag=dogfood \
+          --set api.image.tag=dogfood-${run.id} \
           --set api.image.pullPolicy=Always \
           --set global.database.ssl=false \
           --set "global.database.url=postgres://stormchaser:$DB_PASSWORD@stormchaser-postgresql.stormchaser.svc.cluster.local:5432/stormchaser" \

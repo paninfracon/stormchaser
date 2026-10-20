@@ -228,8 +228,10 @@ workflow "dogfood" {
         mkdir -p target/site
         # The binary comes from the api_binary artifact, which keeps no file mode
         chmod 0755 target/release/stormchaser-api
-        buildah bud --storage-driver vfs -t ${inputs.host_ip}:${inputs.port_reg}/stormchaser-api:dogfood -f Dockerfile.prebuilt --build-arg BINARY=stormchaser-api .
-        buildah push --storage-driver vfs --tls-verify=false ${inputs.host_ip}:${inputs.port_reg}/stormchaser-api:dogfood
+        # A tag of this run's own: deploy names it, so the Deployment changes and Kubernetes
+        # replaces the API's pod. The same tag every run left the old pod serving.
+        buildah bud --storage-driver vfs -t ${inputs.host_ip}:${inputs.port_reg}/stormchaser-api:dogfood-${run.id} -f Dockerfile.prebuilt --build-arg BINARY=stormchaser-api .
+        buildah push --storage-driver vfs --tls-verify=false ${inputs.host_ip}:${inputs.port_reg}/stormchaser-api:dogfood-${run.id}
       EOF
       ]
       next = ["setup_certs"]
@@ -294,7 +296,7 @@ workflow "dogfood" {
         helm upgrade --install stormchaser-dogfood /app/deploy/charts/stormchaser-orchestration \
           --namespace stormchaser-dogfood \
           --set api.image.repository=${inputs.host_ip}:${inputs.port_reg}/stormchaser-api \
-          --set api.image.tag=dogfood \
+          --set api.image.tag=dogfood-${run.id} \
           --set api.image.pullPolicy=Always \
           --set global.database.ssl=false \
           --set "global.database.url=postgres://stormchaser:$DB_PASSWORD@${inputs.host_ip}:${inputs.port_db}/stormchaser" \
