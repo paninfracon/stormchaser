@@ -80,6 +80,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A run's `max_concurrency` was not enforced: it was checked against running steps only, and concurrent claims each took the whole allowance, so a run limited to 50 could have hundreds of steps in flight. Claims now count every step in flight and are taken one at a time per run.
+- The chart's API liveness probe restarted the API while it waited, as designed, for the engine to apply migrations. The API has a startup probe allowing six minutes.
 - A run that timed out left its `initializing` steps as they were; they are failed with the rest. The run and its steps now end in one transaction.
 - A step whose dispatch failed after its task was published was put back to pending and could run twice. It is failed instead; a step whose task was never published is still put back.
 - A step that reached `initializing` through its runner's report did not record the runner's id.

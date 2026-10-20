@@ -143,9 +143,22 @@ Found along the way:
   lost `JQ`/`JinjaRender` steps, then fails the other lost steps in a second query. A
   step that became lost between the two queries was failed instead of re-run. Fixed,
   with a deterministic test.
-- **Step spec settings are not refused at run time.** Only `stormchaser lint` checks a
-  spec against the step type's schema, and the engine deserialises specs leniently. A
-  misspelt `imagee` is ignored. Next: `deny_unknown_fields` on the spec types, and
-  validate when a run is submitted.
+- **System tests on ms-s1-max (2026-10-20), on the branch's HEAD**: Docker and
+  Kubernetes smoke tests, compose dogfood (build, test, images, certificates, deploy)
+  and four load tests pass. They found:
+  - **`max_concurrency` was not enforced**: a 500-iteration run limited to 50 had
+    469 steps in flight. The limit counted only running steps, and concurrent claims
+    each took the whole allowance. Fixed: claims count every step in flight, one at a
+    time per run; the rerun peaked at exactly 50.
+  - **The chart's API liveness probe killed the API** while it waited for the
+    engine to migrate. Fixed with a startup probe.
+  - **Three load tests did not test what they said**: the iterate test ran one step
+    (`iterate` inside `strategy`), and the "sequential" and join tests ordered steps
+    with `depends_on`, which is not DSL, so everything ran at once. A load script also
+    polled another stack's database. All fixed.
+- **Unknown settings inside a step are still ignored** (they become spec keys). This
+  hid `depends_on` in two load tests as well as the typos it was already listed for,
+  so it is the next parser change: refuse unknown step attributes and spec keys at
+  submission.
 - The API's calls to the identity provider, the JWKS fetch and the log backend client
   use `reqwest` clients with no timeout, so a stalled server holds a request open.
