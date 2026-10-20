@@ -174,6 +174,10 @@ pub fn api_client() -> stormchaser_client::Client {
 /// authorities, not instead of them. A CA file that is named but cannot be used stops
 /// the service: carrying on without it would only fail later, on every request.
 #[cfg(feature = "ssr")]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the web tier's client of Stormchaser's own API, from the operator's configuration"
+)]
 pub fn build_http_client() -> reqwest::Client {
     let mut builder = reqwest::Client::builder();
     if let Some(pem) = ca_pem() {

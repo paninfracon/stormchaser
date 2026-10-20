@@ -3,6 +3,8 @@
 //! The shipped policy lets every run use every connection, so these tests run OPA with a
 //! stricter rule (owner only) to show that the engine asks and obeys.
 
+#![expect(clippy::disallowed_methods, reason = "tests call the OPA they start")]
+
 use serde_json::json;
 use sqlx::PgPool;
 use std::collections::HashMap;

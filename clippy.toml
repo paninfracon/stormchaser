@@ -1,0 +1,16 @@
+# Calls that bypassed a safeguard before, each fixed after a security finding. A use
+# that is safe says why, in an `#[expect(clippy::disallowed_methods, reason = "...")]`.
+disallowed-methods = [
+    # SSRF: an outbound request to a URL a user or workflow chose must go through the
+    # guarded client, which checks and pins the address
+    { path = "reqwest::Client::new", reason = "use stormchaser_core::net_guard::guarded_client for any URL a user or workflow chooses" },
+    { path = "reqwest::Client::builder", reason = "use stormchaser_core::net_guard::guarded_client for any URL a user or workflow chooses" },
+    { path = "reqwest::ClientBuilder::new", reason = "use stormchaser_core::net_guard::guarded_client for any URL a user or workflow chooses" },
+    { path = "reqwest::get", reason = "use stormchaser_core::net_guard::guarded_client for any URL a user or workflow chooses" },
+    # Deeply nested HCL overflows the parser's stack and aborts the process
+    { path = "hcl::from_str", reason = "parse workflow text with stormchaser_dsl::StormchaserParser, or under stormchaser_model::hcl_guard::guarded" },
+    { path = "hcl::parse", reason = "parse workflow text with stormchaser_dsl::StormchaserParser, or under stormchaser_model::hcl_guard::guarded" },
+    { path = "hcl::eval::Evaluate::evaluate", reason = "evaluate with stormchaser_model::hcl_eval, or under stormchaser_model::hcl_guard::guarded" },
+    # An archive a step or user made can be a bomb, or hold links out of the destination
+    { path = "tar::Archive::unpack", reason = "read entries one by one with size, count and link limits, as the test-report reader does" },
+]

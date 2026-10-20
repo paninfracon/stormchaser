@@ -1,6 +1,8 @@
 //! Object-level authorization, end to end: the API router, the shipped policy
 //! (`deploy/opa`) in a real OPA, and the database.
 
+#![expect(clippy::disallowed_methods, reason = "tests call the OPA they start")]
+
 use axum::{
     body::Body,
     http::{Method, Request, StatusCode},

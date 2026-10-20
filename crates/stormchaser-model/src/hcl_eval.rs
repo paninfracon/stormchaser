@@ -100,6 +100,10 @@ pub fn hcl_to_json(hv: HclValue) -> Value {
 }
 
 /// Evaluates a string containing HCL interpolation templates (`${...}`).
+#[expect(
+    clippy::disallowed_methods,
+    reason = "parsed and evaluated inside hcl_guard::guarded"
+)]
 pub fn evaluate_string(s: &str, ctx: &HclContext) -> Result<Option<Value>> {
     if !s.contains("${") && !s.contains("%{") {
         return Ok(None);
@@ -127,6 +131,10 @@ pub fn evaluate_string(s: &str, ctx: &HclContext) -> Result<Option<Value>> {
 }
 
 /// Evaluates a raw HCL expression without the template wrapper.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "parsed and evaluated inside hcl_guard::guarded"
+)]
 pub fn evaluate_raw_expr(expr_str: &str, ctx: &HclContext) -> Result<Value> {
     crate::hcl_guard::guarded(expr_str, crate::hcl_guard::expr_limit(), || {
         let expr: hcl::Expression = expr_str.parse().map_err(|e| {

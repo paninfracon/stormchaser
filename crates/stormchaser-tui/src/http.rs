@@ -22,6 +22,10 @@ pub fn trust_ca(path: &Path) -> anyhow::Result<()> {
 
 /// A client builder that trusts the system's CAs and any given with `--ca-cert`, for
 /// requests that are not API calls (the identity provider's login pages).
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a client on the user's machine, calling servers its user names"
+)]
 pub fn builder() -> reqwest::ClientBuilder {
     let builder = reqwest::Client::builder();
     match EXTRA_ROOTS.get() {

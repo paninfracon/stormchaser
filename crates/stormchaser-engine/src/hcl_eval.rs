@@ -250,6 +250,10 @@ const JINJA_LITERAL_FUNC: &str = "stormchaser_jinja_literal";
 /// Evaluates the `${...}` and `%{...}` sequences of a Jinja template, writing each
 /// interpolated value as a Jinja string literal. A template with neither is returned
 /// unchanged.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "parsed and evaluated inside hcl_guard::guarded"
+)]
 pub fn resolve_jinja_template(text: &str, ctx: &HclContext) -> Result<String> {
     use hcl::eval::Evaluate;
     if !text.contains("${") && !text.contains("%{") {

@@ -52,6 +52,10 @@ impl StormchaserParser {
         .context("Workflow rejected")
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "called only from parse, inside hcl_guard::guarded"
+    )]
     fn parse_unguarded(&self, dsl: &str) -> Result<Workflow> {
         let body: Body = hcl::from_str(dsl)?;
 

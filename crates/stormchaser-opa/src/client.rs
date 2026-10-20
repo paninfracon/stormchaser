@@ -48,6 +48,10 @@ struct OpaResponse {
 
 impl OpaClient {
     /// Creates a new OpaClient with the given URL and TLS configuration.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the policy server, from the operator's configuration"
+    )]
     pub fn new(url: Option<String>, tls_config: Option<Arc<rustls::ClientConfig>>) -> Self {
         let retry_policy = ExponentialBackoff::builder().build_with_max_retries(3);
         let mut builder = reqwest::Client::builder();

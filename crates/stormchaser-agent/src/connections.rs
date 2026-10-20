@@ -85,6 +85,10 @@ pub async fn unpark_storage(
         let tar_gz = File::open(&tar_path)?;
         let decoder = GzDecoder::new(tar_gz);
         let mut archive = Archive::new(decoder);
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "restores the step's own parked storage into the step's volume, inside its sandbox"
+        )]
         archive.unpack(destination)?;
 
         let _ = fs::remove_file(tar_path);

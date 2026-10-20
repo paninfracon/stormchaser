@@ -26,6 +26,10 @@ pub use confine::*;
 /// The agent runs inside arbitrary task images, many of which ship without a
 /// system CA bundle, so the Mozilla roots are compiled in and merged with
 /// whatever the platform provides.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the agent runs inside the step's own sandbox, so it can reach nothing the step cannot"
+)]
 pub fn http_client() -> Result<reqwest::Client> {
     let bundled_roots = webpki_root_certs::TLS_SERVER_ROOT_CERTS
         .iter()

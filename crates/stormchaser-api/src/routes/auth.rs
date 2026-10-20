@@ -197,6 +197,10 @@ pub async fn exchange_token(
     }
 
     // 1. Exchange code for tokens
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the identity provider's token endpoint, from the operator's configuration"
+    )]
     let client = Client::new();
     let token_url = format!("{}/token", oidc_config.issuer.trim_end_matches('/'));
 
@@ -336,6 +340,10 @@ pub async fn refresh_token(
         .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // Exchange refresh token for new tokens
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the identity provider's token endpoint, from the operator's configuration"
+    )]
     let client = Client::new();
     let token_url = format!("{}/token", oidc_config.issuer.trim_end_matches('/'));
 

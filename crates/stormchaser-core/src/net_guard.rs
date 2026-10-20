@@ -256,6 +256,7 @@ pub async fn guarded_client(raw_url: &str) -> Result<(reqwest::Client, Url)> {
         .await
         .map_err(|reason| anyhow!("Refusing request to {}: {}", raw_url, reason))?;
 
+    #[expect(clippy::disallowed_methods, reason = "this is the guarded client")]
     let mut builder = reqwest::Client::builder()
         .timeout(DEFAULT_TIMEOUT)
         .redirect(reqwest::redirect::Policy::none())

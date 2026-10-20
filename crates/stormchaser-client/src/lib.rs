@@ -101,6 +101,10 @@ impl ClientBuilder {
     }
 
     /// The client.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the client of Stormchaser's own API, at the URL its user gives"
+    )]
     pub fn build(self) -> Result<Client> {
         let mut builder = reqwest::Client::builder();
         if let Some(pem) = &self.ca_pem {

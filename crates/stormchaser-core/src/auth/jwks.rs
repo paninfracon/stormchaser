@@ -22,6 +22,10 @@ use std::sync::OnceLock;
 
 static HTTP_CLIENT: OnceLock<reqwest_middleware::ClientWithMiddleware> = OnceLock::new();
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the identity provider's keys, from the operator's configuration"
+)]
 fn get_client() -> reqwest_middleware::ClientWithMiddleware {
     HTTP_CLIENT
         .get_or_init(|| {

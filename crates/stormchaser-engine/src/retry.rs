@@ -134,6 +134,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a test of the error a plain client returns"
+    )]
     async fn a_host_that_does_not_resolve_is_transient_behind_the_retry_middleware() {
         let client = reqwest_middleware::ClientBuilder::new(reqwest::Client::new()).build();
         let error = client

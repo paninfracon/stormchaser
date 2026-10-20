@@ -1,3 +1,4 @@
+#![expect(clippy::disallowed_methods, reason = "tests call the OPA they start")]
 use std::net::TcpListener;
 use std::process::Command;
 use std::time::Duration;

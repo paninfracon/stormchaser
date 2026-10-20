@@ -43,6 +43,10 @@ fn log_job_name(step_name: &str, step_id: StepInstanceId) -> String {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl LogBackend {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the log backend, from the operator's configuration"
+    )]
     pub(crate) fn create_client(&self) -> ClientWithMiddleware {
         let retry_policy = ExponentialBackoff::builder().build_with_max_retries(5);
         ClientBuilder::new(reqwest::Client::new())
