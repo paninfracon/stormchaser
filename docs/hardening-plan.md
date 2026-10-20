@@ -59,6 +59,8 @@ from what an attacker would try.
    Docker runner on every pull request (`scripts/smoke-test-docker.sh`). Add a
    nightly k3d job that installs the umbrella chart and runs
    `scripts/smoke-test-k8s.sh` and the dogfood workflow.
+   Load tests (`integration_load_tests`, `scripts/e2e-load-test*.sh`) stay off
+   GitHub's runners: they run on the build host, nightly or before a release.
 2. **Fault injection.** Bring the system-test chaos scripts (stop Postgres,
    stop OPA, kill an engine under load) into the repository as a nightly suite.
 3. **Fuzzing.** Add `cargo-fuzz` targets for the HCL parser and `hcl_guard`,
