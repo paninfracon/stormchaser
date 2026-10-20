@@ -52,7 +52,9 @@ echo '  }' >> "$STORM_FILE"
 echo '}' >> "$STORM_FILE"
 
 echo ">>> Cleaning up previous workflow runs in local DB..."
-POSTGRES_CONTAINER=$(docker ps --format '{{.Names}}' | grep postgres | head -n 1)
+# The first container named postgres, unless STORMCHASER_POSTGRES_CONTAINER names the
+# stack's own: on a host running several stacks the first can be another one
+POSTGRES_CONTAINER=${STORMCHASER_POSTGRES_CONTAINER:-$(docker ps --format '{{.Names}}' | grep postgres | head -n 1)}
 if [ "${STORMCHASER_E2E_RESET_ALL_RUNS:-0}" = "1" ]; then
   echo ">>> STORMCHASER_E2E_RESET_ALL_RUNS=1 set; truncating all workflow runs."
   docker exec "$POSTGRES_CONTAINER" psql -U stormchaser -d stormchaser -c "TRUNCATE workflow_runs CASCADE" > /dev/null 2>&1
