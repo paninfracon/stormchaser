@@ -220,7 +220,6 @@ web:
     # Empty means the release this chart belongs to (v<appVersion>)
     tag: ""
   replicaCount: 1
-  rustLog: "stormchaser_web=info"
   externalApiUrl: "http://localhost:3000"
   webUrl: "http://localhost:3003"
   service:

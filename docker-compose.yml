@@ -215,7 +215,6 @@ services:
       AWS_ACCESS_KEY_ID: stormchaser
       AWS_SECRET_ACCESS_KEY: ${STORMCHASER_MINIO_PASSWORD:-stormchaser_dev_password}
       AWS_DEFAULT_REGION: us-east-1
-      S3_INTERNAL_URL: http://s3:9000
       TLS_CA_CERT_PATH: /etc/engine/certs/ca.crt
       TLS_CERT_PATH: /etc/engine/certs/tls.crt
       TLS_KEY_PATH: /etc/engine/certs/tls.key
@@ -256,11 +255,7 @@ services:
       OIDC_CLIENT_ID: stormchaser-cli
       OIDC_CLIENT_SECRET: '${STORMCHASER_CLI_SECRET?Error: STORMCHASER_CLI_SECRET is not set}'
       LOKI_URL: http://loki:3100
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4317
-      OTEL_SERVICE_NAME: stormchaser-query
       OPA_URL: http://opa:8181/v1/data/stormchaser/allow
-      API_RATE_LIMIT_PER_SECOND: 10000
-      API_RATE_LIMIT_BURST_SIZE: 100000
       TLS_CA_CERT_PATH: /etc/engine/certs/ca.crt
       TLS_CERT_PATH: /etc/engine/certs/tls.crt
       TLS_KEY_PATH: /etc/engine/certs/tls.key
@@ -355,7 +350,6 @@ services:
       QUERY_URL: http://orchestration-query:3001
       EXTERNAL_API_URL: http://localhost:${PORT_API:-3000}
       WEB_URL: http://localhost:${PORT_WEB:-3003}
-      RUST_LOG: ${RUST_LOG:-stormchaser_web=info}
       GRAFANA_URL: http://localhost:${PORT_GRAFANA:-3002}
     depends_on:
       - orchestration-api

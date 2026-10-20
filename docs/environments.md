@@ -564,16 +564,9 @@ The runners start the agent and set these. They are the `run` subcommand's
 | `STORMCHASER_TUI_DEV_LOGIN` | off | TUI only, development: exactly `true` offers logins from `deploy/dex/credentials.generated` under the working directory. |
 | `HOST_DEX` | unset | TUI only, development: host name that replaces `localhost` or `127.0.0.1` in the Dex login URL. |
 
-### Set by deployment files but not read by any code
+### Settings no service reads
 
-- `BINARY`, set on every pod by the charts. The image runs the binary named by
-  `BINARY_NAME`, fixed when the image is built.
-- `GRAFANA_URL` on the API, engine and query pods (chart). Only the web tier reads it.
-- `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_SERVICE_NAME` on the query service (chart and
-  compose). The query service does not set up OpenTelemetry.
-- `KUBERNETES_NAMESPACE` on the query service (chart). Only the API's cron code and the
-  Kubernetes runner read it.
-- `API_RATE_LIMIT_PER_SECOND` and `API_RATE_LIMIT_BURST_SIZE` on the query service
-  (compose). Rate limiting is in the API's router, which the query service does not use.
-- `RUST_LOG` on the web tier (chart and compose). The web tier sets up no logger.
-- `S3_INTERNAL_URL` on the engine (compose).
+The charts and docker-compose set only variables their service reads. A test
+(`crates/stormchaser-core/tests/deploy_settings_tests.rs`) fails when a deployment file
+sets a variable that nothing in the service's code reads, such as a misspelt name, which
+would otherwise leave the service on its default without a word.

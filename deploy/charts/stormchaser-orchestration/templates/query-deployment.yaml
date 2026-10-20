@@ -28,12 +28,6 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           imagePullPolicy: {{ .Values.query.image.pullPolicy }}
           env:
-            - name: BINARY
-              value: "stormchaser-query"
-            - name: KUBERNETES_NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
             {{- include "stormchaser-orchestration.databaseUrlEnv" . | nindent 12 }}
             - name: STORMCHASER_DB_SSL
               value: {{ .Values.global.database.ssl | quote }}
@@ -67,12 +61,6 @@ spec:
               value: {{ .Values.global.oidc.clientId | quote }}
             - name: LOKI_URL
               value: {{ .Values.global.loki.url | quote }}
-            - name: GRAFANA_URL
-              value: {{ .Values.global.grafana.url | quote }}
-            - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: {{ .Values.global.otel.endpoint | quote }}
-            - name: OTEL_SERVICE_NAME
-              value: "stormchaser-query"
             {{- if .Values.global.opa.url }}
             - name: OPA_URL
               value: {{ .Values.global.opa.url | quote }}

@@ -36,8 +36,6 @@ spec:
               value: {{ .Values.web.externalApiUrl | quote }}
             - name: WEB_URL
               value: {{ .Values.web.webUrl | quote }}
-            - name: RUST_LOG
-              value: {{ .Values.web.rustLog | quote }}
             - name: GRAFANA_URL
               value: {{ .Values.global.grafana.url | quote }}
             - name: STORMCHASER_LISTEN_TLS
