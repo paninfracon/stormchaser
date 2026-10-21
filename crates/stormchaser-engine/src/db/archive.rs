@@ -203,17 +203,5 @@ pub async fn purge_archived_runs(
     if runs.is_empty() {
         return Ok(0);
     }
-    // These do not cascade from the archived run; everything else does
-    for statement in [
-        "DELETE FROM archived_step_status_history WHERE step_instance_id IN (SELECT id FROM archived_step_instances WHERE run_id = ANY($1))",
-        "DELETE FROM archived_step_test_cases WHERE run_id = ANY($1)",
-        "DELETE FROM archived_step_test_summaries WHERE run_id = ANY($1)",
-    ] {
-        sqlx::query(statement).bind(&runs).execute(&mut *conn).await?;
-    }
-    let deleted = sqlx::query("DELETE FROM archived_workflow_runs WHERE id = ANY($1)")
-        .bind(&runs)
-        .execute(&mut *conn)
-        .await?;
-    Ok(deleted.rows_affected())
+    stormchaser_core::db::delete_archived_runs(conn, &runs).await
 }

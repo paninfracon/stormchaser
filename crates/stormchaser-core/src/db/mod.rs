@@ -1,5 +1,7 @@
 //! Database access shared by the services.
 
+/// Archived runs.
+pub mod archive;
 /// Connection lookups.
 pub mod connections;
 /// The database schema: applying migrations, and waiting for them.
@@ -11,6 +13,7 @@ pub mod runners;
 /// Step instance lookups.
 pub mod steps;
 
+pub use archive::*;
 pub use connections::*;
 pub use outbox::*;
 pub use runners::*;

@@ -266,11 +266,7 @@ pub async fn delete_workflow_run(pool: &PgPool, id: RunId) -> Result<RunDeletion
             .execute(&mut *tx)
             .await?;
     }
-    let archived = sqlx::query("DELETE FROM archived_workflow_runs WHERE id = $1")
-        .bind(id)
-        .execute(&mut *tx)
-        .await?
-        .rows_affected();
+    let archived = stormchaser_core::db::delete_archived_runs(&mut tx, &[id.into_inner()]).await?;
     tx.commit().await?;
     Ok(if active.is_some() || archived > 0 {
         RunDeletion::Deleted

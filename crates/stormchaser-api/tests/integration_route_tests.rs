@@ -803,6 +803,64 @@ async fn test_delete_workflow_run() {
     assert_eq!(delete(run_id).await, StatusCode::NOT_FOUND);
 }
 
+/// Deleting an archived run deletes what was archived with it, some of which does not
+/// cascade from the run
+#[tokio::test]
+async fn test_delete_archived_workflow_run() {
+    let (app, pool) = match setup_app_with_pool().await {
+        Some(a) => a,
+        None => return,
+    };
+
+    let run_id = Uuid::new_v4();
+    let step_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO archived_workflow_runs (id, workflow_name, status, version, fencing_token, created_at, updated_at, finished_at, repo_url, workflow_path, git_ref, initiating_user) \
+         VALUES ($1, 'wf', 'succeeded', 1, 1, NOW(), NOW(), NOW(), '', '', '', 'u')",
+    )
+    .bind(run_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO archived_step_instances (id, run_id, step_name, step_type, status, created_at) VALUES ($1, $2, 'build', 'RunContainer', 'succeeded', NOW())",
+    )
+    .bind(step_id)
+    .bind(run_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO archived_step_status_history (id, step_instance_id, status, created_at) VALUES ((random() * 1e15)::bigint, $1, 'succeeded', NOW())")
+        .bind(step_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let status = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/api/v1/runs/{}", run_id))
+                .header(AUTHORIZATION, format!("Bearer {}", get_token()))
+                .extension(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 12345))))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .status();
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let history: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM archived_step_status_history WHERE step_instance_id = $1",
+    )
+    .bind(step_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(history, 0, "the run's step history was left behind");
+}
+
 async fn post_direct_run(app: axum::Router, dsl: &str) -> axum::response::Response {
     let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
     app.oneshot(
