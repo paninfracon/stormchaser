@@ -25,15 +25,48 @@ const CHECK_INTERVAL: Duration = Duration::from_secs(5);
 const HOLD_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Takes the advisory lock `key`, if no other session holds it, on a connection that
-/// leaves the pool with it. Dropping the connection closes it, which releases the lock.
+/// leaves the pool with it. Dropping the connection closes it, which releases the lock,
+/// and so does the server once the holder has gone quiet.
 pub async fn try_lock(pool: &PgPool, key: i64) -> Result<Option<PgConnection>> {
     let mut conn: PoolConnection<Postgres> = pool.acquire().await?;
     let locked: bool = sqlx::query_scalar("SELECT pg_try_advisory_lock($1)")
         .bind(key)
         .fetch_one(&mut *conn)
         .await?;
-    // A connection that took no lock goes back to the pool
-    Ok(locked.then(|| conn.detach()))
+    if !locked {
+        // A connection that took no lock goes back to the pool
+        return Ok(None);
+    }
+    let mut conn = conn.detach();
+    end_session_when_holder_vanishes(&mut conn).await;
+    Ok(Some(conn))
+}
+
+/// Has Postgres end the lock's session, and so release the lock, soon after its holder
+/// stops speaking to it. A replica that crashes has its socket closed for it, but one
+/// whose host dies or is cut off from the network does not: without this, the server
+/// would hold the lock until its TCP keepalive gave up, two hours by default, and no
+/// replica would run the background workers meanwhile.
+///
+/// The leader checks its connection every [`CHECK_INTERVAL`], so a session idle for 30
+/// seconds belongs to a leader that has gone. `idle_session_timeout` needs PostgreSQL
+/// 14; the keepalive settings cover older servers, and a server that refuses either
+/// keeps its defaults.
+async fn end_session_when_holder_vanishes(conn: &mut PgConnection) {
+    for setting in [
+        "SET idle_session_timeout = '30s'",
+        "SET tcp_keepalives_idle = 10",
+        "SET tcp_keepalives_interval = 5",
+        "SET tcp_keepalives_count = 3",
+    ] {
+        if let Err(e) = sqlx::query(setting).execute(&mut *conn).await {
+            tracing::warn!(
+                "Could not configure the leader lock's session ({}): {}",
+                setting,
+                e
+            );
+        }
+    }
 }
 
 /// Whether the connection holding the lock still answers in time

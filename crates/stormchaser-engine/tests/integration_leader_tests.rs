@@ -50,3 +50,33 @@ async fn one_replica_holds_the_lock_until_its_connection_goes() {
         "the second replica takes the lock once the first's connection is gone"
     );
 }
+
+#[tokio::test]
+async fn the_server_ends_a_lock_holders_session_once_it_goes_quiet() {
+    // Its host can die without closing the connection; the server must not keep the
+    // lock for as long as TCP would
+    let pool = setup_db().await;
+    let key = uuid::Uuid::new_v4().as_u128() as i64;
+    let mut held = try_lock(&pool, key)
+        .await
+        .unwrap()
+        .expect("the lock is free");
+
+    for (setting, value) in [
+        ("SHOW idle_session_timeout", "30s"),
+        ("SHOW tcp_keepalives_idle", "10"),
+        ("SHOW tcp_keepalives_interval", "5"),
+        ("SHOW tcp_keepalives_count", "3"),
+    ] {
+        let shown: String = sqlx::query_scalar(setting)
+            .fetch_one(&mut held)
+            .await
+            .unwrap();
+        // The server reports keepalive settings as 0 on a Unix socket, where they do
+        // not apply
+        assert!(
+            shown == value || (setting.contains("tcp_") && shown == "0"),
+            "{setting} is {shown}"
+        );
+    }
+}
