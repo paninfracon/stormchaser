@@ -123,6 +123,9 @@ impl<S> DockerContainerMachine<S> {
             "stormchaser-fencing-token".to_string(),
             self.metadata.fencing_token.to_string(),
         );
+        if let Some(attempt) = self.metadata.attempt {
+            labels.insert("stormchaser-attempt".to_string(), attempt.to_string());
+        }
         labels.insert(
             "stormchaser.v1.io/received-at".to_string(),
             self.metadata.received_at.to_rfc3339(),
@@ -226,6 +229,7 @@ mod tests {
             step_id: Uuid::new_v4(),
             runner_id: "test_runner".to_string(),
             fencing_token: 0,
+            attempt: None,
             step_dsl,
             received_at: chrono::Utc::now(),
             encryption_key: None,

@@ -13,7 +13,6 @@ use std::time::Duration;
 use stormchaser_dsl::ast::{Step, Workflow};
 use stormchaser_model::events::WorkflowFailedEvent;
 use stormchaser_model::events::{EventSource, EventType, WorkflowEventType};
-use stormchaser_model::step::StepStatus;
 use stormchaser_tls::TlsReloader;
 use tracing::{error, info};
 
@@ -22,7 +21,8 @@ use crate::handler::step::quota::release_step_quota_for_instance;
 use super::completed::{advance_run, after_advance};
 use super::helpers::{
     completion_authorized, declared_test_reports, is_terminal_step_status,
-    persist_step_test_reports, reporter_is_assigned_runner, step_belongs_to_run,
+    persist_step_test_reports, report_is_current_attempt, reporter_is_assigned_runner,
+    step_belongs_to_run,
 };
 
 #[tracing::instrument(skip(event, pool, nats_client, tls_reloader), fields(run_id = tracing::field::Empty, step_id = tracing::field::Empty))]
@@ -70,17 +70,12 @@ pub async fn handle_step_failed(
         return archive_workflow(run_id, pool.clone()).await;
     }
 
-    // A report on an attempt that was put back for a retry, delivered again before the
-    // step ran again
-    let attempt = crate::db::step_attempt(&mut *tx, step_id).await?;
-    if instance.status == StepStatus::Pending && attempt > 1 {
-        tracing::debug!(
-            "Ignoring failure of run {} step {}: it is waiting to be retried",
-            run_id,
-            step_id
-        );
+    // A report on an attempt that was put back for a retry, arriving late or delivered
+    // again, leaves the next attempt alone
+    if !report_is_current_attempt(&mut *tx, &instance, event.attempt).await? {
         return Ok(());
     }
+    let attempt = crate::db::step_attempt(&mut *tx, step_id).await?;
 
     if !completion_authorized(&mut tx, &instance, event.completion_token.as_deref()).await {
         return Ok(());

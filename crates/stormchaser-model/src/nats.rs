@@ -371,12 +371,14 @@ pub async fn announce_step_running(
     client: &async_nats::Client,
     run_id: uuid::Uuid,
     step_id: uuid::Uuid,
+    attempt: Option<i32>,
     runner_id: &str,
 ) -> Result<()> {
     let run_id = crate::RunId::new(run_id);
     let event = crate::events::StepRunningEvent {
         run_id,
         step_id: crate::StepInstanceId::new(step_id),
+        attempt,
         event_type: EventType::Step(crate::events::StepEventType::Running),
         runner_id: Some(runner_id.to_string()),
         timestamp: chrono::Utc::now(),
@@ -400,6 +402,7 @@ pub async fn announce_step_storage(
     client: &async_nats::Client,
     run_id: uuid::Uuid,
     step_id: uuid::Uuid,
+    attempt: Option<i32>,
     runner_id: &str,
     packing: bool,
 ) -> Result<()> {
@@ -426,6 +429,7 @@ pub async fn announce_step_storage(
         serde_json::json!({
             "run_id": run_id,
             "step_id": step_id,
+            "attempt": attempt,
             "runner_id": runner_id,
             "status": status,
             "timestamp": chrono::Utc::now(),

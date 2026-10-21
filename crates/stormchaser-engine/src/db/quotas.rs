@@ -1,5 +1,5 @@
-use sqlx::{Executor, Postgres};
-use stormchaser_model::RunId;
+use sqlx::{Connection, Executor, Postgres};
+use stormchaser_model::{RunId, StepInstanceId};
 
 #[allow(clippy::too_many_arguments)]
 /// Get run quota by id.
@@ -16,10 +16,13 @@ where
     .await
 }
 
-/// Claim step quota.
+/// Claims a step's share of its run's quota, if the run has room for it, and records
+/// on the step that it holds it.
+#[allow(clippy::too_many_arguments)]
 pub async fn claim_step_quota(
     executor: &mut sqlx::PgConnection,
     run_id: RunId,
+    step_id: StepInstanceId,
     cpu_req: f64,
     mem_req: i64,
     max_cpu: f64,
@@ -27,11 +30,12 @@ pub async fn claim_step_quota(
 ) -> Result<bool, sqlx::Error> {
     use sqlx::Row;
 
+    let mut tx = executor.begin().await?;
     let row = sqlx::query(
         "SELECT current_cpu_usage, current_memory_usage FROM run_quotas WHERE run_id = $1 FOR UPDATE",
     )
     .bind(run_id)
-    .fetch_one(&mut *executor)
+    .fetch_one(&mut *tx)
     .await?;
 
     let current_cpu: f64 = row.get("current_cpu_usage");
@@ -48,27 +52,46 @@ pub async fn claim_step_quota(
         .bind(cpu_req)
         .bind(new_mem)
         .bind(run_id)
-        .execute(&mut *executor)
+        .execute(&mut *tx)
         .await?;
+        sqlx::query("UPDATE step_instances SET quota_held = true WHERE id = $1")
+            .bind(step_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
         Ok(true)
     } else {
         Ok(false)
     }
 }
 
-/// Release step quota.
+/// Gives back a step's share of its run's quota, if the step holds it. A step that
+/// never claimed it, or has given it back already, gives back nothing.
 pub async fn release_step_quota(
     executor: &mut sqlx::PgConnection,
     run_id: RunId,
+    step_id: StepInstanceId,
     cpu_req: f64,
     mem_req: i64,
 ) -> Result<(), sqlx::Error> {
     use sqlx::Row;
 
+    let mut tx = executor.begin().await?;
+    let held = sqlx::query(
+        "UPDATE step_instances SET quota_held = false WHERE id = $1 AND quota_held RETURNING id",
+    )
+    .bind(step_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .is_some();
+    if !held {
+        return Ok(());
+    }
+
     let row =
         sqlx::query("SELECT current_memory_usage FROM run_quotas WHERE run_id = $1 FOR UPDATE")
             .bind(run_id)
-            .fetch_optional(&mut *executor)
+            .fetch_optional(&mut *tx)
             .await?;
 
     if let Some(row) = row {
@@ -84,9 +107,10 @@ pub async fn release_step_quota(
         .bind(cpu_req)
         .bind(new_mem)
         .bind(run_id)
-        .execute(&mut *executor)
+        .execute(&mut *tx)
         .await?;
     }
 
+    tx.commit().await?;
     Ok(())
 }

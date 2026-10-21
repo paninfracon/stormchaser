@@ -213,6 +213,7 @@ impl DockerContainerMachine<state::Initialized> {
             let running_event = stormchaser_model::events::StepRunningEvent {
                 run_id: RunId::new(self.metadata.run_id),
                 step_id: StepInstanceId::new(self.metadata.step_id),
+                attempt: self.metadata.attempt,
                 event_type: EventType::Step(StepEventType::Running),
                 runner_id: Some(self.metadata.runner_id.clone()),
                 timestamp: Utc::now(),
@@ -384,6 +385,7 @@ impl DockerContainerMachine<state::Initialized> {
                 nats,
                 self.metadata.run_id,
                 self.metadata.step_id,
+                self.metadata.attempt,
                 &self.metadata.runner_id,
                 false,
             )
@@ -423,6 +425,7 @@ impl DockerContainerMachine<state::Initialized> {
                         nats,
                         self.metadata.run_id,
                         self.metadata.step_id,
+                        self.metadata.attempt,
                         &self.metadata.runner_id,
                         false,
                     )
@@ -720,6 +723,7 @@ mod tests {
             step_id: Uuid::new_v4(),
             runner_id: "test_runner".to_string(),
             fencing_token: 0,
+            attempt: None,
             step_dsl: Step {
                 name: "test_step".to_string(),
                 r#type: "RunContainer".to_string(),

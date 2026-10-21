@@ -33,6 +33,10 @@ pub async fn handle_step_running(
         step_id, run_id, runner_id
     );
 
+    if !super::helpers::report_is_current_attempt(&pool, &instance, event.attempt).await? {
+        return Ok(());
+    }
+
     let mut conn = pool.acquire().await?;
 
     // 2. Use state machine to transition. Before it runs, only the runner that holds the
@@ -57,7 +61,9 @@ pub async fn handle_step_running(
             crate::step_machine::StepMachine::<crate::step_machine::state::Initializing>::load(
                 instance.clone(),
             )?;
-        machine.start(None, &mut conn).await?;
+        // Claimed by the engine before it was handed out, so no runner is on it yet
+        // unless its initializing report came first
+        machine.start(event.runner_id.clone(), &mut conn).await?;
     } else if instance.status == stormchaser_model::step::StepStatus::Pending {
         // Its report that it took the step has not arrived yet
         crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::load(

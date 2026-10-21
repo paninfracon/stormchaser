@@ -119,6 +119,7 @@ async fn a_run_that_fails_tells_runners_to_stop_its_other_steps() {
         StepFailedEvent {
             run_id,
             step_id,
+            attempt: None,
             fencing_token: 1,
             completion_token: None,
             event_type: EventType::Step(StepEventType::Failed),

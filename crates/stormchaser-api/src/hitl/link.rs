@@ -224,6 +224,7 @@ pub async fn use_approval_link(
         let completion_event = StepCompletedEvent {
             run_id: payload.run_id,
             step_id: payload.step_id,
+            attempt: None,
             fencing_token,
             completion_token: stormchaser_core::db::step_completion_token(
                 &state.pool,
@@ -256,6 +257,7 @@ pub async fn use_approval_link(
         let failure_event = StepFailedEvent {
             run_id: payload.run_id,
             step_id: payload.step_id,
+            attempt: None,
             fencing_token,
             completion_token: stormchaser_core::db::step_completion_token(
                 &state.pool,

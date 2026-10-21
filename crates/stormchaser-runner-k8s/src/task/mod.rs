@@ -60,6 +60,7 @@ async fn execute_job_on_cluster(
     run_id: Uuid,
     step_id: Uuid,
     fencing_token: i64,
+    attempt: Option<i32>,
     step_dsl: dsl::Step,
     storage: Option<HashMap<String, Value>>,
     test_report_urls: Option<HashMap<String, Value>>,
@@ -76,6 +77,7 @@ async fn execute_job_on_cluster(
         run_id,
         step_id,
         fencing_token,
+        attempt,
         step_dsl,
         namespace,
         received_at,
@@ -107,6 +109,7 @@ async fn execute_job_on_cluster(
             let running_event = stormchaser_model::events::StepRunningEvent {
                 run_id: stormchaser_model::RunId::new(run_id),
                 step_id: stormchaser_model::StepInstanceId::new(step_id),
+                attempt,
                 event_type: stormchaser_model::events::EventType::Step(
                     stormchaser_model::events::StepEventType::Running,
                 ),
@@ -146,6 +149,7 @@ async fn execute_job_on_cluster(
         run_id,
         step_id,
         metadata.fencing_token,
+        attempt,
         runner_id,
         result,
     )
@@ -157,6 +161,7 @@ async fn publish_job_result(
     run_id: Uuid,
     step_id: Uuid,
     fencing_token: i64,
+    attempt: Option<i32>,
     runner_id: String,
     result: Result<job_machine::JobState, anyhow::Error>,
 ) {
@@ -170,7 +175,8 @@ async fn publish_job_result(
                     tracing::error!("Step {} (Run {}) failed: {}", step_id, run_id, reason);
                 }
             }
-            let dispatch = build_job_result_event(state, run_id, step_id, fencing_token, runner_id);
+            let dispatch =
+                build_job_result_event(state, run_id, step_id, fencing_token, attempt, runner_id);
 
             let _ = publish_cloudevent(
                 &async_nats::jetstream::new(nats_client.clone()),
@@ -192,7 +198,14 @@ async fn publish_job_result(
                 ))),
                 EventType::Step(StepEventType::Failed),
                 EventSource::System,
-                build_job_error_event(run_id, step_id, fencing_token, runner_id.clone(), &e),
+                build_job_error_event(
+                    run_id,
+                    step_id,
+                    fencing_token,
+                    attempt,
+                    runner_id.clone(),
+                    &e,
+                ),
                 Some(SchemaVersion::new("1.0".to_string())),
                 None,
             )
@@ -227,6 +240,7 @@ fn build_job_result_event(
     run_id: Uuid,
     step_id: Uuid,
     fencing_token: i64,
+    attempt: Option<i32>,
     runner_id: String,
 ) -> EventDispatch {
     match state {
@@ -237,6 +251,7 @@ fn build_job_result_event(
                 run_id: RunId::new(run_id),
                 step_id: StepInstanceId::new(step_id),
                 fencing_token,
+                attempt,
                 completion_token: None,
                 event_type: event_type.clone(),
                 runner_id: Some(runner_id),
@@ -268,6 +283,7 @@ fn build_job_result_event(
                 run_id: RunId::new(run_id),
                 step_id: StepInstanceId::new(step_id),
                 fencing_token,
+                attempt,
                 completion_token: None,
                 event_type: event_type.clone(),
                 error: reason,
@@ -298,6 +314,7 @@ fn build_job_error_event(
     run_id: Uuid,
     step_id: Uuid,
     fencing_token: i64,
+    attempt: Option<i32>,
     runner_id: String,
     error: &anyhow::Error,
 ) -> Value {
@@ -305,6 +322,7 @@ fn build_job_error_event(
         run_id: RunId::new(run_id),
         step_id: StepInstanceId::new(step_id),
         fencing_token,
+        attempt,
         completion_token: None,
         event_type: EventType::Step(StepEventType::Failed),
         error: format!("{:?}", error),
@@ -407,6 +425,9 @@ pub async fn handle_task(
     let registry_auth: Option<Value> =
         serde_json::from_value(payload["registry_auth"].clone()).ok();
     let fencing_token: i64 = payload["fencing_token"].as_i64().unwrap_or(0);
+    let attempt = payload["attempt"]
+        .as_i64()
+        .and_then(|a| i32::try_from(a).ok());
 
     let in_progress_msg = msg.clone();
     let in_progress_handle = tokio::spawn(async move {
@@ -422,6 +443,7 @@ pub async fn handle_task(
     let initializing_event = stormchaser_model::events::StepInitializingEvent {
         run_id: RunId::new(run_id),
         step_id: StepInstanceId::new(step_id),
+        attempt,
         event_type: EventType::Step(StepEventType::Initializing),
         runner_id: Some(runner_id.clone()),
         timestamp: Utc::now(),
@@ -448,6 +470,7 @@ pub async fn handle_task(
                 run_id,
                 step_id,
                 fencing_token,
+                attempt,
                 step_dsl,
                 storage,
                 test_report_urls,
@@ -469,6 +492,7 @@ pub async fn handle_task(
                 run_id: RunId::new(run_id),
                 step_id: StepInstanceId::new(step_id),
                 fencing_token,
+                attempt,
                 completion_token: None,
                 event_type: EventType::Step(StepEventType::Failed),
                 error: format!("Failed to acquire K8s client: {:?}", e),

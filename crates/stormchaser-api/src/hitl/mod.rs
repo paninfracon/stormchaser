@@ -194,6 +194,7 @@ pub async fn approve_step(
     let completion_event = StepCompletedEvent {
         run_id,
         step_id,
+        attempt: None,
         fencing_token,
         completion_token: stormchaser_core::db::step_completion_token(&state.pool, step_id).await,
         event_type: EventType::Step(StepEventType::Completed),
@@ -265,6 +266,7 @@ pub async fn reject_step(
     let event = StepFailedEvent {
         run_id,
         step_id,
+        attempt: None,
         fencing_token,
         completion_token: stormchaser_core::db::step_completion_token(&state.pool, step_id).await,
         event_type: EventType::Step(StepEventType::Failed),
@@ -332,6 +334,7 @@ pub async fn correlate_event(
     let completion_event = StepCompletedEvent {
         run_id: corr.run_id,
         step_id: corr.step_instance_id,
+        attempt: None,
         fencing_token,
         completion_token: stormchaser_core::db::step_completion_token(
             &state.pool,

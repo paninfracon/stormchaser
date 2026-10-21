@@ -107,6 +107,7 @@ fn completed(run_id: RunId, step_id: StepInstanceId, runner: Option<&str>) -> St
     StepCompletedEvent {
         run_id,
         step_id,
+        attempt: None,
         fencing_token: 1,
         completion_token: None,
         event_type: EventType::Step(StepEventType::Completed),
@@ -124,6 +125,7 @@ fn failed(run_id: RunId, step_id: StepInstanceId, runner: Option<&str>) -> StepF
     StepFailedEvent {
         run_id,
         step_id,
+        attempt: None,
         fencing_token: 1,
         completion_token: None,
         event_type: EventType::Step(StepEventType::Failed),
@@ -142,6 +144,7 @@ fn running(run_id: RunId, step_id: StepInstanceId, runner: &str) -> StepRunningE
     StepRunningEvent {
         run_id,
         step_id,
+        attempt: None,
         event_type: EventType::Step(StepEventType::Running),
         runner_id: Some(runner.to_string()),
         timestamp: Utc::now(),

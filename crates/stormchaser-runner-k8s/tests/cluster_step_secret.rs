@@ -31,6 +31,7 @@ fn metadata(name: &str, spec: serde_json::Value) -> JobMetadata {
     JobMetadata {
         run_id: uuid::Uuid::new_v4(),
         step_id: uuid::Uuid::new_v4(),
+        attempt: None,
         fencing_token: 1,
         step_dsl: serde_json::from_value(json!({
             "name": name,

@@ -75,6 +75,7 @@ fn test_do_build_job_spec_basic() {
         run_id: Uuid::new_v4(),
         step_id: Uuid::new_v4(),
         fencing_token: 0,
+        attempt: None,
         step_dsl,
         namespace: "default".into(),
         received_at: Utc::now(),
@@ -150,6 +151,7 @@ fn test_do_build_job_spec_with_pvc() {
         run_id,
         step_id: Uuid::new_v4(),
         fencing_token: 0,
+        attempt: None,
         step_dsl,
         namespace: "default".into(),
         received_at: Utc::now(),
@@ -292,6 +294,7 @@ fn test_do_build_job_spec_rejects_privileged_by_default() {
             run_id: Uuid::new_v4(),
             step_id: Uuid::new_v4(),
             fencing_token: 0,
+            attempt: None,
             step_dsl,
             namespace: "default".into(),
             received_at: Utc::now(),
@@ -341,6 +344,7 @@ fn k8s_job_metadata(spec: serde_json::Value) -> JobMetadata {
         run_id: Uuid::new_v4(),
         step_id: Uuid::new_v4(),
         fencing_token: 7,
+        attempt: Some(2),
         step_dsl,
         namespace: "default".into(),
         received_at: Utc::now(),
@@ -412,7 +416,12 @@ fn test_do_build_job_spec_withholds_api_token_and_protects_reserved_labels() {
     let victim_run = Uuid::new_v4().to_string();
     let metadata = k8s_job_metadata(serde_json::json!({
         "image": "alpine",
-        "labels": { "managed-by": "someone-else", "stormchaser-run-id": victim_run, "team": "a" },
+        "labels": {
+            "managed-by": "someone-else",
+            "stormchaser-run-id": victim_run,
+            "stormchaser-attempt": "1",
+            "team": "a"
+        },
         "annotations": { "stormchaser.v1.io/state-encrypted": "true", "note": "b" }
     }));
 
@@ -421,6 +430,7 @@ fn test_do_build_job_spec_withholds_api_token_and_protects_reserved_labels() {
     let labels = job.metadata.labels.unwrap();
     assert_eq!(labels["managed-by"], "stormchaser");
     assert_eq!(labels["stormchaser-run-id"], metadata.run_id.to_string());
+    assert_eq!(labels["stormchaser-attempt"], "2");
     assert_eq!(labels["team"], "a");
 
     let annotations = job.metadata.annotations.unwrap();

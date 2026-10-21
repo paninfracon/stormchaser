@@ -82,6 +82,10 @@ pub fn do_build_job_spec(
             metadata.fencing_token.to_string(),
         ),
     ]);
+    match metadata.attempt {
+        Some(attempt) => labels.insert("stormchaser-attempt".to_string(), attempt.to_string()),
+        None => labels.remove("stormchaser-attempt"),
+    };
 
     // Job Annotations. The step's definition is kept so that a restarted runner can pick
     // the step up again. Encrypted, it is kept whole; in clear, it is kept without the

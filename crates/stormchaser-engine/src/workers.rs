@@ -463,8 +463,9 @@ pub async fn recover_dispatches(
 }
 
 /// Puts back to pending the steps whose dispatch was lost, giving back what they
-/// claimed of their run's quota, as a failed dispatch does. All or none, so that no
-/// step is put back without its quota.
+/// claimed of their run's quota, as a failed dispatch does: a step lost before it
+/// claimed any, or whose failed dispatch gave it back already, gives back nothing. All
+/// or none, so that no step is put back still holding its quota.
 async fn put_back_lost_dispatches(pool: &sqlx::PgPool, lost_after: Duration) -> anyhow::Result<()> {
     let mut tx = pool.begin().await?;
     let lost = crate::step_machine::bulk::requeue_lost_dispatches(&mut tx, lost_after).await?;
@@ -489,7 +490,7 @@ async fn put_back_lost_dispatches(pool: &sqlx::PgPool, lost_after: Duration) -> 
         if max_cpu > 0.0 || max_mem > 0 {
             let req =
                 crate::resource_utils::get_step_resource_requirements(&step.step_type, &step.spec);
-            db::release_step_quota(&mut tx, step.run_id, req.cpu, req.memory).await?;
+            db::release_step_quota(&mut tx, step.run_id, step.id, req.cpu, req.memory).await?;
         }
     }
     tx.commit().await?;

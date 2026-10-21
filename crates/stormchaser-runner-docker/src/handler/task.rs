@@ -105,6 +105,9 @@ pub async fn handle_task(
     let registry_auth: Option<Value> =
         serde_json::from_value(payload["registry_auth"].clone()).ok();
     let fencing_token: i64 = payload["fencing_token"].as_i64().unwrap_or(0);
+    let attempt = payload["attempt"]
+        .as_i64()
+        .and_then(|a| i32::try_from(a).ok());
 
     let in_progress_msg = msg.clone();
     let in_progress_handle = tokio::spawn(async move {
@@ -117,6 +120,7 @@ pub async fn handle_task(
     let initializing_event = stormchaser_model::events::StepInitializingEvent {
         run_id: RunId::new(run_id),
         step_id: StepInstanceId::new(step_id),
+        attempt,
         event_type: EventType::Step(StepEventType::Initializing),
         runner_id: Some(runner_id.clone()),
         timestamp: Utc::now(),
@@ -141,6 +145,7 @@ pub async fn handle_task(
             step_id,
             runner_id: runner_id.clone(),
             fencing_token,
+            attempt,
             step_dsl,
             storage,
             test_report_urls,
@@ -180,6 +185,7 @@ pub async fn handle_task(
                 run_id,
                 step_id,
                 fencing_token,
+                attempt,
                 runner_id.clone(),
             );
             let _ = publish_cloudevent(
@@ -206,6 +212,7 @@ pub async fn handle_task(
                     run_id,
                     step_id,
                     fencing_token,
+                    attempt,
                     runner_id.clone(),
                     &e,
                 ),

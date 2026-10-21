@@ -203,6 +203,7 @@ pub async fn dispatch_step_instance(
     let payload = StepScheduledEvent {
         run_id,
         step_id: step_instance_id,
+        attempt: Some(crate::db::step_attempt(&pool, step_instance_id).await?),
         fencing_token,
         step_name: Some(step_name.to_string()),
         step_type: Some(step_type.clone()),

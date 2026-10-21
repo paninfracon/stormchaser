@@ -95,6 +95,7 @@ async fn test_shared_affinity_follows_a_kubernetes_runner() {
         StepCompletedEvent {
             run_id,
             step_id: first,
+            attempt: None,
             fencing_token: 0,
             completion_token: None,
             event_type: EventType::Step(StepEventType::Completed),

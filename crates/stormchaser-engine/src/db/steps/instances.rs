@@ -250,6 +250,25 @@ where
     Ok(())
 }
 
+/// Takes a step back from runners for the engine to finish: it gets a new completion
+/// token, so from now on only a report from the engine is accepted, and none from a
+/// runner that may have received it.
+pub async fn take_step_back_from_runners<'a, E>(
+    executor: E,
+    id: StepInstanceId,
+) -> Result<(), sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    sqlx::query(
+        "UPDATE step_instances SET completion_token = gen_random_uuid()::text WHERE id = $1",
+    )
+    .bind(id)
+    .execute(executor)
+    .await?;
+    Ok(())
+}
+
 /// Fetch steps that are currently running on offline runners.
 pub async fn fetch_zombie_steps<'a, E>(executor: E) -> Result<Vec<ZombieStep>, sqlx::Error>
 where

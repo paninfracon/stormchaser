@@ -28,6 +28,10 @@ pub async fn handle_step_packing_sfs(payload: Value, pool: PgPool) -> Result<()>
     {
         return Ok(());
     }
+    let attempt = super::helpers::reported_attempt(&payload);
+    if !super::helpers::report_is_current_attempt(&pool, &instance, attempt).await? {
+        return Ok(());
+    }
     if instance.status != StepStatus::Running {
         info!(
             "Step {} is {:?}, not running; ignoring its packing report",

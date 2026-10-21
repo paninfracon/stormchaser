@@ -37,6 +37,10 @@ pub async fn handle_step_unpacking_sfs(payload: Value, pool: PgPool) -> Result<(
     let Some(runner_id) = reporter else {
         return Ok(());
     };
+    let attempt = super::helpers::reported_attempt(&payload);
+    if !super::helpers::report_is_current_attempt(&pool, &instance, attempt).await? {
+        return Ok(());
+    }
 
     info!(
         "Step {} (Run {}) is now unpacking SFS on runner {}",

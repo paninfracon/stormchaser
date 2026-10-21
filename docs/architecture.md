@@ -297,7 +297,16 @@ Users, permissions and production settings are in [NATS](nats.md).
 * **Completion tokens**: a built-in step has a `completion_token`, which must
   accompany the event that finishes it. A runner step's token is cleared when its
   task is published; from then on only its assigned runner may report on it. A retry
-  gives the step a new token, so a late report from an earlier attempt is ignored.
+  gives a built-in step a new token, so a late report from an earlier attempt is
+  ignored. A step whose task may have been published and whose dispatch then failed
+  gets a new token too: the engine fails it, and no runner can report on it.
+* **Attempts**: a step's `attempt` counts its runs from 1. The engine puts it on the
+  step's task, and runners send it back on every report about the step (and label
+  the container or Job with it, so a runner that adopts one after a restart knows
+  it). A report on another attempt is ignored, so a late report from an attempt that
+  was retried cannot take the step back or end the next attempt. A report with no
+  attempt, from a runner that predates it, is ignored only while the step waits to
+  be retried.
 * **Fencing tokens**: each run has a `fencing_token`, set once when the run is
   created and copied into its tasks and events. It never changes, so the engine no
   longer compares it; the field stays in events for compatibility.
@@ -314,8 +323,8 @@ Users, permissions and production settings are in [NATS](nats.md).
   decisions and correlated events directly. Runners publish their events directly.
 * **Idempotent handlers**: an event delivered again for a step already finished does
   nothing except archive the run if that is still owed. A `start_pending` event for a
-  run that has started is skipped. A failure report for an attempt already put back
-  for retry is ignored.
+  run that has started is skipped. A report on an attempt already put back for retry
+  is ignored.
 
 #### Delivery and retries
 
@@ -348,8 +357,10 @@ One engine replica at a time runs the background workers. The replicas compete f
 Postgres advisory lock (`pg_try_advisory_lock`, key `0x73746f726d636872`) every 5
 seconds. The winner holds it on a connection taken out of the pool and checks every 5
 seconds that the connection answers; when it does not, the replica stops its workers
-and another takes the lock. An engine whose heartbeat or leader election task stops
-exits so that it is restarted. Shard assignment does not affect leadership.
+and another takes the lock. The lock's session has `idle_session_timeout` of 30
+seconds (PostgreSQL 14 and later) and short TCP keepalives, so the server releases
+the lock soon after a leader whose host died or was cut off stops checking. An engine
+whose heartbeat or leader election task stops exits so that it is restarted. Shard assignment does not affect leadership.
 
 | Worker | Interval | What it does |
 | :--- | :--- | :--- |
@@ -398,7 +409,9 @@ exits so that it is restarted. Shard assignment does not affect leadership.
   memory against the run's `max_cpu` and `max_memory` (`current_cpu_usage`,
   `current_memory_usage`). A step that does not fit goes back to `pending`; a step
   that asks for more than the whole run may use fails. The claim is given back when
-  the step finishes or its dispatch is lost.
+  the step finishes or its dispatch is lost. `step_instances.quota_held` records
+  whether a step holds its claim, so it is given back once however many of those
+  happen.
 * **Timeout**: the timeout worker aborts a run past its `timeout`, fails its
   unfinished steps and tells runners to stop them.
 * `max_storage` is stored but not enforced.

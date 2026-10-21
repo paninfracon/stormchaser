@@ -172,8 +172,10 @@ pub async fn dispatch_pending_steps(
 
         let can_dispatch = if max_cpu > 0.0 || max_mem > 0 {
             let mut conn = pool.acquire().await?;
-            crate::db::claim_step_quota(&mut *conn, run_id, req.cpu, req.memory, max_cpu, max_mem)
-                .await?
+            crate::db::claim_step_quota(
+                &mut *conn, run_id, step.id, req.cpu, req.memory, max_cpu, max_mem,
+            )
+            .await?
         } else {
             true // If no quota configured, allow dispatch
         };
@@ -211,7 +213,8 @@ pub async fn dispatch_pending_steps(
             if max_cpu > 0.0 || max_mem > 0 {
                 let mut conn = pool.acquire().await?;
                 let _ =
-                    crate::db::release_step_quota(&mut *conn, run_id, req.cpu, req.memory).await;
+                    crate::db::release_step_quota(&mut *conn, run_id, step.id, req.cpu, req.memory)
+                        .await;
             }
             requeue_or_fail(machine, &format!("dispatching it failed: {e:#}"), &pool).await?;
         }
@@ -222,7 +225,7 @@ pub async fn dispatch_pending_steps(
 
 /// Puts a claimed step back to pending if its task was never published. One whose task
 /// may have been published is failed instead: putting it back could run it twice.
-async fn requeue_or_fail(
+pub async fn requeue_or_fail(
     machine: crate::step_machine::StepMachine<crate::step_machine::state::Initializing>,
     why: &str,
     pool: &PgPool,
@@ -248,6 +251,10 @@ async fn requeue_or_fail(
                 "Run {}: step {} may have reached a runner and {}; failing it rather than risk running it twice",
                 run_id, step_id, why
             );
+            // Its task was handed over, so the token that would let the engine's report
+            // through was cleared, and no runner is recorded to report it. The engine
+            // takes it back, which also turns away any report from a runner that got it.
+            crate::db::steps::take_step_back_from_runners(&mut *conn, step_id).await?;
             crate::handler::integrations::utils::report_step_failed(
                 pool,
                 run_id,

@@ -264,6 +264,13 @@ pub struct WorkflowAbortedEvent {
 pub struct StepScheduledEvent {
     pub run_id: RunId,
     pub step_id: StepInstanceId,
+    /// Which attempt at the step this is about: the engine numbers a step's attempts
+    /// from 1, puts the number on the task, and runners send it back on every report, so
+    /// a late report on an attempt that was retried leaves the next attempt alone.
+    /// Optional only so that runners and engines of different versions understand
+    /// each other.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt: Option<i32>,
     pub fencing_token: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub step_name: Option<String>,
@@ -288,6 +295,10 @@ pub struct StepScheduledEvent {
 pub struct StepRunningEvent {
     pub run_id: RunId,
     pub step_id: StepInstanceId,
+    /// The attempt this report is about, as its task gave it (see
+    /// [`StepScheduledEvent::attempt`]). Absent from runners that predate it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt: Option<i32>,
     pub event_type: EventType,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runner_id: Option<String>,
@@ -298,6 +309,10 @@ pub struct StepRunningEvent {
 pub struct StepInitializingEvent {
     pub run_id: RunId,
     pub step_id: StepInstanceId,
+    /// The attempt this report is about, as its task gave it (see
+    /// [`StepScheduledEvent::attempt`]). Absent from runners that predate it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt: Option<i32>,
     pub event_type: EventType,
     pub runner_id: Option<String>,
     pub timestamp: DateTime<Utc>,
@@ -307,6 +322,10 @@ pub struct StepInitializingEvent {
 pub struct StepCompletedEvent {
     pub run_id: RunId,
     pub step_id: StepInstanceId,
+    /// The attempt this report is about, as its task gave it (see
+    /// [`StepScheduledEvent::attempt`]). Absent from runners that predate it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt: Option<i32>,
     pub fencing_token: i64,
     /// Secret proving the sender may finish a step the engine handles itself. Runners
     /// never have one.
@@ -335,6 +354,7 @@ impl StepCompletedEvent {
             run_id,
             step_id,
             fencing_token,
+            attempt: None,
             completion_token: None,
             event_type: EventType::Step(StepEventType::Completed),
             runner_id: None,
@@ -352,6 +372,10 @@ impl StepCompletedEvent {
 pub struct StepFailedEvent {
     pub run_id: RunId,
     pub step_id: StepInstanceId,
+    /// The attempt this report is about, as its task gave it (see
+    /// [`StepScheduledEvent::attempt`]). Absent from runners that predate it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt: Option<i32>,
     pub fencing_token: i64,
     /// Secret proving the sender may finish a step the engine handles itself. Runners
     /// never have one.
@@ -386,6 +410,7 @@ impl StepFailedEvent {
             run_id,
             step_id,
             fencing_token,
+            attempt: None,
             completion_token: None,
             event_type: EventType::Step(StepEventType::Failed),
             error: error.into(),

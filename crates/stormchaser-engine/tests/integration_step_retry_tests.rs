@@ -8,7 +8,10 @@ use serde_json::json;
 use std::sync::Arc;
 use stormchaser_engine::handler;
 use stormchaser_engine::workers::dispatch_due_retries;
-use stormchaser_model::events::{StepCompletedEvent, StepFailedEvent};
+use stormchaser_model::events::{
+    EventType, StepCompletedEvent, StepEventType, StepFailedEvent, StepInitializingEvent,
+    StepRunningEvent,
+};
 use stormchaser_model::step::StepStatus;
 use stormchaser_model::workflow::RunStatus;
 use stormchaser_model::{RunId, StepInstanceId};
@@ -76,8 +79,21 @@ async fn fail(
     run_id: RunId,
     step_id: StepInstanceId,
 ) {
+    fail_attempt(pool, nats_client, run_id, step_id, None).await;
+}
+
+/// The runner's report that `attempt` failed (`None`: a runner that does not number
+/// attempts)
+async fn fail_attempt(
+    pool: &sqlx::PgPool,
+    nats_client: &async_nats::Client,
+    run_id: RunId,
+    step_id: StepInstanceId,
+    attempt: Option<i32>,
+) {
     let mut event = StepFailedEvent::new(run_id, step_id, 0, "exit status 1".to_string());
     event.runner_id = Some(RUNNER.to_string());
+    event.attempt = attempt;
     handler::handle_step_failed(
         event,
         pool.clone(),
@@ -98,6 +114,37 @@ async fn retry_now(pool: &sqlx::PgPool, nats_client: &async_nats::Client, step_i
     dispatch_due_retries(pool, nats_client, &tls_reloader().await)
         .await
         .unwrap();
+}
+
+/// The runner's report that it has started `attempt`
+async fn report_running(
+    pool: &sqlx::PgPool,
+    run_id: RunId,
+    step_id: StepInstanceId,
+    attempt: Option<i32>,
+) {
+    handler::handle_step_running(
+        StepRunningEvent {
+            run_id,
+            step_id,
+            attempt,
+            event_type: EventType::Step(StepEventType::Running),
+            runner_id: Some(RUNNER.to_string()),
+            timestamp: chrono::Utc::now(),
+        },
+        pool.clone(),
+    )
+    .await
+    .unwrap();
+}
+
+/// The runner the step is with
+async fn step_runner(pool: &sqlx::PgPool, step_id: StepInstanceId) -> Option<String> {
+    sqlx::query_scalar("SELECT runner_id FROM step_instances WHERE id = $1")
+        .bind(step_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
 }
 
 async fn run_status(pool: &sqlx::PgPool, run_id: RunId) -> RunStatus {
@@ -210,6 +257,117 @@ async fn a_failure_delivered_again_does_not_use_up_a_retry() {
         (StepStatus::Pending, 2, true)
     );
     assert_eq!(run_status(&pool, run_id).await, RunStatus::Running);
+
+    delete_run(&pool, run_id).await;
+}
+
+#[tokio::test]
+async fn a_late_start_report_from_the_failed_attempt_leaves_the_retry_waiting() {
+    let pool = setup_db().await;
+    let nats_client = nats().await;
+    let run_id = start_run(&pool, &nats_client).await;
+
+    let flaky = running_step(&pool, run_id).await;
+    fail_attempt(&pool, &nats_client, run_id, flaky, Some(1)).await;
+
+    // Its reports arrive on different subjects, so the first attempt's start can come
+    // after its failure, from a runner that numbers attempts or one that does not
+    for attempt in [Some(1), None] {
+        report_running(&pool, run_id, flaky, attempt).await;
+        handler::handle_step_initializing(
+            StepInitializingEvent {
+                run_id,
+                step_id: flaky,
+                attempt,
+                event_type: EventType::Step(StepEventType::Initializing),
+                runner_id: Some(RUNNER.to_string()),
+                timestamp: chrono::Utc::now(),
+            },
+            pool.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            step_state(&pool, flaky).await,
+            (StepStatus::Pending, 2, true),
+            "attempt {attempt:?}'s late report took the step"
+        );
+        assert_eq!(step_runner(&pool, flaky).await, None);
+    }
+
+    delete_run(&pool, run_id).await;
+}
+
+#[tokio::test]
+async fn a_report_on_the_failed_attempt_leaves_the_next_one_alone() {
+    let pool = setup_db().await;
+    let nats_client = nats().await;
+    let run_id = start_run(&pool, &nats_client).await;
+
+    let flaky = running_step(&pool, run_id).await;
+    fail_attempt(&pool, &nats_client, run_id, flaky, Some(1)).await;
+    retry_now(&pool, &nats_client, flaky).await;
+    assert_eq!(
+        step_state(&pool, flaky).await,
+        (StepStatus::Initializing, 2, false)
+    );
+
+    // The first failure delivered again once the second attempt has been handed out,
+    // and a completion of the first attempt, change nothing
+    fail_attempt(&pool, &nats_client, run_id, flaky, Some(1)).await;
+    let mut late = StepCompletedEvent::new(run_id, flaky, 0);
+    late.runner_id = Some(RUNNER.to_string());
+    late.attempt = Some(1);
+    handler::handle_step_completed(
+        late,
+        pool.clone(),
+        nats_client.clone(),
+        Arc::new(None),
+        tls_reloader().await,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        step_state(&pool, flaky).await,
+        (StepStatus::Initializing, 2, false)
+    );
+    assert_eq!(run_status(&pool, run_id).await, RunStatus::Running);
+
+    // The second attempt's own reports are taken
+    report_running(&pool, run_id, flaky, Some(2)).await;
+    assert_eq!(step_state(&pool, flaky).await.0, StepStatus::Running);
+    fail_attempt(&pool, &nats_client, run_id, flaky, Some(2)).await;
+    assert_eq!(
+        step_state(&pool, flaky).await,
+        (StepStatus::Pending, 3, true)
+    );
+
+    delete_run(&pool, run_id).await;
+}
+
+#[tokio::test]
+async fn the_runner_that_starts_a_claimed_step_is_recorded() {
+    let pool = setup_db().await;
+    let nats_client = nats().await;
+    let run_id = start_run(&pool, &nats_client).await;
+
+    let flaky: StepInstanceId =
+        sqlx::query_scalar("SELECT id FROM step_instances WHERE run_id = $1")
+            .bind(run_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(step_state(&pool, flaky).await.0, StepStatus::Initializing);
+    assert_eq!(step_runner(&pool, flaky).await, None);
+
+    report_running(&pool, run_id, flaky, Some(1)).await;
+
+    assert_eq!(step_state(&pool, flaky).await.0, StepStatus::Running);
+    assert_eq!(
+        step_runner(&pool, flaky).await.as_deref(),
+        Some(RUNNER),
+        "the liveness check and the result check go by the step's runner"
+    );
 
     delete_run(&pool, run_id).await;
 }

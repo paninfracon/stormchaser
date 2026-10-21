@@ -503,6 +503,48 @@ pub(crate) async fn reporter_is_assigned_runner(
     false
 }
 
+/// Whether a report is about the step's current attempt.
+///
+/// A retry hands the step out again with no runner, so a late report on the attempt
+/// before it would otherwise pass every other check: it would take the waiting step, or
+/// fail or finish the next attempt. A runner names the attempt its task gave it. A
+/// report that names none comes from a runner that predates attempt numbers; it is taken
+/// to be about the current attempt, unless the step is waiting to be retried, when no
+/// attempt is out.
+pub(crate) async fn report_is_current_attempt<'a, E>(
+    executor: E,
+    instance: &stormchaser_model::step::StepInstance,
+    reported: Option<i32>,
+) -> Result<bool>
+where
+    E: sqlx::Executor<'a, Database = Postgres>,
+{
+    let current = crate::db::step_attempt(executor, instance.id).await?;
+    let current_attempt = match reported {
+        Some(reported) => reported == current,
+        None => !(instance.status == StepStatus::Pending && current > 1),
+    };
+    if !current_attempt {
+        tracing::debug!(
+            "Ignoring a report on {} of step {}: it is on attempt {}",
+            reported.map_or_else(
+                || "an earlier attempt".to_string(),
+                |a| format!("attempt {a}")
+            ),
+            instance.id,
+            current
+        );
+    }
+    Ok(current_attempt)
+}
+
+/// The attempt a storage report names. These reports are untyped JSON.
+pub(crate) fn reported_attempt(payload: &Value) -> Option<i32> {
+    payload["attempt"]
+        .as_i64()
+        .and_then(|a| i32::try_from(a).ok())
+}
+
 /// Whether `reporter` may move a step that is with a runner along: the runner it is
 /// assigned to, or, while none is, any runner that names itself. The router has already
 /// checked that a runner with a key signed the message.

@@ -264,6 +264,7 @@ impl DockerContainerMachine<state::Running> {
                 nats,
                 self.metadata.run_id,
                 self.metadata.step_id,
+                self.metadata.attempt,
                 &self.metadata.runner_id,
                 true,
             )
@@ -689,6 +690,7 @@ mod tests {
             step_id: Uuid::new_v4(),
             runner_id: "test_runner".to_string(),
             fencing_token: 0,
+            attempt: None,
             step_dsl: Step {
                 name: "test_step".to_string(),
                 r#type: "RunContainer".to_string(),
@@ -807,6 +809,7 @@ mod tests {
             step_id: Uuid::new_v4(),
             runner_id: "test_runner".to_string(),
             fencing_token: 0,
+            attempt: None,
             step_dsl,
             received_at: chrono::Utc::now(),
             encryption_key: None,
@@ -872,6 +875,7 @@ mod tests {
             step_id: Uuid::new_v4(),
             runner_id: "test_runner".to_string(),
             fencing_token: 0,
+            attempt: None,
             step_dsl: step(name),
             received_at: chrono::Utc::now(),
             encryption_key: None,

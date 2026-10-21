@@ -121,6 +121,12 @@ async fn handle_orphaned_job(
         job_name, step_id, run_id, cluster_name
     );
 
+    let attempt = job
+        .metadata
+        .labels
+        .as_ref()
+        .and_then(|labels| labels.get("stormchaser-attempt"))
+        .and_then(|attempt| attempt.parse::<i32>().ok());
     let annotations = job.metadata.annotations.as_ref();
     let received_at = annotations
         .and_then(|a| a.get("stormchaser.v1.io/received-at"))
@@ -202,6 +208,7 @@ async fn handle_orphaned_job(
                             run_id,
                             step_id,
                             fencing_token,
+                            attempt,
                             step_dsl: step_dsl.clone(),
                             namespace,
                             received_at,
@@ -229,6 +236,7 @@ async fn handle_orphaned_job(
             run_id,
             step_id,
             fencing_token,
+            attempt,
             step_dsl: step_dsl.clone(),
             namespace: namespace.clone(),
             received_at,
@@ -251,7 +259,7 @@ async fn handle_orphaned_job(
             async move {
                 loop {
                     if let Err(e) = stormchaser_model::nats::announce_step_running(
-                        &nats, run_id, step_id, &runner_id,
+                        &nats, run_id, step_id, attempt, &runner_id,
                     )
                     .await
                     {
@@ -275,8 +283,10 @@ async fn handle_orphaned_job(
         if let Some(remaining) = ADOPTION_SETTLE.checked_sub(adopted_at.elapsed()) {
             tokio::time::sleep(remaining).await;
         }
-        if let Err(e) =
-            stormchaser_model::nats::announce_step_running(&nats, run_id, step_id, &runner_id).await
+        if let Err(e) = stormchaser_model::nats::announce_step_running(
+            &nats, run_id, step_id, attempt, &runner_id,
+        )
+        .await
         {
             error!("Failed to announce adoption of step {}: {:?}", step_id, e);
         }
@@ -306,6 +316,7 @@ async fn handle_orphaned_job(
                         run_id: RunId::new(run_id),
                         step_id: StepInstanceId::new(step_id),
                         fencing_token,
+                        attempt,
                         completion_token: None,
                         event_type: EventType::Step(StepEventType::Completed),
                         runner_id: Some(r_id.clone()),
@@ -359,6 +370,7 @@ async fn handle_orphaned_job(
                         run_id: RunId::new(run_id),
                         step_id: StepInstanceId::new(step_id),
                         fencing_token,
+                        attempt,
                         completion_token: None,
                         event_type: EventType::Step(StepEventType::Failed),
                         error: reason,
