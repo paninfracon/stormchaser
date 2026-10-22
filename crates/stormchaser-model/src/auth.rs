@@ -1,18 +1,9 @@
-//! Authentication and authorization models and OPA client.
+//! Who is asking (claims from a verified token) and what services ask policy. The client
+//! that asks is `stormchaser_opa::OpaClient`.
 
 use crate::id::RunId;
-use anyhow::{Context, Result};
-use async_trait::async_trait;
-#[cfg(not(target_arch = "wasm32"))]
-use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
-#[cfg(not(target_arch = "wasm32"))]
-use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-#[cfg(not(target_arch = "wasm32"))]
-use std::sync::Arc;
-#[cfg(not(target_arch = "wasm32"))]
-use tracing::debug;
 
 /// Extracted claims from a JWT token.
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -29,158 +20,14 @@ pub struct Claims {
     pub groups: Vec<String>,
 }
 
-/// Trait for executing Open Policy Agent (OPA) policies compiled to WebAssembly.
-#[cfg(not(target_arch = "wasm32"))]
-#[async_trait]
-pub trait OpaWasmExecutor: Send + Sync {
-    /// Evaluates a WASM-compiled OPA policy against the given input.
-    async fn evaluate(&self, entrypoint: &str, input: &Value) -> Result<bool>;
-}
-
-/// Client for interacting with an Open Policy Agent (OPA) server or WASM module.
-#[cfg(not(target_arch = "wasm32"))]
-#[derive(Clone)]
-pub struct OpaClient {
-    url: Option<String>,
-    http_client: ClientWithMiddleware,
-    wasm_executor: Option<Arc<dyn OpaWasmExecutor>>,
-    entrypoint: String,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl std::fmt::Debug for OpaClient {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OpaClient")
-            .field("url", &self.url)
-            .field("wasm_configured", &self.wasm_executor.is_some())
-            .field("entrypoint", &self.entrypoint)
-            .finish()
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[derive(Debug, Serialize)]
-struct OpaInput<T> {
-    input: T,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[derive(Debug, Deserialize)]
-struct OpaResponse {
-    result: bool,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl OpaClient {
-    /// Creates a new OpaClient with the given URL and TLS configuration.
-    pub fn new(url: Option<String>, tls_config: Option<Arc<rustls::ClientConfig>>) -> Self {
-        let retry_policy = ExponentialBackoff::builder().build_with_max_retries(3);
-        let mut builder = reqwest::Client::builder();
-
-        if let Some(config) = tls_config {
-            builder = builder.use_preconfigured_tls(config);
+impl Claims {
+    /// The user these claims identify, as policy sees them.
+    pub fn opa_subject(&self) -> OpaSubject<'_> {
+        OpaSubject {
+            sub: &self.sub,
+            email: self.email.as_deref(),
+            groups: &self.groups,
         }
-
-        let http_client =
-            ClientBuilder::new(builder.build().unwrap_or_else(|_| reqwest::Client::new()))
-                .with(RetryTransientMiddleware::new_with_policy(retry_policy))
-                .build();
-
-        Self {
-            url,
-            http_client,
-            wasm_executor: None,
-            entrypoint: "stormchaser/allow".to_string(),
-        }
-    }
-
-    /// Configures the client to use a WASM executor.
-    pub fn with_wasm_executor(mut self, executor: Arc<dyn OpaWasmExecutor>) -> Self {
-        self.wasm_executor = Some(executor);
-        self
-    }
-
-    /// Sets the entrypoint for the OPA policy.
-    pub fn with_entrypoint(mut self, entrypoint: String) -> Self {
-        self.entrypoint = entrypoint;
-        self
-    }
-
-    /// Returns true if the client is configured with either a URL or a WASM executor.
-    pub fn is_configured(&self) -> bool {
-        self.url.is_some() || self.wasm_executor.is_some()
-    }
-
-    /// Flexible check that sends any serializable context to OPA
-    pub async fn check_context<T: Serialize>(&self, context: T) -> Result<bool> {
-        // 1. Try WASM executor first if configured
-        if let Some(executor) = &self.wasm_executor {
-            let context_val = serde_json::to_value(&context)?;
-            return executor.evaluate(&self.entrypoint, &context_val).await;
-        }
-
-        // 2. Fallback to HTTP OPA if configured
-        let url = match &self.url {
-            Some(url) => url,
-            None => return Ok(true), // No-op if not configured
-        };
-
-        debug!("Checking OPA policy at {} with custom context", url);
-
-        let input = OpaInput { input: context };
-
-        let response = self
-            .http_client
-            .post(url)
-            .json(&input)
-            .send()
-            .await
-            .context("Failed to reach OPA server")?;
-
-        if !response.status().is_success() {
-            return Err(anyhow::anyhow!(
-                "OPA server returned error: {}",
-                response.status()
-            ));
-        }
-
-        let opa_res: OpaResponse = response
-            .json()
-            .await
-            .context("Failed to parse OPA response")?;
-
-        Ok(opa_res.result)
-    }
-}
-
-/// Trait for authorizing requests using an Open Policy Agent (OPA).
-#[async_trait]
-pub trait OpaAuthorizer: Send + Sync {
-    /// Checks the given context against the OPA policy.
-    async fn check(&self, context: ApiOpaContext<'_>) -> Result<bool>;
-    /// Checks if a workflow approval is authorized by OPA.
-    async fn check_approval(&self, context: ApprovalOpaContext<'_>) -> Result<bool>;
-    /// Checks whether a user may act on one object (a run, connection, webhook, event
-    /// rule or cron schedule).
-    async fn check_resource(&self, context: ResourceOpaContext<'_>) -> Result<bool>;
-    /// Returns true if an OPA URL is configured.
-    fn is_configured(&self) -> bool;
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[async_trait]
-impl OpaAuthorizer for OpaClient {
-    async fn check(&self, context: ApiOpaContext<'_>) -> Result<bool> {
-        self.check_context(context).await
-    }
-    async fn check_approval(&self, context: ApprovalOpaContext<'_>) -> Result<bool> {
-        self.check_context(context).await
-    }
-    async fn check_resource(&self, context: ResourceOpaContext<'_>) -> Result<bool> {
-        self.check_context(context).await
-    }
-    fn is_configured(&self) -> bool {
-        self.is_configured()
     }
 }
 
@@ -191,8 +38,8 @@ pub struct ApiOpaContext<'a> {
     pub path: &'a str,
     /// The HTTP method.
     pub method: &'a str,
-    /// The optional authentication token.
-    pub token: Option<&'a str>,
+    /// Who is asking, as their verified token says. `None` without a valid token.
+    pub subject: Option<OpaSubject<'a>>,
 }
 
 /// Context for OPA checks in the Engine after DSL parsing
@@ -222,8 +69,6 @@ pub struct ApprovalOpaContext<'a> {
     pub run_outputs: Value,
     /// The approver's verified identity, when they are logged in.
     pub approver: Option<OpaSubject<'a>>,
-    /// The optional authentication token of the approver.
-    pub token: Option<&'a str>,
 }
 
 /// A user as policy sees them: the identity the API verified from their token.
@@ -233,6 +78,8 @@ pub struct OpaSubject<'a> {
     pub sub: &'a str,
     /// Email address, when the token carries one.
     pub email: Option<&'a str>,
+    /// The identity provider's groups, as the token carries them.
+    pub groups: &'a [String],
 }
 
 /// The object a resource check is about.
@@ -257,34 +104,4 @@ pub struct ResourceOpaContext<'a> {
     pub resource: OpaResource<'a>,
     /// Who is acting.
     pub subject: OpaSubject<'a>,
-    /// The caller's token, for policies that read further claims such as groups.
-    pub token: Option<&'a str>,
-}
-
-#[cfg(all(test, not(target_arch = "wasm32")))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_opa_client_config() {
-        let client = OpaClient::new(None, None);
-        assert!(!client.is_configured());
-        assert!(!OpaAuthorizer::is_configured(&client));
-
-        let client = OpaClient::new(Some("http://localhost:8181".to_string()), None);
-        assert!(client.is_configured());
-        assert_eq!(client.entrypoint, "stormchaser/allow");
-
-        let client = client.with_entrypoint("custom/allow".to_string());
-        assert_eq!(client.entrypoint, "custom/allow");
-    }
-
-    #[test]
-    fn test_opa_client_debug() {
-        let client = OpaClient::new(Some("http://localhost:8181".to_string()), None);
-        let debug_str = format!("{:?}", client);
-        assert!(debug_str.contains("OpaClient"));
-        assert!(debug_str.contains("url: Some(\"http://localhost:8181\")"));
-        assert!(debug_str.contains("wasm_configured: false"));
-    }
 }

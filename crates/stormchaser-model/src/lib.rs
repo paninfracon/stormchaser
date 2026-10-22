@@ -9,6 +9,8 @@ pub const APPLICATION_JSON: &str = "application/json";
 pub mod id;
 pub use id::*;
 
+/// The API's requests and responses, shared with its clients.
+pub mod api;
 /// Authentication and authorization models.
 pub mod auth;
 /// Storage backend and artifact registry models.
@@ -16,9 +18,6 @@ pub mod connections;
 /// Cron scheduling definitions.
 pub mod cron;
 /// Domain-Specific Language (DSL) abstract syntax tree and types.
-#[cfg(not(target_arch = "wasm32"))]
-/// How services connect to PostgreSQL over TLS.
-pub mod db_tls;
 pub mod dsl;
 /// System event and correlation models.
 pub mod event;
@@ -30,16 +29,11 @@ pub mod events;
 pub mod hcl_eval;
 /// Keeps workflow-supplied HCL from overflowing the stack.
 pub mod hcl_guard;
-/// Logging configuration and log streaming types.
-pub mod logging;
 /// Browser login pieces shared by the CLI and the TUI.
 #[cfg(not(target_arch = "wasm32"))]
 pub mod login_flow;
 /// NATS helpers.
 pub mod nats;
-/// SSRF protection for outbound HTTP requests.
-#[cfg(not(target_arch = "wasm32"))]
-pub mod net_guard;
 /// Outbox pattern models for reliable message publishing.
 pub mod outbox;
 /// Matching container images to registry credentials.
@@ -65,13 +59,11 @@ pub mod test_report;
 pub mod workflow;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use auth::OpaClient;
 pub use auth::{ApiOpaContext, Claims, EngineOpaContext};
 pub use connections::{Connection, ConnectionType};
 pub use dsl::{ApprovalSpec, WaitEventSpec};
 pub use event::{ApprovalRegistry, EventCorrelation};
 pub use event_rules::{EventRule, WebhookConfig};
-pub use logging::LogBackend;
 pub use outbox::OutboxMessage;
 pub use runner::{Runner, RunnerStatus, StepDefinition};
 pub use step::{StepInstance, StepOutput, StepStatus};

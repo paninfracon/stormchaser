@@ -1,9 +1,11 @@
+#![expect(clippy::disallowed_methods, reason = "tests call the OPA they start")]
 use std::env;
 use std::net::TcpListener;
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
-use stormchaser_model::auth::{ApiOpaContext, OpaAuthorizer, OpaClient};
+use stormchaser_model::auth::{ApiOpaContext, OpaSubject};
+use stormchaser_opa::{OpaAuthorizer, OpaClient};
 use uuid::Uuid;
 
 /// Pinned OPA image used by integration tests.
@@ -16,6 +18,15 @@ fn get_free_port() -> u16 {
         .local_addr()
         .unwrap()
         .port()
+}
+
+/// A caller with a verified token.
+fn someone() -> OpaSubject<'static> {
+    OpaSubject {
+        sub: "mcp-tester",
+        email: Some("mcp-tester@paninfracon.net"),
+        groups: &[],
+    }
 }
 
 struct ContainerGuard {
@@ -102,7 +113,7 @@ async fn test_mcp_opa_policy() {
     let ctx = ApiOpaContext {
         path: "/api/v1/runs",
         method: "GET",
-        token: None,
+        subject: None,
     };
     assert!(
         client.check(ctx).await.unwrap(),
@@ -113,7 +124,7 @@ async fn test_mcp_opa_policy() {
     let ctx = ApiOpaContext {
         path: "/api/v1/runs",
         method: "POST",
-        token: None,
+        subject: None,
     };
     assert!(
         !client.check(ctx).await.unwrap(),
@@ -124,7 +135,7 @@ async fn test_mcp_opa_policy() {
     let ctx = ApiOpaContext {
         path: "/api/v1/auth/login",
         method: "POST",
-        token: None,
+        subject: None,
     };
     assert!(
         client.check(ctx).await.unwrap(),
@@ -135,7 +146,7 @@ async fn test_mcp_opa_policy() {
     let ctx = ApiOpaContext {
         path: "/api/v1/auth/exchange",
         method: "POST",
-        token: None,
+        subject: None,
     };
     assert!(
         client.check(ctx).await.unwrap(),
@@ -146,7 +157,7 @@ async fn test_mcp_opa_policy() {
     let ctx = ApiOpaContext {
         path: "/api/v1/mcp/messages",
         method: "POST",
-        token: None,
+        subject: None,
     };
     assert!(
         client.check(ctx).await.unwrap(),
@@ -157,7 +168,7 @@ async fn test_mcp_opa_policy() {
     let ctx = ApiOpaContext {
         path: "/api/v1/mcp/something_else",
         method: "POST",
-        token: None,
+        subject: None,
     };
     assert!(
         !client.check(ctx).await.unwrap(),
@@ -168,7 +179,7 @@ async fn test_mcp_opa_policy() {
     let ctx = ApiOpaContext {
         path: "/api/v1/runs",
         method: "POST",
-        token: Some("dummy_token"),
+        subject: Some(someone()),
     };
     assert!(
         client.check(ctx).await.unwrap(),
@@ -180,7 +191,7 @@ async fn test_mcp_opa_policy() {
     let ctx = ApiOpaContext {
         path: "/api/v1/mcp/messages",
         method: "POST",
-        token: Some("dummy_token"),
+        subject: Some(someone()),
     };
     assert!(
         client.check(ctx).await.unwrap(),
@@ -191,7 +202,7 @@ async fn test_mcp_opa_policy() {
     let ctx = ApiOpaContext {
         path: "/api/v1/mcp/something_else",
         method: "POST",
-        token: Some("dummy_token"),
+        subject: Some(someone()),
     };
     assert!(
         !client.check(ctx).await.unwrap(),
@@ -202,32 +213,32 @@ async fn test_mcp_opa_policy() {
     // with or without a token; other non-read-only methods and paths stay blocked.
     let cases = [
         ("/api/v1/mcp", "POST", None, true),
-        ("/api/v1/mcp", "POST", Some("dummy_token"), true),
+        ("/api/v1/mcp", "POST", Some(someone()), true),
         ("/api/v1/mcp", "DELETE", None, true),
-        ("/api/v1/mcp", "DELETE", Some("dummy_token"), true),
+        ("/api/v1/mcp", "DELETE", Some(someone()), true),
         ("/api/v1/mcp", "GET", None, true),
         ("/api/v1/mcp/", "POST", None, true),
         ("/api/v1/mcp", "PUT", None, false),
-        ("/api/v1/mcp", "PATCH", Some("dummy_token"), false),
-        ("/api/v1/mcp/messages", "PUT", Some("dummy_token"), false),
+        ("/api/v1/mcp", "PATCH", Some(someone()), false),
+        ("/api/v1/mcp/messages", "PUT", Some(someone()), false),
         (
             "/api/v1/mcp/something_else",
             "DELETE",
-            Some("dummy_token"),
+            Some(someone()),
             false,
         ),
     ];
-    for (path, method, token, expected) in cases {
+    for (path, method, subject, expected) in cases {
+        let authenticated = subject.is_some();
         let ctx = ApiOpaContext {
             path,
             method,
-            token,
+            subject,
         };
         assert_eq!(
             client.check(ctx).await.unwrap(),
             expected,
-            "{method} {path} (token: {}) should be {}",
-            token.is_some(),
+            "{method} {path} (authenticated: {authenticated}) should be {}",
             if expected { "allowed" } else { "denied" }
         );
     }
@@ -236,7 +247,7 @@ async fn test_mcp_opa_policy() {
     let ctx = ApiOpaContext {
         path: "/api/v1/mcp/sse",
         method: "GET",
-        token: Some("dummy_token"),
+        subject: Some(someone()),
     };
     assert!(
         client.check(ctx).await.unwrap(),
@@ -247,7 +258,7 @@ async fn test_mcp_opa_policy() {
     let ctx = ApiOpaContext {
         path: "/api/v1/mcp/sse",
         method: "GET",
-        token: None,
+        subject: None,
     };
     assert!(
         client.check(ctx).await.unwrap(),

@@ -10,6 +10,8 @@ license.workspace = true
 
 [dependencies]
 stormchaser-model = { workspace = true }
+stormchaser-runner-core = { workspace = true }
+async-trait = { workspace = true }
 tokio = { workspace = true }
 futures = { workspace = true }
 async-nats = { workspace = true }

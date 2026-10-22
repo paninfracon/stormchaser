@@ -33,6 +33,10 @@ pub async fn handle_step_running(
         step_id, run_id, runner_id
     );
 
+    if !super::helpers::report_is_current_attempt(&pool, &instance, event.attempt).await? {
+        return Ok(());
+    }
+
     let mut conn = pool.acquire().await?;
 
     // 2. Use state machine to transition. Before it runs, only the runner that holds the
@@ -48,26 +52,25 @@ pub async fn handle_step_running(
     }
     if instance.status == stormchaser_model::step::StepStatus::UnpackingSfs {
         let machine =
-            crate::step_machine::StepMachine::<crate::step_machine::state::UnpackingSfs>::from_instance(
+            crate::step_machine::StepMachine::<crate::step_machine::state::UnpackingSfs>::load(
                 instance.clone(),
-            );
+            )?;
         let _ = machine.start_running(&mut *conn).await?;
     } else if instance.status == stormchaser_model::step::StepStatus::Initializing {
         let machine =
-            crate::step_machine::StepMachine::<crate::step_machine::state::Initializing>::from_instance(
+            crate::step_machine::StepMachine::<crate::step_machine::state::Initializing>::load(
                 instance.clone(),
-            );
-        let _ = machine.start(&mut *conn).await?;
+            )?;
+        // Claimed by the engine before it was handed out, so no runner is on it yet
+        // unless its initializing report came first
+        machine.start(event.runner_id.clone(), &mut conn).await?;
     } else if instance.status == stormchaser_model::step::StepStatus::Pending {
-        // Fallback in case Initializing was missed
-        let machine =
-            crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::from_instance(
-                instance.clone(),
-            );
-        let machine = machine
-            .initializing(runner_id.to_string(), &mut *conn)
-            .await?;
-        let _ = machine.start(&mut *conn).await?;
+        // Its report that it took the step has not arrived yet
+        crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::load(
+            instance.clone(),
+        )?
+        .start(runner_id.to_string(), &mut conn)
+        .await?;
     } else {
         // Already running. If another runner now reports it, that runner picked the step
         // up (it adopted the container or job after a restart, or took the redelivered

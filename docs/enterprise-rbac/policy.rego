@@ -4,21 +4,18 @@ import rego.v1
 
 default allow := false
 
-# Handle JWT decoding safely: guard against a null/absent token (e.g. EngineContext)
-# before calling io.jwt.decode, which would raise a built-in type error on null input.
-token_payload := payload if {
-	input.token != null
-	[_, payload, _] := io.jwt.decode(input.token)
-} else := {"groups": [], "email": ""}
+# Who is asking: the identity the API verified from their token, {sub, email, groups}.
+# Requests and resource questions carry it as `subject`, approvals as `approver`. The
+# token itself is never sent.
+nobody := {"groups": [], "email": ""}
+
+caller := object.union(nobody, input.subject) if {
+	is_object(input.subject)
+} else := object.union(nobody, input.approver) if {
+	is_object(input.approver)
+} else := nobody
 
 # --- Core Authorization Logic ---
-
-allow if {
-	# 1. Allow unauthenticated/public API routes explicitly.
-	input.method
-	input.path
-	is_public_api_route
-}
 
 allow if {
 	# 2. Check if it's an API request (has method/path)
@@ -37,10 +34,10 @@ allow if {
 }
 
 allow if {
-	# 4. Check if it's an Approval request (has step_ast, inputs, token, initiating_user)
+	# 4. Check if it's an Approval request (has step_ast, inputs, approver, initiating_user)
 	input.step_ast
 	input.inputs
-	input.token
+	input.approver
 	input.initiating_user
 	is_valid_domain
 	has_approval_permission
@@ -48,49 +45,23 @@ allow if {
 
 allow if {
 	# 5. Check if it's a resource request: may this user act on this object?
-	# (has action, resource {type, id, owner} and subject {sub, email})
+	# (has action, resource {type, id, owner} and subject {sub, email, groups})
 	input.action
 	input.resource
 	has_resource_permission
 }
 
-# Public API endpoints that must remain accessible without a token.
-is_public_api_route if {
-	input.method == "GET"
-	input.path == "/api/v1/auth/login"
-}
-
-is_public_api_route if {
-	input.method == "POST"
-	input.path == "/api/v1/auth/exchange"
-}
-
-is_public_api_route if {
-	input.method == "GET"
-	input.path == "/api/health"
-}
-
-is_public_api_route if {
-	input.method == "GET"
-	input.path == "/healthz"
-}
-
-is_public_api_route if {
-	input.method == "GET"
-	input.path == "/readyz"
-}
-
-is_public_api_route if {
-	input.method == "GET"
-	input.path == "/livez"
-}
+# The API does not ask policy about health checks, login, token exchange and refresh,
+# webhook deliveries, approval links or cron triggers, so they need no rules here.
+# Every other request reaches policy with a verified subject, except calls to the MCP
+# transport, which carry none.
 
 # --- Data-Driven RBAC ---
 
-# Check if the user's groups in the JWT overlap with the allowed IDP groups for a specific Stormchaser role
+# Check if the user's identity provider groups overlap with the allowed IDP groups for a specific Stormchaser role
 user_has_role(role_name) if {
 	allowed_idp_groups := data.role_mappings[role_name]
-	some user_group in token_payload.groups
+	some user_group in caller.groups
 	user_group in allowed_idp_groups
 }
 
@@ -139,7 +110,7 @@ has_api_permission if {
 # Operators can manage webhooks and cron workflows
 has_api_permission if {
 	user_has_role("operator")
-	input.method in ["GET", "POST", "DELETE"]
+	input.method in ["GET", "POST", "PATCH", "DELETE"]
 	startswith(input.path, "/api/v1/webhooks")
 }
 
@@ -149,14 +120,8 @@ has_api_permission if {
 	startswith(input.path, "/api/v1/cron-workflows")
 }
 
-# Security can view reports
-has_api_permission if {
-	user_has_role("security")
-	input.method == "GET"
-	startswith(input.path, "/api/v1/reports")
-}
-
-# Security can view runs
+# Security can view runs, and with them their test reports
+# (/api/v1/runs/{id}/reports)
 has_api_permission if {
 	user_has_role("security")
 	input.method == "GET"
@@ -219,7 +184,7 @@ has_resource_permission if {
 # Only allow users from approved corporate domains
 is_valid_domain if {
 	some domain in data.allowed_email_domains
-	endswith(token_payload.email, concat("", ["@", domain]))
+	endswith(caller.email, concat("", ["@", domain]))
 }
 
 # --- Engine ABAC Policies ---
@@ -241,10 +206,13 @@ engine_deny if {
 	not email_has_role(input.initiating_user, "operator")
 }
 
-# ABAC Example 2: Prevent running containers with 'privileged' flag unless admin
+# ABAC Example 2: Prevent running privileged containers unless admin.
+# workflow_ast is the whole parsed workflow; steps nest under `steps` (and `on_failure`,
+# `finally`), so walk all of it. Each step has `name`, `type` and `spec`.
 engine_deny if {
-	input.workflow_ast.step_type == "RunContainer"
-	input.workflow_ast.config.privileged == true
+	walk(input.workflow_ast, [_, node])
+	node.type == "RunContainer"
+	node.spec.privileged == true
 	not email_has_role(input.initiating_user, "admin")
 }
 
@@ -256,42 +224,32 @@ has_approval_permission if {
 	user_is_in_approvers_list
 }
 
+# A step's approvers are in its spec: `spec.approvers`
+step_approvers := approvers if {
+	approvers := object.get(object.get(input.step_ast, "spec", {}), "approvers", [])
+	is_array(approvers)
+} else := []
+
+# If the step doesn't name approvers, anyone can approve (subject to other policies)
+user_is_in_approvers_list if count(step_approvers) == 0
+
+# An approver may be named by email or subject id, as the shipped policy reads them
 user_is_in_approvers_list if {
-	# If the step doesn't specify approvers, anyone can approve (subject to other policies)
-	spec := object.get(input.step_ast, "params", {}) # Check params for intrinsic/template steps or spec for native
-	approvers := object.get(spec, "approvers", [])
-	count(approvers) == 0
+	some approver in step_approvers
+	approver in {caller.email, object.get(caller, "sub", "")}
 }
 
+# This example also lets an approver entry name a Stormchaser role (e.g. "admin"),
+# mapped to IdP groups through data.role_mappings
 user_is_in_approvers_list if {
-	spec := object.get(input.step_ast, "params", {})
-	approvers := object.get(spec, "approvers", [])
-	count(approvers) > 0
-	some approver in approvers
-
-	# Map the requested approver (e.g. "admin") to IDP groups
-	user_has_role(approver)
-}
-
-# Fallback to check "spec" object if "params" didn't match (for native vs templated steps)
-user_is_in_approvers_list if {
-	spec := object.get(input.step_ast, "spec", {})
-	approvers := object.get(spec, "approvers", [])
-	count(approvers) == 0
-}
-
-user_is_in_approvers_list if {
-	spec := object.get(input.step_ast, "spec", {})
-	approvers := object.get(spec, "approvers", [])
-	count(approvers) > 0
-	some approver in approvers
+	some approver in step_approvers
 	user_has_role(approver)
 }
 
 # Approval ABAC Example 1: Separation of Duties (SoD)
 approval_deny if {
 	# Prevent the person who initiated the run from approving their own manual steps
-	token_payload.email == input.initiating_user
+	caller.email == input.initiating_user
 }
 
 # Approval ABAC Example 2: Environment-specific restrictions

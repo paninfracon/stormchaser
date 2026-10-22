@@ -21,7 +21,15 @@ pub async fn handle_workflow_timeout(
 ) -> Result<()> {
     info!("Workflow {} timed out, aborting", run_id);
 
-    let run = fetch_run(run_id, &pool).await?;
+    // The run and its steps end together, under the run's lock
+    let mut tx = pool.begin().await?;
+    if crate::db::lock_workflow_run(&mut *tx, run_id)
+        .await?
+        .is_none()
+    {
+        return Ok(());
+    }
+    let mut run = fetch_run(run_id, &mut *tx).await?;
     if matches!(
         run.status,
         RunStatus::Succeeded | RunStatus::Failed | RunStatus::Aborted
@@ -30,65 +38,44 @@ pub async fn handle_workflow_timeout(
     }
 
     // 1. Mark Workflow as Aborted
-    let mut machine_run = run.clone();
-    machine_run.error = Some("Workflow timed out".to_string());
-
+    run.error = Some("Workflow timed out".to_string());
     match run.status {
         RunStatus::Queued => {
-            WorkflowMachine::<state::Queued>::new_from_run(machine_run)
-                .abort(&mut *pool.acquire().await?)
+            WorkflowMachine::<state::Queued>::load(run)?
+                .abort(&mut tx)
                 .await?;
         }
         RunStatus::Resolving => {
-            WorkflowMachine::<state::Resolving>::new_from_run(machine_run)
-                .abort(&mut *pool.acquire().await?)
+            WorkflowMachine::<state::Resolving>::load(run)?
+                .abort(&mut tx)
                 .await?;
         }
         RunStatus::StartPending => {
-            WorkflowMachine::<state::StartPending>::new_from_run(machine_run)
-                .abort(&mut *pool.acquire().await?)
+            WorkflowMachine::<state::StartPending>::load(run)?
+                .abort(&mut tx)
                 .await?;
         }
         RunStatus::Running => {
-            WorkflowMachine::<state::Running>::new_from_run(machine_run)
-                .abort(&mut *pool.acquire().await?)
+            WorkflowMachine::<state::Running>::load(run)?
+                .abort(&mut tx)
                 .await?;
         }
-        _ => {} // Should not happen due to check above
+        RunStatus::Succeeded | RunStatus::Failed | RunStatus::Aborted => unreachable!(),
     };
 
     // 2. Mark all non-terminal steps as failed
-    let steps: Vec<StepInstance> = crate::db::get_step_instances_by_run_id(&pool, run_id).await?;
-
-    let mut tx = pool.begin().await?;
+    let steps: Vec<StepInstance> =
+        crate::db::get_step_instances_by_run_id(&mut *tx, run_id).await?;
     for step in steps {
-        match step.status {
-            StepStatus::Pending => {
-                crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::from_instance(step)
-                    .fail("Workflow timed out".to_string(), None, &mut *tx)
-                    .await?;
-            }
-            StepStatus::UnpackingSfs => {
-                crate::step_machine::StepMachine::<crate::step_machine::state::UnpackingSfs>::from_instance(step)
-                    .fail("Workflow timed out".to_string(), None, &mut *tx)
-                    .await?;
-            }
-            StepStatus::Running => {
-                crate::step_machine::StepMachine::<crate::step_machine::state::Running>::from_instance(step)
-                    .fail("Workflow timed out".to_string(), None, &mut *tx)
-                    .await?;
-            }
-            StepStatus::PackingSfs => {
-                crate::step_machine::StepMachine::<crate::step_machine::state::PackingSfs>::from_instance(step)
-                    .fail("Workflow timed out".to_string(), None, &mut *tx)
-                    .await?;
-            }
-            StepStatus::WaitingForEvent => {
-                crate::step_machine::StepMachine::<crate::step_machine::state::WaitingForEvent>::from_instance(step)
-                    .fail("Workflow timed out".to_string(), None, &mut *tx)
-                    .await?;
-            }
-            _ => {}
+        use crate::step_machine::{state as step_state, StepMachine};
+        if step.status == StepStatus::Pending {
+            StepMachine::<step_state::Pending>::load(step)?
+                .fail("Workflow timed out".to_string(), None, &mut tx)
+                .await?;
+        } else if let Ok(machine) = StepMachine::<step_state::Unfinished>::load(step) {
+            machine
+                .fail("Workflow timed out".to_string(), None, &mut tx)
+                .await?;
         }
     }
     // 3. Enqueue abort event

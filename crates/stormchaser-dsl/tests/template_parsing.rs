@@ -36,10 +36,12 @@ fn test_parse_step_library() {
     assert_eq!(lib.params.get("tag").unwrap(), "latest");
     assert_eq!(lib.spec["image"], "ubuntu:22.04");
 
+    // The step is the library's step, with its own settings on top
     let step = &workflow.steps[0];
-    assert_eq!(step.r#type, "ubuntu_base");
+    assert_eq!(step.r#type, "RunContainer");
     assert_eq!(step.params.get("tag").unwrap(), "v1");
     assert_eq!(step.spec["command"][0], "echo");
+    assert_eq!(step.spec["image"], "ubuntu:22.04");
 }
 
 #[test]
@@ -95,4 +97,69 @@ fn test_parse_terraform_pipeline() {
         .parse(&dsl)
         .expect("Failed to parse terraform-pipeline.storm");
     assert!(!workflow.steps.is_empty());
+}
+
+#[test]
+fn test_spec_attribute_means_the_same_as_spec_block() {
+    let dsl = r#"
+        stormchaser_dsl_version = "0.1"
+        workflow "spec_forms" {
+            step_library "notify_base" {
+                type = "WebhookInvoke"
+                spec = {
+                    method = "PUT"
+                }
+            }
+
+            steps {
+                step "as_attribute" "WebhookInvoke" {
+                    spec = {
+                        url = "https://paninfracon.net/hook"
+                    }
+                }
+                step "as_block" "WebhookInvoke" {
+                    spec {
+                        url = "https://paninfracon.net/hook"
+                    }
+                }
+            }
+        }
+    "#;
+
+    let workflow = StormchaserParser::new()
+        .parse(dsl)
+        .expect("Failed to parse DSL");
+
+    assert_eq!(workflow.step_libraries[0].spec["method"], "PUT");
+    assert_eq!(workflow.steps[0].spec, workflow.steps[1].spec);
+    assert_eq!(
+        workflow.steps[0].spec,
+        serde_json::json!({ "url": "https://paninfracon.net/hook" })
+    );
+}
+
+#[test]
+fn a_spec_attribute_that_is_not_an_object_is_kept_in_steps_and_step_libraries_alike() {
+    let dsl = r#"
+        stormchaser_dsl_version = "0.1"
+        workflow "spec_value" {
+            step_library "from_input" {
+                type = "WebhookInvoke"
+                spec = "${inputs.webhook}"
+            }
+
+            steps {
+                step "from_input" "WebhookInvoke" {
+                    spec = "${inputs.webhook}"
+                }
+            }
+        }
+    "#;
+
+    let workflow = StormchaserParser::new()
+        .parse(dsl)
+        .expect("Failed to parse DSL");
+
+    assert_eq!(workflow.steps[0].spec["spec"], "${inputs.webhook}");
+    assert_eq!(workflow.step_libraries[0].spec, workflow.steps[0].spec);
 }

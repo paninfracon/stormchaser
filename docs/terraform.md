@@ -1,27 +1,82 @@
-# Future Terraform Enhancements
+# Terraform Steps
 
-This document outlines proposed enhancements to the native `TerraformPlan`, `TerraformApply`, and `TerraformApproval` intrinsic steps in Stormchaser.
+Stormchaser has three built-in Terraform step types: `TerraformPlan`,
+`TerraformApply` and `TerraformApproval`. Their fields are listed in
+[TerraformPlan](steps/TerraformPlan.md), [TerraformApply](steps/TerraformApply.md)
+and [TerraformApproval](steps/TerraformApproval.md). This page records how they
+work and which of the planned enhancements are in.
+
+## How they run
+
+When the engine dispatches a `TerraformPlan` or `TerraformApply` step, it
+rewrites it into a `RunContainer` step:
+
+* The image is `hashicorp/terraform:1.16.6`, pinned by digest. The engine's
+  `STORMCHASER_TERRAFORM_IMAGE` replaces it.
+* The script runs `terraform init` in `workspace_dir` (default `.`), with
+  `backend_bucket`, `backend_key` and `region` passed as `-backend-config` when
+  set, then `terraform plan -out=<out_file>` or `terraform apply <out_file>`
+  (`out_file` defaults to `tfplan`; `auto_approve`, default true, adds
+  `-auto-approve`).
+* Spec values reach the script as environment variables, never as part of its
+  text. `region` also sets `AWS_REGION`.
+* `storage_mounts`, `cpu` and `memory` pass through to the container.
+
+`TerraformApply` applies the plan file, so the plan and apply steps must share
+the workspace through a storage mount.
+
+`TerraformApproval` becomes an `Approval` step with one input,
+`approval_decision` (`Approve` or `Reject`). Its description is `plan_summary`;
+if the summary says resources will be destroyed, the description and any
+`notify` email get a warning. `approvers`, `notify` and `timeout` pass through.
+
+Outputs are read back from the step's logs, so the engine needs a log backend
+(`LOKI_URL`):
+
+* `TerraformPlan`: `plan_summary` (the `Plan:` or `No changes.` line) and
+  `plan_json` (`terraform show -json`).
+* `TerraformApply`: `terraform` (`terraform output -json`).
+
+None of these outputs is marked sensitive, and they are printed to the step's
+logs. Keep secrets out of plan output and Terraform outputs, or mark them
+`sensitive` in Terraform.
 
 ## 1. Deep Terraform OPA Context (Resource-Level ABAC) (Implemented)
 
-**Goal:** Extract the full JSON representation of the Terraform plan and inject it into the `ApprovalOpaContext`.
-**Rationale:** Allows security and compliance teams to write granular Rego policies. For example, enforcing separation of duties if a specific sensitive resource (like `aws_iam_role`) is modified, or automatically denying plans that open security groups to `0.0.0.0/0`.
-**Implementation:** `TerraformPlan` executes `terraform show -json tfplan` and extracts it natively into a `plan_json` output variable. During the HITL approval phase, the API resolves all run outputs and provides them inside the `ApprovalOpaContext` as `run_outputs`, allowing Rego policies to deeply inspect `input.run_outputs.terraform_plan.outputs.plan_json.resource_changes`.
+**Goal:** Give approval policies the full JSON plan.
+**Rationale:** Lets security teams write Rego that inspects individual resource
+changes, for example requiring a second approver when an `aws_iam_role` changes,
+or denying plans that open security groups to `0.0.0.0/0`.
+**Implementation:** `TerraformPlan` runs `terraform show -json` and stores the
+result as the `plan_json` output. When someone approves a step, the API puts all
+the run's outputs into the `ApprovalOpaContext` as `run_outputs`, so a policy
+can read `input.run_outputs.<plan step name>.outputs.plan_json.resource_changes`.
 
-## 2. Native OIDC Cloud Authentication (Implemented)
+## 2. Native OIDC Cloud Authentication (Implemented, AWS only)
 
-**Goal:** Eliminate long-lived static credentials for cloud providers.
-**Rationale:** The current approach requires passing `AWS_ACCESS_KEY_ID` or `GOOGLE_CREDENTIALS` via environment variables. Since Stormchaser runs on modern orchestrators, it should natively generate short-lived OIDC tokens.
-**Implementation:** You can now provide `aws_assume_role_arn` and `aws_role_session_name` in the spec of `TerraformPlan` and `TerraformApply`. If the Stormchaser Engine is compiled with the `aws-sdk-sts` feature, it will natively invoke `sts:AssumeRole` before dispatching the container and inject short-lived AWS credentials securely into the container environment. The role must be listed in the engine's `STORMCHASER_AWS_ALLOWED_ROLE_ARNS` (Helm: `global.aws.allowedRoleArns`); the list is empty by default and a trailing `*` matches a prefix.
+**Goal:** No long-lived cloud credentials in workflows.
+**Implementation:** Set `aws_assume_role_arn` (and optionally
+`aws_role_session_name`, default `stormchaser-tf-<run id>`) in the spec of
+`TerraformPlan` or `TerraformApply`. The engine calls `sts:AssumeRole` with its
+own AWS credentials before dispatching the step and passes the short-lived
+credentials to the container as environment variables. This needs the engine's
+`aws-sdk-sts` Cargo feature, which is on by default. The role must be listed in
+the engine's `STORMCHASER_AWS_ALLOWED_ROLE_ARNS` (Helm: `global.aws.allowedRoleArns`);
+the list is empty by default, and a trailing `*` matches a prefix.
 
-## 3. Automatic Plan Artifact Generation (Implemented)
+There is no equivalent for other clouds.
 
-**Goal:** Automatically expose the human-readable plan text as a downloadable artifact.
-**Rationale:** While the `TerraformApproval` UI shows a brief summary (e.g., "3 to add, 1 to destroy"), a human approver needs to read the full line-by-line diff before making an informed decision.
-**Implementation:** `TerraformPlan` automatically executes `terraform show -no-color tfplan > plan.txt` during its run phase, exposing the readable plan file to the workspace.
+## 3. Plan Text in the Workspace (Implemented)
 
-## 4. Plugin Caching (`.terraform/providers`) (Implemented)
+**Goal:** Let approvers read the full plan, not only the summary line.
+**Implementation:** `TerraformPlan` runs `terraform show -no-color` and writes
+the result to `plan.txt` in `workspace_dir`. It is a file in the workspace, not a
+published artifact. A later step that mounts the same storage can read it.
 
-**Goal:** Speed up execution by caching provider binaries.
-**Rationale:** `terraform init` downloads provider plugins (like the AWS provider, which can be hundreds of megabytes) every time it runs. In a workflow with multiple sub-modules, this is highly inefficient.
-**Implementation:** `TerraformPlan` and `TerraformApply` automatically inject `TF_PLUGIN_CACHE_DIR=/tmp/.terraform_plugin_cache` and ensure the directory exists before `terraform init`. Users simply need to configure a persistent storage volume mount targeting this path to enable caching.
+## 4. Plugin Caching (Implemented)
+
+**Goal:** Avoid downloading provider binaries on every `terraform init`.
+**Implementation:** `TerraformPlan` and `TerraformApply` set
+`TF_PLUGIN_CACHE_DIR=/tmp/.terraform_plugin_cache` and create the directory
+before `terraform init`. Mount persistent storage at that path to keep the cache
+between steps.

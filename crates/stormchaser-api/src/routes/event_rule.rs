@@ -15,7 +15,7 @@ use stormchaser_model::RuleId;
     post,
     path = "/api/v1/rules",
     responses(
-        (status = 200, description = "Success"),
+        (status = 201, description = "Created", body = crate::CreatedResponse),
         (status = 400, description = "Bad Request"),
         (status = 404, description = "Not Found"),
         (status = 500, description = "Internal Server Error")
@@ -96,7 +96,12 @@ pub async fn create_event_rule(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    Ok((StatusCode::CREATED, Json(serde_json::json!({ "id": id }))))
+    Ok((
+        StatusCode::CREATED,
+        Json(crate::CreatedResponse {
+            id: id.into_inner(),
+        }),
+    ))
 }
 
 /// Lists event rules.
@@ -104,7 +109,7 @@ pub async fn create_event_rule(
     get,
     path = "/api/v1/rules",
     responses(
-        (status = 200, description = "Success"),
+        (status = 200, description = "Success", body = [stormchaser_model::EventRule]),
         (status = 400, description = "Bad Request"),
         (status = 404, description = "Not Found"),
         (status = 500, description = "Internal Server Error")

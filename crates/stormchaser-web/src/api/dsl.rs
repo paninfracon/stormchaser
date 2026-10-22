@@ -17,40 +17,27 @@ pub async fn submit_run_git(
     git_ref: String,
     inputs: serde_json::Value,
 ) -> Result<(), ServerFnError> {
-    let cookie = require_auth().await?;
-    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
-
-    let client = super::http_client();
-    let url = format!("{}/api/v1/runs", api_url);
-
     let workflow_name = workflow_path
         .split('/')
         .next_back()
         .unwrap_or("manual_run")
         .to_string();
-
-    let res = client
-        .post(&url)
-        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
-        .json(&serde_json::json!({
-            "workflow_name": workflow_name,
-            "connection": connection,
-            "workflow_path": workflow_path,
-            "git_ref": git_ref,
-            "inputs": inputs
-        }))
-        .send()
+    let request = stormchaser_model::api::EnqueueRequest {
+        workflow_name,
+        connection,
+        workflow_path,
+        git_ref,
+        inputs,
+        overrides: None,
+        sops_file: None,
+        sops_role_arn: None,
+    };
+    authed_client()
+        .await?
+        .enqueue(&request)
         .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?;
-
-    if res.status().is_success() {
-        Ok(())
-    } else {
-        Err(ServerFnError::new(format!(
-            "Failed to submit run: {}",
-            res.status()
-        )))
-    }
+        .map_err(api_error("Failed to submit run"))?;
+    Ok(())
 }
 
 #[server(input = Json, output = Json)]
@@ -58,39 +45,13 @@ pub async fn submit_run_direct(
     dsl: String,
     inputs: serde_json::Value,
 ) -> Result<String, ServerFnError> {
-    let cookie = require_auth().await?;
-    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
-
-    let client = super::http_client();
-    let url = format!("{}/api/v1/runs/direct", api_url);
-
-    let res = client
-        .post(&url)
-        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
-        .json(&serde_json::json!({
-            "dsl": dsl,
-            "inputs": inputs
-        }))
-        .send()
+    let request = stormchaser_model::api::DirectRunRequest { dsl, inputs };
+    let response = authed_client()
+        .await?
+        .run_direct(&request)
         .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?;
-
-    if res.status().is_success() {
-        let body = res
-            .json::<serde_json::Value>()
-            .await
-            .map_err(|e| ServerFnError::new(e.to_string()))?;
-        if let Some(id) = body.get("run_id").and_then(|v| v.as_str()) {
-            Ok(id.to_string())
-        } else {
-            Ok("".to_string())
-        }
-    } else {
-        Err(ServerFnError::new(format!(
-            "Failed to submit run: {}",
-            res.status()
-        )))
-    }
+        .map_err(api_error("Failed to submit run"))?;
+    Ok(response.run_id.to_string())
 }
 
 #[server(input = Json, output = Json)]
@@ -99,37 +60,18 @@ pub async fn fetch_dsl_from_git(
     workflow_path: String,
     git_ref: String,
 ) -> Result<String, ServerFnError> {
-    let cookie = require_auth().await?;
-    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
-
-    let client = super::http_client();
-    let url = format!("{}/api/v1/schema/parse-git", api_url);
-
-    let res = client
-        .post(&url)
-        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
-        .json(&serde_json::json!({
-            "connection": connection,
-            "workflow_path": workflow_path,
-            "git_ref": git_ref
-        }))
-        .send()
+    let request = stormchaser_model::api::ParseGitRequest {
+        connection,
+        workflow_path,
+        git_ref,
+    };
+    let text = authed_client()
+        .await?
+        .parse_git(&request)
         .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?;
-
-    if res.status().is_success() {
-        let text = res
-            .text()
-            .await
-            .map_err(|e| ServerFnError::new(e.to_string()))?;
-        tracing::info!("fetch_dsl_from_git returned DSL of length {}", text.len());
-        Ok(text)
-    } else {
-        Err(ServerFnError::new(format!(
-            "Failed to fetch DSL from git: {}",
-            res.status()
-        )))
-    }
+        .map_err(api_error("Failed to fetch DSL from git"))?;
+    tracing::info!("fetch_dsl_from_git returned DSL of length {}", text.len());
+    Ok(text)
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]

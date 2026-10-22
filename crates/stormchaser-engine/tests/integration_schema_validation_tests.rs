@@ -1,10 +1,11 @@
+mod common;
+
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use std::env::var;
 use std::sync::Arc;
-use stormchaser_engine::handler;
-use stormchaser_model::auth::OpaClient;
 use stormchaser_model::RunId;
+use stormchaser_opa::OpaClient;
 
 async fn setup_db() -> sqlx::PgPool {
     let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
@@ -42,14 +43,9 @@ async fn test_headless_validation_dynamic_query_success() {
         "initiating_user": "test-user"
     });
 
-    handler::handle_workflow_direct(
-        payload,
-        pool.clone(),
-        opa_client.clone(),
-        nats_client.clone(),
-    )
-    .await
-    .unwrap();
+    common::run_direct(payload, &pool, opa_client.clone(), nats_client.clone())
+        .await
+        .unwrap();
 
     let status: String = sqlx::query_scalar("SELECT status::text FROM workflow_runs WHERE id = $1")
         .bind(run_id)
@@ -80,13 +76,7 @@ async fn test_headless_validation_dynamic_query_failure() {
         "initiating_user": "test-user"
     });
 
-    let res = handler::handle_workflow_direct(
-        payload,
-        pool.clone(),
-        opa_client.clone(),
-        nats_client.clone(),
-    )
-    .await;
+    let res = common::run_direct(payload, &pool, opa_client.clone(), nats_client.clone()).await;
 
     let err = res.unwrap_err();
     assert!(err.to_string().contains("Input validation failed"));
@@ -128,13 +118,7 @@ workflow "bad-schema" {
         "initiating_user": "test-user"
     });
 
-    let res = handler::handle_workflow_direct(
-        payload,
-        pool.clone(),
-        opa_client.clone(),
-        nats_client.clone(),
-    )
-    .await;
+    let res = common::run_direct(payload, &pool, opa_client.clone(), nats_client.clone()).await;
 
     let err = res.unwrap_err();
     assert!(err.to_string().contains("Failed to compile input schema"));
@@ -163,13 +147,7 @@ workflow "bad-schema-eval" {
         "initiating_user": "test-user"
     });
 
-    let res = handler::handle_workflow_direct(
-        payload,
-        pool.clone(),
-        opa_client.clone(),
-        nats_client.clone(),
-    )
-    .await;
+    let res = common::run_direct(payload, &pool, opa_client.clone(), nats_client.clone()).await;
 
     let err = res.unwrap_err();
     assert!(err
@@ -253,4 +231,24 @@ async fn test_execute_query_connection_resolution() {
         .execute(&pool)
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn a_direct_run_that_does_not_parse_is_recorded_as_failed() {
+    let pool = setup_db().await;
+    let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
+    let run_id = RunId::new_v4();
+
+    let err = common::run_direct(
+        json!({ "run_id": run_id, "dsl": "workflow {", "inputs": {}, "initiating_user": "test-user" }),
+        &pool,
+        Arc::new(OpaClient::new(None, None)),
+        nats_client,
+    )
+    .await
+    .unwrap_err();
+    assert!(err.to_string().contains("parsing failed"), "{err}");
+
+    common::delete_run(&pool, run_id).await;
 }

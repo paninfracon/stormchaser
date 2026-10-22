@@ -58,6 +58,7 @@ fn test_build_job_result_event_success() {
         run_id,
         step_id,
         0,
+        None,
         "runner-k8s".to_string(),
     );
 
@@ -100,6 +101,7 @@ fn test_build_job_result_event_failed() {
         run_id,
         step_id,
         0,
+        None,
         "runner-k8s".to_string(),
     );
 
@@ -123,6 +125,7 @@ fn test_build_job_error_event() {
         run_id,
         step_id,
         0,
+        None,
         "runner-k8s".to_string(),
         &anyhow::anyhow!("job exploded"),
     );

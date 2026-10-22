@@ -1,38 +1,33 @@
 stateDiagram-v2
-    [*] --> Pending: new()
+    [*] --> Pending: created
+    [*] --> WaitingForEvent: created (Approval, Wait, held-back iteration)
+    [*] --> Skipped: created (condition false, empty iterate)
 
-    Pending --> Initializing: initializing(runner_id)
-    Pending --> Running: start(runner_id)
+    Pending --> Initializing: claim_for_run() / initializing(runner_id)
     Pending --> UnpackingSfs: start_unpacking(runner_id)
-    Pending --> Failed: fail(error)
+    Pending --> Running: start(runner_id)
+    Pending --> Failed: fail() on run timeout
 
-    Initializing --> Running: start()
-    Initializing --> UnpackingSfs: start_unpacking(runner_id)
-    Initializing --> Failed: fail(error)
+    state Unfinished {
+        Initializing --> UnpackingSfs: start_unpacking(runner_id)
+        Initializing --> Running: start()
+        UnpackingSfs --> Running: start_running()
+        Running --> PackingSfs: start_packing()
+        WaitingForEvent
+    }
 
-    UnpackingSfs --> Running: start_running()
-    UnpackingSfs --> Failed: fail(error)
-    UnpackingSfs --> Skipped: skip()
+    Initializing --> Pending: requeue(), requeue_lost_dispatches(), requeue_lost_engine_steps()
+    WaitingForEvent --> Pending: reschedule() (held-back iteration starts)
 
-    Running --> PackingSfs: start_packing()
-    Running --> Succeeded: succeed()
-    Running --> Failed: fail(error)
-    Running --> WaitingForEvent: wait_for_event()
-    Running --> Aborted: abort()
-    Running --> LostZombie: zombify()
+    Unfinished --> Succeeded: succeed()
+    Unfinished --> Failed: fail()
+    Unfinished --> LostZombie: zombify() (not from WaitingForEvent)
+    Unfinished --> Pending: retry(delay)
 
-    PackingSfs --> Succeeded: succeed()
-    PackingSfs --> Failed: fail(error)
-
-    WaitingForEvent --> Running: resume()
-    WaitingForEvent --> Pending: reschedule()
-    WaitingForEvent --> Failed: fail(error)
-
-    Failed --> FailedIgnored: ignore_failure()
+    Failed --> FailedIgnored: ignore_failure() when allow_failure = true
 
     Succeeded --> [*]
     Skipped --> [*]
     Failed --> [*]
     FailedIgnored --> [*]
-    Aborted --> [*]
     LostZombie --> [*]

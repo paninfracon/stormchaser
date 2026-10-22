@@ -8,11 +8,11 @@ use tokio::task::JoinHandle;
 
 use stormchaser_engine::handler;
 use stormchaser_engine::handler::runner::handle_runner_heartbeat;
-use stormchaser_model::auth::OpaClient;
 use stormchaser_model::events::RunnerHeartbeatEvent;
 use stormchaser_model::runner::RunnerStatus;
 use stormchaser_model::step::StepInstance;
 use stormchaser_model::RunId;
+use stormchaser_opa::OpaClient;
 use stormchaser_tls::{TlsConfig, TlsReloader};
 
 struct RelayWorkerGuard(JoinHandle<()>);
@@ -46,6 +46,10 @@ async fn setup() -> (
 
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
+    // The engine creates the stream at start-up; a fresh test stack has none
+    stormchaser_engine::nats::init_jetstream(&nats_client)
+        .await
+        .unwrap();
     let opa_client = Arc::new(OpaClient::new(None, None));
     let tls_config = TlsConfig::default();
     let tls_reloader = Arc::new(TlsReloader::new(tls_config).await.unwrap());

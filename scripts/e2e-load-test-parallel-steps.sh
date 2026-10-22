@@ -27,32 +27,28 @@ echo '  description = "A workflow with many parallel steps joined at the end."' 
 echo '  steps {' >> "$STORM_FILE"
 
 # Generate parallel steps
-DEPENDENCIES=""
+# Every step names the join step in next, so it runs once all of them are done
 for i in $(seq 1 $NUM_STEPS); do
   echo "    step \"step_$i\" \"JQ\" {" >> "$STORM_FILE"
   echo "      program = \".text\"" >> "$STORM_FILE"
   echo "      input = { text = \"Hello World $i!\" }" >> "$STORM_FILE"
+  echo "      next = [\"join_step\"]" >> "$STORM_FILE"
   echo "    }" >> "$STORM_FILE"
-
-  if [ -z "$DEPENDENCIES" ]; then
-    DEPENDENCIES="\"step_$i\""
-  else
-    DEPENDENCIES="$DEPENDENCIES, \"step_$i\""
-  fi
 done
 
 # Generate join step
 echo "    step \"join_step\" \"JQ\" {" >> "$STORM_FILE"
 echo "      program = \".text\"" >> "$STORM_FILE"
 echo "      input = { text = \"All parallel steps completed!\" }" >> "$STORM_FILE"
-echo "      depends_on = [$DEPENDENCIES]" >> "$STORM_FILE"
 echo "    }" >> "$STORM_FILE"
 
 echo '  }' >> "$STORM_FILE"
 echo '}' >> "$STORM_FILE"
 
 echo ">>> Cleaning up previous workflow runs in local DB..."
-POSTGRES_CONTAINER=$(docker ps --format '{{.Names}}' | grep postgres | head -n 1)
+# The first container named postgres, unless STORMCHASER_POSTGRES_CONTAINER names the
+# stack's own: on a host running several stacks the first can be another one
+POSTGRES_CONTAINER=${STORMCHASER_POSTGRES_CONTAINER:-$(docker ps --format '{{.Names}}' | grep postgres | head -n 1)}
 if [ "${STORMCHASER_E2E_RESET_ALL_RUNS:-0}" = "1" ]; then
   echo ">>> STORMCHASER_E2E_RESET_ALL_RUNS=1 set; truncating all workflow runs."
   docker exec "$POSTGRES_CONTAINER" psql -U stormchaser -d stormchaser -c "TRUNCATE workflow_runs CASCADE" > /dev/null 2>&1

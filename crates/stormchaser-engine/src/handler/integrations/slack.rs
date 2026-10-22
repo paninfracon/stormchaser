@@ -15,59 +15,40 @@ fn build_slack_payload(spec: &stormchaser_model::dsl::SlackMessageSpec) -> Value
     serde_json::to_value(payload).unwrap()
 }
 
-#[cfg(feature = "chatops-slack")]
-use crate::handler::fetch_step_instance;
-#[cfg(feature = "chatops-slack")]
 use anyhow::Result;
-#[cfg(feature = "chatops-slack")]
 use sqlx::PgPool;
-#[cfg(feature = "chatops-slack")]
 pub async fn handle_slack_message(
     run_id: stormchaser_model::RunId,
     step_instance_id: stormchaser_model::StepInstanceId,
     fencing_token: i64,
     spec: Value,
     pool: PgPool,
-    nats_client: async_nats::Client,
 ) -> Result<()> {
-    use crate::step_machine::{state::Pending, StepMachine};
     use std::collections::HashMap;
     use stormchaser_model::dsl::SlackMessageSpec;
 
     let spec: SlackMessageSpec = serde_json::from_value(spec)?;
 
     // Fetch instance
-    let instance = fetch_step_instance(step_instance_id, &pool).await?;
-
-    let machine = StepMachine::<Pending>::from_instance(instance);
-    let mut conn = pool.acquire().await?;
-    let _machine = machine.start("system".to_string(), &mut *conn).await?;
+    crate::handler::integrations::utils::start_built_in(&pool, step_instance_id, "slack").await?;
 
     let webhook_url =
         super::utils::fetch_http_api_url_from_connection(&pool, run_id, &spec.connection).await?;
 
     // Post to Slack Webhook
-    let (client, webhook_url) = stormchaser_model::net_guard::guarded_client(&webhook_url).await?;
+    let (client, webhook_url) = stormchaser_core::net_guard::guarded_client(&webhook_url).await?;
     let payload = build_slack_payload(&spec);
 
     let res = client.post(webhook_url).json(&payload).send().await?;
 
     let status = res.status();
     if status.is_success() {
-        let instance = fetch_step_instance(step_instance_id, &pool).await?;
-        let machine =
-            crate::step_machine::StepMachine::<crate::step_machine::state::Running>::from_instance(
-                instance,
-            );
-        let _ = machine.succeed(&mut *pool.acquire().await?).await?;
-
-        super::utils::publish_step_completed_event(
+        super::utils::report_step_completed(
+            &pool,
             run_id,
             step_instance_id,
             fencing_token,
             Some(HashMap::new()),
-            &pool,
-            nats_client,
         )
         .await?;
         Ok(())

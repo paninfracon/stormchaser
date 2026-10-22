@@ -76,6 +76,9 @@ async fn handle_orphaned_container(
         .get("stormchaser-fencing-token")
         .and_then(|token| token.parse::<i64>().ok())
         .unwrap_or(0);
+    let attempt = labels
+        .get("stormchaser-attempt")
+        .and_then(|attempt| attempt.parse::<i32>().ok());
 
     let step_dsl = match parse_step_from_docker_labels(
         &container_name,
@@ -153,6 +156,7 @@ async fn handle_orphaned_container(
                             step_id,
                             runner_id: r_id.clone(),
                             fencing_token,
+                            attempt,
                             step_dsl,
                             storage: None,
                             test_report_urls: None,
@@ -178,6 +182,7 @@ async fn handle_orphaned_container(
             step_id,
             runner_id: r_id.clone(),
             fencing_token,
+            attempt,
             step_dsl: step_dsl.clone(),
             storage: None,
             test_report_urls: None,
@@ -190,7 +195,8 @@ async fn handle_orphaned_container(
         // Tell the engine this runner now holds the step, so that it is not judged by the
         // runner that started it and has gone.
         if let Err(e) =
-            stormchaser_model::nats::announce_step_running(&nats, run_id, step_id, &r_id).await
+            stormchaser_model::nats::announce_step_running(&nats, run_id, step_id, attempt, &r_id)
+                .await
         {
             error!("Failed to announce adoption of step {}: {:?}", step_id, e);
         }
@@ -204,6 +210,7 @@ async fn handle_orphaned_container(
                     run_id,
                     step_id,
                     fencing_token,
+                    attempt,
                     r_id,
                     nats.clone(),
                 )

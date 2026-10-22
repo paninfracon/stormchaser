@@ -27,9 +27,9 @@ fn git_host_port(repo_url: &str) -> Result<(String, u16), String> {
 
 /// Refuses a repository the engine would not clone, or one on an internal address.
 async fn check_git_target(repo_url: &str) -> Result<(), String> {
-    stormchaser_engine::git_cache::validate_repo_url(repo_url).map_err(|e| e.to_string())?;
+    stormchaser_core::git_cache::validate_repo_url(repo_url).map_err(|e| e.to_string())?;
     let (host, port) = git_host_port(repo_url)?;
-    stormchaser_model::net_guard::validate_host_safe(&host, port)
+    stormchaser_core::net_guard::validate_host_safe(&host, port)
         .await
         .map(|_| ())
 }
@@ -52,7 +52,7 @@ async fn check_postgres_target(url: &str) -> Result<sqlx::postgres::PgConnectOpt
         return Err("Postgres URL must name a network host".to_string());
     }
     let addrs =
-        stormchaser_model::net_guard::validate_host_safe(options.get_host(), options.get_port())
+        stormchaser_core::net_guard::validate_host_safe(options.get_host(), options.get_port())
             .await?;
     if matches!(options.get_ssl_mode(), PgSslMode::VerifyFull) {
         return Ok(options);
@@ -74,8 +74,9 @@ async fn check_s3_target(
     endpoint: Option<&str>,
 ) -> Result<(), String> {
     match role_arn {
-        Some(role_arn) => stormchaser_engine::aws_guard::ensure_role_allowed(role_arn)
-            .map_err(|e| e.to_string())?,
+        Some(role_arn) => {
+            stormchaser_core::aws_guard::ensure_role_allowed(role_arn).map_err(|e| e.to_string())?
+        }
         None if !has_keys => {
             return Err(
                 "An S3 connection test needs access_key and secret_key, or an allow-listed role"
@@ -85,7 +86,7 @@ async fn check_s3_target(
         None => {}
     }
     if let Some(endpoint) = endpoint {
-        stormchaser_model::net_guard::validate_url_safe(endpoint).await?;
+        stormchaser_core::net_guard::validate_url_safe(endpoint).await?;
     }
     Ok(())
 }
@@ -97,7 +98,7 @@ pub async fn validate_connection(payload: &TestConnectionRequest) -> (bool, Stri
                 // Refuses internal addresses, pins the validated ones and does not follow
                 // redirects (see `net_guard`).
                 let (client, parsed_url) =
-                    match stormchaser_model::net_guard::guarded_client(base_url).await {
+                    match stormchaser_core::net_guard::guarded_client(base_url).await {
                         Ok(guarded) => guarded,
                         Err(reason) => return (false, reason.to_string()),
                     };

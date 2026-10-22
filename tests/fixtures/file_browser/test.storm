@@ -1,8 +1,11 @@
 workflow "test" {
   description = "Valid workflow for linter"
-  step "hello" {
-    type   = "docker"
-    image  = "alpine"
-    script = "echo hello"
+  steps {
+    step "hello" "RunContainer" {
+      spec {
+        image   = "alpine"
+        command = ["echo", "hello"]
+      }
+    }
   }
 }

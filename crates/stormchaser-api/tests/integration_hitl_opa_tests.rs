@@ -10,8 +10,9 @@ use std::sync::Arc;
 use stormchaser_api::auth::AuthClaims;
 use stormchaser_api::hitl::approve_step;
 use stormchaser_api::AppState;
-use stormchaser_model::auth::{Claims, OpaClient};
+use stormchaser_model::auth::Claims;
 use stormchaser_model::StepInstanceId;
+use stormchaser_opa::OpaClient;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -95,7 +96,6 @@ async fn test_hitl_opa_integration() {
             exp: 0,
             groups: Vec::new(),
         }),
-        axum::http::HeaderMap::new(),
         Path((run_id, step_id)),
         Json(json!({"decision": "yes"})),
     )

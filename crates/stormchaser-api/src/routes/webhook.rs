@@ -2,7 +2,6 @@ use super::{CreateWebhookRequest, UpdateWebhookRequest};
 use crate::authz::{self, Caller, Kind};
 use crate::db;
 use crate::{AppState, AuthClaims};
-use async_nats::jetstream;
 use axum::{
     body::Bytes,
     extract::{Path, State},
@@ -16,9 +15,7 @@ use serde_json::Value;
 use sha2::Sha256;
 use std::collections::HashMap;
 use stormchaser_model::event_rules::WebhookConfig;
-use stormchaser_model::events::WorkflowQueuedEvent;
-use stormchaser_model::events::{EventSource, EventType, SchemaVersion, WorkflowEventType};
-use stormchaser_model::nats::{publish_cloudevent, NatsSubject};
+use stormchaser_model::events::EventSource;
 use stormchaser_model::workflow::RunStatus;
 use stormchaser_model::WebhookId;
 
@@ -27,7 +24,7 @@ use stormchaser_model::WebhookId;
     post,
     path = "/api/v1/webhooks",
     responses(
-        (status = 200, description = "Success"),
+        (status = 201, description = "Created", body = crate::CreatedResponse),
         (status = 400, description = "Bad Request"),
         (status = 404, description = "Not Found"),
         (status = 500, description = "Internal Server Error")
@@ -40,11 +37,7 @@ pub async fn create_webhook(
     Json(payload): Json<CreateWebhookRequest>,
 ) -> Result<impl IntoResponse, StatusCode> {
     // A webhook URL is public; the secret is the only thing that says who is calling
-    if !payload
-        .secret_token
-        .as_deref()
-        .is_some_and(|secret| !secret.is_empty())
-    {
+    if payload.secret_token.as_deref().is_none_or(str::is_empty) {
         tracing::warn!(
             "Refusing to create webhook '{}' without a secret",
             payload.name
@@ -81,7 +74,12 @@ pub async fn create_webhook(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    Ok((StatusCode::CREATED, Json(serde_json::json!({ "id": id }))))
+    Ok((
+        StatusCode::CREATED,
+        Json(crate::CreatedResponse {
+            id: id.into_inner(),
+        }),
+    ))
 }
 
 /// List webhooks.
@@ -89,7 +87,7 @@ pub async fn create_webhook(
     get,
     path = "/api/v1/webhooks",
     responses(
-        (status = 200, description = "Success"),
+        (status = 200, description = "Success", body = [stormchaser_model::WebhookConfig]),
         (status = 400, description = "Bad Request"),
         (status = 404, description = "Not Found"),
         (status = 500, description = "Internal Server Error")
@@ -118,7 +116,7 @@ pub async fn list_webhooks(
     path = "/api/v1/webhooks/{id}",
     params(("id" = stormchaser_model::WebhookId, Path, description="Webhook ID")),
     responses(
-        (status = 200, description = "Success"),
+        (status = 200, description = "Success", body = stormchaser_model::WebhookConfig),
         (status = 400, description = "Bad Request"),
         (status = 404, description = "Not Found"),
         (status = 500, description = "Internal Server Error")
@@ -665,33 +663,20 @@ async fn process_rule(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    tx.commit()
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let event = WorkflowQueuedEvent {
+    // The engine's relay publishes it
+    stormchaser_core::db::outbox::insert_run_queued(
+        &mut *tx,
         run_id,
-        event_type: EventType::Workflow(WorkflowEventType::Queued),
-        timestamp: chrono::Utc::now(),
-        status: stormchaser_model::workflow::RunStatus::Queued,
-        dsl: None,
-        inputs: None,
-        initiating_user: None,
-        sops_file: None,
-        sops_role_arn: None,
-    };
-
-    publish_cloudevent(
-        &jetstream::new(state.nats.clone()),
-        NatsSubject::RunQueued(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
-        EventType::Workflow(WorkflowEventType::Queued),
         EventSource::System,
-        serde_json::to_value(event).unwrap(),
-        Some(SchemaVersion::new("1.0".to_string())),
+        None,
         None,
     )
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    tx.commit()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     tracing::info!(
         "Triggered workflow '{}' (run {}) from rule '{}'",

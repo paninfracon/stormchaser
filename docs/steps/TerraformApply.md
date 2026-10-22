@@ -1,46 +1,36 @@
 # TerraformApply Step
 
-The `TerraformApply` step natively executes a previously generated `.tfplan` using HashiCorp's official container image.
+The `TerraformApply` step runs `terraform init` and `terraform apply <out_file>` on a plan file that a [TerraformPlan](TerraformPlan.md) step saved. Like `TerraformPlan`, the engine turns it into a `RunContainer` step in the `hashicorp/terraform` image, and it needs the same storage mounted so that it can find the configuration and the plan.
 
-Like `TerraformPlan`, the execution runs on top of the shared file system context, meaning module dependencies and lock states do not need to be manually restored.
+After a successful apply, the step runs `terraform output -json` and stores the result in the output `terraform`. A later step reads an output variable as `${steps.<step_name>.outputs.terraform.<variable>.value}`.
 
-**Outputs Capture:** A key feature of `TerraformApply` is that it natively extracts JSON output variables after a successful apply. The values produced by `terraform output -json` are parsed into a native `terraform` object available to subsequent workflow steps via the `steps.<step_name>.outputs.terraform` expression.
-
-**Plugin Caching:** Similar to `TerraformPlan`, this step automatically sets the `TF_PLUGIN_CACHE_DIR` environment variable to `/tmp/.terraform_plugin_cache`. Mounting a shared persistent volume to this path can significantly speed up the `terraform init` phase.
+It sets `TF_PLUGIN_CACHE_DIR=/tmp/.terraform_plugin_cache`, as `TerraformPlan` does.
 
 ## DSL Specification
 
-The `spec` block for `TerraformApply` shares similar configuration with `TerraformPlan`:
+The `spec` block for `TerraformApply` takes the same fields as `TerraformPlan` (`workspace_dir`, `backend_bucket`, `backend_key`, `region`, `aws_assume_role_arn`, `aws_role_session_name`, `out_file`, `storage_mounts`, `cpu`, `memory`), with `out_file` naming the plan to apply, and one more:
 
-* `workspace_dir` (string, optional): The directory containing the Terraform configuration files. Defaults to `.` (the root).
-* `backend_bucket` (string, optional): S3 bucket name if using an S3 remote backend.
-* `backend_key` (string, optional): State file key path within the S3 bucket.
-* `region` (string, optional): AWS Region for backend configuration and AWS provider. Injects `AWS_REGION`.
-* `aws_assume_role_arn` (string, optional): The ARN of an IAM role to assume before running Terraform. When provided (and if the engine is built with the `aws-sdk-sts` feature), Stormchaser will natively assume this role and inject short-lived credentials (`AWS_ACCESS_KEY_ID`, etc.) into the container.
-* `aws_role_session_name` (string, optional): An optional session name to use when assuming the role. Defaults to `stormchaser-tf-<run_id>`.
-* `out_file` (string, optional): Name of the plan file to execute. Defaults to `tfplan`.
-* `auto_approve` (boolean, optional): Whether to run with `-auto-approve`. Defaults to `true`.
+* `auto_approve` (boolean, optional): Pass `-auto-approve` to `terraform apply`. Defaults to `true`.
 
 ## Example
 
 ```hcl
 step "apply" "TerraformApply" {
   spec {
-    workspace_dir  = "infrastructure/"
+    workspace_dir  = "/workspace/infrastructure"
     backend_bucket = "my-company-tf-state"
     backend_key    = "app/production.tfstate"
     region         = "us-east-1"
-    out_file       = "tfplan"
+    storage_mounts = [{ name = "workspace", mount_path = "/workspace" }]
   }
+  next = ["notify"]
 }
 
 step "notify" "WebhookInvoke" {
   spec {
-    url = "https://example.com"
-    body = {
-      // Accessing a terraform output variable named 'vpc_id'
-      vpc_id = "${steps.apply.outputs.terraform.vpc_id.value}"
-    }
+    url  = "https://example.com/hooks/infra"
+    // Reads a Terraform output variable named 'vpc_id'
+    body = "{\"vpc_id\": \"${steps.apply.outputs.terraform.vpc_id.value}\"}"
   }
 }
 ```

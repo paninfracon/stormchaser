@@ -3,6 +3,7 @@ use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
 use stormchaser_model::ConnectionId;
 
+pub use stormchaser_core::db::connections::{get_connection, get_connection_by_name};
 use stormchaser_model::connections;
 
 /// Unsets the default Stormchaser File System.
@@ -25,12 +26,12 @@ pub async fn create_connection(
     connection_type: &connections::ConnectionType,
     config: &Value,
     aws_assume_role_arn: &Option<String>,
-    encrypted_credentials: &Option<String>,
+    credentials: &Option<String>,
     is_default_sfs: bool,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"
-        INSERT INTO connections (id, name, description, connection_type, config, aws_assume_role_arn, encrypted_credentials, is_default_sfs)
+        INSERT INTO connections (id, name, description, connection_type, config, aws_assume_role_arn, credentials, is_default_sfs)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         "#,
     )
@@ -40,7 +41,7 @@ pub async fn create_connection(
     .bind(connection_type)
     .bind(config)
     .bind(aws_assume_role_arn)
-    .bind(encrypted_credentials)
+    .bind(credentials)
     .bind(is_default_sfs)
     .execute(&mut **tx)
     .await?;
@@ -52,32 +53,6 @@ pub async fn create_connection(
 pub async fn list_connections(pool: &PgPool) -> Result<Vec<connections::Connection>, sqlx::Error> {
     sqlx::query_as("SELECT * FROM connections ORDER BY name ASC")
         .fetch_all(pool)
-        .await
-}
-
-/// Retrieves a storage backend by ID.
-/// Get storage backend.
-pub async fn get_connection<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
-    executor: E,
-    id: ConnectionId,
-) -> Result<Option<connections::Connection>, sqlx::Error> {
-    sqlx::query_as("SELECT * FROM connections WHERE id = $1")
-        .bind(id)
-        .fetch_optional(executor)
-        .await
-}
-
-/// Retrieves a storage backend by its unique name.
-///
-/// Unlike [`get_connection`], which looks up by [`ConnectionId`], this helper
-/// resolves a connection using the user-facing `name` field.
-pub async fn get_connection_by_name<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
-    executor: E,
-    name: &str,
-) -> Result<Option<connections::Connection>, sqlx::Error> {
-    sqlx::query_as("SELECT * FROM connections WHERE name = $1")
-        .bind(name)
-        .fetch_optional(executor)
         .await
 }
 
@@ -116,14 +91,14 @@ pub async fn update_connection(
             .push("aws_assume_role_arn = ")
             .push_bind_unseparated(value);
     }
-    if let Some(credentials) = &payload.encrypted_credentials {
+    if let Some(credentials) = &payload.credentials {
         let value: Option<&str> = if credentials.is_empty() {
             None
         } else {
             Some(credentials.as_str())
         };
         separated
-            .push("encrypted_credentials = ")
+            .push("credentials = ")
             .push_bind_unseparated(value);
     }
     if let Some(is_default) = payload.is_default_sfs {

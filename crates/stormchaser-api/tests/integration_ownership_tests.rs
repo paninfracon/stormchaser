@@ -1,6 +1,8 @@
 //! Object-level authorization, end to end: the API router, the shipped policy
 //! (`deploy/opa`) in a real OPA, and the database.
 
+#![expect(clippy::disallowed_methods, reason = "tests call the OPA they start")]
+
 use axum::{
     body::Body,
     http::{Method, Request, StatusCode},
@@ -14,7 +16,7 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 use stormchaser_api::{app, AppState};
-use stormchaser_model::auth::OpaClient;
+use stormchaser_opa::OpaClient;
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -158,12 +160,7 @@ fn bearer(email: &str) -> String {
         exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
         groups: Vec::new(),
     };
-    let token = jsonwebtoken::encode(
-        &jsonwebtoken::Header::default(),
-        &claims,
-        &jsonwebtoken::EncodingKey::from_secret(stormchaser_api::JWT_SECRET),
-    )
-    .unwrap();
+    let token = stormchaser_api::sign_local_token(&claims, stormchaser_api::JWT_SECRET).unwrap();
     format!("Bearer {token}")
 }
 

@@ -1,6 +1,8 @@
 # Default values for the Stormchaser Umbrella Chart
 
 global:
+  # Lets the Bitnami subcharts (PostgreSQL, MinIO) run the bitnamilegacy/ images set
+  # below, which they would otherwise refuse as unrecognised.
   security:
     allowInsecureImages: true
 
@@ -9,6 +11,7 @@ global:
 # ---------------------------------------------------------
 
 stormchaser-orchestration:
+  # Not read: Chart.yaml has no condition for this subchart, so it is always installed.
   enabled: true
   global:
     database:
@@ -33,6 +36,8 @@ stormchaser-orchestration:
       # The API and the query service have users of their own, limited to what each does.
       apiAuthSecret: "stormchaser-nats-api"
       queryAuthSecret: "stormchaser-nats-query"
+    # The bundled quickstart Loki, Grafana and Alloy. In production point these at
+    # your own platform (see docs/observability.md).
     loki:
       url: "http://stormchaser-loki:3100"
     grafana:
@@ -54,6 +59,7 @@ stormchaser-orchestration:
     otel:
       endpoint: "http://stormchaser-alloy:4317"
 
+  # Bundled Prometheus and Grafana, for evaluation only.
   prometheus:
     enabled: true
     server:
@@ -92,6 +98,7 @@ runnerDocker:
   enabled: false
 
 stormchaser-runner-k8s:
+  # Not read: Chart.yaml has no condition for this subchart, so it is always installed.
   enabled: true
   config:
     natsUrl: "nats://stormchaser-nats:4222"
@@ -242,8 +249,8 @@ nats:
                   - "stormchaser.v1.*.step.running"
                   - "stormchaser.v1.*.step.completed"
                   - "stormchaser.v1.*.step.failed"
-                  - "stormchaser.v1.step.unpacking_sfs"
-                  - "stormchaser.v1.step.packing_sfs"
+                  - "stormchaser.v1.*.step.unpacking_sfs"
+                  - "stormchaser.v1.*.step.packing_sfs"
                   - "stormchaser.rpc.step.query"
                   - "stormchaser.rpc.step.artifact_auth"
                   - "stormchaser.rpc.runner.session"
@@ -303,6 +310,10 @@ minio:
       ephemeral-storage: "10Gi"
     limits:
       ephemeral-storage: "20Gi"
+# Grafana Alloy (collects step pod logs, receives OTLP), Loki and Tempo below are the
+# bundled quickstart observability stack. They have no authentication, a single
+# replica and local storage. In production set these to false and send telemetry to
+# your own platform; docs/observability.md lists what Stormchaser emits and needs.
 stormchaser-telemetry:
   enabled: true
   alloy:

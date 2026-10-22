@@ -3,7 +3,7 @@ use crate::AppState;
 
 use axum::{
     extract::{Path, State},
-    http::{header::AUTHORIZATION, HeaderMap, StatusCode},
+    http::StatusCode,
     response::IntoResponse,
     Json,
 };
@@ -27,7 +27,6 @@ use crate::db::{
 };
 use async_nats::jetstream::new as new_jetstream;
 use chrono::Utc;
-use stormchaser_model::auth::OpaSubject;
 use stormchaser_model::dsl::{Step, Workflow};
 use stormchaser_model::nats::{publish_cloudevent, NatsSubject};
 
@@ -36,7 +35,6 @@ pub(super) async fn check_approval_opa(
     run_id: RunId,
     step_name: &str,
     approver: Option<&Claims>,
-    token: Option<&str>,
 ) -> Result<(), (StatusCode, String)> {
     if !state.opa.is_configured() {
         return Ok(());
@@ -85,11 +83,7 @@ pub(super) async fn check_approval_opa(
             step_ast,
             inputs: context_data.run_inputs,
             run_outputs: Value::Object(run_outputs_map),
-            approver: approver.map(|claims| OpaSubject {
-                sub: &claims.sub,
-                email: claims.email.as_deref(),
-            }),
-            token,
+            approver: approver.map(Claims::opa_subject),
         };
 
         match state.opa.check_approval(opa_context).await {
@@ -154,14 +148,29 @@ pub(crate) async fn resolve_fencing_token_or_response(
 }
 
 /// Approves a step.
+#[utoipa::path(
+    post,
+    path = "/api/v1/runs/{id}/steps/{step_id}/approve",
+    params(
+        ("id" = RunId, Path, description = "Run ID"),
+        ("step_id" = StepInstanceId, Path, description = "The approval step's ID")
+    ),
+    request_body(content = Object, description = "Values that become the step's outputs; `{}` for none"),
+    responses(
+        (status = 200, description = "Approved"),
+        (status = 400, description = "The step is not waiting for approval"),
+        (status = 403, description = "The caller is not one of the step's approvers"),
+        (status = 404, description = "No such run or step")
+    ),
+    tag = "hitl"
+)]
 pub async fn approve_step(
     State(state): State<AppState>,
     AuthClaims(claims): AuthClaims,
-    headers: HeaderMap,
     Path((run_id, step_id)): Path<(RunId, StepInstanceId)>,
     Json(inputs): Json<Value>,
 ) -> impl IntoResponse {
-    if let Err(r) = validate_approval_state(&state, run_id, step_id, &claims, &headers).await {
+    if let Err(r) = validate_approval_state(&state, run_id, step_id, &claims).await {
         return *r;
     }
 
@@ -185,8 +194,9 @@ pub async fn approve_step(
     let completion_event = StepCompletedEvent {
         run_id,
         step_id,
+        attempt: None,
         fencing_token,
-        completion_token: stormchaser_engine::db::step_completion_token(&state.pool, step_id).await,
+        completion_token: stormchaser_core::db::step_completion_token(&state.pool, step_id).await,
         event_type: EventType::Step(StepEventType::Completed),
         runner_id: None,
         exit_code: Some(0),
@@ -214,13 +224,27 @@ pub async fn approve_step(
 }
 
 /// Rejects a step.
+#[utoipa::path(
+    post,
+    path = "/api/v1/runs/{id}/steps/{step_id}/reject",
+    params(
+        ("id" = RunId, Path, description = "Run ID"),
+        ("step_id" = StepInstanceId, Path, description = "The approval step's ID")
+    ),
+    responses(
+        (status = 200, description = "Rejected"),
+        (status = 400, description = "The step is not waiting for approval"),
+        (status = 403, description = "The caller is not one of the step's approvers"),
+        (status = 404, description = "No such run or step")
+    ),
+    tag = "hitl"
+)]
 pub async fn reject_step(
     State(state): State<AppState>,
     AuthClaims(claims): AuthClaims,
-    headers: HeaderMap,
     Path((run_id, step_id)): Path<(RunId, StepInstanceId)>,
 ) -> impl IntoResponse {
-    if let Err(r) = validate_approval_state(&state, run_id, step_id, &claims, &headers).await {
+    if let Err(r) = validate_approval_state(&state, run_id, step_id, &claims).await {
         return *r;
     }
 
@@ -242,8 +266,9 @@ pub async fn reject_step(
     let event = StepFailedEvent {
         run_id,
         step_id,
+        attempt: None,
         fencing_token,
-        completion_token: stormchaser_engine::db::step_completion_token(&state.pool, step_id).await,
+        completion_token: stormchaser_core::db::step_completion_token(&state.pool, step_id).await,
         event_type: EventType::Step(StepEventType::Failed),
         error: "Rejected by human".to_string(),
         exit_code: Some(1),
@@ -271,7 +296,17 @@ pub async fn reject_step(
     }
 }
 
-/// Correlates an event.
+/// Resumes the `Wait` step whose correlation key and value an event carries.
+#[utoipa::path(
+    post,
+    path = "/api/v1/events/correlate",
+    request_body(content = Object, description = "`key` and `value` equal to a waiting step's `correlation_key` and `correlation_value`; every top-level field becomes one of the step's outputs"),
+    responses(
+        (status = 200, description = "Event Correlated"),
+        (status = 404, description = "No waiting step has that correlation")
+    ),
+    tag = "hitl"
+)]
 pub async fn correlate_event(
     State(state): State<AppState>,
     Json(payload): Json<Value>,
@@ -299,8 +334,9 @@ pub async fn correlate_event(
     let completion_event = StepCompletedEvent {
         run_id: corr.run_id,
         step_id: corr.step_instance_id,
+        attempt: None,
         fencing_token,
-        completion_token: stormchaser_engine::db::step_completion_token(
+        completion_token: stormchaser_core::db::step_completion_token(
             &state.pool,
             corr.step_instance_id,
         )
@@ -372,16 +408,11 @@ async fn validate_approval_state(
     run_id: RunId,
     step_id: StepInstanceId,
     approver: &Claims,
-    headers: &HeaderMap,
 ) -> Result<(), Box<axum::response::Response>> {
     let step = verify_step_for_approval(&state.pool, run_id, step_id).await?;
-    let token = headers
-        .get(AUTHORIZATION)
-        .and_then(|h| h.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer "));
 
     if let Err((status, msg)) =
-        check_approval_opa(state, run_id, &step.step_name, Some(approver), token).await
+        check_approval_opa(state, run_id, &step.step_name, Some(approver)).await
     {
         return Err(Box::new((status, msg).into_response()));
     }

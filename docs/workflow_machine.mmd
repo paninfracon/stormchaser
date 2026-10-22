@@ -1,20 +1,22 @@
 stateDiagram-v2
-    [*] --> Queued: new()
+    [*] --> Queued: API creates the run (request, webhook rule, cron trigger)
+    [*] --> StartPending: engine accepts a direct run
 
     Queued --> Resolving: start_resolving()
-    Queued --> Aborted: abort()
+    Queued --> Failed: fail() (direct run refused, or engine gives up on run.queued)
+    Queued --> Aborted: abort() on run timeout
 
     Resolving --> StartPending: start_pending()
     Resolving --> Failed: fail(error)
-    Resolving --> Aborted: abort()
+    Resolving --> Aborted: abort() on run timeout
 
     StartPending --> Running: start()
-    StartPending --> Failed: fail(error)
-    StartPending --> Aborted: abort()
+    StartPending --> Failed: fail() (engine gives up on run.start_pending)
+    StartPending --> Aborted: abort() on run timeout
 
     Running --> Succeeded: succeed()
     Running --> Failed: fail(error)
-    Running --> Aborted: abort()
+    Running --> Aborted: abort() on run timeout
 
     Succeeded --> [*]
     Failed --> [*]

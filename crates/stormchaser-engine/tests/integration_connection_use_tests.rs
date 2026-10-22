@@ -3,6 +3,8 @@
 //! The shipped policy lets every run use every connection, so these tests run OPA with a
 //! stricter rule (owner only) to show that the engine asks and obeys.
 
+#![expect(clippy::disallowed_methods, reason = "tests call the OPA they start")]
+
 use serde_json::json;
 use sqlx::PgPool;
 use std::collections::HashMap;
@@ -12,8 +14,8 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 use stormchaser_engine::authz;
-use stormchaser_model::auth::OpaClient;
 use stormchaser_model::{Connection, RunId};
+use stormchaser_opa::OpaClient;
 use uuid::Uuid;
 
 const OPA_IMAGE: &str = "openpolicyagent/opa:0.68.0";

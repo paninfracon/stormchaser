@@ -2,6 +2,7 @@ use chrono::Utc;
 use serde_json::Value;
 use stormchaser_dsl::ast;
 use stormchaser_model::dsl;
+use stormchaser_model::dsl::step_types;
 use stormchaser_model::step::StepStatus;
 use stormchaser_model::{EventId, RunId, StepInstanceId};
 
@@ -23,43 +24,13 @@ pub async fn schedule_step(
     pool: PgPool,
     workflow: &ast::Workflow,
 ) -> Result<()> {
-    let mut resolved_type = step_dsl.r#type.clone();
-    let mut resolved_spec = step_dsl.spec.clone();
-    let mut resolved_params = serde_json::to_value(&step_dsl.params).unwrap_or(Value::Null);
-
-    // Merge Step Library if it exists
-    if let Some(library) = workflow
-        .step_libraries
-        .iter()
-        .find(|l| l.name == resolved_type)
-    {
-        resolved_type = library.r#type.clone();
-
-        // Merge specs
-        if let (Value::Object(mut lib_spec), Value::Object(step_spec)) =
-            (library.spec.clone(), resolved_spec.clone())
-        {
-            for (k, v) in step_spec {
-                lib_spec.insert(k, v);
-            }
-            resolved_spec = Value::Object(lib_spec);
-        } else if resolved_spec.is_null() {
-            resolved_spec = library.spec.clone();
-        }
-
-        // Merge params
-        if let (Value::Object(mut lib_params), Value::Object(step_params)) = (
-            serde_json::to_value(&library.params).unwrap_or(Value::Null),
-            resolved_params.clone(),
-        ) {
-            for (k, v) in step_params {
-                lib_params.insert(k, v);
-            }
-            resolved_params = Value::Object(lib_params);
-        } else if resolved_params.is_null() {
-            resolved_params = serde_json::to_value(&library.params).unwrap_or(Value::Null);
-        }
-    }
+    // Parsing applies the workflow's step libraries; a run stored before it did is
+    // applied them here
+    let mut step = step_dsl.clone();
+    stormchaser_dsl::libraries::apply_step_library(&mut step, &workflow.step_libraries)?;
+    let mut resolved_type = step.r#type.clone();
+    let mut resolved_spec = step.spec.clone();
+    let mut resolved_params = serde_json::to_value(&step.params).unwrap_or(Value::Null);
 
     // Secrets fetched while this step's expressions are evaluated, recorded for the run
     // so that the API masks them wherever they turn up
@@ -119,8 +90,12 @@ pub async fn schedule_step(
         .await?;
     } else {
         let ((), fetched) = crate::hcl_eval::capturing_secrets(|| {
-            let _ = crate::hcl_eval::resolve_step_spec(&resolved_type, &mut resolved_spec, hcl_ctx);
-            let _ = crate::hcl_eval::resolve_expressions(&mut resolved_params, hcl_ctx, true);
+            crate::hcl_eval::resolve_step(
+                &resolved_type,
+                &mut resolved_spec,
+                &mut resolved_params,
+                hcl_ctx,
+            );
         });
         fetched_secrets.extend(fetched);
         crate::db::add_sensitive_values(&mut *executor, run_id, &fetched_secrets).await?;
@@ -134,9 +109,10 @@ pub async fn schedule_step(
         );
 
         let step_instance_id = StepInstanceId::new(Uuid::new_v4());
-        let initial_status = match resolved_type.as_str() {
-            "Approval" | "Wait" => StepStatus::WaitingForEvent,
-            _ => StepStatus::Pending,
+        let initial_status = if step_types::waits(&resolved_type) {
+            StepStatus::WaitingForEvent
+        } else {
+            StepStatus::Pending
         };
 
         let affinity_context = step_dsl.strategy.as_ref().and_then(|s| s.affinity.clone());
@@ -232,8 +208,8 @@ async fn schedule_iterated_steps(
     let run_context = fetch_run_context(run_id, &mut *executor).await?;
     let steps_outputs = fetch_outputs(run_id, &mut *executor).await?;
     let quotas = fetch_quotas(run_id, &mut *executor).await?;
-    let current_running_count: i64 =
-        crate::db::count_running_steps_for_run(&mut *executor, run_id).await?;
+    let current_in_flight: i64 =
+        crate::db::count_in_flight_steps_for_run(&mut *executor, run_id).await?;
 
     for (idx, item) in items.into_iter().enumerate() {
         let step_instance_id = StepInstanceId::new(Uuid::new_v4());
@@ -251,15 +227,11 @@ async fn schedule_iterated_steps(
         let mut resolved_spec_iter = resolved_spec.clone();
         let mut resolved_params_iter = resolved_params.clone();
         let ((), fetched) = crate::hcl_eval::capturing_secrets(|| {
-            let _ = crate::hcl_eval::resolve_step_spec(
+            crate::hcl_eval::resolve_step(
                 resolved_type,
                 &mut resolved_spec_iter,
-                &iteration_ctx,
-            );
-            let _ = crate::hcl_eval::resolve_expressions(
                 &mut resolved_params_iter,
                 &iteration_ctx,
-                true,
             );
         });
         let mut fetched_secrets = crate::hcl_eval::take_alias_secrets(run_id);
@@ -273,10 +245,9 @@ async fn schedule_iterated_steps(
         );
         let resolved_type = resolved_type.as_str();
         let status = match resolved_type {
-            "Approval" | "Wait" => StepStatus::WaitingForEvent,
+            t if step_types::waits(t) => StepStatus::WaitingForEvent,
             _ => {
-                if (idx as u32) < max_parallel
-                    && current_running_count < quotas.max_concurrency as i64
+                if (idx as u32) < max_parallel && current_in_flight < quotas.max_concurrency as i64
                 {
                     StepStatus::Pending
                 } else {

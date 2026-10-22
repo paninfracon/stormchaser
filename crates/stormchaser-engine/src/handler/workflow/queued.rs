@@ -1,19 +1,32 @@
+use super::resolve::{check_policy, run_queries, validate_inputs};
 use crate::git_cache::GitCache;
 use crate::handler::{fetch_inputs, fetch_run};
 use crate::workflow_machine::{state, WorkflowMachine};
-use anyhow::{Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
+use serde_json::Value;
 use sqlx::PgPool;
+use std::collections::HashSet;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use stormchaser_dsl::StormchaserParser;
-use stormchaser_model::auth::{EngineOpaContext, OpaClient};
+use stormchaser_model::dsl::{self, Workflow};
 use stormchaser_model::events::WorkflowStartPendingEvent;
 use stormchaser_model::events::{EventSource, EventType, SchemaVersion, WorkflowEventType};
+use stormchaser_model::nats::NatsSubject;
+use stormchaser_model::workflow::{RunStatus, WorkflowRun};
 use stormchaser_model::RunId;
+use stormchaser_opa::OpaClient;
 use stormchaser_tls::TlsReloader;
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 #[tracing::instrument(skip(payload, pool, git_cache, opa_client, _nats_client, _tls_reloader), fields(run_id = %run_id))]
 /// Handles the event when a workflow is queued and ready for resolution.
+///
+/// A failure of the workflow's own (an unreadable file, a denied policy, invalid
+/// inputs) fails the run. A transient one (the database, a broker, a connection) leaves
+/// the run resolving and returns the error, so that the event is delivered again and
+/// resolution starts over; the resolver crash recovery worker fails a run that stays
+/// resolving.
 pub async fn handle_workflow_queued(
     run_id: RunId,
     payload: serde_json::Value,
@@ -25,359 +38,65 @@ pub async fn handle_workflow_queued(
 ) -> Result<()> {
     info!("Handling queued workflow run: {}", run_id);
 
-    // 1. Fetch WorkflowRun from DB
     let run = fetch_run(run_id, &pool).await?;
-    let machine = WorkflowMachine::<state::Queued>::new(run);
-
-    // 2. Transition to Resolving
-    let machine = machine.start_resolving(&mut *pool.acquire().await?).await?;
-
-    // 3. Resolve the workflow file into cache
-    // Cloning blocks on the network, so it runs off the async executor
-    let repo_path_res = {
-        let git_cache = git_cache.clone();
-        let repo_url = machine.run.repo_url.clone();
-        let git_ref = machine.run.git_ref.clone();
-        let workflow_path = machine.run.workflow_path.clone();
-        tokio::task::spawn_blocking(move || {
-            git_cache.ensure_files(&repo_url, &git_ref, std::slice::from_ref(&workflow_path))
-        })
-        .await
-        .unwrap_or_else(|e| Err(anyhow::anyhow!("Git resolution task failed: {}", e)))
-    };
-
-    let repo_path = match repo_path_res {
-        Ok(path) => path,
-        Err(e) => {
-            let _ = machine
-                .fail(
-                    format!("Git resolution failed: {}", e),
-                    &mut *pool.acquire().await?,
-                )
-                .await?;
-            return Err(e);
+    // The stream can deliver this event again: after the run has moved on, which leaves
+    // nothing to do, or after a transient failure left it resolving, to try again
+    let machine = match run.status {
+        RunStatus::Queued => {
+            WorkflowMachine::<state::Queued>::load(run)?
+                .start_resolving(&mut *pool.acquire().await?)
+                .await?
         }
-    };
-
-    let workflow_req_path = std::path::Path::new(&machine.run.workflow_path);
-    if workflow_req_path.is_absolute()
-        || workflow_req_path
-            .components()
-            .any(|c| matches!(c, std::path::Component::ParentDir))
-    {
-        let err_msg = format!(
-            "Workflow path {} is invalid (absolute or contains '..')",
-            machine.run.workflow_path
-        );
-        let _ = machine
-            .fail(err_msg.clone(), &mut *pool.acquire().await?)
-            .await?;
-        return Err(anyhow::anyhow!(err_msg));
-    }
-    // 4. Read and Parse the workflow file. It is read from the git object database, not
-    // the working tree, so a symlink committed to the repository cannot redirect the read.
-    let workflow_content =
-        match crate::git_cache::read_blob_at_head(&repo_path, &machine.run.workflow_path) {
-            Ok(content) => content,
-            Err(e) => {
-                let err_msg = format!("Failed to load workflow file: {}", e);
-                let _ = machine
-                    .fail(err_msg.clone(), &mut *pool.acquire().await?)
-                    .await?;
-                return Err(anyhow::anyhow!(err_msg));
-            }
-        };
-
-    debug!(
-        "Workflow content loaded for {}: {} bytes",
-        run_id,
-        workflow_content.len()
-    );
-
-    let parser = StormchaserParser::new();
-    let mut parsed_workflow = match parser.parse(&workflow_content) {
-        Ok(w) => w,
-        Err(e) => {
-            let _ = machine
-                .fail(
-                    format!("Workflow parsing failed: {}", e),
-                    &mut *pool.acquire().await?,
-                )
-                .await?;
-            return Err(e);
-        }
-    };
-
-    // 4.5 Resolve includes inline
-    let mut resolved_includes = std::collections::HashSet::new();
-    let mut includes_to_process = parsed_workflow.includes.clone();
-    parsed_workflow.includes.clear(); // We will inline them, so remove from AST
-
-    while let Some(inc) = includes_to_process.pop() {
-        if !resolved_includes.insert(inc.workflow.clone()) {
-            continue; // Prevent infinite loops
-        }
-
-        let req_inc_path = std::path::Path::new(&inc.workflow);
-        if req_inc_path.is_absolute()
-            || req_inc_path
-                .components()
-                .any(|c| matches!(c, std::path::Component::ParentDir))
-        {
-            let err_msg = format!(
-                "Included workflow path {} is invalid (absolute or contains '..')",
-                inc.workflow
+        RunStatus::Resolving => WorkflowMachine::<state::Resolving>::load(run)?,
+        status => {
+            debug!(
+                "Run {} is {:?}, not queued; skipping its queued event",
+                run_id, status
             );
-            let _ = machine
-                .fail(err_msg.clone(), &mut *pool.acquire().await?)
-                .await?;
-            return Err(anyhow::anyhow!(err_msg));
+            return Ok(());
         }
-        let inc_content = match crate::git_cache::read_blob_at_head(&repo_path, &inc.workflow) {
-            Ok(content) => content,
-            Err(e) => {
-                let err_msg = format!("Failed to load included workflow: {}", e);
-                let _ = machine
-                    .fail(err_msg.clone(), &mut *pool.acquire().await?)
-                    .await?;
-                return Err(anyhow::anyhow!(err_msg));
-            }
-        };
-        let inc_workflow = match parser.parse(&inc_content) {
-            Ok(w) => w,
-            Err(e) => {
-                let err_msg = format!("Included workflow {} parsing failed: {}", inc.workflow, e);
-                let _ = machine
-                    .fail(err_msg.clone(), &mut *pool.acquire().await?)
-                    .await?;
-                return Err(anyhow::anyhow!(err_msg));
-            }
-        };
-
-        // Inline step libraries
-        parsed_workflow
-            .step_libraries
-            .extend(inc_workflow.step_libraries);
-
-        // Inline steps, applying the include prefix to avoid name collisions and substituting inputs
-        let prefix = format!("{}.", inc.name);
-        for mut step in inc_workflow.steps {
-            step.name = format!("{}{}", prefix, step.name);
-
-            // Update next pointers
-            for next_ref in &mut step.next {
-                *next_ref = format!("{}{}", prefix, next_ref);
-            }
-
-            // Substitute include inputs into the step parameters using a word-boundary aware regex
-            // to avoid matching similarly named variables (e.g. replacing 'inputs.id' shouldn't affect 'my_inputs.id')
-            for (k, v) in &inc.inputs {
-                let var_pattern = format!(r"\binputs\.{}\b", regex::escape(k));
-                if let Ok(re) = regex::Regex::new(&var_pattern) {
-                    let val_str = v.to_string();
-
-                    for param_val in step.params.values_mut() {
-                        *param_val = re.replace_all(param_val, val_str.as_str()).to_string();
-                    }
-                }
-            }
-
-            parsed_workflow.steps.push(step);
-        }
-
-        includes_to_process.extend(inc_workflow.includes);
-    }
-
-    // 5. Schema Validation and Default Value Hydration
-    let mut inputs = fetch_inputs(run_id, &pool).await?;
-
-    // OPA Policy Check — runs before any query execution so denied requests cannot
-    // trigger SQL/API/AWS side-effects from DSL-supplied query parameters.
-    let opa_context = EngineOpaContext {
-        run_id,
-        initiating_user: machine.run.initiating_user.clone(),
-        workflow_ast: serde_json::to_value(&parsed_workflow)?,
-        inputs: inputs.clone(),
     };
 
-    match opa_client.check_context(opa_context).await {
-        Ok(true) => debug!("OPA allowed execution for run {}", run_id),
-        Ok(false) => {
-            let err_msg = "Execution denied by OPA policy".to_string();
-            info!("Run {}: {}", run_id, err_msg);
-            let _ = machine.fail(err_msg, &mut *pool.acquire().await?).await?;
-            return Ok(()); // Handled failure
-        }
+    let resolved = match resolve(machine.run(), &payload, &pool, &git_cache, &opa_client).await {
+        Ok(resolved) => resolved,
+        Err(e) if crate::retry::is_transient(&e) => return Err(e),
         Err(e) => {
-            let err_msg = format!("OPA check failed: {}", e);
-            error!("Run {}: {}", run_id, err_msg);
-            let _ = machine.fail(err_msg, &mut *pool.acquire().await?).await?;
-            return Err(e);
+            let reason = format!("{:#}", e);
+            info!("Run {} failed to resolve: {}", run_id, reason);
+            machine.fail(reason, &mut *pool.acquire().await?).await?;
+            return Ok(());
         }
-    }
-
-    // Evaluate dynamic queries
-    let mut query_results = serde_json::Map::new();
-    // Secrets fetched for query parameters, recorded with the run's own below
-    let mut query_secrets = Vec::new();
-    for query in &parsed_workflow.queries {
-        let hcl_ctx = crate::hcl_eval::create_context(
-            inputs.clone(),
-            run_id,
-            serde_json::json!({}), // secrets
-            serde_json::json!({}), // steps
-            Some(&parsed_workflow),
-            None,
-        );
-        let mut resolved_params = serde_json::to_value(&query.params)?;
-        let (resolved, fetched) = crate::hcl_eval::capturing_secrets(|| {
-            crate::hcl_eval::resolve_expressions(&mut resolved_params, &hcl_ctx, true)
-        });
-        query_secrets.extend(fetched);
-        if let Err(e) = resolved {
-            let err_msg = format!(
-                "Failed to evaluate parameters for query {}: {}",
-                query.name, e
-            );
-            let _ = machine
-                .fail(err_msg.clone(), &mut *pool.acquire().await?)
-                .await?;
-            return Err(anyhow::anyhow!(err_msg));
-        }
-
-        let resolved_params_map: std::collections::HashMap<String, String> =
-            serde_json::from_value(resolved_params)?;
-
-        // Execute the query
-        let result_vec = match crate::query::execute_query(
-            &query.r#type,
-            &resolved_params_map,
-            Some(&pool),
-            None,
-            Some(&machine.run.initiating_user),
-        )
-        .await
-        {
-            Ok(res) => res,
-            Err(e) => {
-                let err_msg = format!("Failed to execute query {}: {}", query.name, e);
-                let _ = machine
-                    .fail(err_msg.clone(), &mut *pool.acquire().await?)
-                    .await?;
-                return Err(anyhow::anyhow!(err_msg));
-            }
-        };
-        let result = serde_json::Value::Array(result_vec);
-
-        query_results.insert(query.name.clone(), result);
-    }
-
-    if let Some(mut schema_val) = parsed_workflow.inputs_schema.clone() {
-        // Resolve dynamic expressions (like query results) inside the schema
-        let mut schema_ctx = crate::hcl_eval::create_context(
-            inputs.clone(),
-            run_id,
-            serde_json::json!({}), // secrets
-            serde_json::json!({}), // steps
-            Some(&parsed_workflow),
-            None,
-        );
-        schema_ctx.declare_var(
-            "queries",
-            crate::hcl_eval::json_to_hcl(serde_json::Value::Object(query_results)),
-        );
-
-        if let Err(e) = crate::hcl_eval::resolve_expressions(&mut schema_val, &schema_ctx, true) {
-            let err_msg = format!("Failed to evaluate expressions in inputs schema: {}", e);
-            let _ = machine
-                .fail(err_msg.clone(), &mut *pool.acquire().await?)
-                .await?;
-            return Err(anyhow::anyhow!(err_msg));
-        }
-
-        // Hydrate defaults
-        if let Some(properties) = schema_val.get("properties").and_then(|p| p.as_object()) {
-            let mut inputs_obj = match inputs {
-                serde_json::Value::Object(obj) => obj,
-                _ => serde_json::Map::new(),
-            };
-
-            for (key, prop) in properties {
-                if !inputs_obj.contains_key(key) {
-                    if let Some(default_val) = prop.get("default") {
-                        inputs_obj.insert(key.clone(), default_val.clone());
-                    }
-                }
-            }
-            inputs = serde_json::Value::Object(inputs_obj);
-        }
-
-        // Validate
-        let compiled_schema = jsonschema::validator_for(&schema_val)
-            .map_err(|e| anyhow::anyhow!("Failed to compile input schema: {}", e))?;
-
-        if let Err(e) = compiled_schema.validate(&inputs) {
-            let full_err = format!("Input validation failed: {}", e);
-            let _ = machine
-                .fail(full_err.clone(), &mut *pool.acquire().await?)
-                .await?;
-            return Err(anyhow::anyhow!(full_err));
-        }
-    }
-
-    let sops_file: Option<String> = serde_json::from_value(payload["sops_file"].clone()).ok();
-    let sops_role_arn: Option<String> =
-        serde_json::from_value(payload["sops_role_arn"].clone()).ok();
-
-    let (secrets, mut sensitive_values) = crate::handler::workflow::sops::decrypt_sops_secrets(
-        &repo_path,
-        sops_file.as_deref(),
-        sops_role_arn.as_deref(),
-    )
-    .await
-    .unwrap_or_else(|e| {
-        error!("Failed to decrypt SOPS secrets for run {}: {:?}", run_id, e);
-        (serde_json::json!({}), vec![])
-    });
-
-    sensitive_values.extend(query_secrets);
-    sensitive_values.extend(crate::hcl_eval::take_alias_secrets(run_id));
-    sensitive_values.sort();
-    sensitive_values.dedup();
+    };
 
     let mut tx = pool.begin().await?;
 
-    // 7. Update RunContext with the definition and source code
     crate::db::update_run_context(
         &mut *tx,
-        serde_json::to_value(&parsed_workflow)?,
-        Some(&workflow_content).map(|s| s.as_str()),
-        &parsed_workflow.dsl_version,
-        inputs,
-        secrets,
-        sensitive_values,
+        serde_json::to_value(&resolved.workflow)?,
+        Some(resolved.source.as_str()),
+        &resolved.workflow.dsl_version,
+        resolved.inputs,
+        resolved.secrets,
+        resolved.sensitive_values,
         run_id,
     )
     .await
     .with_context(|| format!("Failed to update run context for {}", run_id))?;
 
-    // 8. Transition to StartPending
-    let machine = machine.start_pending(&mut *tx).await?;
-
-    // Emit event for transition to StartPending
+    // The start_pending handler schedules the first steps and moves the run to Running
+    machine.start_pending(&mut *tx).await?;
     let event = WorkflowStartPendingEvent {
         run_id,
         event_type: EventType::Workflow(WorkflowEventType::StartPending),
         timestamp: chrono::Utc::now(),
-        status: stormchaser_model::workflow::RunStatus::StartPending,
+        status: RunStatus::StartPending,
     };
-    use stormchaser_model::nats::NatsSubject;
     crate::db::outbox::insert_outbox_event(
         &mut *tx,
         NatsSubject::RunStartPending(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
         EventType::Workflow(WorkflowEventType::StartPending),
         EventSource::System,
-        serde_json::to_value(event).unwrap(),
+        serde_json::to_value(event)?,
         Some(SchemaVersion::new("1.0".to_string())),
         None,
     )
@@ -386,15 +105,156 @@ pub async fn handle_workflow_queued(
 
     tx.commit().await?;
 
-    // 8. Transition to Running
-    let _ = machine.start(&mut *pool.acquire().await?).await?;
-
     info!(
-        "Successfully resolved and parsed workflow file, started run {}",
+        "Successfully resolved and parsed workflow file for run {}",
         run_id
     );
-
     Ok(())
+}
+
+/// What a run resolves to, ready to record in its context
+struct Resolved {
+    workflow: Workflow,
+    source: String,
+    inputs: Value,
+    secrets: Value,
+    sensitive_values: Vec<String>,
+}
+
+async fn resolve(
+    run: &WorkflowRun,
+    payload: &Value,
+    pool: &PgPool,
+    git_cache: &Arc<GitCache>,
+    opa_client: &OpaClient,
+) -> Result<Resolved> {
+    let run_id = run.id;
+    let repo_path = fetch_repo(run, git_cache).await?;
+    let (workflow, source) = load_workflow(&repo_path, &run.workflow_path)?;
+    let inputs = fetch_inputs(run_id, pool).await?;
+
+    // Before any query runs, so that a denied request cannot cause the SQL, API or
+    // AWS side effects of the queries' parameters
+    check_policy(opa_client, run_id, &run.initiating_user, &workflow, &inputs).await?;
+
+    let (query_results, query_secrets) =
+        run_queries(run_id, &run.initiating_user, &workflow, &inputs, pool).await?;
+    let inputs = validate_inputs(run_id, &workflow, inputs, query_results)?;
+
+    // A run whose secrets cannot be read does not go ahead without them
+    let sops_file: Option<String> = serde_json::from_value(payload["sops_file"].clone()).ok();
+    let sops_role_arn: Option<String> =
+        serde_json::from_value(payload["sops_role_arn"].clone()).ok();
+    let (secrets, mut sensitive_values) = crate::handler::workflow::sops::decrypt_sops_secrets(
+        &repo_path,
+        sops_file.as_deref(),
+        sops_role_arn.as_deref(),
+    )
+    .await
+    .context("Failed to decrypt SOPS secrets")?;
+
+    sensitive_values.extend(query_secrets);
+    sensitive_values.extend(crate::hcl_eval::take_alias_secrets(run_id));
+    sensitive_values.sort();
+    sensitive_values.dedup();
+
+    Ok(Resolved {
+        workflow,
+        source,
+        inputs,
+        secrets,
+        sensitive_values,
+    })
+}
+
+/// The run's repository, with its workflow file, in the git cache
+async fn fetch_repo(run: &WorkflowRun, git_cache: &Arc<GitCache>) -> Result<PathBuf> {
+    // Cloning blocks on the network, so it runs off the async executor
+    let git_cache = git_cache.clone();
+    let repo_url = run.repo_url.clone();
+    let git_ref = run.git_ref.clone();
+    let workflow_path = run.workflow_path.clone();
+    tokio::task::spawn_blocking(move || {
+        git_cache.ensure_files(&repo_url, &git_ref, std::slice::from_ref(&workflow_path))
+    })
+    .await
+    .unwrap_or_else(|e| Err(anyhow!("Git resolution task failed: {}", e)))
+    .context("Git resolution failed")
+}
+
+/// Refuses a path that could leave the repository
+fn ensure_relative(path: &str, what: &str) -> Result<()> {
+    let path_ref = Path::new(path);
+    if path_ref.is_absolute()
+        || path_ref
+            .components()
+            .any(|c| matches!(c, Component::ParentDir))
+    {
+        bail!(
+            "{} path {} is invalid (absolute or contains '..')",
+            what,
+            path
+        );
+    }
+    Ok(())
+}
+
+/// Reads and parses the run's workflow file and inlines the workflows it includes.
+/// Files are read from the git object database, not the working tree, so a symlink
+/// committed to the repository cannot redirect the read.
+fn load_workflow(repo_path: &Path, workflow_path: &str) -> Result<(Workflow, String)> {
+    ensure_relative(workflow_path, "Workflow")?;
+    let source = crate::git_cache::read_blob_at_head(repo_path, workflow_path)
+        .context("Failed to load workflow file")?;
+    debug!("Workflow content loaded: {} bytes", source.len());
+
+    let parser = StormchaserParser::new();
+    let mut workflow = parser.parse(&source).context("Workflow parsing failed")?;
+
+    let mut resolved_includes = HashSet::new();
+    // They are inlined, so they leave the AST
+    let mut includes_to_process = std::mem::take(&mut workflow.includes);
+    while let Some(inc) = includes_to_process.pop() {
+        if !resolved_includes.insert(inc.workflow.clone()) {
+            continue; // Prevent infinite loops
+        }
+        ensure_relative(&inc.workflow, "Included workflow")?;
+        let inc_source = crate::git_cache::read_blob_at_head(repo_path, &inc.workflow)
+            .context("Failed to load included workflow")?;
+        let inc_workflow = parser
+            .parse(&inc_source)
+            .with_context(|| format!("Included workflow {} parsing failed", inc.workflow))?;
+
+        workflow.step_libraries.extend(inc_workflow.step_libraries);
+        inline_steps(&mut workflow, &inc, inc_workflow.steps);
+        includes_to_process.extend(inc_workflow.includes);
+    }
+    // The includes may bring step libraries the workflow's own steps name
+    stormchaser_dsl::libraries::apply_step_libraries(&mut workflow)?;
+    Ok((workflow, source))
+}
+
+/// Adds an included workflow's steps, prefixed with the include's name to avoid name
+/// collisions, with the include's inputs substituted into their parameters
+fn inline_steps(workflow: &mut Workflow, inc: &dsl::Include, steps: Vec<dsl::Step>) {
+    let prefix = format!("{}.", inc.name);
+    for mut step in steps {
+        step.name = format!("{}{}", prefix, step.name);
+        for next_ref in &mut step.next {
+            *next_ref = format!("{}{}", prefix, next_ref);
+        }
+        // Word-boundary aware, so that replacing 'inputs.id' does not touch 'my_inputs.id'
+        for (k, v) in &inc.inputs {
+            let var_pattern = format!(r"\binputs\.{}\b", regex::escape(k));
+            if let Ok(re) = regex::Regex::new(&var_pattern) {
+                let val_str = v.to_string();
+                for param_val in step.params.values_mut() {
+                    *param_val = re.replace_all(param_val, val_str.as_str()).to_string();
+                }
+            }
+        }
+        workflow.steps.push(step);
+    }
 }
 
 #[cfg(test)]

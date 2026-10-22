@@ -286,7 +286,7 @@ pub fn restore_masked(incoming: &mut Value, stored: &Value) {
 /// A connection as the API returns it: credentials masked.
 pub fn connection(mut connection: Connection) -> Connection {
     mask_config(&mut connection.config);
-    connection.encrypted_credentials = connection.encrypted_credentials.map(|_| MASK.to_string());
+    connection.credentials = connection.credentials.map(|_| MASK.to_string());
     connection.client_key = connection.client_key.map(|_| MASK.to_string());
     connection
 }

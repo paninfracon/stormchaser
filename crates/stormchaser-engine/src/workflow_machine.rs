@@ -1,3 +1,11 @@
+//! A run's lifecycle, as a typestate machine.
+//!
+//! Every change to a run's status goes through a transition here. A machine is loaded
+//! from the stored row with [`WorkflowMachine::load`], which refuses a row whose
+//! status is not its state's, and saves with a compare-and-set on the version and
+//! status it loaded (see [`crate::persistence::persist_run`]). The database refuses a
+//! move the diagram in `docs/state_machines.md` does not allow.
+
 use crate::persistence::persist_run;
 use anyhow::Result;
 use chrono::Utc;
@@ -6,265 +14,222 @@ use stormchaser_model::workflow::{RunStatus, WorkflowRun};
 
 /// State markers for the workflow typestate pattern
 pub mod state {
-    /// State representing a workflow run that is queued and waiting for resolution.
+    /// Saved by the API, waiting for the engine.
     pub struct Queued;
-    /// State representing a workflow run that is resolving its source repository and dependencies.
+    /// The engine is fetching the workflow, checking policy and running queries.
     pub struct Resolving;
-    /// State representing a workflow run that has been resolved and is pending start.
+    /// Resolved; its first steps are about to be created.
     pub struct StartPending;
-    /// State representing a workflow run that is currently executing.
+    /// Steps are being created and dispatched.
     pub struct Running;
-    /// State representing a workflow run that has successfully completed.
+    /// Every step finished in a status that lets the run go on.
     pub struct Succeeded;
-    /// State representing a workflow run that has failed.
+    /// A step failed, or the run could not be resolved or started.
     pub struct Failed;
-    /// State representing a workflow run that has been aborted.
+    /// The run timed out.
     pub struct Aborted;
 }
 
+/// The stored status a state stands for.
+pub trait RunState {
+    const STATUS: RunStatus;
+}
+
+macro_rules! run_state {
+    ($($state:ident),+) => {
+        $(impl RunState for state::$state {
+            const STATUS: RunStatus = RunStatus::$state;
+        })+
+    };
+}
+
+run_state!(
+    Queued,
+    Resolving,
+    StartPending,
+    Running,
+    Succeeded,
+    Failed,
+    Aborted
+);
+
+/// A run loaded in a state its stored status is not.
+#[derive(Debug)]
+pub struct WrongState {
+    pub run: stormchaser_model::RunId,
+    pub status: RunStatus,
+    pub expected: RunStatus,
+}
+
+impl std::fmt::Display for WrongState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "run {} is {:?}, not {:?}",
+            self.run, self.status, self.expected
+        )
+    }
+}
+
+impl std::error::Error for WrongState {}
+
 /// A state machine for managing the lifecycle of a `WorkflowRun`.
 pub struct WorkflowMachine<S> {
-    /// The underlying workflow run data model.
-    pub run: WorkflowRun,
+    run: WorkflowRun,
     _state: PhantomData<S>,
 }
 
-impl<S> WorkflowMachine<S> {
-    /// New from run.
-    pub fn new_from_run(run: WorkflowRun) -> Self {
-        Self {
+impl<S: RunState> WorkflowMachine<S> {
+    /// The machine for a stored run, if its status is the state's.
+    pub fn load(run: WorkflowRun) -> std::result::Result<Self, WrongState> {
+        if run.status != S::STATUS {
+            return Err(WrongState {
+                run: run.id,
+                status: run.status,
+                expected: S::STATUS,
+            });
+        }
+        Ok(Self {
             run,
             _state: PhantomData,
-        }
+        })
     }
 
-    /// Into run.
+    /// The run as the machine holds it.
+    pub fn run(&self) -> &WorkflowRun {
+        &self.run
+    }
+
+    /// The run as the machine holds it.
     pub fn into_run(self) -> WorkflowRun {
         self.run
     }
-}
 
-impl WorkflowMachine<state::Queued> {
-    /// New.
-    pub fn new(run: WorkflowRun) -> Self {
-        let mut run = run;
-        run.status = RunStatus::Queued;
-
-        Self {
-            run,
+    /// Saves the status a transition has set, if the row is unchanged since loading.
+    async fn save<T: RunState>(
+        mut self,
+        executor: &mut sqlx::PgConnection,
+    ) -> Result<WorkflowMachine<T>> {
+        debug_assert_eq!(self.run.status, T::STATUS);
+        self.run.updated_at = Utc::now();
+        persist_run(&mut self.run, &S::STATUS, executor).await?;
+        Ok(WorkflowMachine {
+            run: self.run,
             _state: PhantomData,
-        }
+        })
     }
 
+    fn finish(&mut self, status: RunStatus, error: Option<String>) {
+        self.run.status = status;
+        self.run.finished_at = Some(Utc::now());
+        if error.is_some() {
+            self.run.error = error;
+        }
+    }
+}
+
+/// `fail` and `abort`, which every unfinished state has.
+macro_rules! ending_transitions {
+    ($($state:ident),+) => {
+        $(impl WorkflowMachine<state::$state> {
+            #[tracing::instrument(skip(self, executor, error), fields(run_id = %self.run.id))]
+            /// The run fails.
+            pub async fn fail(
+                mut self,
+                error: String,
+                executor: &mut sqlx::PgConnection,
+            ) -> Result<WorkflowMachine<state::Failed>> {
+                self.finish(RunStatus::Failed, Some(error));
+                self.save(executor).await
+            }
+
+            #[tracing::instrument(skip(self, executor), fields(run_id = %self.run.id))]
+            /// The run timed out.
+            pub async fn abort(
+                mut self,
+                executor: &mut sqlx::PgConnection,
+            ) -> Result<WorkflowMachine<state::Aborted>> {
+                self.finish(RunStatus::Aborted, None);
+                self.save(executor).await
+            }
+        })+
+    };
+}
+
+ending_transitions!(Queued, Resolving, StartPending);
+
+impl WorkflowMachine<state::Queued> {
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.run.id))]
-    /// Start resolving.
+    /// The engine starts resolving the run.
     pub async fn start_resolving(
         mut self,
         executor: &mut sqlx::PgConnection,
     ) -> Result<WorkflowMachine<state::Resolving>> {
         self.run.status = RunStatus::Resolving;
         self.run.started_resolving_at = Some(Utc::now());
-        self.run.updated_at = Utc::now();
-
-        persist_run(&mut self.run, executor).await?;
-
-        Ok(WorkflowMachine {
-            run: self.run,
-            _state: PhantomData,
-        })
-    }
-
-    #[tracing::instrument(skip(self, executor), fields(run_id = %self.run.id))]
-    /// Abort.
-    pub async fn abort(
-        mut self,
-        executor: &mut sqlx::PgConnection,
-    ) -> Result<WorkflowMachine<state::Aborted>> {
-        self.run.status = RunStatus::Aborted;
-        self.run.finished_at = Some(Utc::now());
-        self.run.updated_at = Utc::now();
-
-        persist_run(&mut self.run, executor).await?;
-
-        Ok(WorkflowMachine {
-            run: self.run,
-            _state: PhantomData,
-        })
+        self.save(executor).await
     }
 }
 
 impl WorkflowMachine<state::Resolving> {
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.run.id))]
-    /// Start pending.
+    /// The run is resolved.
     pub async fn start_pending(
         mut self,
         executor: &mut sqlx::PgConnection,
     ) -> Result<WorkflowMachine<state::StartPending>> {
         self.run.status = RunStatus::StartPending;
-        self.run.updated_at = Utc::now();
-
-        persist_run(&mut self.run, executor).await?;
-
-        Ok(WorkflowMachine {
-            run: self.run,
-            _state: PhantomData,
-        })
-    }
-
-    #[tracing::instrument(skip(self, executor, error), fields(run_id = %self.run.id))]
-    /// Fail.
-    pub async fn fail(
-        mut self,
-        error: String,
-        executor: &mut sqlx::PgConnection,
-    ) -> Result<WorkflowMachine<state::Failed>> {
-        self.run.status = RunStatus::Failed;
-        self.run.finished_at = Some(Utc::now());
-        self.run.updated_at = Utc::now();
-        self.run.error = Some(error);
-
-        persist_run(&mut self.run, executor).await?;
-
-        Ok(WorkflowMachine {
-            run: self.run,
-            _state: PhantomData,
-        })
-    }
-
-    #[tracing::instrument(skip(self, executor), fields(run_id = %self.run.id))]
-    /// Abort.
-    pub async fn abort(
-        mut self,
-        executor: &mut sqlx::PgConnection,
-    ) -> Result<WorkflowMachine<state::Aborted>> {
-        self.run.status = RunStatus::Aborted;
-        self.run.finished_at = Some(Utc::now());
-        self.run.updated_at = Utc::now();
-
-        persist_run(&mut self.run, executor).await?;
-
-        Ok(WorkflowMachine {
-            run: self.run,
-            _state: PhantomData,
-        })
+        self.save(executor).await
     }
 }
 
 impl WorkflowMachine<state::StartPending> {
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.run.id))]
-    /// Start.
+    /// The run's first steps are created.
     pub async fn start(
         mut self,
         executor: &mut sqlx::PgConnection,
     ) -> Result<WorkflowMachine<state::Running>> {
         self.run.status = RunStatus::Running;
         self.run.started_at = Some(Utc::now());
-        self.run.updated_at = Utc::now();
-
-        persist_run(&mut self.run, executor).await?;
-
-        Ok(WorkflowMachine {
-            run: self.run,
-            _state: PhantomData,
-        })
-    }
-
-    #[tracing::instrument(skip(self, executor, error), fields(run_id = %self.run.id))]
-    /// Fail.
-    pub async fn fail(
-        mut self,
-        error: String,
-        executor: &mut sqlx::PgConnection,
-    ) -> Result<WorkflowMachine<state::Failed>> {
-        self.run.status = RunStatus::Failed;
-        self.run.finished_at = Some(Utc::now());
-        self.run.updated_at = Utc::now();
-        self.run.error = Some(error);
-
-        persist_run(&mut self.run, executor).await?;
-
-        Ok(WorkflowMachine {
-            run: self.run,
-            _state: PhantomData,
-        })
-    }
-
-    #[tracing::instrument(skip(self, executor), fields(run_id = %self.run.id))]
-    /// Abort.
-    pub async fn abort(
-        mut self,
-        executor: &mut sqlx::PgConnection,
-    ) -> Result<WorkflowMachine<state::Aborted>> {
-        self.run.status = RunStatus::Aborted;
-        self.run.finished_at = Some(Utc::now());
-        self.run.updated_at = Utc::now();
-
-        persist_run(&mut self.run, executor).await?;
-
-        Ok(WorkflowMachine {
-            run: self.run,
-            _state: PhantomData,
-        })
+        self.save(executor).await
     }
 }
 
 impl WorkflowMachine<state::Running> {
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.run.id))]
-    /// Succeed.
+    /// Every step has finished in a status that lets the run go on.
     pub async fn succeed(
         mut self,
         executor: &mut sqlx::PgConnection,
     ) -> Result<WorkflowMachine<state::Succeeded>> {
-        self.run.status = RunStatus::Succeeded;
-        self.run.finished_at = Some(Utc::now());
-        self.run.updated_at = Utc::now();
-
-        persist_run(&mut self.run, executor).await?;
-
-        Ok(WorkflowMachine {
-            run: self.run,
-            _state: PhantomData,
-        })
+        self.finish(RunStatus::Succeeded, None);
+        self.save(executor).await
     }
 
     #[tracing::instrument(skip(self, executor, error), fields(run_id = %self.run.id))]
-    /// Fail.
+    /// The run fails, and runners are told to stop its other steps.
     pub async fn fail(
         mut self,
         error: String,
         executor: &mut sqlx::PgConnection,
     ) -> Result<WorkflowMachine<state::Failed>> {
-        self.run.status = RunStatus::Failed;
-        self.run.finished_at = Some(Utc::now());
-        self.run.updated_at = Utc::now();
-        self.run.error = Some(error);
-
-        persist_run(&mut self.run, executor).await?;
-        cancel_steps_on_runners(&self.run, "the run failed", executor).await?;
-
-        Ok(WorkflowMachine {
-            run: self.run,
-            _state: PhantomData,
-        })
+        self.finish(RunStatus::Failed, Some(error));
+        let failed = self.save(&mut *executor).await?;
+        cancel_steps_on_runners(&failed.run, "the run failed", executor).await?;
+        Ok(failed)
     }
 
     #[tracing::instrument(skip(self, executor), fields(run_id = %self.run.id))]
-    /// Abort.
+    /// The run timed out, and runners are told to stop its steps.
     pub async fn abort(
         mut self,
         executor: &mut sqlx::PgConnection,
     ) -> Result<WorkflowMachine<state::Aborted>> {
-        self.run.status = RunStatus::Aborted;
-        self.run.finished_at = Some(Utc::now());
-        self.run.updated_at = Utc::now();
-
-        persist_run(&mut self.run, executor).await?;
-        cancel_steps_on_runners(&self.run, "the run was aborted", executor).await?;
-
-        Ok(WorkflowMachine {
-            run: self.run,
-            _state: PhantomData,
-        })
+        self.finish(RunStatus::Aborted, None);
+        let aborted = self.save(&mut *executor).await?;
+        cancel_steps_on_runners(&aborted.run, "the run was aborted", executor).await?;
+        Ok(aborted)
     }
 }
 
@@ -306,12 +271,12 @@ mod tests {
     use super::*;
     use stormchaser_model::RunId;
 
-    fn dummy_run() -> WorkflowRun {
+    fn run(status: RunStatus) -> WorkflowRun {
         WorkflowRun {
             id: RunId::new_v4(),
             workflow_name: "test".to_string(),
             initiating_user: "u".to_string(),
-            status: RunStatus::Succeeded, // start with something else
+            status,
             created_at: Utc::now(),
             started_resolving_at: None,
             started_at: None,
@@ -327,26 +292,12 @@ mod tests {
     }
 
     #[test]
-    fn test_workflow_machine_new() {
-        let run = dummy_run();
-        let machine: WorkflowMachine<state::Queued> = WorkflowMachine::new(run.clone());
-        assert_eq!(machine.run.status, RunStatus::Queued);
-        assert_eq!(machine.run.id, run.id);
-    }
-
-    #[test]
-    fn test_workflow_machine_new_from_run() {
-        let run = dummy_run();
-        let machine: WorkflowMachine<state::Succeeded> = WorkflowMachine::new_from_run(run.clone());
-        assert_eq!(machine.run.status, RunStatus::Succeeded);
-    }
-
-    #[test]
-    fn test_workflow_machine_into_run() {
-        let run = dummy_run();
-        let machine: WorkflowMachine<state::Succeeded> = WorkflowMachine::new_from_run(run.clone());
-        let extracted = machine.into_run();
-        assert_eq!(extracted.id, run.id);
-        assert_eq!(extracted.status, RunStatus::Succeeded);
+    fn a_run_loads_only_in_its_own_state() {
+        assert!(WorkflowMachine::<state::Running>::load(run(RunStatus::Running)).is_ok());
+        let wrong = WorkflowMachine::<state::Running>::load(run(RunStatus::Aborted))
+            .err()
+            .unwrap();
+        assert_eq!(wrong.status, RunStatus::Aborted);
+        assert_eq!(wrong.expected, RunStatus::Running);
     }
 }

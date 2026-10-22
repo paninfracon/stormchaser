@@ -1,9 +1,12 @@
+pub mod abandon;
 pub mod direct;
 pub mod queued;
+mod resolve;
 pub mod sops;
 pub mod start_pending;
 pub mod timeout;
 
+pub use abandon::*;
 pub use direct::*;
 pub use queued::*;
 pub use sops::*;

@@ -76,12 +76,10 @@ workflow "e2e_load_test" {
 
   steps {
     step "process" "RunContainer" {
+      iterate = "__ITERATE_ARRAY__"
       image = "alpine:latest"
       command = ["/bin/sh", "-c"]
-      args = ["echo 'Running iteration ${step.iterate.value}'"]
-      strategy {
-        iterate = "__ITERATE_ARRAY__"
-      }
+      args = ["echo 'Running iteration ${item}'"]
     }
   }
 }
@@ -107,18 +105,14 @@ echo -e "${BLUE}>>> Workflow started with ID: $RUN_ID${NC}"
 # We'll allow up to 300 seconds (60 attempts * 5s).
 STATUS="started"
 for i in {1..60}; do
-    STATUS_JSON=$(cargo run -q -p stormchaser-cli -- --url "$API_URL" --token "$TOKEN" runs get "$RUN_ID" 2>&1)
-    CLI_EXIT=$?
-    if [ $CLI_EXIT -ne 0 ]; then
-        echo -e "${RED}>>> 'runs get' command failed (exit $CLI_EXIT):${NC}"
-        echo "$STATUS_JSON"
-        exit 1
-    fi
-
-    if echo "$STATUS_JSON" | grep -q '"status": "succeeded"'; then
+    # The engine creates a direct run when it accepts it, a moment after the API answers,
+    # so a poll that fails is a run not there yet. The run's own status, not a step's:
+    STATUS_JSON=$(cargo run -q -p stormchaser-cli -- --url "$API_URL" --token "$TOKEN" runs get "$RUN_ID" 2>&1) || true
+    RUN_STATUS=$(echo "$STATUS_JSON" | python3 -c 'import json, sys; print(json.load(sys.stdin)["detail"]["status"])' 2>/dev/null || true)
+    if [ "$RUN_STATUS" = "succeeded" ]; then
         STATUS="succeeded"
         break
-    elif echo "$STATUS_JSON" | grep -q '"status": "failed"'; then
+    elif [ "$RUN_STATUS" = "failed" ]; then
         STATUS="failed"
         break
     fi

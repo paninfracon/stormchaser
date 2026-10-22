@@ -1,5 +1,5 @@
 use super::*;
-use chrono::Utc;
+use crate::app::fixtures::{full_detail, run_detail};
 use tokio::sync::mpsc;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -8,14 +8,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 async fn test_refresh_runs_success() {
     let server = MockServer::start().await;
 
-    let run_detail = WorkflowRunDetail {
-        id: RunId::new_v4(),
-        workflow_name: "test".to_string(),
-        initiating_user: "user".to_string(),
-        status: RunStatus::Succeeded,
-        created_at: Utc::now(),
-        finished_at: None,
-    };
+    let run_detail = run_detail(RunId::new_v4(), "test", RunStatus::Succeeded);
 
     Mock::given(method("GET"))
         .and(path("/api/v1/runs"))
@@ -76,20 +69,7 @@ async fn test_fetch_run_detail_success() {
     let server = MockServer::start().await;
     let run_id = RunId::new_v4();
 
-    let full_detail = crate::app::WorkflowRunFullDetail {
-        detail: WorkflowRunDetail {
-            id: run_id,
-            workflow_name: "test".to_string(),
-            initiating_user: "user".to_string(),
-            status: RunStatus::Succeeded,
-            created_at: Utc::now(),
-            finished_at: None,
-        },
-        steps: vec![],
-        artifacts: vec![],
-        test_summaries: vec![],
-        test_cases: vec![],
-    };
+    let full_detail = full_detail(run_detail(run_id, "test", RunStatus::Succeeded), vec![]);
 
     Mock::given(method("GET"))
         .and(path(format!("/api/v1/runs/{}", run_id)))
@@ -117,14 +97,7 @@ async fn test_fetch_run_detail_success() {
 async fn test_start_listening_for_workflows_sse_success() {
     let server = MockServer::start().await;
 
-    let run_detail = WorkflowRunDetail {
-        id: RunId::new_v4(),
-        workflow_name: "test-workflow".to_string(),
-        initiating_user: "user".to_string(),
-        status: RunStatus::Running,
-        created_at: Utc::now(),
-        finished_at: None,
-    };
+    let run_detail = run_detail(RunId::new_v4(), "test-workflow", RunStatus::Running);
 
     let sse_body = format!(
         "event: workflow_run\ndata: {}\n\n",
@@ -174,22 +147,9 @@ async fn test_refresh_runs_clamps_out_of_range_selection() {
     let server = MockServer::start().await;
     let run_id = RunId::new_v4();
 
-    let run_detail = WorkflowRunDetail {
-        id: run_id,
-        workflow_name: "test".to_string(),
-        initiating_user: "user".to_string(),
-        status: RunStatus::Running,
-        created_at: Utc::now(),
-        finished_at: None,
-    };
+    let run_detail = run_detail(run_id, "test", RunStatus::Running);
 
-    let full_detail = crate::app::WorkflowRunFullDetail {
-        detail: run_detail.clone(),
-        steps: vec![],
-        artifacts: vec![],
-        test_summaries: vec![],
-        test_cases: vec![],
-    };
+    let full_detail = full_detail(run_detail.clone(), vec![]);
 
     Mock::given(method("GET"))
         .and(path("/api/v1/runs"))
@@ -223,39 +183,13 @@ async fn test_delete_selected_run_clears_stale_selection_and_refreshes_details()
     let first_run_id = RunId::new_v4();
     let second_run_id = RunId::new_v4();
 
-    let first_run = WorkflowRunDetail {
-        id: first_run_id,
-        workflow_name: "workflow-1".to_string(),
-        initiating_user: "user".to_string(),
-        status: RunStatus::Running,
-        created_at: Utc::now(),
-        finished_at: None,
-    };
+    let first_run = run_detail(first_run_id, "workflow-1", RunStatus::Running);
 
-    let second_run = WorkflowRunDetail {
-        id: second_run_id,
-        workflow_name: "workflow-2".to_string(),
-        initiating_user: "user".to_string(),
-        status: RunStatus::Queued,
-        created_at: Utc::now(),
-        finished_at: None,
-    };
+    let second_run = run_detail(second_run_id, "workflow-2", RunStatus::Queued);
 
-    let first_detail = crate::app::WorkflowRunFullDetail {
-        detail: first_run.clone(),
-        steps: vec![],
-        artifacts: vec![],
-        test_summaries: vec![],
-        test_cases: vec![],
-    };
+    let first_detail = full_detail(first_run.clone(), vec![]);
 
-    let second_detail = crate::app::WorkflowRunFullDetail {
-        detail: second_run.clone(),
-        steps: vec![],
-        artifacts: vec![],
-        test_summaries: vec![],
-        test_cases: vec![],
-    };
+    let second_detail = full_detail(second_run.clone(), vec![]);
 
     Mock::given(method("DELETE"))
         .and(path(format!("/api/v1/runs/{}", second_run_id)))

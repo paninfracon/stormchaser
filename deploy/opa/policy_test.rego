@@ -9,17 +9,10 @@ bob := {"sub": "bob-id", "email": "bob@example.com"}
 
 with_admins := {"admins": ["root@example.com"], "admin_groups": ["platform-admins"]}
 
-token_with_groups(groups) := io.jwt.encode_sign(
-	{"alg": "HS256", "typ": "JWT"},
-	{"sub": "x", "groups": groups},
-	{"kty": "oct", "k": "c2VjcmV0"},
-)
-
 resource(action, type, owner, subject) := {
 	"action": action,
 	"resource": {"type": type, "id": "1", "owner": owner},
 	"subject": subject,
-	"token": null,
 }
 
 # --- Unknown questions ---------------------------------------------------------------
@@ -32,24 +25,24 @@ test_unknown_input_is_refused if {
 # --- Request tier --------------------------------------------------------------------
 
 test_authenticated_request_is_allowed if {
-	allow with input as {"method": "DELETE", "path": "/api/v1/runs/1", "token": "t"}
+	allow with input as {"method": "DELETE", "path": "/api/v1/runs/1", "subject": alice}
 }
 
 test_tokenless_request_may_only_read if {
-	allow with input as {"method": "GET", "path": "/api/v1/runs", "token": null}
-	not allow with input as {"method": "POST", "path": "/api/v1/runs", "token": null}
+	allow with input as {"method": "GET", "path": "/api/v1/runs", "subject": null}
+	not allow with input as {"method": "POST", "path": "/api/v1/runs", "subject": null}
 	not allow with input as {"method": "DELETE", "path": "/api/v1/connections/1"}
 }
 
 test_login_and_exchange_need_no_token if {
-	allow with input as {"method": "POST", "path": "/api/v1/auth/exchange", "token": null}
+	allow with input as {"method": "POST", "path": "/api/v1/auth/exchange", "subject": null}
 }
 
 test_mcp_transport_is_allowed_and_other_mcp_writes_are_not if {
-	allow with input as {"method": "POST", "path": "/api/v1/mcp", "token": null}
-	allow with input as {"method": "DELETE", "path": "/api/v1/mcp/", "token": null}
-	not allow with input as {"method": "POST", "path": "/api/v1/mcp/other", "token": null}
-	not allow with input as {"method": "PUT", "path": "/api/v1/mcp", "token": "t"}
+	allow with input as {"method": "POST", "path": "/api/v1/mcp", "subject": null}
+	allow with input as {"method": "DELETE", "path": "/api/v1/mcp/", "subject": null}
+	not allow with input as {"method": "POST", "path": "/api/v1/mcp/other", "subject": null}
+	not allow with input as {"method": "PUT", "path": "/api/v1/mcp", "subject": alice}
 }
 
 # --- Resource tier -------------------------------------------------------------------
@@ -116,21 +109,29 @@ test_admins_may_do_anything if {
 		with data.stormchaser_settings as with_admins
 }
 
-test_admin_by_token_group if {
-	request := object.union(
-		resource("delete", "run", "alice@example.com", bob),
-		{"token": token_with_groups(["platform-admins"])},
-	)
-	allow with input as request with data.stormchaser_settings as with_admins
+test_admin_by_group if {
+	admin := object.union(bob, {"groups": ["platform-admins"]})
+	allow with input as resource("delete", "run", "alice@example.com", admin)
+		with data.stormchaser_settings as with_admins
 
-	not_admin := object.union(
-		resource("delete", "run", "alice@example.com", bob),
-		{"token": token_with_groups(["developers"])},
-	)
-	not allow with input as not_admin with data.stormchaser_settings as with_admins
+	not_admin := object.union(bob, {"groups": ["developers"]})
+	not allow with input as resource("delete", "run", "alice@example.com", not_admin)
+		with data.stormchaser_settings as with_admins
 
-	garbage := object.union(resource("delete", "run", "alice@example.com", bob), {"token": "garbage"})
-	not allow with input as garbage with data.stormchaser_settings as with_admins
+	garbage := object.union(bob, {"groups": "platform-admins"})
+	not allow with input as resource("delete", "run", "alice@example.com", garbage)
+		with data.stormchaser_settings as with_admins
+}
+
+test_a_token_in_the_input_grants_nothing if {
+	# Policy reads groups only from the identity the API verified
+	forged := io.jwt.encode_sign(
+		{"alg": "HS256", "typ": "JWT"},
+		{"sub": "x", "groups": ["platform-admins"]},
+		{"kty": "oct", "k": "c2VjcmV0"},
+	)
+	request := object.union(resource("delete", "run", "alice@example.com", bob), {"token": forged})
+	not allow with input as request with data.stormchaser_settings as with_admins
 }
 
 test_an_owner_named_system_is_nobody if {
@@ -164,7 +165,6 @@ approval(approver) := {
 	"inputs": {},
 	"run_outputs": {},
 	"approver": approver,
-	"token": "t",
 }
 
 test_anyone_may_approve_by_default if {
@@ -193,11 +193,7 @@ test_only_a_listed_approver_may_decide_a_step_that_names_them if {
 }
 
 test_a_listed_group_or_an_admin_may_approve if {
-	by_group := object.union(
-		approval_listing(["release-managers"], alice),
-		{"token": token_with_groups(["release-managers"])},
-	)
-	allow with input as by_group
+	allow with input as approval_listing(["release-managers"], object.union(alice, {"groups": ["release-managers"]}))
 
 	root := {"sub": "root-id", "email": "root@example.com"}
 	allow with input as approval_listing(["bob@example.com"], root)
@@ -216,11 +212,9 @@ with_authors := {
 	"author_groups": ["workflow-authors"],
 }
 
-token_for(claims) := io.jwt.encode_sign({"alg": "HS256", "typ": "JWT"}, claims, {"kty": "oct", "k": "c2VjcmV0"})
+run_only_user := {"sub": "carol-id", "email": "carol@example.com", "groups": ["engineers"]}
 
-runner_token := token_for({"sub": "carol-id", "email": "carol@example.com", "groups": ["engineers"]})
-
-author_token := token_for({"sub": "dave-id", "email": "dave@example.com", "groups": ["workflow-authors"]})
+author := {"sub": "dave-id", "email": "dave@example.com", "groups": ["workflow-authors"]}
 
 author_only_requests := [
 	{"method": "POST", "path": "/api/v1/runs/direct"},
@@ -233,14 +227,14 @@ author_only_requests := [
 
 test_without_author_groups_everyone_may_write_workflows if {
 	every request in author_only_requests {
-		allow with input as object.union(request, {"token": runner_token})
+		allow with input as object.union(request, {"subject": run_only_user})
 			with data.stormchaser_settings as with_admins
 	}
 }
 
 test_run_only_users_may_not_supply_workflows_or_change_connections if {
 	every request in author_only_requests {
-		not allow with input as object.union(request, {"token": runner_token})
+		not allow with input as object.union(request, {"subject": run_only_user})
 			with data.stormchaser_settings as with_authors
 	}
 }
@@ -253,17 +247,17 @@ test_run_only_users_may_still_run_and_hydrate_repository_workflows if {
 		{"method": "GET", "path": "/api/v1/connections"},
 		{"method": "GET", "path": "/api/v1/runs/direct"},
 	] {
-		allow with input as object.union(request, {"token": runner_token})
+		allow with input as object.union(request, {"subject": run_only_user})
 			with data.stormchaser_settings as with_authors
 	}
 }
 
 test_authors_and_admins_may_write_workflows if {
-	admin_by_group := token_for({"sub": "erin-id", "groups": ["platform-admins"]})
-	admin_by_email := token_for({"sub": "root-id", "email": "root@example.com"})
-	every token in [author_token, admin_by_group, admin_by_email] {
+	admin_by_group := {"sub": "erin-id", "groups": ["platform-admins"]}
+	admin_by_email := {"sub": "root-id", "email": "root@example.com"}
+	every subject in [author, admin_by_group, admin_by_email] {
 		every request in author_only_requests {
-			allow with input as object.union(request, {"token": token})
+			allow with input as object.union(request, {"subject": subject})
 				with data.stormchaser_settings as with_authors
 		}
 	}

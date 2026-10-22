@@ -1,6 +1,6 @@
 # Resource Quotas in Stormchaser
 
-Stormchaser provides a robust resource quota management system to prevent individual workflow runs from monopolizing cluster resources or exceeding organizational limits. Quotas are defined at the workflow level and enforced by the Orchestration Engine during execution.
+Quotas limit what one workflow run may use at once: how many steps run, how much CPU and memory they ask for together, and how long the run lasts. They are set per run and enforced by the engine when it dispatches steps.
 
 ## Defining Quotas
 
@@ -12,17 +12,19 @@ workflow "DataProcessingPipeline" {
         max_concurrency = 10       // Maximum number of steps running simultaneously
         max_cpu         = "4.0"    // Maximum aggregate CPU cores across all running steps
         max_memory      = "8Gi"    // Maximum aggregate memory across all running steps
-        max_storage     = "50Gi"   // Maximum shared storage space (SFS) allowed
+        max_storage     = "50Gi"   // Recorded, not enforced (see below)
         timeout         = "2h"     // Maximum total duration for the workflow run
     }
     // ...
 }
 ```
 
-A run started from workflow text (a direct run) takes its quotas from this block.
-A run queued from a repository, a webhook rule or a cron schedule gets fixed quotas:
-concurrency 10, CPU `1`, memory `4Gi`, storage `10Gi` and timeout `1h`, or the
-`overrides.timeout` of the `POST /api/v1/runs` request.
+A run started from workflow text (a direct run) takes its quotas from this block. A field left out gets the same default as below.
+A run queued from a repository, a webhook rule or a cron schedule ignores the
+block and gets fixed quotas: concurrency 10, CPU `1`, memory `4Gi`, storage `10Gi`
+and timeout `1h` (or the `overrides.timeout` of the `POST /api/v1/runs` request).
+A step that asks for more CPU or memory than its run's total fails at once (see
+below), so such a run cannot have a step that asks for more than 1 CPU or `4Gi`.
 
 ### Operator ceilings
 
@@ -37,26 +39,27 @@ the operator sets. A run that asks for more gets the ceiling, and a warning is l
 | `max_memory` | `256Gi` | `STORMCHASER_RUN_MAX_MEMORY` |
 | `timeout` | `24h` | `STORMCHASER_RUN_MAX_TIMEOUT` |
 
+The orchestration Helm chart has no values for these variables, so with the chart
+the defaults apply.
+
 What one step may use is limited separately, by each runner (see
 [What one step may use](security.md#what-one-step-may-use)).
 
 ## How Quotas Are Enforced
 
-The Stormchaser Engine enforces quotas using a central, database-backed tracking system to ensure consistency even in a distributed, multi-controller deployment.
+The engine keeps each run's quotas and current usage in the `run_quotas` table, and locks the row when it changes usage, so several engine replicas stay consistent.
 
 ### 1. Concurrency Limits (`max_concurrency`)
 
-The `max_concurrency` limit is the simplest form of quota. It restricts the absolute number of `StepInstance`s that can be in the `Running` state at any given time for a specific workflow run.
-
-Before dispatching new steps, the Engine counts the active steps. If the count meets or exceeds `max_concurrency`, no further steps are dispatched until an active step completes, fails, or aborts.
+Before dispatching, the engine counts the run's steps in the `running` state. If the count meets or exceeds `max_concurrency`, it dispatches nothing; otherwise it dispatches at most the difference. Steps that have been dispatched but have not started running yet (initializing, unpacking storage) are not counted.
 
 ### 2. Resource Limits (`max_cpu` and `max_memory`)
 
-Unlike concurrency, which just counts steps, the CPU and Memory quotas track the *aggregate requested resources* of all currently running steps. This allows you to run many small steps concurrently, or fewer large steps, safely within a defined boundary.
+The CPU and memory quotas track the total that the run's dispatched steps *ask for*. They do not measure what steps actually use. Only `RunContainer` and `RunK8sJob` steps count; built-in steps such as `JQ` or `RestApi`, and Terraform steps, count as zero.
 
 #### Resource Requirement Parsing
 
-When a step is defined (typically a `RunContainer` or `RunK8sJob`), it can specify its resource requirements in its `spec`:
+A `RunContainer` or `RunK8sJob` step gives its request in its `spec` (for `RunK8sJob`, `resources.requests.cpu` and `resources.requests.memory` take precedence when set):
 
 ```hcl
 step "heavy_computation" "RunContainer" {
@@ -71,27 +74,31 @@ step "heavy_computation" "RunContainer" {
 The Engine parses these values into a normalized format:
 
 * **CPU:** Parsed into a floating-point number of cores. `500m` becomes `0.5`, `2` becomes `2.0`.
-* **Memory:** Parsed into an integer number of bytes. `512Mi` becomes `536,870,912`, `1Gi` becomes `1,073,741,824`.
+* **Memory:** Parsed into an integer number of bytes, as Kubernetes reads quantities. `512Mi` becomes `536,870,912`, `1.5Gi` becomes `1,610,612,736`, and `1G` becomes `1,000,000,000`: `Ki`, `Mi`, `Gi` and `Ti` are binary units, `k`, `M`, `G` and `T` decimal ones. The runners read a step's `cpu` and `memory` the same way. A value with an unknown suffix cannot be parsed and counts as zero; in a run's `max_memory`, zero means no memory limit.
 
 #### The Claim and Release Cycle
 
-1. **Evaluation:** When the Engine identifies a pending step that is ready to run, it extracts its CPU and Memory requirements.
-2. **Claim:** The Engine attempts to atomically "claim" this quota against the run's current usage in the database.
-3. **Dispatch:**
-    * If the claim is **successful** (i.e., `current_usage + step_requirement <= max_quota`), the step is dispatched to a Runner.
-    * If the claim is **unsuccessful** (i.e., dispatching this step would exceed the `max_cpu` or `max_memory`), the step remains in the `Pending` state. The Engine will try to dispatch other, smaller pending steps if they fit within the remaining quota.
-4. **Release:** When the step finishes (either successfully or with an error), the Engine hooks into the completion event and subtracts the step's requested resources from the run's current usage, freeing up space for pending steps.
+1. **Evaluation:** When the engine picks up a pending step, it reads its CPU and memory request.
+2. **Too large:** If the request alone is more than the run's `max_cpu` or `max_memory`, the step can never fit, so the engine fails it with a message saying so instead of leaving it pending.
+3. **Claim:** Otherwise the engine adds the request to the run's usage, in one locked database update, if `current_usage + request <= max_quota` for both CPU and memory.
+4. **Dispatch:**
+    * If the claim succeeds, the step is dispatched to a runner.
+    * If it does not, the step goes back to `Pending`, and the engine tries the next pending step, which may be smaller.
+    * If dispatching fails, the claim is given back and the step goes back to `Pending`. A dispatch that was lost later is given back in the same transaction that puts the step back.
+5. **Release:** When the step completes or fails (including a failed attempt that its retry policy runs again), the engine subtracts its request from the run's usage.
 
 ### 3. Timeout Enforcement (`timeout`)
 
-The `timeout` quota is enforced by a background process in the Orchestration Engine. It periodically scans active runs. If a run's duration exceeds its specified timeout, the Engine automatically transitions the run to the `Failed` (or `Aborted`) state and attempts to gracefully terminate any active steps associated with it.
+A background worker in the engine (on the one replica that holds the background-worker lock) checks active runs every 30 seconds. The clock starts when the run started, or when it was queued if it has not started, so time spent queued counts. When a run is past its timeout, the engine marks it `Aborted` with the error `Workflow timed out`, fails its unfinished steps, asks the runners to cancel them, publishes `run.aborted`, and archives the run.
+
+Each step also has its own timeout, set by the step's `timeout` or the runner's default; see [What one step may use](security.md#what-one-step-may-use).
 
 ### 4. Storage Limits (`max_storage`)
 
-The `max_storage` limit applies to the Shared File System (SFS). Enforcement of this limit is typically handled by the underlying storage provisioner or the Runner Agent, which monitors the size of the mounted volumes during execution. If a step attempts to write data that pushes the volume size beyond this limit, the write operation will fail, resulting in a step failure.
+Not enforced. `max_storage` is parsed and stored with the run's quotas, but nothing reads it: neither the engine, the runners nor the agent limit the size of a run's storage volumes. Volume sizes are whatever the runner and storage backend give them (Docker volumes, the size of a shared PVC, the object store's limits).
 
 ## Best Practices
 
-* **Always Define Quotas:** It is highly recommended to define baseline quotas for all production workflows to prevent accidental runaway processes, especially when using dynamic features like `iterate` (Map/Reduce).
-* **Step Granularity:** Be explicit about the CPU and Memory requirements of individual steps. If a step does not declare its requirements, it counts as 0 CPU and 0 Memory against the run's quota, so only `max_concurrency` bounds how many such steps run at once. When it runs, the runner gives it its default CPU and memory (1 core and `2Gi` unless the operator changed them).
+* **Define Quotas:** Set quotas in workflows you run directly, especially ones that use `iterate`. Without them a direct run gets concurrency 10, 1 CPU and `4Gi` in all.
+* **Step Requests:** Give each container step its CPU and memory. If a step does not declare its requirements, it counts as 0 CPU and 0 Memory against the run's quota, so only `max_concurrency` bounds how many such steps run at once. When it runs, the runner gives it its default CPU and memory (1 core and `2Gi` unless the operator changed them).
 * **Balancing Concurrency and Resources:** Use `max_concurrency` to limit API rate limits or connection pools, and use `max_cpu`/`max_memory` to limit compute resource consumption.

@@ -1,80 +1,14 @@
-use crate::handler::{fetch_outputs, fetch_run_context, fetch_step_instance};
+use crate::handler::integrations::utils::report_step_completed;
+use crate::handler::{fetch_outputs, fetch_run_context};
 use anyhow::{Context, Result};
 use serde_json::Value;
 use sqlx::PgPool;
-use std::sync::Arc;
+use std::collections::HashMap;
 use std::time::Duration;
 use stormchaser_model::dsl::{RestApiResponseExtractor, RestApiSpec};
-use stormchaser_model::events::{
-    EventSource, EventType, SchemaVersion, StepCompletedEvent, StepEventType,
-};
-use stormchaser_model::nats::NatsSubject;
 use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
-use stormchaser_tls::TlsReloader;
 use tracing::{info, warn};
-
-/// Attempts to dispatch a REST API step instance directly.
-#[allow(clippy::too_many_arguments)]
-pub async fn try_dispatch(
-    run_id: RunId,
-    step_instance_id: StepInstanceId,
-    fencing_token: i64,
-    step_type: &str,
-    resolved_spec: &Value,
-    pool: PgPool,
-    nats_client: async_nats::Client,
-    _tls_reloader: Arc<TlsReloader>,
-) -> Result<bool> {
-    if step_type == "RestApi" {
-        let pool = pool.clone();
-        let nats_client = nats_client.clone();
-        let spec = resolved_spec.clone();
-
-        tokio::spawn(async move {
-            if let Err(e) = handle_rest_api_invoke(
-                run_id,
-                step_instance_id,
-                fencing_token,
-                spec,
-                pool.clone(),
-                nats_client.clone(),
-            )
-            .await
-            {
-                if let Ok(instance) = fetch_step_instance(step_instance_id, &pool).await {
-                    let machine = crate::step_machine::StepMachine::<
-                        crate::step_machine::state::Pending,
-                    >::from_instance(instance);
-                    if let Ok(mut conn) = pool.acquire().await {
-                        if let Ok(_machine) = machine
-                            .start("error-recovery".to_string(), &mut *conn)
-                            .await
-                        {
-                            if let Ok(instance) = fetch_step_instance(step_instance_id, &pool).await
-                            {
-                                let machine =
-                                    crate::step_machine::StepMachine::<
-                                        crate::step_machine::state::Running,
-                                    >::from_instance(instance);
-                                let _ = machine
-                                    .fail(
-                                        format!("RestApi invoke failed: {:?}", e),
-                                        None,
-                                        &mut *conn,
-                                    )
-                                    .await;
-                            }
-                        }
-                    }
-                }
-            }
-        });
-        return Ok(true);
-    }
-
-    Ok(false)
-}
 
 fn prepare_template_context(inputs: Value, outputs: Value, run_id: RunId) -> Value {
     serde_json::json!({
@@ -86,13 +20,13 @@ fn prepare_template_context(inputs: Value, outputs: Value, run_id: RunId) -> Val
     })
 }
 
-async fn handle_rest_api_invoke(
+/// Runs a RestApi step, reporting its result.
+pub(crate) async fn handle_rest_api_invoke(
     run_id: RunId,
     step_id: StepInstanceId,
     fencing_token: i64,
     spec: Value,
     pool: PgPool,
-    nats_client: async_nats::Client,
 ) -> Result<()> {
     let mut spec: RestApiSpec = serde_json::from_value(spec.get("spec").unwrap_or(&spec).clone())?;
 
@@ -118,14 +52,7 @@ async fn handle_rest_api_invoke(
     info!("Invoking REST API {} for run {}", spec.url, run_id);
 
     // 1. Mark as Running
-    let instance = fetch_step_instance(step_id, &pool).await?;
-    let machine =
-        crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::from_instance(
-            instance,
-        );
-    let _ = machine
-        .start("rest_api".to_string(), &mut *pool.acquire().await?)
-        .await?;
+    crate::handler::integrations::utils::start_built_in(&pool, step_id, "rest_api").await?;
 
     // 2. Prepare Context for Template Rendering
     let run_context = fetch_run_context(run_id, &pool).await?;
@@ -137,16 +64,7 @@ async fn handle_rest_api_invoke(
     let rendered_body = render_request_body(&spec, &template_ctx)?;
 
     // 4. Build and Execute Request
-    execute_request(
-        run_id,
-        step_id,
-        fencing_token,
-        &spec,
-        rendered_body,
-        pool,
-        nats_client,
-    )
-    .await
+    execute_request(run_id, step_id, fencing_token, &spec, rendered_body, pool).await
 }
 
 /// Resolves the step's URL against an HttpApi connection and attaches the connection's
@@ -166,8 +84,7 @@ fn apply_http_connection(
         // Keep legacy `url` support for existing HttpApi connections.
         .or_else(|| conn.config.get("url").and_then(|v| v.as_str()));
     let headers = conn.config.get("headers").and_then(|v| v.as_object());
-    let carries_credentials =
-        conn.encrypted_credentials.is_some() || headers.is_some_and(|h| !h.is_empty());
+    let carries_credentials = conn.credentials.is_some() || headers.is_some_and(|h| !h.is_empty());
 
     let lowered = spec.url.to_ascii_lowercase();
     let is_absolute = lowered.starts_with("http://") || lowered.starts_with("https://");
@@ -214,7 +131,7 @@ fn apply_http_connection(
             }
         }
     }
-    if let Some(auth_token) = &conn.encrypted_credentials {
+    if let Some(auth_token) = &conn.credentials {
         if !current_headers.contains_key("Authorization")
             && !current_headers.contains_key("authorization")
         {
@@ -224,7 +141,7 @@ fn apply_http_connection(
             );
         }
     }
-    if !current_headers.is_empty() || headers.is_some() || conn.encrypted_credentials.is_some() {
+    if !current_headers.is_empty() || headers.is_some() || conn.credentials.is_some() {
         spec.headers = Some(current_headers);
     }
     Ok(())
@@ -331,14 +248,12 @@ fn normalize_json_pointer(path: &str) -> String {
     }
 }
 
+/// The step's outputs from a successful response
 fn parse_response(
     status_is_success: bool,
     body_bytes: &[u8],
     spec: &RestApiSpec,
-    run_id: RunId,
-    step_id: StepInstanceId,
-    fencing_token: i64,
-) -> Result<StepCompletedEvent> {
+) -> Result<HashMap<String, Value>> {
     if status_is_success {
         let body_val: Value = serde_json::from_slice(body_bytes)
             .unwrap_or_else(|_| serde_json::json!({ "text": String::from_utf8_lossy(body_bytes) }));
@@ -349,20 +264,7 @@ fn parse_response(
 
         apply_extractors(spec, &body_val, &body_text, &mut final_outputs);
 
-        Ok(StepCompletedEvent {
-            run_id,
-            step_id,
-            fencing_token,
-            completion_token: None,
-            event_type: EventType::Step(StepEventType::Completed),
-            test_reports: None,
-            artifacts: None,
-            storage_hashes: None,
-            outputs: Some(final_outputs.into_iter().collect()),
-            timestamp: chrono::Utc::now(),
-            exit_code: Some(0),
-            runner_id: Some("engine-intrinsic".to_string()),
-        })
+        Ok(final_outputs.into_iter().collect())
     } else {
         let error_body = String::from_utf8_lossy(body_bytes).to_string();
         anyhow::bail!("RestApi failed with error body: {}", error_body);
@@ -376,9 +278,8 @@ async fn execute_request(
     spec: &RestApiSpec,
     rendered_body: Option<String>,
     pool: PgPool,
-    nats_client: async_nats::Client,
 ) -> Result<()> {
-    let (client, url) = stormchaser_model::net_guard::guarded_client(&spec.url).await?;
+    let (client, url) = stormchaser_core::net_guard::guarded_client(&spec.url).await?;
     let method = build_request_method(spec);
 
     let mut builder = client.request(method, url);
@@ -401,45 +302,15 @@ async fn execute_request(
 
     let res = builder.timeout(timeout).send().await?;
     let status = res.status();
-    let body_bytes = stormchaser_model::net_guard::read_body_capped(
+    let body_bytes = stormchaser_core::net_guard::read_body_capped(
         res,
-        stormchaser_model::net_guard::MAX_RESPONSE_BYTES,
+        stormchaser_core::net_guard::MAX_RESPONSE_BYTES,
     )
     .await?;
 
-    match parse_response(
-        status.is_success(),
-        &body_bytes,
-        spec,
-        run_id,
-        step_id,
-        fencing_token,
-    ) {
-        Ok(mut event) => {
-            event.completion_token = crate::db::step_completion_token(&pool, step_id).await;
-            let js = async_nats::jetstream::new(nats_client);
-            let event_payload = serde_json::to_value(event)
-                .context("failed to serialize RestApi completion event")?;
-
-            stormchaser_model::nats::publish_cloudevent(
-                &js,
-                NatsSubject::StepCompleted(Some(stormchaser_model::nats::compute_shard_id(
-                    &run_id,
-                ))),
-                EventType::Step(StepEventType::Completed),
-                EventSource::System,
-                event_payload,
-                Some(SchemaVersion::new("1.0".to_string())),
-                None,
-            )
-            .await
-            .context("failed to publish RestApi completion event")?;
-            Ok(())
-        }
-        Err(e) => {
-            anyhow::bail!("RestApi failed with status {}: {}", status, e);
-        }
-    }
+    let outputs = parse_response(status.is_success(), &body_bytes, spec)
+        .map_err(|e| anyhow::anyhow!("RestApi failed with status {}: {}", status, e))?;
+    report_step_completed(&pool, run_id, step_id, fencing_token, Some(outputs)).await
 }
 
 #[cfg(test)]
@@ -455,7 +326,7 @@ mod tests {
             "description": null,
             "connection_type": "http_api",
             "config": config,
-            "encrypted_credentials": token,
+            "credentials": token,
             "aws_assume_role_arn": null,
             "is_default_sfs": false,
             "ca_cert": null,
@@ -737,9 +608,6 @@ mod tests {
 
     #[test]
     fn test_parse_response_success() {
-        use stormchaser_model::StepInstanceId;
-        let run_id = RunId::new(Uuid::new_v4());
-        let step_id = StepInstanceId::new(Uuid::new_v4());
         let spec = RestApiSpec {
             connection: None,
             url: "http://example.com".to_string(),
@@ -751,18 +619,13 @@ mod tests {
         };
 
         let body = b"{\"hello\":\"world\"}";
-        let result = parse_response(true, body, &spec, run_id, step_id, 1).unwrap();
+        let outputs = parse_response(true, body, &spec).unwrap();
 
-        assert_eq!(result.exit_code, Some(0));
-        let outputs = result.outputs.unwrap();
         assert_eq!(outputs.get("response").unwrap(), &json!({"hello": "world"}));
     }
 
     #[test]
     fn test_parse_response_failure() {
-        use stormchaser_model::StepInstanceId;
-        let run_id = RunId::new(Uuid::new_v4());
-        let step_id = StepInstanceId::new(Uuid::new_v4());
         let spec = RestApiSpec {
             connection: None,
             url: "http://example.com".to_string(),
@@ -774,7 +637,7 @@ mod tests {
         };
 
         let body = b"Internal Server Error";
-        let err = parse_response(false, body, &spec, run_id, step_id, 1).unwrap_err();
+        let err = parse_response(false, body, &spec).unwrap_err();
 
         assert!(err
             .to_string()

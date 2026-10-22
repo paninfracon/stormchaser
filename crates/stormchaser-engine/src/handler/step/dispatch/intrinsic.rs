@@ -1,4 +1,7 @@
 use anyhow::Result;
+use futures::future::{BoxFuture, FutureExt};
+
+use crate::handler::integrations::utils::report_step_failed;
 use serde_json::Value;
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -91,7 +94,7 @@ pub(crate) async fn inject_connection_env_vars(
                     value: user.to_string(),
                 });
             }
-            if let Some(creds) = &conn.encrypted_credentials {
+            if let Some(creds) = &conn.credentials {
                 // The step can print it; the API masks it wherever it turns up
                 crate::db::add_sensitive_values(pool, run_id, std::slice::from_ref(creds)).await?;
                 envs.push(dsl::EnvVar {
@@ -105,166 +108,154 @@ pub(crate) async fn inject_connection_env_vars(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn try_dispatch_intrinsic(
-    run_id: RunId,
-    step_instance_id: StepInstanceId,
-    fencing_token: i64,
-    step_type: &str,
-    resolved_spec: &Value,
-    resolved_params: &Value,
-    pool: PgPool,
-    nats_client: async_nats::Client,
-    tls_reloader: Arc<TlsReloader>,
-) -> Result<bool> {
-    if crate::handler::step::intrinsic::wasm::try_dispatch(
-        run_id,
-        step_instance_id,
-        fencing_token,
-        step_type,
-        resolved_spec,
-        resolved_params,
-        pool.clone(),
-        nats_client.clone(),
-        tls_reloader.clone(),
+/// A claimed step, with what the engine needs to run it itself if it is a built-in one.
+#[derive(Clone)]
+pub struct BuiltInStep {
+    pub run_id: RunId,
+    pub step_id: StepInstanceId,
+    pub fencing_token: i64,
+    pub step_type: String,
+    pub spec: Value,
+    pub params: Value,
+    pub pool: PgPool,
+    pub tls_reloader: Arc<TlsReloader>,
+}
+
+/// A built-in step's work, which reports the step's result itself and returns an error
+/// only when it could not
+pub(crate) type BuiltInWork = BoxFuture<'static, Result<()>>;
+
+/// Work for a built-in step type that this engine build leaves out
+#[cfg(not(all(feature = "chatops-slack", feature = "chatops-teams")))]
+fn not_enabled(feature: &'static str) -> BuiltInWork {
+    async move { anyhow::bail!("{feature} support is not enabled in this engine build.") }.boxed()
+}
+
+/// The work of `step`, if it is a built-in step.
+async fn built_in_work(step: &BuiltInStep) -> Result<Option<BuiltInWork>> {
+    use crate::handler::step::intrinsic::{jq, rest_api, sql_execute, wasm};
+    let s = step.clone();
+    let work = match step.step_type.as_str() {
+        "RestApi" => {
+            rest_api::handle_rest_api_invoke(s.run_id, s.step_id, s.fencing_token, s.spec, s.pool)
+                .boxed()
+        }
+        "SqlExecute" => {
+            sql_execute::handle_sql_execute(s.run_id, s.step_id, s.fencing_token, s.spec, s.pool)
+                .boxed()
+        }
+        "JQ" => jq::run_jq(s.run_id, s.step_id, s.fencing_token, s.spec, s.pool).boxed(),
+        "JinjaRender" => {
+            crate::handler::handle_jinja_render(s.run_id, s.step_id, s.spec, s.pool).boxed()
+        }
+        "WebhookInvoke" => {
+            crate::handler::handle_webhook_invoke(s.run_id, s.step_id, s.spec, s.pool).boxed()
+        }
+        "TestReportEmail" => crate::handler::handle_test_report_email(
+            s.run_id,
+            s.step_id,
+            s.spec,
+            s.pool,
+            s.tls_reloader,
+        )
+        .boxed(),
+        // Email and Lambda stand in for themselves in builds without them
+        "EmailSend" => {
+            crate::handler::handle_email_send(s.run_id, s.step_id, s.spec, s.pool, s.tls_reloader)
+                .boxed()
+        }
+        "LambdaInvoke" => {
+            crate::handler::handle_lambda_invoke(s.run_id, s.step_id, s.spec, s.pool).boxed()
+        }
+        #[cfg(feature = "chatops-slack")]
+        "SlackMessage" => crate::handler::handle_slack_message(
+            s.run_id,
+            s.step_id,
+            s.fencing_token,
+            s.spec,
+            s.pool,
+        )
+        .boxed(),
+        #[cfg(not(feature = "chatops-slack"))]
+        "SlackMessage" => not_enabled("ChatOps Slack"),
+        #[cfg(feature = "chatops-teams")]
+        "TeamsMessage" => crate::handler::handle_teams_message(
+            s.run_id,
+            s.step_id,
+            s.fencing_token,
+            s.spec,
+            s.pool,
+        )
+        .boxed(),
+        #[cfg(not(feature = "chatops-teams"))]
+        "TeamsMessage" => not_enabled("ChatOps Teams"),
+        // A Wasm step, or a step type registered with a WASM module
+        _ => return wasm::work(step).await,
+    };
+    Ok(Some(work))
+}
+
+/// Starts `step` in this engine if it is a built-in step, and says whether it was.
+///
+/// The step records this engine as the one running it before its work starts, so that
+/// the step is failed if this engine dies (see `engine_instance`). A failure of the
+/// work goes to the step-failed handler, as a runner's would.
+pub async fn try_dispatch_intrinsic(step: BuiltInStep) -> Result<bool> {
+    let Some(work) = built_in_work(&step).await? else {
+        return Ok(false);
+    };
+    crate::db::set_step_run_by_engine(&step.pool, step.step_id, *crate::engine_instance::ENGINE_ID)
+        .await?;
+    tokio::spawn(async move {
+        let Err(e) = work.await else { return };
+        if let Err(report_err) = report_failure(&step, e).await {
+            tracing::error!(
+                "Failed to report step {} as failed: {:?}",
+                step.step_id,
+                report_err
+            );
+        }
+    });
+    Ok(true)
+}
+
+async fn report_failure(step: &BuiltInStep, error: anyhow::Error) -> Result<()> {
+    report_step_failed(
+        &step.pool,
+        step.run_id,
+        step.step_id,
+        step.fencing_token,
+        failure_message(&step.step_type, &error),
     )
-    .await?
-    {
-        return Ok(true);
+    .await
+}
+
+/// The error on one line, its causes after colons, named for the step type unless it
+/// already is ("RestApi failed with status 500", not "RestApi failed: RestApi failed …")
+fn failure_message(step_type: &str, error: &anyhow::Error) -> String {
+    let message = format!("{:#}", error);
+    if message.starts_with(step_type) {
+        message
+    } else {
+        format!("{} failed: {}", step_type, message)
     }
-    if crate::handler::step::intrinsic::lambda::try_dispatch(
-        run_id,
-        step_instance_id,
-        step_type,
-        resolved_spec,
-        pool.clone(),
-        nats_client.clone(),
-        tls_reloader.clone(),
-    )
-    .await?
-    {
-        return Ok(true);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::failure_message;
+
+    #[test]
+    fn a_failure_is_named_for_its_step_type_once() {
+        let error = anyhow::anyhow!("RestApi failed with status 500");
+        assert_eq!(
+            failure_message("RestApi", &error),
+            "RestApi failed with status 500"
+        );
+        let error = anyhow::anyhow!("connection refused").context("Could not reach the host");
+        assert_eq!(
+            failure_message("WebhookInvoke", &error),
+            "WebhookInvoke failed: Could not reach the host: connection refused"
+        );
     }
-    if crate::handler::step::intrinsic::rest_api::try_dispatch(
-        run_id,
-        step_instance_id,
-        fencing_token,
-        step_type,
-        resolved_spec,
-        pool.clone(),
-        nats_client.clone(),
-        tls_reloader.clone(),
-    )
-    .await?
-    {
-        return Ok(true);
-    }
-    if crate::handler::step::intrinsic::sql_execute::try_dispatch(
-        run_id,
-        step_instance_id,
-        fencing_token,
-        step_type,
-        resolved_spec,
-        pool.clone(),
-        nats_client.clone(),
-    )
-    .await?
-    {
-        return Ok(true);
-    }
-    if crate::handler::step::intrinsic::webhook::try_dispatch(
-        run_id,
-        step_instance_id,
-        step_type,
-        resolved_spec,
-        pool.clone(),
-        nats_client.clone(),
-        tls_reloader.clone(),
-    )
-    .await?
-    {
-        return Ok(true);
-    }
-    if crate::handler::step::intrinsic::slack::try_dispatch(
-        run_id,
-        step_instance_id,
-        fencing_token,
-        step_type,
-        resolved_spec,
-        pool.clone(),
-        nats_client.clone(),
-        tls_reloader.clone(),
-    )
-    .await?
-    {
-        return Ok(true);
-    }
-    if crate::handler::step::intrinsic::teams::try_dispatch(
-        run_id,
-        step_instance_id,
-        fencing_token,
-        step_type,
-        resolved_spec,
-        pool.clone(),
-        nats_client.clone(),
-        tls_reloader.clone(),
-    )
-    .await?
-    {
-        return Ok(true);
-    }
-    if crate::handler::step::intrinsic::jinja::try_dispatch(
-        run_id,
-        step_instance_id,
-        step_type,
-        resolved_spec,
-        pool.clone(),
-        nats_client.clone(),
-        tls_reloader.clone(),
-    )
-    .await?
-    {
-        return Ok(true);
-    }
-    if crate::handler::step::intrinsic::email::try_dispatch(
-        run_id,
-        step_instance_id,
-        step_type,
-        resolved_spec,
-        pool.clone(),
-        nats_client.clone(),
-        tls_reloader.clone(),
-    )
-    .await?
-    {
-        return Ok(true);
-    }
-    if crate::handler::step::intrinsic::test_report_email::try_dispatch(
-        run_id,
-        step_instance_id,
-        step_type,
-        resolved_spec,
-        pool.clone(),
-        nats_client.clone(),
-        tls_reloader.clone(),
-    )
-    .await?
-    {
-        return Ok(true);
-    }
-    if crate::handler::step::intrinsic::jq::try_dispatch(
-        run_id,
-        step_instance_id,
-        fencing_token,
-        step_type,
-        resolved_spec,
-        pool.clone(),
-        nats_client.clone(),
-        tls_reloader.clone(),
-    )
-    .await?
-    {
-        return Ok(true);
-    }
-    Ok(false)
 }

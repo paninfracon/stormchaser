@@ -5,7 +5,7 @@ use std::sync::Arc;
 use stormchaser_tls::TlsReloader;
 
 #[cfg(feature = "email")]
-use crate::handler::{fetch_outputs, fetch_run_context, fetch_step_instance};
+use crate::handler::{fetch_outputs, fetch_run_context};
 #[cfg(feature = "email")]
 use stormchaser_model::dsl::{self, EmailBackend};
 #[cfg(feature = "email")]
@@ -23,7 +23,6 @@ pub async fn handle_test_report_email(
     step_id: stormchaser_model::StepInstanceId,
     spec: Value,
     pool: PgPool,
-    nats_client: async_nats::Client,
     tls_reloader: Arc<TlsReloader>,
 ) -> Result<()> {
     let spec: stormchaser_model::dsl::TestReportEmailSpec = serde_json::from_value(spec)?;
@@ -31,13 +30,7 @@ pub async fn handle_test_report_email(
     info!("Sending test report email for run {}", run_id);
 
     // 1. Mark as Running
-    let instance = fetch_step_instance(step_id, &pool).await?;
-    let machine =
-        crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::from_instance(
-            instance,
-        );
-    let _ = machine
-        .start("test-report-email".to_string(), &mut *pool.acquire().await?)
+    crate::handler::integrations::utils::start_built_in(&pool, step_id, "test-report-email")
         .await?;
 
     // 2. Fetch Test Data
@@ -63,19 +56,11 @@ pub async fn handle_test_report_email(
 
     match backend {
         EmailBackend::Ses => {
-            send_test_report_via_ses(run_id, step_id, &spec, rendered_body, pool, nats_client).await
+            send_test_report_via_ses(run_id, step_id, &spec, rendered_body, pool).await
         }
         EmailBackend::Smtp => {
-            send_test_report_via_smtp(
-                run_id,
-                step_id,
-                &spec,
-                rendered_body,
-                pool,
-                nats_client,
-                tls_reloader,
-            )
-            .await
+            send_test_report_via_smtp(run_id, step_id, &spec, rendered_body, pool, tls_reloader)
+                .await
         }
     }
 }
@@ -186,7 +171,6 @@ async fn send_test_report_via_ses(
     spec: &dsl::TestReportEmailSpec,
     rendered_body: String,
     pool: PgPool,
-    nats_client: async_nats::Client,
 ) -> Result<()> {
     #[cfg(feature = "aws-ses")]
     {
@@ -210,17 +194,17 @@ async fn send_test_report_via_ses(
                     "Test report email sent via SES successfully for step {}",
                     step_id
                 );
-                complete_email_step(run_id, step_id, pool, nats_client).await
+                complete_email_step(run_id, step_id, pool).await
             }
             Err(e) => {
                 let error_msg = format!("Failed to send test report email via SES: {:?}", e);
-                fail_email_step(run_id, step_id, error_msg, pool, nats_client).await
+                fail_email_step(run_id, step_id, error_msg, pool).await
             }
         }
     }
     #[cfg(not(feature = "aws-ses"))]
     {
-        let _ = (run_id, step_id, spec, rendered_body, pool, nats_client);
+        let _ = (run_id, step_id, spec, rendered_body, pool);
         anyhow::bail!("SES backend requested but 'aws-ses' feature is not enabled.");
     }
 }
@@ -232,7 +216,6 @@ async fn send_test_report_via_smtp(
     spec: &dsl::TestReportEmailSpec,
     rendered_body: String,
     pool: PgPool,
-    nats_client: async_nats::Client,
     _tls_reloader: Arc<TlsReloader>,
 ) -> Result<()> {
     use lettre::message::header::ContentType;
@@ -266,11 +249,11 @@ async fn send_test_report_via_smtp(
     match mailer.send(&message) {
         Ok(_) => {
             info!("Test report email sent successfully for step {}", step_id);
-            complete_email_step(run_id, step_id, pool, nats_client).await
+            complete_email_step(run_id, step_id, pool).await
         }
         Err(e) => {
             let error_msg = format!("Failed to send test report email: {:?}", e);
-            fail_email_step(run_id, step_id, error_msg, pool, nats_client).await
+            fail_email_step(run_id, step_id, error_msg, pool).await
         }
     }
 }
@@ -282,7 +265,6 @@ pub async fn handle_test_report_email(
     _step_id: stormchaser_model::StepInstanceId,
     _spec: Value,
     _pool: PgPool,
-    _nats_client: async_nats::Client,
     __tls_reloader: Arc<TlsReloader>,
 ) -> Result<()> {
     anyhow::bail!("Email support is not enabled. Enable 'email' feature.")

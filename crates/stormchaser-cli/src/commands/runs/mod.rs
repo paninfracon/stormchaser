@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::Subcommand;
+use stormchaser_client::Client;
 
 pub mod approve;
 pub mod artifacts;
@@ -47,7 +48,9 @@ pub enum RunCommands {
     /// Stream logs for a specific step in a run
     Logs {
         id: stormchaser_model::RunId,
-        #[arg(long)]
+        /// The step's name, or the id of one of its instances. A step that ran more
+        /// than once (in a loop, say) is followed in its most recent instance.
+        #[arg(long, alias = "step")]
         step_name: String,
     },
     /// Stream real-time state transition events for a run
@@ -90,12 +93,7 @@ pub enum RunCommands {
     ApproveLink { token: String },
 }
 
-pub async fn handle(
-    url: &str,
-    token: Option<&str>,
-    http_client: &reqwest_middleware::ClientWithMiddleware,
-    command: RunCommands,
-) -> Result<()> {
+pub async fn handle(client: &Client, command: RunCommands) -> Result<()> {
     match command {
         RunCommands::List {
             owner,
@@ -107,9 +105,7 @@ pub async fn handle(
             status,
         } => {
             list::list_runs(
-                url,
-                token,
-                http_client,
+                client,
                 list::ListRunsFilters {
                     owner,
                     name,
@@ -122,19 +118,13 @@ pub async fn handle(
             )
             .await
         }
-        RunCommands::Get { id } => get::get_run(url, token, http_client, id).await,
-        RunCommands::Delete { id } => delete::delete_run(url, token, http_client, id).await,
-        RunCommands::Artifacts { id } => {
-            artifacts::list_artifacts(url, token, http_client, id).await
-        }
-        RunCommands::Reports { id } => reports::list_reports(url, token, http_client, id).await,
-        RunCommands::Report { id, report_id } => {
-            reports::get_report(url, token, http_client, id, report_id).await
-        }
-        RunCommands::Logs { id, step_name } => {
-            logs::stream_logs(url, token, http_client, id, step_name).await
-        }
-        RunCommands::Watch { id } => watch::watch_run(url, token, http_client, id).await,
+        RunCommands::Get { id } => get::get_run(client, id).await,
+        RunCommands::Delete { id } => delete::delete_run(client, id).await,
+        RunCommands::Artifacts { id } => artifacts::list_artifacts(client, id).await,
+        RunCommands::Reports { id } => reports::list_reports(client, id).await,
+        RunCommands::Report { id, report_id } => reports::get_report(client, id, report_id).await,
+        RunCommands::Logs { id, step_name } => logs::stream_logs(client, id, step_name).await,
+        RunCommands::Watch { id } => watch::watch_run(client, id).await,
         RunCommands::Enqueue {
             workflow_name,
             connection,
@@ -145,9 +135,7 @@ pub async fn handle(
             watch,
         } => {
             enqueue::enqueue_run(
-                url,
-                token,
-                http_client,
+                client,
                 enqueue::EnqueueRunParams {
                     workflow_name,
                     connection,
@@ -164,14 +152,14 @@ pub async fn handle(
             run_id,
             step_id,
             input,
-        } => approve::approve_step(url, token, http_client, run_id, step_id, input).await,
+        } => approve::approve_step(client, run_id, step_id, input).await,
         RunCommands::Reject { run_id, step_id } => {
-            approve::reject_step(url, token, http_client, run_id, step_id).await
+            approve::reject_step(client, run_id, step_id).await
         }
         RunCommands::ApproveLink { token: link_token } => {
-            approve::approve_link(url, http_client, link_token).await
+            approve::approve_link(client, link_token).await
         }
-        RunCommands::Pending => approve::list_pending(url, token, http_client).await,
+        RunCommands::Pending => approve::list_pending(client).await,
     }
 }
 
@@ -180,15 +168,17 @@ mod tests {
     use super::*;
     use stormchaser_model::StepInstanceId;
 
-    fn build_dummy_client() -> reqwest_middleware::ClientWithMiddleware {
-        reqwest_middleware::ClientBuilder::new(reqwest::Client::new()).build()
+    fn build_dummy_client() -> Client {
+        // An address nothing listens on, to force connection refused
+        Client::builder("http://127.0.0.1:1")
+            .token("test_token")
+            .build()
+            .unwrap()
     }
 
     #[tokio::test]
     async fn test_handle_commands() {
         let client = build_dummy_client();
-        let url = "http://127.0.0.1:1"; // Invalid dummy URL to force connection refused
-        let token = Some("test_token");
         let id = stormchaser_model::RunId::new_v4();
 
         let commands = vec![
@@ -239,9 +229,9 @@ mod tests {
         ];
 
         for cmd in commands {
-            let res = handle(url, token, &client, cmd).await;
+            let res = handle(&client, cmd).await;
             let err = res.expect_err("Expected an error but got Ok for command");
-            let err_msg = err.to_string();
+            let err_msg = format!("{err:#}");
             assert!(
                 err_msg.contains("Connection refused")
                     || err_msg.contains("error sending request")

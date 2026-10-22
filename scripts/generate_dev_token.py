@@ -12,7 +12,10 @@ header = {"alg": "HS256", "typ": "JWT"}
 payload = {
     "sub": "stormchaser-admin",
     "email": "stormchaser-admin@paninfracon.net",
-    "exp": int(time.time()) + 3600
+    "exp": int(time.time()) + 3600,
+    # The API accepts a token it signed itself only with these
+    "iss": "stormchaser",
+    "aud": "stormchaser-api",
 }
 
 h_b64 = b64url(json.dumps(header, separators=(',', ':')).encode('utf-8'))

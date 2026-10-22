@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use hcl::{Block, Body};
 use stormchaser_model::dsl;
 
-use super::expr::expr_to_string;
+use super::expr::{expr_to_string, unknown_attribute};
 
 /// Parses a provision sub-block in the new syntax:
 /// `provision { <resource_type> "name" { ... } }`
@@ -13,7 +13,7 @@ pub fn parse_provision_sub_block(prov_block: &Block) -> Result<dsl::Provision> {
         .first()
         .map(|l| l.as_str().to_string())
         .context("Provision sub-block must have a name label")?;
-    parse_provision_attributes(name, resource_type, prov_block.body())
+    parse_provision_attributes(name, resource_type, prov_block.body(), false)
 }
 
 /// Parses a provision block in the legacy syntax:
@@ -30,7 +30,7 @@ pub fn parse_provision_legacy_block(block: &Block) -> Result<dsl::Provision> {
             resource_type = expr_to_string(attr.expr())?;
         }
     }
-    parse_provision_attributes(name, resource_type, block.body())
+    parse_provision_attributes(name, resource_type, block.body(), true)
 }
 
 /// Extracts the common provision fields from a block body, for both syntaxes.
@@ -38,6 +38,7 @@ fn parse_provision_attributes(
     name: String,
     resource_type: String,
     body: &Body,
+    legacy: bool,
 ) -> Result<dsl::Provision> {
     let mut source = None;
     let mut url = None;
@@ -54,7 +55,9 @@ fn parse_provision_attributes(
             "mode" => mode = Some(expr_to_string(attr.expr())?),
             "checksum" => checksum = Some(expr_to_string(attr.expr())?),
             "from" => from = Some(expr_to_string(attr.expr())?),
-            _ => {}
+            // Read by parse_provision_legacy_block
+            "resource_type" if legacy => {}
+            other => return Err(unknown_attribute(&format!("Provision '{}'", name), other)),
         }
     }
 

@@ -41,7 +41,7 @@ pub fn ConnectionsTable(
                                 <strong>{conn.name}</strong>
                             </td>
                             <td style="padding: 1rem; border-bottom: 1px solid var(--surface-border);">
-                                <span class="status-badge status-running">{conn.connection_type.to_string()}</span>
+                                <span class="status-badge status-running">{crate::models::connection_type_label(&conn.connection_type)}</span>
                             </td>
                             <td style="padding: 1rem; border-bottom: 1px solid var(--surface-border); color: var(--text-secondary);">
                                 {conn.description.unwrap_or_else(|| "-".to_string())}

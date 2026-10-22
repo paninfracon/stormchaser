@@ -11,6 +11,7 @@ license.workspace = true
 [dependencies]
 humantime = "2.1"
 stormchaser-model = { workspace = true }
+stormchaser-runner-core = { workspace = true }
 tokio = { workspace = true }
 futures = { workspace = true }
 async-nats = { workspace = true }

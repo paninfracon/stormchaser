@@ -37,6 +37,10 @@ pub async fn handle_step_unpacking_sfs(payload: Value, pool: PgPool) -> Result<(
     let Some(runner_id) = reporter else {
         return Ok(());
     };
+    let attempt = super::helpers::reported_attempt(&payload);
+    if !super::helpers::report_is_current_attempt(&pool, &instance, attempt).await? {
+        return Ok(());
+    }
 
     info!(
         "Step {} (Run {}) is now unpacking SFS on runner {}",
@@ -46,12 +50,12 @@ pub async fn handle_step_unpacking_sfs(payload: Value, pool: PgPool) -> Result<(
     let mut conn = pool.acquire().await?;
     match instance.status {
         StepStatus::Pending => {
-            StepMachine::<state::Pending>::from_instance(instance)
+            StepMachine::<state::Pending>::load(instance)?
                 .start_unpacking(runner_id.to_string(), &mut conn)
                 .await?;
         }
         StepStatus::Initializing => {
-            StepMachine::<state::Initializing>::from_instance(instance)
+            StepMachine::<state::Initializing>::load(instance)?
                 .start_unpacking(runner_id.to_string(), &mut conn)
                 .await?;
         }

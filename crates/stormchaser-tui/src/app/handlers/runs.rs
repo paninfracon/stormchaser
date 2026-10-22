@@ -1,7 +1,8 @@
-use crate::app::{App, WorkflowRunDetail, WorkflowRunFullDetail};
+use crate::app::{parse_step_status, App, WorkflowRunDetail, WorkflowRunFullDetail};
 use crate::AppEvent;
 use chrono::Utc;
 use serde_json::Value;
+use stormchaser_model::step::StepStatus;
 use stormchaser_model::workflow::RunStatus;
 use stormchaser_model::RunId;
 
@@ -28,26 +29,20 @@ impl<'a> App<'a> {
             }
             self.last_refresh_time = Some(now);
 
-            let url = self.url.clone();
-            let token = self.token.clone();
+            if self.token.is_none() {
+                return;
+            }
+            let api = self.api();
             let tx = self.status_tx.clone();
             tokio::spawn(async move {
-                if let Some(token) = token {
-                    let client = crate::http::client();
-                    if let Ok(res) = client
-                        .get(format!("{}/api/v1/runs/{}", url, run_id))
-                        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
-                        .send()
-                        .await
-                    {
-                        if res.status() == reqwest::StatusCode::UNAUTHORIZED {
-                            let _ = tx.send(AppEvent::TokenExpired).await;
-                            return;
-                        }
-                        if let Ok(full_detail) = res.json::<WorkflowRunFullDetail>().await {
-                            let _ = tx.send(AppEvent::FullRunUpdate(full_detail)).await;
-                        }
+                match api.get_run(run_id).await {
+                    Ok(full_detail) => {
+                        let _ = tx.send(AppEvent::FullRunUpdate(full_detail)).await;
                     }
+                    Err(e) if e.status() == Some(reqwest::StatusCode::UNAUTHORIZED) => {
+                        let _ = tx.send(AppEvent::TokenExpired).await;
+                    }
+                    Err(_) => {}
                 }
             });
             return;
@@ -106,37 +101,25 @@ impl<'a> App<'a> {
 
                     // 2. Prevent step status regression and preserve logs
                     for step in &mut full_detail.steps {
-                        if let Some(step_name) =
-                            step.instance.get("step_name").and_then(|v| v.as_str())
+                        if let Some(old_step) = old_run
+                            .steps
+                            .iter()
+                            .find(|s| s.instance.step_name == step.instance.step_name)
                         {
-                            if let Some(old_step) = old_run.steps.iter().find(|s| {
-                                s.instance.get("step_name").and_then(|v| v.as_str())
-                                    == Some(step_name)
-                            }) {
-                                // Preserve logs if new ones are empty
-                                if step.logs.is_empty() && !old_step.logs.is_empty() {
-                                    step.logs = old_step.logs.clone();
-                                }
+                            // Preserve logs if new ones are empty
+                            if step.logs.is_empty() && !old_step.logs.is_empty() {
+                                step.logs = old_step.logs.clone();
+                            }
 
-                                // Prevent step status regression
-                                if let Some(old_status) =
-                                    old_step.instance.get("status").and_then(|v| v.as_str())
-                                {
-                                    if let Some(new_status_val) = step.instance.get_mut("status") {
-                                        if let Some(new_status) = new_status_val.as_str() {
-                                            // Simple heuristic: don't move back to unpacking/pending if already running
-                                            if (old_status == "running"
-                                                || old_status == "succeeded"
-                                                || old_status == "failed")
-                                                && (new_status == "unpacking_sfs"
-                                                    || new_status == "pending")
-                                            {
-                                                *new_status_val =
-                                                    Value::String(old_status.to_string());
-                                            }
-                                        }
-                                    }
-                                }
+                            // Simple heuristic: don't move back to unpacking/pending if already running
+                            if matches!(
+                                old_step.instance.status,
+                                StepStatus::Running | StepStatus::Succeeded | StepStatus::Failed
+                            ) && matches!(
+                                step.instance.status,
+                                StepStatus::UnpackingSfs | StepStatus::Pending
+                            ) {
+                                step.instance.status = old_step.instance.status.clone();
                             }
                         }
                     }
@@ -185,15 +168,10 @@ impl<'a> App<'a> {
             if run.detail.id == run_id {
                 let mut updated_step_index = None;
 
-                for (i, step_detail) in run.steps.iter_mut().enumerate() {
-                    if step_detail
-                        .instance
-                        .get("step_name")
-                        .and_then(|v| v.as_str())
-                        == Some(&step_name)
-                    {
-                        if let Some(obj) = step_detail.instance.as_object_mut() {
-                            obj.insert("status".to_string(), Value::String(status.clone()));
+                if let Some(new_status) = parse_step_status(&status) {
+                    for (i, step_detail) in run.steps.iter_mut().enumerate() {
+                        if step_detail.instance.step_name == step_name {
+                            step_detail.instance.status = new_status.clone();
                             updated_step_index = Some(i);
                         }
                     }
@@ -266,32 +244,26 @@ impl<'a> App<'a> {
 
                 // Update the logs for the specific step in our model
                 for step in &mut run.steps {
-                    if let Some(name) = step.instance.get("step_name").and_then(|v| v.as_str()) {
-                        // Check if the log line starts with [STEP_NAME]
-                        let prefix = format!("[{}]", name);
-                        if line.starts_with(&prefix) {
-                            let clean_line = line
-                                .strip_prefix(&prefix)
-                                .unwrap_or(&line)
-                                .strip_prefix(' ')
-                                .unwrap_or_else(|| line.strip_prefix(&prefix).unwrap_or(&line))
-                                .to_string();
-                            step.logs.push(clean_line.clone());
-                            step_name_and_clean_line = Some((name.to_string(), clean_line));
-                            break;
-                        }
+                    let name = &step.instance.step_name;
+                    // Check if the log line starts with [STEP_NAME]
+                    let prefix = format!("[{}]", name);
+                    if line.starts_with(&prefix) {
+                        let clean_line = line
+                            .strip_prefix(&prefix)
+                            .unwrap_or(&line)
+                            .strip_prefix(' ')
+                            .unwrap_or_else(|| line.strip_prefix(&prefix).unwrap_or(&line))
+                            .to_string();
+                        step.logs.push(clean_line.clone());
+                        step_name_and_clean_line = Some((name.clone(), clean_line));
+                        break;
                     }
                 }
 
                 // If the selected step was updated, update current log view
                 if let Some((name, clean_line)) = step_name_and_clean_line {
                     if let Some(current_step) = run.steps.get(self.selected_step_index) {
-                        if current_step
-                            .instance
-                            .get("step_name")
-                            .and_then(|v| v.as_str())
-                            == Some(&name)
-                        {
+                        if current_step.instance.step_name == name {
                             self.run_logs.push(clean_line);
                         }
                     }
@@ -411,8 +383,8 @@ mod tests {
         assert_eq!(app.runs[0].status, RunStatus::Succeeded);
     }
 
-    #[test]
-    fn test_handle_full_run_update_preserves_logs() {
+    #[tokio::test]
+    async fn test_handle_full_run_update_preserves_logs() {
         let mut app = setup_app();
         let run_id = RunId::new(Uuid::new_v4());
 

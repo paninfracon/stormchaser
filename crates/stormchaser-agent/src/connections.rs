@@ -11,7 +11,7 @@ use std::io::{Read, Write};
 use std::path::Path;
 use tar::{Archive, Builder};
 use tokio::fs::File as AsyncFile;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 use uuid::Uuid;
 
 #[cfg(unix)]
@@ -85,6 +85,10 @@ pub async fn unpark_storage(
         let tar_gz = File::open(&tar_path)?;
         let decoder = GzDecoder::new(tar_gz);
         let mut archive = Archive::new(decoder);
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "restores the step's own parked storage into the step's volume, inside its sandbox"
+        )]
         archive.unpack(destination)?;
 
         let _ = fs::remove_file(tar_path);
@@ -179,18 +183,17 @@ pub async fn park_storage(urls: Value, paths: Value) -> Result<HashMap<String, S
                         .send()
                         .await?;
 
+                    let _ = fs::remove_file(tar_path);
+
+                    // The previous archive is still stored under the same key with the hash
+                    // the engine holds, so carrying on would hand the next step stale data
                     if !res.status().is_success() {
                         let status = res.status();
-                        let text = res.text().await?;
-                        error!("Failed to upload storage '{}': {} - {}", name, status, text);
-                    } else {
-                        // Only an archive that was stored is reported: the next restore
-                        // refuses anything without this hash
-                        info!("Successfully parked storage '{}' (hash: {})", name, hash);
-                        hashes.insert(name.clone(), hash);
+                        let text = res.text().await.unwrap_or_default();
+                        anyhow::bail!("Failed to upload storage '{}': {} - {}", name, status, text);
                     }
-
-                    let _ = fs::remove_file(tar_path);
+                    info!("Successfully parked storage '{}' (hash: {})", name, hash);
+                    hashes.insert(name.clone(), hash);
                 }
             }
         }
@@ -303,6 +306,33 @@ mod tests {
         let hashes = park_storage(urls, paths).await.unwrap();
         assert!(hashes.contains_key("storage1"));
     }
+
+    #[tokio::test]
+    async fn test_park_storage_fails_when_the_upload_is_refused() {
+        let mock_server = MockServer::start().await;
+        let dir = tempdir().unwrap();
+        let mount_path = dir.path().join("storage1");
+        fs::create_dir_all(&mount_path).unwrap();
+        fs::write(mount_path.join("file.txt"), "data").unwrap();
+
+        Mock::given(method("PUT"))
+            .respond_with(ResponseTemplate::new(403).set_body_string("AccessDenied"))
+            .mount(&mock_server)
+            .await;
+
+        let urls = json!({
+            "storage1": {
+                "put_url": format!("{}/upload/storage1.tar.gz", mock_server.uri())
+            }
+        });
+        let paths = json!({
+            "storage1": mount_path.to_str().unwrap()
+        });
+
+        let err = park_storage(urls, paths).await.unwrap_err();
+        assert!(err.to_string().contains("403"), "{err}");
+    }
+
     /// Unpacks every request body the mock received and returns the archived entries,
     /// with the contents of the regular files.
     async fn uploaded_entries(server: &MockServer) -> Vec<(String, Option<String>)> {

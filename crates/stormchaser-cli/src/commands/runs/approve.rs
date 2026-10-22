@@ -1,83 +1,62 @@
-use crate::utils::{handle_response, parse_key_val_list, require_token};
+use crate::utils::{parse_key_val_list, print_json};
 use anyhow::Result;
-use reqwest::header::AUTHORIZATION;
+use stormchaser_client::Client;
+use stormchaser_model::api::ListRunsQuery;
+use stormchaser_model::RunStatus;
 
 pub async fn approve_step(
-    url: &str,
-    token: Option<&str>,
-    http_client: &reqwest_middleware::ClientWithMiddleware,
+    client: &Client,
     run_id: stormchaser_model::RunId,
     step_id: stormchaser_model::StepInstanceId,
     input: Vec<String>,
 ) -> Result<()> {
-    let token = require_token(token)?;
     let inputs = parse_key_val_list(input);
-    let res = http_client
-        .post(format!(
-            "{}/api/v1/runs/{}/steps/{}/approve",
-            url, run_id, step_id
-        ))
-        .header(AUTHORIZATION, format!("Bearer {}", token))
-        .json(&inputs)
-        .send()
-        .await?;
-    handle_response(res).await
+    client.approve(run_id, step_id, &inputs.into()).await?;
+    println!("Approved");
+    Ok(())
 }
 
 pub async fn reject_step(
-    url: &str,
-    token: Option<&str>,
-    http_client: &reqwest_middleware::ClientWithMiddleware,
+    client: &Client,
     run_id: stormchaser_model::RunId,
     step_id: stormchaser_model::StepInstanceId,
 ) -> Result<()> {
-    let token = require_token(token)?;
-    let res = http_client
-        .post(format!(
-            "{}/api/v1/runs/{}/steps/{}/reject",
-            url, run_id, step_id
-        ))
-        .header(AUTHORIZATION, format!("Bearer {}", token))
-        .send()
-        .await?;
-    handle_response(res).await
+    client.reject(run_id, step_id).await?;
+    println!("Rejected");
+    Ok(())
 }
 
-pub async fn approve_link(
-    url: &str,
-    http_client: &reqwest_middleware::ClientWithMiddleware,
-    link_token: String,
-) -> Result<()> {
-    let res = http_client
-        // POST acts on the link; GET only returns its confirmation page
-        .post(format!("{}/api/v1/approve-link/{}", url, link_token))
-        .send()
-        .await?;
-    handle_response(res).await
+pub async fn approve_link(client: &Client, link_token: String) -> Result<()> {
+    // POST acts on the link; GET only returns its confirmation page
+    client.approve_link(&link_token).await?;
+    println!("Success");
+    Ok(())
 }
 
-pub async fn list_pending(
-    url: &str,
-    token: Option<&str>,
-    http_client: &reqwest_middleware::ClientWithMiddleware,
-) -> Result<()> {
-    let token = require_token(token)?;
-    let res = http_client
-        .get(format!("{}/api/v1/runs?status=Running", url))
-        .header(AUTHORIZATION, format!("Bearer {}", token))
-        .send()
+pub async fn list_pending(client: &Client) -> Result<()> {
+    let runs = client
+        .list_runs(&ListRunsQuery {
+            status: Some(RunStatus::Running),
+            ..Default::default()
+        })
         .await?;
-    handle_response(res).await
+    print_json(&runs)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reqwest_middleware::ClientBuilder;
     use serde_json::json;
     use stormchaser_model::{RunId, StepInstanceId};
-    use wiremock::matchers::{header, method, path};
+    use wiremock::matchers::{body_json, header, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn client(server: &MockServer) -> Client {
+        Client::builder(server.uri())
+            .token("test-token")
+            .build()
+            .unwrap()
+    }
 
     #[tokio::test]
     async fn test_runs_approve() {
@@ -89,20 +68,18 @@ mod tests {
                 "/api/v1/runs/{}/steps/{}/approve",
                 run_id, step_id
             )))
-            .and(header(AUTHORIZATION, "Bearer test-token"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "approved"})))
+            .and(header("authorization", "Bearer test-token"))
+            .and(body_json(json!({ "reason": "ok" })))
+            .respond_with(ResponseTemplate::new(200).set_body_string("Approved"))
+            .expect(1)
             .mount(&server)
             .await;
 
-        let client = ClientBuilder::new(reqwest::Client::new()).build();
-
         let result = approve_step(
-            &server.uri(),
-            Some("test-token"),
-            &client,
+            &client(&server),
             run_id,
             step_id,
-            vec![],
+            vec!["reason=ok".to_string()],
         )
         .await;
         result.unwrap();
@@ -118,14 +95,13 @@ mod tests {
                 "/api/v1/runs/{}/steps/{}/reject",
                 run_id, step_id
             )))
-            .and(header(AUTHORIZATION, "Bearer test-token"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "rejected"})))
+            .and(header("authorization", "Bearer test-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("Rejected"))
+            .expect(1)
             .mount(&server)
             .await;
 
-        let client = ClientBuilder::new(reqwest::Client::new()).build();
-
-        let result = reject_step(&server.uri(), Some("test-token"), &client, run_id, step_id).await;
+        let result = reject_step(&client(&server), run_id, step_id).await;
         result.unwrap();
     }
 
@@ -134,14 +110,14 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/api/v1/runs"))
-            .and(header(AUTHORIZATION, "Bearer test-token"))
+            .and(query_param("status", "running"))
+            .and(header("authorization", "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+            .expect(1)
             .mount(&server)
             .await;
 
-        let client = ClientBuilder::new(reqwest::Client::new()).build();
-
-        let result = list_pending(&server.uri(), Some("test-token"), &client).await;
+        let result = list_pending(&client(&server)).await;
         result.unwrap();
     }
 
@@ -150,13 +126,13 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/api/v1/approve-link/my-secret-token"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "approved"})))
+            .respond_with(ResponseTemplate::new(200).set_body_string("Successfully approved"))
+            .expect(1)
             .mount(&server)
             .await;
 
-        let client = ClientBuilder::new(reqwest::Client::new()).build();
-
-        let result = approve_link(&server.uri(), &client, "my-secret-token".to_string()).await;
+        let client = Client::builder(server.uri()).build().unwrap();
+        let result = approve_link(&client, "my-secret-token".to_string()).await;
         result.unwrap();
     }
 }

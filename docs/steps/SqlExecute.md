@@ -1,8 +1,9 @@
 # SqlExecute Step
 
 The `SqlExecute` step runs one SQL statement on a database connection from the
-engine, and reports the number of rows it affected. Only PostgreSQL connections are
-supported.
+engine, and reports the number of rows it affected. The engine runs it itself; no
+runner is involved. Only PostgreSQL connections are supported; any other type fails
+the step.
 
 ## DSL Specification
 
@@ -25,7 +26,7 @@ part of the SQL, and a value such as `x' OR '1'='1` changes what the statement d
 
 ### Outputs
 
-* `result.rows_affected`: The number of rows the statement affected or returned.
+* `result`: An object whose `rows_affected` is the number of rows the statement affected or returned. A later step reads it as `${steps.<name>.outputs.result.rows_affected}`. Rows a query returns are not kept.
 
 ## Example
 

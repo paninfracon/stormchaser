@@ -6,8 +6,9 @@ use sqlx::postgres::PgPoolOptions;
 use std::env::var;
 use std::sync::Arc;
 use std::time::Duration;
-use stormchaser_model::auth::OpaClient;
+use stormchaser_engine::handler::step::dispatch::intrinsic::{try_dispatch_intrinsic, BuiltInStep};
 use stormchaser_model::RunId;
+use stormchaser_opa::OpaClient;
 use tokio::time::sleep;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -38,6 +39,10 @@ async fn test_rest_api_with_httpapi_connection() {
 
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
+    // Built-in steps report their results through the outbox, which the engine's
+    // relay publishes
+    let _relay =
+        stormchaser_engine::workers::start_outbox_relay_worker(pool.clone(), nats_client.clone());
     let _opa_client = Arc::new(OpaClient::new(None, None));
 
     let mock_server = MockServer::start().await;
@@ -47,7 +52,7 @@ async fn test_rest_api_with_httpapi_connection() {
     let backend_name = format!("test-httpapi-{}", connection_id);
     sqlx::query(
         r#"
-        INSERT INTO connections (id, name, connection_type, config, encrypted_credentials, is_default_sfs)
+        INSERT INTO connections (id, name, connection_type, config, credentials, is_default_sfs)
         VALUES ($1, $2, 'http_api', $3, $4, FALSE)
         "#,
     )
@@ -172,7 +177,7 @@ async fn test_rest_api_with_httpapi_connection() {
         run_id,
         "fetch_data",
         "RestApi",
-        stormchaser_model::step::StepStatus::Pending,
+        stormchaser_model::step::StepStatus::Initializing,
         None,
         None,
         spec.clone(),
@@ -186,16 +191,16 @@ async fn test_rest_api_with_httpapi_connection() {
     let tls_config = TlsConfig::default();
     let tls_reloader = Arc::new(TlsReloader::new(tls_config).await.unwrap());
 
-    stormchaser_engine::handler::step::intrinsic::rest_api::try_dispatch(
+    try_dispatch_intrinsic(BuiltInStep {
         run_id,
         step_id,
-        1,
-        "RestApi",
-        &spec,
-        pool.clone(),
-        nats_client.clone(),
-        tls_reloader.clone(),
-    )
+        fencing_token: 1,
+        step_type: "RestApi".to_string(),
+        spec: spec.clone(),
+        params: json!({}),
+        pool: pool.clone(),
+        tls_reloader: tls_reloader.clone(),
+    })
     .await
     .unwrap();
 

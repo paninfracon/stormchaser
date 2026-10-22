@@ -1,173 +1,148 @@
 # Stormchaser Workflow DSL Specification
 
-This document defines the Stormchaser Workflow DSL (SWD). The DSL is designed for human readability, machine parsability, and robust version control (git) compatibility. It explicitly rejects whitespace-based scoping (like YAML) in favor of explicit delimiters.
+This document defines the Stormchaser Workflow DSL. A workflow is an HCL (HashiCorp Configuration Language) file, usually named `*.storm`. Blocks are delimited by braces, so indentation does not matter.
+
+Features that are described but not implemented are marked **(Planned)**. The parser accepts some of them, so a workflow that uses them parses, but nothing acts on them.
 
 ## Preamble
 
-Every workflow file MUST start with a DSL version declaration. This version determines the schema validation rules and available features for the workflow.
+A workflow file starts with a DSL version declaration:
 
 ```hcl
 stormchaser_dsl_version = "1.0"
 ```
 
-### Version Compatibility & Migration
+The version is recorded with each run. It is not required and not checked yet.
 
-The Stormchaser engine is designed with **Backwards Compatibility** as a core principle:
+**(Planned)** Version compatibility: mapping older DSL versions onto the current model, and a deprecation warning in the run's log for a workflow that uses an older version.
 
-* **Version Mapping:** The engine can parse and execute older DSL versions by internally mapping them to the current internal representation (AST).
-* **Automatic Upgrades:** When an older version is detected, the engine applies internal transformations to ensure the workflow behaves as expected on the modern runtime.
-* **Deprecation Warnings:** If a workflow uses an older DSL version, the engine will emit a `DEPRECATION` warning in the workflow's execution log, encouraging authors to upgrade to the latest schema to access new features.
+## Limits
 
-## Grammar Design Principles
-
-1. **Unified HCL:** The DSL uses HCL (HashiCorp Configuration Language) for both structural components (blocks, labels, and keys) and logic evaluation.
-2. **Explicit Scope:** Use curly braces `{ }` for blocks.
-3. **No Indentation Sensitivity:** Indentation is for humans; the parser ignores it.
-4. **Type Safety:** Values are evaluated as native HCL types (string, number, bool, list, map, etc.).
+A workflow file may be at most 1 MiB. A file, or one expression in it, that nests too deeply (by default 16,384 brackets and operators in a file, 8,192 in one expression) is refused. One `iterate` may produce at most 1,000 step instances. `jq` programs have time and memory limits. All but the file size can be raised by the operator; see "Limits on What a Workflow Can Cost" in [security.md](security.md#8-limits-on-what-a-workflow-can-cost).
 
 ---
 
 ### 1. The HCL Expression Language
 
-To ensure consistency, Stormchaser follows standard HCL expression and template rules:
+Values follow HCL's rules:
 
-* **Literals:** Standard HCL literals are used for basic types.
-  * `count = 5` (Number)
-  * `enabled = true` (Boolean)
-  * `tags = ["web", "prod"]` (List)
-* **Expressions:** Values can be complex HCL expressions.
-  * `replica_count = inputs.min_replicas + 2`
-  * `is_prod = inputs.env == "production"`
-  * `status = var.enabled ? "active" : "disabled"` (Conditionals)
-* **Strings & Interpolation:** HCL supports template interpolation within double-quoted strings using the `${}` sequence.
-  * `image = "my-app:${inputs.tag}"`
-* **Templates:** Complex logic can be embedded in strings using `%{ if ... }` and `%{ for ... }` directives.
-* **Escaping:** To use a literal `${` in a string, escape it as `$${`.
+* **Literals:** `count = 5`, `enabled = true`, `tags = ["web", "prod"]`, `labels = { team = "infra" }`.
+* **Interpolation:** a `${...}` sequence in a string is an expression: `image = "my-app:${inputs.tag}"`.
+* **Templates:** `%{ if ... }` and `%{ for ... }` directives work inside strings.
+* **Escaping:** write `$${` for a literal `${`.
+
+Most values in a step are kept as written when the workflow is parsed and resolved when the step is scheduled, with the run's inputs, secrets and the outputs of steps that have finished (see [Variables](#51-variables)). A `${...}` that cannot be resolved, such as a shell variable `${HOME}`, is left as it is.
+
+`condition` and `iterate` are different: each is one expression, written as a string without `${...}`, such as `condition = "inputs.environment == \"production\""`. A literal list also works for `iterate`.
 
 ---
 
 ### 2. Workflow Definition
 
-The root object of a `.storm` file.
+The root of a `.storm` file is one `workflow` block (or `workflow_template`, see [Template Workflows and Includes](#template-workflows-and-includes)). Its label is the workflow's name.
 
 ```hcl
+stormchaser_dsl_version = "1.0"
+
 workflow "DeployProduction" {
-    description = "Standard production deployment pipeline"
+  description = "Standard production deployment pipeline"
 
-    // Optional: Schedule the workflow to run automatically using an external cron engine.
-    // Standard cron expression format: "min hour day_of_month month day_of_week"
-    cron = "0 2 * * *"
+  // Limits for one run; see docs/quotas.md
+  quotas {
+    max_concurrency = 5
+    timeout         = "2h"
+  }
 
-    // Global Strategy: Defines default execution behavior for all steps.
-    // Group-level strategy blocks will shadow these values.
-    strategy {
-        affinity = "isolated"
-        fail_fast = true
+  aliases {
+    env_name = inputs.environment
+  }
+
+  inputs {
+    environment = string(enum(["staging", "production"]))
+    required    = ["environment"]
+  }
+
+  storage "workspace" {
+    size = "10Gi"
+  }
+
+  step_library "kubectl" {
+    type = "RunContainer"
+    spec {
+      image = "bitnami/kubectl:1.31"
     }
+  }
 
-    // Import step libraries from external sources (Git, Registry, etc.)
-    libraries {
-        import "slack" {
-            source = "github.com/stormchaser-plugins/slack"
-            version = "v2.1.0"
-            // The SHA256 of the canonical source archive for this version
-            checksum = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        }
+  steps {
+    step "deploy" "kubectl" {
+      spec {
+        args = ["apply", "-f", "/workspace/manifests/${env_name}"]
+        storage_mounts = [{ name = "workspace", mount_path = "/workspace" }]
+      }
     }
-
----
-
-### 1.1 Library Integrity
-When a library is imported, the Control Plane performs the following:
-1.  **Download:** Fetches the source archive from the provider (Git, Registry, etc.).
-2.  **Verify:** Calculates the SHA256 of the downloaded archive and compares it to the `checksum` field in the DSL.
-3.  **Cache:** If verification passes, the library is extracted and cached locally in the Control Plane.
-
-If the checksum is missing or mismatched, the workflow compilation will fail during the **Validation and Safety** phase.
-
-    // Configuration blocks...
-    inputs { ... }
-    outputs { ... }
-
-    // Resource Quotas: Define limits for the entire workflow execution, held to the
-    // operator's ceilings (see docs/quotas.md)
-    quotas {
-        // ... (existing quotas)
-    }
-
-    // Lifecycle Handlers: Global execution hooks
-    // These run after all steps in the 'steps' block have completed or failed.
-
-    // on_failure runs ONLY if the workflow state is 'failed' or 'aborted'.
-    on_failure {
-        step "notify_slack" "slack/slack_alert" {
-            params {
-                channel = "#ops-critical"
-                message = "Workflow ${run.name} failed! Error: ${run.error}"
-            }
-        }
-    }
-
-    // finally runs ALWAYS, regardless of the workflow's final status.
-    // It executes AFTER on_failure (if triggered).
-    // NOTE: Step failures within a 'finally' block are treated as HARD FAILURES.
-    // They will be logged as errors, and the overall run status will be marked
-    // as 'failed' (even if the main 'steps' succeeded) to ensure visibility
-    // of failed cleanup operations.
-    finally {
-        step "cleanup_temp_env" "aws/LambdaInvoke" { ... }
-    }
-
-    // Event Handlers: Listen for events throughout the workflow's lifecycle
-    handlers { ... }
-
-    steps { ... }
+  }
 }
 ```
+
+The workflow block takes:
+
+| Attribute or block | Meaning |
+| :--- | :--- |
+| `description` | Free text. |
+| `inputs { ... }` | The JSON schema of the run's inputs. See [Inputs](#3-inputs-and-schemas). |
+| `query "<name>" { ... }` | A data source for input options. See [Dynamic Options](#31-dynamic-options-via-queries). |
+| `quotas { ... }` | `max_concurrency`, `max_cpu`, `max_memory`, `max_storage` and `timeout` for the run, held to the operator's ceilings. See [quotas.md](quotas.md), which also says when the block is ignored. |
+| `aliases { ... }` | Short names for expressions. See [Aliases](#41-aliases). |
+| `storage "<name>" { ... }` | A volume steps can share. See [Storage](#42-storage-and-artifacts). |
+| `step_library "<name>" { ... }` | A reusable step definition. See [Step Libraries](#step-libraries). |
+| `include "<name>" { ... }` | Steps from another workflow file. See [Includes](#template-workflows-and-includes). |
+| `steps { ... }` | The workflow's steps. See [Steps](#4-steps). |
+
+These are parsed and stored with the run, but nothing acts on them yet:
+
+* `cron`: **(Planned)** A cron expression in the workflow. Schedules are created with `stormchaser cron` (the API's cron schedules) instead.
+* `strategy { ... }` at workflow level: **(Planned)** Defaults for every step. Only a step's own `strategy` is read (see [Iteration](#46-iteration)), and `fail_fast` and `process_allow_list` are not read anywhere.
+* `library "<alias>" { source, version, checksum }`: **(Planned)** Importing step libraries from Git or a registry, verified against a SHA-256 checksum. Nothing is fetched; use `step_library` blocks in the workflow instead.
+* `handler "<name>" { event_type, condition, action }`: **(Planned)** Event handlers.
+* `on_failure { steps... }` and `finally { steps... }`: **(Planned)** Steps to run after the main steps when the run fails, and always. The parser accepts them and applies step libraries to their steps, but the engine never runs them.
+* `output "<name>" { value = "..." }`: **(Planned)** Workflow outputs. The values are not evaluated.
+* `input "<name>" { type, default, description, validation, options }`: an older way to declare inputs. The TUI's scheduling dialog reads these blocks to build a form, but the engine neither validates inputs against them nor fills in their defaults. Use `inputs { ... }`.
+
+A block or attribute the parser does not know, a `step` block outside `steps`, and a value of the wrong type (such as `allow_failure = "yes"` or `max_concurrency = "2"`) are errors when the workflow is parsed. Inside a step the rule is different: an attribute or block that is not one of the step's own becomes part of its spec (see [Base Step Structure](#45-base-step-structure)). `stormchaser lint` checks a spec against the step type's schema, but the engine does not yet refuse a spec setting it does not know.
 
 ---
 
 ### 3. Inputs and Schemas
 
-Inputs define the contract for triggering the workflow. Stormchaser uses embedded JSON Schema to define and validate inputs. This enables rich type safety, default value hydration, and dynamic query capabilities when generating forms in the TUI or Web UI via `schemaui`.
+The `inputs` block is a JSON schema, written in HCL. The engine fills in each property's `default` and validates the run's inputs against the schema before the run starts; a run whose inputs do not match fails. The TUI and the web UI build run forms from it.
+
+An attribute whose value is a type function (`string()`, `integer()`, `number()`, `boolean()`, `array()`, `object()`, `map()`) is a property. Functions inside it are JSON schema keywords with one argument (`pattern("...")`, `minimum(1)`, `default(3)`, `enum([...])`, `format("email")`); a type function inside `array()` describes the items. Any other attribute is a keyword at the root of the schema (`required`, `title`, `allOf`, ...). `ui_order` sets the order of fields in forms.
 
 ```hcl
 inputs {
-    type = "object"
-    title = "Deploy Parameters"
-    properties {
-        service_name {
-            type = "string"
-            description = "Name of the microservice"
-            pattern = "^[a-z-]+$"
-        }
-
-        replica_count {
-            type = "integer"
-            default = 3
-            minimum = 1
-            maximum = 10
-        }
-
-        environment {
-            type = "string"
-            description = "Deployment environment"
-        }
-    }
-    required = ["service_name", "environment"]
+  ui_order      = ["service_name", "environment", "replica_count"]
+  service_name  = string(pattern("^[a-z-]+$"))
+  environment   = string(enum(["staging", "production"]))
+  replica_count = integer(default(3), minimum(1), maximum(10))
+  dry_run       = boolean(default(true))
+  required      = ["service_name", "environment"]
 }
 ```
 
+Inputs are read in expressions as `inputs.<name>`.
+
 #### 3.1 Dynamic Options via Queries
 
-Stormchaser supports dynamic options populated via external systems (e.g., Rundeck-style). First, define a `query` block with the data source details. Then, reference the query results in your inputs using the `${queries.QUERY_NAME}` interpolator within an `enum` constraint (or using the shorthand type function `enum("${queries.QUERY_NAME}")`).
+A `query` block names a data source. An input refers to its results with `${queries.<name>}` inside `enum(...)`, and each result becomes an option. Query `params` must be strings; other values are dropped.
 
-When the TUI or Web UI shows a run form, the Query microservice resolves these queries and converts the result into an `enum` list, embedding it back into the schema before returning it to the UI. The UI tells the service which workflow the form is for and the service reads the schema and queries from the workflow itself, so the queries that run are the workflow's and not whatever a client sends:
+When the TUI or web UI shows a run form, the query service resolves the queries and puts the options into the schema. The UI tells the service which workflow the form is for, and the service reads the schema and queries from the workflow itself, so the queries that run are the workflow's and not whatever a client sends:
 
 * `POST /api/v1/schema/hydrate` takes `connection`, `workflow_path`, `git_ref` and `inputs`, and reads the workflow from that Git connection's repository. The caller must be allowed to use the connection.
 * `POST /api/v1/schema/hydrate-direct` takes `dsl` (the workflow text) and `inputs`, for direct runs. Whoever calls it is choosing the queries, so policy can refuse it to users who may run workflows but not write them (see `author_groups` in [OPA RBAC](opa-rbac.md)).
 
 A user may have 4 hydrations in flight and the service 64 in all (`STORMCHASER_QUERY_MAX_HYDRATIONS_PER_USER`, `STORMCHASER_QUERY_MAX_HYDRATIONS`); one more is refused with `429 Too Many Requests`. Each hydration runs at most 8 of its queries at once.
+
+The engine also runs the queries when a run is queued, and validates the inputs against the schema with their results.
 
 ##### Mock Data
 
@@ -175,28 +150,28 @@ Useful for testing or static lists.
 
 ```hcl
 query "env_options" {
-    type = "mock"
-    params = {
-        items = "dev,staging,prod"
-    }
+  type = "mock"
+  params = {
+    items = "dev,staging,prod"
+  }
 }
 
 inputs {
-    environment = string(enum("${queries.env_options}"))
+  environment = string(enum("${queries.env_options}"))
 }
 ```
 
 ##### SQL Database
 
-Fetch options directly from a database configured as a storage backend in Stormchaser.
+Fetch options from a database connection.
 
 ```hcl
 query "db_envs" {
-    type = "sql"
-    params = {
-        connection = "my-postgres-db"
-        query      = "SELECT name FROM environments WHERE active = true"
-    }
+  type = "sql"
+  params = {
+    connection = "my-postgres-db"
+    query      = "SELECT name FROM environments WHERE active = true"
+  }
 }
 ```
 
@@ -204,168 +179,130 @@ The query must be a single statement that only reads. It runs in a read-only tra
 
 ##### REST API
 
-Fetch options from an HTTP endpoint. You can optionally use `jq_filter` to extract a list of strings if the API returns a complex object.
+Fetch options from an HTTP endpoint. `jq_filter` can pick a list of strings out of a larger response.
 
 ```hcl
 query "api_options" {
-    type = "api"
-    params = {
-        url                  = "https://api.example.com/v1/options"
-        method               = "GET"
-        header_Authorization = "Bearer token"
-        jq_filter            = ".data[] | .name"
-    }
+  type = "api"
+  params = {
+    url                  = "https://api.example.com/v1/options"
+    method               = "GET"
+    header_Authorization = "Bearer token"
+    jq_filter            = ".data[] | .name"
+  }
 }
 ```
 
 ##### AWS Cloud Control
 
-Query AWS resources dynamically via the AWS API.
+List AWS resources.
 
 ```hcl
 query "aws_vpcs" {
-    type = "aws_cloudcontrol"
-    params = {
-        type_name         = "AWS::EC2::VPC"
-        region            = "us-east-1"
-        assume_role_arn   = "arn:aws:iam::123456789012:role/StormchaserQuery"
-    }
+  type = "aws_cloudcontrol"
+  params = {
+    type_name       = "AWS::EC2::VPC"
+    region          = "us-east-1"
+    assume_role_arn = "arn:aws:iam::123456789012:role/StormchaserQuery"
+  }
 }
 ```
 
 #### 3.2 TUI Integration
 
-The Stormchaser TUI dynamically renders interactive forms for workflow inputs. Because input schemas support dynamic queries and inter-field dependencies, the TUI abandons static blocking runners (like `schemaui`) in favor of a native, reactive dependency graph built directly into the asynchronous Tokio event loop. This allows the TUI to render dropdown lists for enums, provide immediate visual feedback, and fetch data from the Query microservice without freezing the application.
+The TUI renders run forms from the schema, with drop-down lists for enums. It fetches options from the query service and re-renders dependent fields as inputs change, without blocking its event loop.
 
-#### 3.3 Type System
+#### 3.3 Types
 
-Stormchaser uses a type system derived from the **HCL Expression Language**. All inputs, variables, and outputs must belong to one of the following types:
+Inputs are JSON values, and the schema's types are JSON schema types: `string`, `integer`, `number`, `boolean`, `array`, `object` and `null`. In expressions they are HCL values: strings, numbers, booleans, lists (tuples), maps (objects) and `null`.
 
-| Type | Description | DSL Literal Example |
-| :--- | :--- | :--- |
-| `string` | UTF-8 encoded text | `"hello"`, `"v1.2.0"` |
-| `int` | 64-bit signed integer | `42`, `-10` |
-| `uint` | 64-bit unsigned integer | `100u` |
-| `double` | 64-bit floating point | `3.14`, `-0.5` |
-| `bool` | Boolean value | `true`, `false` |
-| `bytes` | Byte sequence | `b"binary-data"` |
-| `timestamp`| RFC 3339 formatted date/time | `timestamp("2024-01-01T00:00:00Z")` |
-| `duration` | Time duration | `duration("5m")`, `duration("1h")` |
-| `list` | Ordered collection of any type | `["a", "b", "c"]`, `[1, 2, 3]` |
-| `map` | Key-value associative array | `{"key": "value", "id": 101}` |
-| `enum` | Restricted string (Stormchaser specific) | `options = ["prod", "stage"]` |
-| `null` | Represents the absence of a value | `null` |
+#### 3.4 Secrets
 
-#### 3.2 Type Conversion
+A run of a workflow from a repository gets the secrets of the repository's SOPS file (`secrets.sops.yaml`, `secrets.sops.json`, `.sops.yaml` or `.sops.json`, or the file the run request names), decrypted by the engine. They are read as `secrets.<name>`. The `secret("path#key")` function reads a secret from Vault (see [Standard Library](#53-stormchaser-standard-library-hcl)). Every secret value is masked wherever the API returns run data or logs.
 
-HCL provides built-in functions for explicit casting between types (e.g., `int("123")`, `string(42)`).
-
-#### 3.3 Dynamic Secret Masking
-
-In addition to DSL-defined secrets, steps can dynamically register sensitive values during execution by emitting a special command to `stdout`:
-
-`::add-mask::<secret_value>`
-
-When the Runner Agent detects this sequence:
-
-1. The `<secret_value>` is immediately added to the **Sensitive Values Registry** for the current run.
-2. All subsequent logs (from the same step or future steps) will redact any occurrences of this value.
-3. The `::add-mask::` line itself is scrubbed from the final log persistence.
+**(Planned)** Dynamic secret masking: a step printing `::add-mask::<value>` to have that value masked in later logs.
 
 ---
 
 ### 4. Steps
 
-Steps are the atomic units of execution. Every step has a unique name and a type.
+Steps are the units of work. Each step block has two labels, a name and a type:
+
+```hcl
+step "build" "RunContainer" {
+  // attributes and blocks
+}
+```
+
+A step name may contain only letters, digits, `_` and `-`. The type is a built-in step type (see [Step Types](#47-step-types)), a registered WASM step type, or the name of a `step_library`.
 
 #### 4.1 Aliases
 
-Aliases allow users to map short, human-readable names to long variable paths. Aliases defined in a wider scope (workflow or group) are inherited by all child steps unless shadowed by a local definition.
+Aliases give short names to expressions. Workflow aliases are evaluated when a step's expressions are resolved, and a step's own `aliases` block adds to or replaces them for that step.
 
 ```hcl
 aliases {
-    // Map 'build' to a deeply nested step path
-    "build" = "steps.setup.group.build"
-    "env_name" = "inputs.environment"
+  env_name   = inputs.environment
+  build_tag  = steps.build.outputs.tag
 }
 ```
+
+An alias's value is an expression. Written without quotes, as above, it is evaluated. A quoted string is evaluated only if it contains `${...}` (`env_name = "${inputs.environment}"`); `"inputs.environment"` would be the text itself. HCL attribute names cannot be quoted, so `"build" = ...` is a syntax error.
+
+An alias that refers to a step's outputs has a value only once that step has finished.
 
 #### 4.2 Storage and Artifacts
 
-Workflow-level, step-level, and group-level (Sequential/Parallel) storage definitions control the shared file system.
+A workflow-level `storage` block declares a volume that steps can mount and share. Between steps, a volume's contents are kept by the runner (parked to object storage, or on a shared PVC on Kubernetes).
 
 ```hcl
 storage "workspace" {
-    size = "10Gi"
-    backend = "my-oci-registry" // Optional: Route artifacts to a specific backend by name
+  size    = "10Gi"             // Defaults to 1Gi
+  backend = "my-oci-registry"  // Optional: the connection artifacts are published to
 
-    // I/O Speed Governor: Prevent this workflow from starving others
-    // on shared infrastructure (EFS/NFS/Shared SSD).
-    limits {
-        max_throughput = "100MiB/s"; // Sustained read/write speed
-        max_iops       = 1000;       // Maximum I/O operations per second
+  // Fetched into the volume before a step that mounts it starts
+  provision {
+    download "toolchain" {
+      url         = "https://internal.example.com/toolchain.tar.gz"
+      destination = "tools"
     }
+  }
 
-    // Provisioning: Fetch external resources into this storage space
-    // BEFORE the steps start executing.
-    provision {
-        // Fetch from platform-native config providers (K8s ConfigMap, ECS Params)
-        config "app_settings" {
-            source = "prod-env-config"
-            destination = "config/settings.json"
-        }
-
-        // Fetch from a public or private URL
-        download "utility_script" {
-            url = "https://internal.acme.com/scripts/setup.sh"
-            destination = "scripts/setup.sh"
-            mode = "0755"
-            checksum = "sha256:e3b0c442..."
-        }
-
-        // Pull in artifacts from other runs or storage declarations
-        artifact "previous_binary" {
-            from = "build_workflow.workspace.binary"
-            destination = "bin/old_app"
-        }
-    }
-
-    // Glob patterns to keep on the shared FS between steps
-    preserve = [
-        "src/**",
-        "node_modules/**",
-        "target/release/app"
-    ]
-
-    // Files to publish to long-term object storage
-    artifact "binary" {
-        path = "target/release/app"
-        retention = "30d"
-    }
-
-    artifact "logs" {
-        path = "logs/*.log"
-        retention = "7d"
-    }
-
-    // When to keep the storage volume after execution
-    // Options: "always", "on_failure", "on_success", "none"
-    retainment = "on_failure"
+  // Files to publish to long-term storage
+  artifact "binary" {
+    path      = "target/release/app"
+    retention = "30d"
+  }
 }
 ```
 
+Provisioning:
+
+* `download "<name>" { url, destination }` fetches `url` and unpacks it, as a gzipped tar archive, into `destination`, a directory relative to the volume. A `${...}` in `url` can use the run's inputs and secrets.
+* `artifact "<name>" { destination }` fetches the artifact of that name published earlier in the same run, from an S3 backend, and writes it to `destination` as a file. `mode` sets the file's permissions (`"0755"`).
+* **(Planned)** `config` (a platform config map or parameter), `checksum` verification, `mode` on a download, and `from` (an artifact of another run or storage) are parsed but not acted on.
+
+Artifacts:
+
+* An `artifact "<name>" { path }` block declares a file to publish. `path` is relative to the root of the volume. Only steps that list the artifact in their `artifacts` attribute publish it (see [Mounting Storage](#43-mounting-storage-in-steps)).
+* `retention` (default `on_success`) is passed to the runner and stored with the artifact, but nothing deletes artifacts when it runs out. **(Planned)**
+
+**(Planned)** These storage settings are not implemented, and a workflow that sets them is refused: `limits { max_throughput, max_iops }` (an I/O governor), `preserve` (globs to keep between steps; the storage mount's own `preserve` field is not read either) and `retainment` (when to keep the volume after the run).
+
 #### 4.3 Mounting Storage in Steps
 
-Defining a `storage` block at the workflow level creates the volume, but it must be explicitly mounted into a `RunContainer` or `RunK8sJob` step using the `storage_mounts` field.
+A step mounts declared storage with `storage_mounts` in its spec. `RunContainer`, `RunK8sJob`, `GitCheckout`, `TerraformPlan`, `TerraformApply` and file-mode `JQ` steps take it.
 
 ```hcl
 step "my_step" "RunContainer" {
-    image = "alpine"
-    storage_mounts = [
-        { name = "workspace", mount_path = "/data", read_only = false }
-    ]
-    artifacts = ["binary"] // Optional: the artifacts this step publishes
+  spec {
+    image   = "alpine"
     command = ["ls", "-la", "/data"]
+    storage_mounts = [
+      { name = "workspace", mount_path = "/data", read_only = false }
+    ]
+  }
+  artifacts = ["binary"] // Optional: the artifacts this step publishes
 }
 ```
 
@@ -405,397 +342,308 @@ not pushed unless the operator sets `STORMCHASER_OCI_ALLOW_STATIC_CREDENTIALS=tr
 on the engine, which sends the stored username and password to the runner's helper
 instead.
 
-#### 4.4 Using Library Steps
+#### 4.4 External Step Libraries (Planned)
 
-Imported steps are referenced by their library alias and name (e.g., `lib_alias/step_name`).
-
-```hcl
-step "notify_ops" "slack/slack_alert" {
-    params {
-        channel = "#ops-alerts"
-        message = "Deployment for ${inputs.service_name} complete."
-    }
-}
-
-step "cleanup_resources" "aws/LambdaInvoke" {
-    params {
-        function_name = "cleanup-temp-resources"
-        payload = "${run.id}"
-    }
-}
-```
+Referring to a step from an imported library as `<alias>/<step>` (for example `step "notify" "slack/slack_alert"`) needs `library` imports, which are not implemented. A step whose type is not a built-in type, a registered WASM type or a `step_library` in the workflow is never run, and its run waits until it times out. Define reusable steps with [`step_library`](#step-libraries).
 
 #### 4.5 Base Step Structure
 
-A `condition` can be applied to ANY step. If the condition evaluates to `false`, the step is skipped.
+Every step takes the attributes and blocks below. Anything else in the step body, attribute or block, becomes part of the step's spec, so these are equivalent:
 
 ```hcl
-step "fetch_source" "GitCheckout" {
-    // HCL expression for conditional execution
-    condition = "inputs.environment == 'production'"
+step "a" "RunContainer" {
+  image = "alpine"
+}
 
-    params {
-        repo = "https://github.com/org/repo"
-        branch = "${input.service_name}"
-    }
+step "b" "RunContainer" {
+  spec {
+    image = "alpine"
+  }
+}
 
-    retry {
-        count = 3
-        backoff = "exponential"
-        max_delay = "5m"
-    }
-
-    timeout = "10m"
-
-    // If true, the workflow continues even if this step fails.
-    // The step is marked as 'failed_ignored' in the DB.
-    allow_failure = false
-
-    // Routing: Support for both Pull (default) and Push (mapped) models.
-    next = [
-        "build_image",
-        // "Push" model: Explicitly map variables to the next step's inputs/params
-        step "notify_webhook" {
-            map {
-                "url" = "https://hooks.acme.com/v1"
-                "message" = "Checkout complete for ${inputs.service_name}"
-            }
-        }
-    ]
-
-    on_failure = step "slack_alert" {
-        map {
-            "channel" = "#ops-alerts"
-            "error" = "${run.error}"
-        }
-    }
-
-    // Test Reports: specialized handling for test results (e.g. junit.xml)
-    // These are collected by the runner and persisted in the orchestrator.
-    reports {
-        report "unit-tests" {
-            path = "target/surefire-reports/*.xml"
-            format = "junit"
-        }
-    }
-    // Only reports declared here are stored. A report's files may total at most
-    // 32 MiB compressed, 64 MiB unpacked and 1,000 files; a larger report is
-    // dropped and the step's result is unaffected.
-
-    // Output Mapping: Extract data from step execution
-    outputs {
-        // Search stdout for a specific marker and parse subsequent lines as Dotenv
-        extract "metadata" {
-            source = "stdout"
-            marker = "--- OUTPUT ---"
-            format = "dotenv"
-        }
-
-        // Search stdout for a specific marker and parse subsequent lines as JSON
-        extract "api_response" {
-            source = "stdout"
-            marker = "--- JSON ---"
-            format = "json"
-        }
-
-        // Extract a single value using regex
-        extract "version" {
-            source = "stdout"
-            regex = "Version: ([0-9.]+)"
-            group = 1
-        }
-
-        // Read and parse a file from the shared file system
-        extract "test_report" {
-            source = "file('results.json')"
-            format = "json"
-        }
-
-        // Extract a single value and register it as a secret for masking
-        extract "session_token" {
-            source = "stdout"
-            regex = "SessionToken: ([a-zA-Z0-9._-]+)"
-            group = 1
-            sensitive = true; // Automatically adds to Sensitive Values Registry
-        }
-    }
+step "c" "RunContainer" {
+  spec = {
+    image = "alpine"
+  }
 }
 ```
 
-#### 4.6 Parallel and Sequential Groups
-
-Groups allow for nested execution logic and iteration.
-
 ```hcl
-step "process_data" "Parallel" {
-    // The collection to iterate over (HCL expression)
-    iterate = "inputs.file_list"
+step "unit_tests" "RunContainer" {
+  // Skip the step unless this expression is true
+  condition = "inputs.environment != \"production\""
 
-    // Name of the variable for the current item
-    as = "file"
+  spec {
+    image   = "rust:1.96"
+    command = ["cargo", "test"]
+  }
 
-    // Execution strategy
-    strategy {
-        max_parallel = 5
-        fail_fast = true
-        affinity = "shared"
+  // Values the spec can use as ${params.<name>}; see Step Libraries
+  params {
+    profile = "dev"
+  }
+
+  // Run the step again if it fails; see 4.5.1
+  retry {
+    count   = 3
+    backoff = "exponential"
+    delay   = "10s"
+  }
+
+  // Longest the step may run; container steps only, see 4.8
+  timeout = "30m"
+
+  // Let the run go on if this step fails
+  allow_failure = false
+
+  // Steps that start once this one has finished
+  next = ["package"]
+
+  // Test reports to collect; see 4.5.5
+  reports {
+    report "unit-tests" {
+      path   = "target/nextest/junit.xml"
+      format = "junit"
     }
+  }
 
-    // Optional: Aggregate results from all iterations into group-level outputs
-    aggregation "built_images" {
-        description = "A list of all successfully built image tags"
-        // HCL expression with access to the 'iterations' collection
-        value = "iterations.filter(i, i.steps.build.status == 'succeeded').map(i, i.steps.build.outputs.tag)"
+  // Values to take from the step's log; see 4.5.4
+  outputs {
+    output "version" {
+      regex = "Version: ([0-9.]+)"
     }
-
-    aggregation "failure_count" {
-        value = "iterations.filter(i, i.steps.build.status == 'failed').size()"
-    }
-
-    steps {
-        step "start_db" "RunContainer" {
-            image = "postgres:15"
-
-            // Define processes that are permitted to survive the
-            // reaping phase AFTER this step completes.
-            process_allow_list = ["postgres"]
-
-            next = ["run_tests"]
-        }
-
-        step "run_tests" "RunContainer" {
-            image = "test-runner:latest"
-            params {
-                db_url = "localhost:5432"
-            }
-        }
-    }
+  }
 }
 ```
 
-##### 4.6.1 Output Collection and Reduction (Map/Reduce)
+| Attribute or block | Meaning |
+| :--- | :--- |
+| `spec` | The step type's settings. See the type's page under [steps/](steps/). |
+| `condition` | An expression, evaluated when the step would be scheduled. `false` skips the step (status `skipped`), and steps after it go ahead. A value that is not a boolean, or an expression that fails, is an error and the step is not scheduled. |
+| `params { ... }` | Named values the spec can use as `${params.<name>}`. See [Step Libraries](#step-libraries). |
+| `next` | A list of step names. See [Ordering steps](#452-ordering-steps). |
+| `retry { ... }` | See [Retries](#451-retries). |
+| `timeout` | The longest the step may run, such as `"30m"`. See [Step limits](#48-step-limits). |
+| `allow_failure` | `true` lets the run go on when the step fails. The step is marked `failed_ignored`, and the run continues as if it had succeeded. A step whose runner is lost still fails its run. |
+| `aliases { ... }` | Aliases for this step only. See [Aliases](#41-aliases). |
+| `artifacts` | The artifacts this step publishes. See [Mounting Storage](#43-mounting-storage-in-steps). |
+| `iterate`, `as`, `strategy { ... }` | See [Iteration](#46-iteration). |
+| `outputs { ... }` | See [Outputs from logs](#454-outputs-from-logs). |
+| `reports { ... }` | See [Test reports](#455-test-reports). |
 
-When a step uses the `iterate` strategy, Stormchaser automatically collects the outputs from every iteration.
+**(Planned)** Not implemented, though some of them parse:
 
-**Accessing Data:**
+* `on_failure` on a step (a step to run when this one fails). An `on_failure = ...` attribute ends up in the spec, and nothing reads it.
+* Steps inside `next`, with values mapped onto them (the "push" model, `next = [step "x" { map { ... } }]`). This is not valid HCL and does not parse; `next` takes step names only.
+* A nested `steps` block (groups); see [Parallel](steps/Parallel.md) and [Sequential](steps/Sequential.md).
+* `process_allow_list` (processes allowed to outlive a step).
 
-1. **Aggregated Outputs (Preferred):** If an `aggregation` block is defined, the result is available at `${steps.<group_name>.outputs.<agg_name>}`.
-2. **Raw Iteration Data:** The full raw list is always available at `${steps.<group_name>.iterations}`.
+##### 4.5.1 Retries
 
-Each iteration object contains:
+A step with a `retry` block that fails is run again, up to `count` more times, before its failure counts. Its run waits meanwhile, and the step shows as `pending` between attempts.
 
-* `input`: The value of the item being iterated over.
-* `index`: The zero-based index.
-* `steps`: A map of the outputs for each step within that iteration.
+| Attribute | Required | Meaning |
+|---|---|---|
+| `count` | yes | How many times to run the step again after its first attempt fails, at most 100. |
+| `backoff` | no | How the wait grows between attempts: `fixed` (the default) waits `delay` each time, `linear` waits `delay` times the retry's number, and `exponential` doubles the wait each time. |
+| `delay` | no | The wait before the first retry. Defaults to `10s`. |
+| `max_delay` | no | The longest any wait may be. No wait is longer than 24 hours. |
 
-**HCL Macros for Aggregation:**
-Aggregation blocks use HCL macros (`map`, `filter`, `exists`, `all`, `size`) to transform the `iterations` list into a simplified output.
+A `retry` block with no `count`, another attribute, an unknown `backoff`, a duration that does not parse or a `count` over 100 is an error when the workflow is parsed.
 
-#### 4.7 Human-in-the-Loop & Async Events (Approval / Wait)
+With `count = 3`, `backoff = "exponential"` and `delay = "10s"`, a step that keeps failing runs four times, 10, 20 and 40 seconds apart.
 
-Stormchaser provides two dedicated step types for pausing execution: `Approval` and `Wait`.
+Every failure counts: a non-zero exit, a step-level `timeout`, a built-in step's error and a runner that is lost while running the step. A step that also sets `allow_failure` is retried first, and its failure is ignored once its retries are used up. The run's own `timeout` covers all attempts. `Approval`, `TerraformApproval` and `Wait` steps are never retried.
 
-**Runtime Behavior:**
+A retry runs the step from the start, as it was dispatched the first time. Only retry a step that is safe to run twice: a step that changes something outside the run, such as an `SqlExecute` or a `RestApi` call, may have done so before it failed. A step's logs hold every attempt, and its outputs and test reports are those of its last attempt.
 
-* **Execution Suspension:** When an `Approval` or `Wait` step is reached, the workflow's state is persisted, and active execution is **suspended** (status `WaitingForEvent`). All runner resources for this workflow are released to the pool.
-* **Timeout:** The step-level `timeout` (e.g., `24h`) applies to the suspension period. If no correlated event or approval is received within this window, the step fails.
-* **Re-activation:** Upon receipt of a matching NATS event (either via the API for approvals or webhook correlations), the Controller re-hydrates the workflow state, injects any provided inputs/payloads as step outputs, and schedules the next step.
+On the Kubernetes runner, a step's Job gets `backoffLimit` 0, so Kubernetes does not retry the pod itself, unless a `RunK8sJob` sets `backoff_limit`.
 
-##### 4.7.1 The `Approval` Step
+##### 4.5.2 Ordering steps
 
-The `Approval` step halts the workflow until a user explicitly approves or rejects it via the API or CLI. It supports RBAC constraints and dynamic inputs.
+When a run starts, every step that is not in some step's `next` list starts at once. When a step finishes (succeeded, skipped or `failed_ignored`), each step in its `next` list starts if every step that lists it in `next` has finished. A failed step fails the run, unless it sets `allow_failure`, and nothing after it starts.
 
-```hcl
-step "manual_approval" "Approval" {
-    spec {
-        // Optional: List of authorized approvers (users or OPA groups)
-        approvers = ["group:admins", "user:alice"]
+A workflow in which every step is in some `next` list (a cycle with no way in) fails to start. Steps are matched by name among the workflow's top-level steps.
 
-        // Optional: Form inputs required from the human upon approval
-        inputs = [
-            {
-                name = "deploy_env"
-                type = "string"
-                options = ["staging", "production"]
-                default = "staging"
-            }
-        ]
+##### 4.5.3 Conditions
 
-        // Optional: Send an email notification when the step is reached
-        notify {
-            from = "ops@paninfracon.net"
-            to   = ["admin@paninfracon.net"]
-            subject = "Approval required for run ${run.id}"
-            // The body can use 'approve_link' and 'reject_link' variables. They are
-            // empty unless the operator has set STORMCHASER_APPROVAL_LINK_KEY. A link
-            // opens a confirmation page, expires (72 hours by default), and records
-            // the decision against the addresses in 'to'.
-            body = <<-EOT
-                Hello,
+`condition` is evaluated once, with the run's inputs, secrets, workflow aliases and the outputs of steps that have finished. It cannot use the iteration item, `params`, or the step's own aliases.
 
-                Workflow ${run.id} requires your approval.
+##### 4.5.4 Outputs from logs
 
-                Click below to take action:
-                - [Approve]({{ approve_link }})
-                - [Reject]({{ reject_link }})
-            EOT
-            html = true
-        }
-
-        // Optional: Fail the step if not approved within this window
-        timeout = "24h"
-    }
-    next = ["deploy_approved"]
-}
-
-```
-
-*Note: Unauthenticated, encrypted approval links are also supported for use in emails, bypassing the need for a UI session. See `scripts/generate-approval-link.py`.*
-
-##### 4.7.2 The `Wait` Step
-
-The `Wait` step pauses the workflow until an external event (e.g., a GitHub webhook or Jira status change) arrives matching a specific correlation key/value pair.
+Built-in steps set their own outputs (see each step type's page). A container step's outputs come from its log, through `output` blocks:
 
 ```hcl
-step "wait_for_github" "Wait" {
-    spec {
-        // The key to match in the incoming event payload
-        correlation_key = "github.commit.sha"
-        // The expected value
-        correlation_value = "expected_sha_12345"
-        timeout = "1h"
-    }
-    next = ["echo_event_received"]
+outputs {
+  // Optional: only read the lines between these markers
+  start_marker = "--- OUTPUTS ---"
+  end_marker   = "--- END OUTPUTS ---"
+
+  output "version" {
+    regex = "Version: ([0-9.]+)"
+    group = 1                       // The capture group; defaults to 1
+  }
+
+  output "build_info" {
+    marker = "BUILD_INFO="          // Only lines that contain this
+    regex  = "BUILD_INFO=(.*)"
+    format = "json"                 // Parse the captured text as JSON
+  }
+
+  output "session_token" {
+    regex     = "SessionToken: ([a-zA-Z0-9._-]+)"
+    sensitive = true                // Store it as sensitive
+  }
 }
 ```
 
-##### 4.7.3 The `LambdaInvoke` Step
+When the step succeeds, the engine reads up to 5,000 lines of its log and, for each `output`, finds the last line the `regex` matches (and that contains `marker`, if set). The capture group becomes the output, as a string, or parsed as JSON with `format = "json"`. An output whose regex matches nothing is not set. `source` may be `logs` (the default) or `stdout`, which mean the same.
 
-The `LambdaInvoke` step allows for the direct execution of AWS Lambda functions as a step in the workflow. This is executed by the engine itself and does not require a separate runner.
+Outputs are read as `steps.<name>.outputs.<output>`.
 
-*Note: This step type is only available if the `aws-lambda` feature is enabled in the engine build.*
+**(Planned)** Other sources, such as a file on the shared file system (`source = "file('results.json')"`), a `dotenv` format, and an output without a `regex`.
+
+##### 4.5.5 Test reports
+
+A `reports` block names test report files the runner collects after the step, even when it fails:
 
 ```hcl
-step "invoke_my_lambda" "LambdaInvoke" {
-    spec {
-        function_name = "my-function-name"
-        // Optional: JSON payload to pass to the function (HCL expression)
-        payload = {
-            "id" = "${run.id}"
-            "env" = "${inputs.environment}"
-        }
-        // Optional: "RequestResponse" (default), "Event", or "DryRun"
-        invocation_type = "RequestResponse"
-        // Optional: Version or Alias
-        qualifier = "prod"
-        // Optional: AWS Region
-        region = "us-west-2"
-    }
-    next = ["process_lambda_output"]
+reports {
+  report "unit-tests" {
+    path   = "target/surefire-reports/*.xml"
+    format = "junit"        // The default
+  }
 }
 ```
 
-**Outputs:**
-The response from the Lambda function is available as a JSON object in the `response` output of the step.
-`${steps.invoke_my_lambda.outputs.response}`
+Only reports declared here are stored. A report's files may total at most 32 MiB compressed, 64 MiB unpacked and 1,000 files; a larger report is dropped and the step's result is unaffected. `junit` reports are parsed into a summary and test cases, which the API, the UIs and the [TestReportEmail](steps/TestReportEmail.md) step read.
 
-##### 4.7.4 The `EmailSend` Step
+#### 4.6 Iteration
 
-The `EmailSend` step allows sending emails using SMTP. The email body is rendered using the **MiniJinja** template engine, with access to the full workflow context (`inputs`, `steps`, `run`).
-
-*Note: This step type is only available if the `email` feature is enabled in the engine build.*
+A step with `iterate` runs once for each item of a list, as separate step instances:
 
 ```hcl
-step "send_notification" "EmailSend" {
-    spec {
-        from = "ops@paninfracon.net"
-        to   = ["admin@paninfracon.net", "${inputs.on_call_email}"]
-        cc   = ["audit@paninfracon.net"]
-        subject = "Workflow ${run.id} completed"
+step "build" "RunContainer" {
+  iterate = "inputs.services"   // An expression that gives a list
+  as      = "service"           // The item's name; defaults to "item"
 
-        // MiniJinja template body
-        body = <<-EOT
-            Hello,
+  strategy {
+    max_parallel = 5            // At most this many instances run at once
+  }
 
-            The workflow {{ run.id }} has finished with status: {{ steps.deploy.status }}.
-
-            Summary of artifacts:
-            {% for name, info in steps.build.outputs.artifacts %}
-              - {{ name }}: {{ info.remote_path }}
-            {% endfor %}
-        EOT
-
-        html = false
-
-        // Optional SMTP configuration (defaults to environment variables)
-        smtp_server   = "smtp.paninfracon.net"
-        smtp_port     = 587
-        smtp_username = "stormchaser"
-        smtp_password = "${secrets.SMTP_PASSWORD}"
-    }
+  spec {
+    image   = "builder:latest"
+    command = ["build", "${service}"]
+  }
 }
 ```
 
-**Environment Variables for SMTP:**
-If not provided in the `spec`, the engine will look for the following environment variables:
+`iterate` is evaluated once, when the step is scheduled; it must give a list of at most 1,000 items (`STORMCHASER_MAX_ITERATIONS`), and an empty list skips the step. Each instance resolves the spec and params with its item. `iterate_as` is another name for `as`. The step counts as finished when all its instances have, so steps in its `next` list wait for all of them.
 
-* `SMTP_SERVER` (default: `localhost`)
-* `SMTP_PORT` (default: `25`)
-* `SMTP_USERNAME`
-* `SMTP_PASSWORD`
+A step's `strategy` block takes:
 
-`SMTP_USERNAME` and `SMTP_PASSWORD` are only used with the server and port the engine is configured with. A step that sets `smtp_server` or `smtp_port` to anything else must supply its own `smtp_username` and `smtp_password`; otherwise the message is sent without authentication.
+* `max_parallel`: instances that may run at once. Without it, all may (within the run's `max_concurrency`).
+* `affinity = "shared"`: dispatch the step's container work to the runner that the first step with the same affinity ran on.
+* `fail_fast`: **(Planned)** parsed, not read.
+
+**(Planned)** Collecting iteration results. `aggregation` blocks (map/reduce expressions over an `iterations` collection) are not parsed into anything the engine reads, and there is no `steps.<name>.iterations`. Each instance stores its outputs under the step's name, so `steps.<name>.outputs` holds the outputs of one of the instances, and which one is not defined.
+
+#### 4.7 Step Types
+
+| Type | Runs on | Page |
+| :--- | :--- | :--- |
+| `RunContainer` | Docker or Kubernetes runner | [RunContainer](steps/RunContainer.md) |
+| `RunK8sJob` | Kubernetes runner | [RunK8sJob](steps/RunK8sJob.md) |
+| `GitCheckout` | A runner, as a `RunContainer` step | [GitCheckout](steps/GitCheckout.md) |
+| `TerraformPlan`, `TerraformApply` | A runner, as `RunContainer` steps | [TerraformPlan](steps/TerraformPlan.md), [TerraformApply](steps/TerraformApply.md) |
+| `JQ` | The engine, or a runner when it reads or writes files | [JQ](steps/JQ.md) |
+| `JinjaRender` | The engine | [JinjaRender](steps/JinjaRender.md) |
+| `RestApi` | The engine | [RestApi](steps/RestApi.md) |
+| `WebhookInvoke` | The engine | [WebhookInvoke](steps/WebhookInvoke.md) |
+| `SqlExecute` | The engine | [SqlExecute](steps/SqlExecute.md) |
+| `EmailSend` | The engine | [EmailSend](steps/EmailSend.md) |
+| `TestReportEmail` | The engine | [TestReportEmail](steps/TestReportEmail.md) |
+| `SlackMessage` | The engine | [SlackMessage](steps/SlackMessage.md) |
+| `TeamsMessage` | The engine | [TeamsMessage](steps/TeamsMessage.md) |
+| `LambdaInvoke` | The engine | [LambdaInvoke](steps/LambdaInvoke.md) |
+| `Wasm`, registered WASM types | The engine | [Wasm](steps/Wasm.md) |
+| `Approval` | Waits for a person | [Approval](steps/Approval.md) |
+| `TerraformApproval` | Waits for a person, as an `Approval` step | [TerraformApproval](steps/TerraformApproval.md) |
+| `Wait` | Waits for a correlated event | [Wait](steps/Wait.md) |
+| `Parallel`, `Sequential` | **(Planned)** | [Parallel](steps/Parallel.md), [Sequential](steps/Sequential.md) |
+
+Some step types depend on engine features that are on by default: `EmailSend` and `TestReportEmail` (`email`, and `aws-ses` for SES), `LambdaInvoke` (`aws-lambda`), `SlackMessage` (`chatops-slack`) and `TeamsMessage` (`chatops-teams`). In a build without the feature, such a step fails, saying so.
+
+`Approval` and `Wait` steps suspend the run's progress without holding any runner: the step waits in the `waiting_for_event` state until it is approved, rejected or correlated. Their `timeout` is not enforced; a step left waiting ends only when its run times out.
+
+#### 4.8 Step limits
+
+A runner applies limits to every container step (`RunContainer`, `RunK8sJob`, and the steps that become `RunContainer` steps), whatever its workflow asks for:
+
+| Limit | Default | Runner setting |
+| :--- | :--- | :--- |
+| CPU for a step that sets none | 1 | `STORMCHASER_STEP_DEFAULT_CPU` |
+| Memory for a step that sets none | 2Gi | `STORMCHASER_STEP_DEFAULT_MEMORY` |
+| Most CPU a step may ask for | 8 | `STORMCHASER_STEP_MAX_CPU` |
+| Most memory a step may ask for | 16Gi | `STORMCHASER_STEP_MAX_MEMORY` |
+| Run time of a step that sets no `timeout` | 24h | `STORMCHASER_STEP_DEFAULT_TIMEOUT` |
+| Longest `timeout` a step may set | 24h | `STORMCHASER_STEP_MAX_TIMEOUT` |
+| Processes in a step's container (Docker) | 4096 | `STORMCHASER_STEP_PIDS_LIMIT` |
+| Pods one step may run at once or ask to complete (Kubernetes) | 10 | `STORMCHASER_STEP_MAX_PARALLELISM` |
+
+A step that asks for more than a maximum is refused. A step that runs past its `timeout` is stopped and fails.
+
+Steps the engine runs itself do not use `timeout`; `RestApi` and `WebhookInvoke` have a per-request `timeout` in their spec, `Wasm` and inline `JQ` have their own limits, and the run's `timeout` covers everything.
 
 ---
 
 ### 5. Expressions (HCL)
 
-Stormchaser uses **HCL Expression Language** for all logic, conditions, and variable interpolation.
+#### 5.1 Variables
 
-#### 5.1 Variable Resolution & Shadowing
+An expression can use these names:
 
-When an expression references a variable without a fully qualified prefix (e.g., `${my_var}` instead of `${inputs.my_var}`), the engine resolves the name using a **"Most Specific Wins"** shadowing model.
+| Name | Value |
+| :--- | :--- |
+| `inputs` | The run's inputs, with schema defaults filled in. |
+| `secrets` | The run's decrypted SOPS secrets. See [Secrets](#34-secrets). |
+| `run` | The run: `run.id`. |
+| `steps` | Outputs of steps that have finished: `steps.<name>.outputs.<key>`. A step that has not finished, or set no outputs, is absent. |
+| `params` | The step's params (in the spec only). |
+| Aliases | Workflow aliases, and the step's own aliases, by name. |
+| The iteration item | `item`, or the name `as` gives it (in the spec and params of an iterated step). |
+| `queries` | Query results (in the `inputs` schema only). |
 
-The resolution order (from highest to lowest precedence) is:
-
-1. **Iteration Local:** The `as` variable defined in an `iterate` block (e.g., `${file}`).
-2. **Step Aliases:** Aliases defined explicitly within the current `step` block.
-3. **Group Aliases:** Aliases inherited from the immediate parent `Parallel` or `Sequential` group.
-4. **Workflow Aliases:** Aliases defined at the root `workflow` level.
-5. **Step Outputs:** Data from previously completed steps (e.g., `${steps.setup.outputs.id}`).
-6. **Workflow Inputs:** Trigger-time inputs (e.g., `${inputs.branch}`).
-7. **Global Secrets & Env:** System-level values (e.g., `${secrets.DB_PASSWORD}` or `${env.HOME}`).
-
-**Example of Shadowing:**
+There is no fallback lookup: a bare name that is none of these is an error, and a `${...}` that fails is left as written. A step alias replaces a workflow alias of the same name, and the iteration item replaces an alias of the same name.
 
 ```hcl
 workflow "Example" {
-    aliases { "tag" = "inputs.global_tag"; }
+  aliases {
+    tag = inputs.global_tag
+  }
 
-    inputs { input "global_tag" { type = "string"; } }
+  steps {
+    step "build" "RunContainer" {
+      iterate = ["v1", "v2"]
+      as      = "tag" // replaces the alias 'tag' in this step
 
-    steps {
-        step "build" "Parallel" {
-            iterate = ["v1", "v2"]
-            as = "tag"; // SHADOWS the workflow alias 'tag'
-
-            steps {
-                step "run" "RunContainer" {
-                    // This resolves to the iteration value ("v1" or "v2")
-                    // NOT the workflow input.
-                    args = ["--version", "${tag}"]
-                }
-            }
-        }
+      spec {
+        image = "builder:latest"
+        // "v1" or "v2", not the input
+        args  = ["--version", "${tag}"]
+      }
     }
+  }
 }
 ```
 
 #### 5.2 Common HCL Patterns
 
-* `build.exit_code == 0` (where 'build' is an alias for 'steps.setup.group.build')
-* `inputs.replica_count > 5 && env_name == 'prod'` (where 'env_name' is an alias for 'inputs.environment')
-* `has(inputs.optional_flag) && inputs.optional_flag == true`
+* `inputs.replica_count > 5 && env_name == "prod"` (where `env_name` is an alias for `inputs.environment`)
+* `contains(["staging", "production"], inputs.environment)`
+* `coalesce(inputs.tag, "latest")`
+
+HCL strings take double quotes only.
 
 #### 5.2.1 `${...}` inside Jinja templates
 
@@ -812,95 +660,78 @@ instead; see [SqlExecute](steps/SqlExecute.md).
 
 #### 5.3 Stormchaser Standard Library (HCL)
 
-Stormchaser provides a set of built-in functions extending HCL to handle common workflow tasks.
+These functions are available in every expression.
 
-**String Manipulation:**
+**Strings:**
 
-* `upper(string)`: Converts a string to uppercase.
-* `lower(string)`: Converts a string to lowercase.
-* `trim(string, cutset)`: Removes leading and trailing characters specified in `cutset`.
+* `upper(string)`, `lower(string)`: Change case.
+* `trim(string, cutset)`: Removes leading and trailing characters that are in `cutset`.
 * `trimspace(string)`: Removes leading and trailing whitespace.
-* `split(separator, string)`: Splits a string into a list of strings by the given separator.
-* `join(separator, list)`: Joins a list of strings into a single string with the given separator.
-* `replace(string, old, new)`: Replaces all occurrences of `old` string with `new` string.
-* `uuid()`: **(Planned)** Generates a unique v4 UUID.
-* `slugify(string)`: **(Planned)** Converts a string to a URL-safe slug (lowercase, dashes).
+* `split(separator, string)`: Splits a string into a list.
+* `join(separator, list)`: Joins a list into a string. Items that are not strings are written as JSON.
+* `replace(string, old, new)`: Replaces every occurrence of `old` with `new`.
+* `slugify(string)`: Lower case, with each run of characters other than `a-z` and `0-9` replaced by `-`, and no `-` at either end.
+* `uuid()`: A random version 4 UUID, new on each call.
+* `regex_match(pattern, string)`: `true` if `pattern` matches somewhere in `string`. Note the order: the pattern comes first.
 
-**Encoding & Decoding:**
+**Encoding:**
 
-* `base64encode(string)`: Encodes a string to base64.
-* `base64decode(string)`: Decodes a base64 string.
-* `jsonencode(any)`: Converts an HCL object/value to a JSON string.
-* `jsondecode(string)`: Parses a JSON string into an HCL object/value.
+* `base64encode(string)`, `base64decode(string)`: Base64. Decoding fails if the result is not UTF-8.
+* `jsonencode(any)`: A value as a JSON string.
+* `jsondecode(string)`: A JSON string as a value.
 
 **Collections:**
 
-* `length(any)`: Returns the number of elements in a list, map, or string.
-* `keys(map)`: Returns a list of keys from a map.
-* `values(map)`: Returns a list of values from a map.
-* `contains(list, value)`: Checks if a value is present in a list.
+* `length(any)`: The length of a list, map or string (in bytes).
+* `keys(map)`, `values(map)`: A map's keys or values as a list.
+* `contains(list, value)`: Whether the list holds the value.
 
-**Logic & Types:**
+**Logic:**
 
-* `coalesce(any...)`: Returns the first argument that is neither `null` nor an empty string `""`.
-  This matches [Terraform's `coalesce` semantics](https://developer.hashicorp.com/terraform/language/functions/coalesce):
+* `coalesce(any...)`: The first argument that is neither `null` nor an empty string `""`.
+  This matches [Terraform's `coalesce`](https://developer.hashicorp.com/terraform/language/functions/coalesce):
   only `null` and the empty string are skipped. Non-string values such as `0`, `false`, and empty
-  collections (`[]`, `{}`) are considered valid and will be returned as-is.
+  collections (`[]`, `{}`) are returned as they are. With no such argument it is an error.
 
-**Path & Filesystem:**
+**Paths:**
 
-* `path_join(list)`: **(Planned)** Joins path components (e.g., `path_join(["/", "tmp", "source"])` -> `"/tmp/source"`).
-* `file_exists(string)`: **(Planned)** Checks if a file exists on the shared filesystem (Runtime only).
-* `file_size(string)`: **(Planned)** Returns the size of a file in bytes.
+* `path_join(list)`: Joins path parts with `/` (`path_join(["/", "tmp", "source"])` gives `"/tmp/source"`).
 
-**Networking & URLs:**
+**Environment and secrets:**
 
-* `url_parse(string)`: **(Planned)** Returns a map of URL components (scheme, host, path, query).
-* `is_valid_ipv4(string)` / `is_valid_ipv6(string)`: **(Planned)** IP validation helpers.
-
-**Workflow Context:**
-
-* `env(string)`: Reads an environment variable of the engine process. Only names the operator has listed in `STORMCHASER_ENV_ALLOWLIST` (comma-separated) are readable; any other name is an evaluation error. The list is empty by default.
-* `secret(string)`: Performs a dynamic secret lookup from the configured backend (e.g., Vault). Format is `secret("path#key")`. Lookups need `VAULT_TOKEN` to be set on the engine (there is no default token), and only paths the operator has listed in `STORMCHASER_VAULT_ALLOWED_PATHS` (comma-separated; a trailing `*` matches a prefix) are readable. The list is empty by default.
-* `is_retry()`: **(Planned)** Returns `true` if the current step execution is a retry.
-* `retry_count()`: **(Planned)** Returns the number of times the current step has been retried.
-
-**Example of Secret Lookup:**
+* `env(string)`: Reads an environment variable of the engine process. Only names the operator has listed in `STORMCHASER_ENV_ALLOWLIST` (comma-separated) are readable; any other name is an evaluation error. The list is empty by default. A listed variable that is not set reads as `""`.
+* `secret(string)`: Reads a secret from Vault, as `secret("path#key")`. Lookups need `VAULT_TOKEN` to be set on the engine (there is no default token), and only paths the operator has listed in `STORMCHASER_VAULT_ALLOWED_PATHS` (comma-separated; a trailing `*` matches a prefix) are readable. The list is empty by default. A value read this way is masked like other secrets.
 
 ```hcl
 step "deploy" "RunContainer" {
-    params {
-        db_password = "${secret('kv/data/db#password')}"
-    }
+  spec {
+    image = "deployer:latest"
+    env = [
+      { name = "DB_PASSWORD", value = "${secret("kv/data/db#password")}" }
+    ]
+  }
 }
 ```
 
-**Validation Macros:**
-
-* `regex_match(string, pattern)`: **(Planned)** Boolean check for regex compliance.
-* `is_in_range(value, min, max)`: **(Planned)** Numeric range validation.
+**(Planned):** `file_exists`, `file_size`, `url_parse`, `is_valid_ipv4`, `is_valid_ipv6`, `is_retry`, `retry_count` and `is_in_range`.
 
 ---
 
 ### 6. Validation and Safety
 
-Every workflow MUST undergo a validation phase before execution. The `stormchaser lint` CLI command (and the Control Plane's pre-run handler) performs the following checks:
+A workflow is checked at these points:
 
-1. **Grammar Validation:** Ensures the `.storm` file is syntactically valid HCL, which can be checked via standard parsing or visually assisted with `tree-sitter-hcl` in editors.
-2. **DAG Cycle Detection:** The workflow graph is validated as a Directed Acyclic Graph (DAG) for all explicit `next` mappings. If a cycle is detected, the workflow is rejected.
-3. **Variable Resolution:** All `${inputs.*}`, `${steps.*}`, and `${secrets.*}` references are checked for existence and scope (including alias shadowing).
-4. **Policy Compliance:** The OPA engine is queried to ensure the workflow structure and resource requirements comply with organizational rules.
-5. **External Dependency Verification (Planned):** When the `--verify-external` flag is used, the linter performs non-destructive "pre-flight" checks to ensure the workflow is executable:
-    * **Image Registry Check:** Verifies that all referenced container images exist and are accessible (e.g., via `docker manifest inspect`).
-    * **Git Repository Check:** Confirms that all referenced Git repositories and branches are reachable (e.g., via `git ls-remote`).
-    * **Library Integrity:** Validates that all `libraries` blocks have matching checksums and that the remote sources are available.
-    * **OPA Policy Existence:** Verifies that the specific OPA policies required for the run are loaded and reachable in the OPA server.
+1. **Parsing.** The parser refuses text that is not valid HCL, has no `workflow` or `workflow_template` block, has a step without a name and a type or with an invalid name, has an invalid `retry` block, a library param that is a list or a map, or a spec that uses a param nobody sets. It also enforces the [limits](#limits). `stormchaser lint`, `POST /api/v1/runs/direct` (`stormchaser run <file>`) and the engine all parse a workflow before using it.
+2. **Schema.** `stormchaser lint` also validates the parsed workflow against the DSL's JSON schema (see [Validation & Linting](#validation--linting)).
+3. **Policy.** When OPA is configured, the engine asks it whether the run may start, with the workflow and its inputs.
+4. **Inputs.** The engine validates the run's inputs against the `inputs` schema before the run starts.
+5. **At run time.** A workflow whose steps all appear in `next` lists fails to start. Each step type checks its own spec when the step runs.
 
-6. **Checksum Generation (Planned):** To simplify the adoption of the mandatory `checksum` field in `libraries`, the linter provides a `--generate-checksums` flag.
-    * **Behavior:** The linter fetches the remote source for any library missing a checksum, calculates its SHA256 fingerprint, and provides the value to update the DSL.
-    * **Security Note:** Users SHOULD only use this flag when first adding a trusted library or when intentionally upgrading a version. Once generated, the checksum provides the "Lockfile" guarantee for all future executions.
+**(Planned):**
 
-If any check fails, the linter returns a non-zero exit code and a detailed report of the missing or unreachable dependencies.
+* Checking that every `${inputs.*}`, `${steps.*}` and `${secrets.*}` reference exists, and detecting cycles in `next` that some step does lead into.
+* `--verify-external`: checking that images, Git repositories and branches, library sources and OPA policies are reachable.
+* `--generate-checksums`: computing the `checksum` of a `library` import.
 
 ---
 
@@ -910,64 +741,58 @@ If any check fails, the linter returns a non-zero exit code and a detailed repor
 stormchaser_dsl_version = "1.0"
 
 workflow "ContainerBuildAndDeploy" {
-    description = "Builds a docker image and deploys to K8s"
+  description = "Builds an image and deploys it to Kubernetes"
 
-    inputs {
-        input "image_tag" {
-            type = "string"
-            description = "The tag to apply to the build"
-        }
+  inputs {
+    image_tag = string()
+    required  = ["image_tag"]
+  }
+
+  storage "workspace" {
+    size = "5Gi"
+  }
+
+  steps {
+    step "checkout" "GitCheckout" {
+      spec {
+        repo           = "https://github.com/acme/app.git"
+        destination    = "/workspace/source"
+        storage_mounts = [{ name = "workspace", mount_path = "/workspace" }]
+      }
+      next = ["build"]
     }
 
-    steps {
-        step "checkout" "GitCheckout" {
-            params {
-                url = "git@github.com:acme/app.git"
-            }
-            next = ["build"]
-        }
-
-        step "build" "RunContainer" {
-            image = "gcr.io/kaniko-project/executor:latest"
-            storage_mounts = [
-                { name = "workspace", mount_path = "/workspace" }
-            ]
-            args = [
-                "--destination=myrepo/app:${inputs.image_tag}",
-                "--context=dir:///workspace/source"
-            ]
-            next = ["deploy_prod"]
-        }
-
-        step "deploy_prod" "RunContainer" {
-            image = "bitnami/kubectl:latest"
-            args = ["set", "image", "deployment/myapp", "app=myrepo/app:${inputs.image_tag}"]
-
-            retry {
-                count = 5
-                backoff = "linear"
-            }
-
-            on_failure = "rollback"
-        }
-
-        step "rollback" "RunContainer" {
-            image = "bitnami/kubectl:latest"
-            args = ["rollout", "undo", "deployment/myapp"]
-        }
+    step "build" "RunContainer" {
+      spec {
+        image = "gcr.io/kaniko-project/executor:latest"
+        args = [
+          "--destination=myrepo/app:${inputs.image_tag}",
+          "--context=dir:///workspace/source"
+        ]
+        storage_mounts = [{ name = "workspace", mount_path = "/workspace" }]
+        cpu    = "2"
+        memory = "4Gi"
+      }
+      next = ["deploy"]
     }
 
-    outputs {
-        output "status" {
-            value = "${step.deploy_prod.status}"
-        }
+    step "deploy" "RunContainer" {
+      spec {
+        image = "bitnami/kubectl:1.31"
+        args  = ["set", "image", "deployment/myapp", "app=myrepo/app:${inputs.image_tag}"]
+      }
+      retry {
+        count   = 5
+        backoff = "linear"
+      }
     }
+  }
 }
 ```
 
 ## Step Libraries
 
-You can define reusable steps inside a workflow using the `step_library` block. When you define a step that uses the library name as its `type`, it will inherit the properties defined in the library. Properties defined on the step itself will be merged with the library (with the step's properties taking precedence).
+You can define reusable steps inside a workflow using the `step_library` block. A step that names the library as its `type` becomes a step of the library's type, with the library's `spec`, `params`, `timeout`, `allow_failure` and `retry`. Whatever the step sets itself takes precedence: its `params` replace the library's of the same name, and its `spec` is merged into the library's. Objects merge key by key, as deep as they go. Lists of named entries, such as `env`, merge by name: the step's entry replaces the library's of the same name, and its other entries are added. Any other value the step sets, such as `command`, replaces the library's.
 
 ```hcl
 step_library "ubuntu_base" {
@@ -984,28 +809,61 @@ step "my_step" "ubuntu_base" {
 }
 ```
 
-## Template Workflows and Includes
+### Parameters
 
-You can mark a workflow as a template by using the `workflow_template` block instead of `workflow`.
+A library's `params` are its arguments, with the values it gives them by default. Its `spec` uses them as `${params.<name>}`, and a step that uses the library sets the ones it wants changed:
 
 ```hcl
-workflow_template "standard_build" {
-  inputs {
-    repo = string()
+step_library "python_env" {
+  type = "RunContainer"
+  params {
+    python_version = "3.12"
+    test_selection = "${inputs.selection}"
   }
+  spec {
+    image   = "python:${params.python_version}-slim"
+    command = ["sh", "-c", "pip install pytest && pytest -k '${params.test_selection}'"]
+  }
+}
 
-  step "build" "RunContainer" {
-    // ...
+step "unit_tests" "python_env" {}
+
+step "unit_tests_older" "python_env" {
+  params {
+    python_version = "3.11"
   }
 }
 ```
 
-Other workflows can then include this template using the `include` block. The steps from the included workflow will be merged into the caller, with step names prefixed to prevent collisions. Inputs provided in the include block will be injected into the included steps.
+* A param's value is a string, number or boolean; a list or a map is an error. Numbers and booleans become their text.
+* A param's value can use the run's `inputs`, `secrets`, `steps` outputs and the iteration item, as a spec can. Params are resolved first, then the spec; a param cannot use another param.
+* A spec that uses a param that neither the step nor its library sets is an error when the workflow is parsed, naming the step and the param.
+* A step that uses no library can set `params` too, and its own `spec` can use them the same way.
+* A step sets params with a `params { ... }` block. A library takes a block or a `params = { ... }` attribute.
+
+## Template Workflows and Includes
+
+A workflow can be marked as a template with `workflow_template` instead of `workflow`. It is parsed like a workflow; the mark is recorded.
+
+```hcl
+workflow_template "standard_build" {
+  steps {
+    step "build" "RunContainer" {
+      spec {
+        image   = "builder:latest"
+        command = ["build", "${inputs.repo}"]
+      }
+    }
+  }
+}
+```
+
+Another workflow includes it with an `include` block:
 
 ```hcl
 workflow "main" {
   include "my_build" {
-    workflow = "standard_build.storm"
+    workflow = "builds/standard_build.storm"
     inputs = {
       repo = "my-repo"
     }
@@ -1013,33 +871,35 @@ workflow "main" {
 }
 ```
 
+When a run is queued from a repository, the engine reads each included file from the same commit (`workflow` is a path relative to the repository root), and adds its steps and step libraries to the workflow; other blocks of the included file are not used. Included steps are named `<include name>.<step name>`, and their `next` lists are renamed to match. Includes may include further files; each file is included once. In each included step's `params`, the text `inputs.<name>` is replaced by the include's value for `<name>`; the spec is not changed.
+
+Direct runs (`stormchaser run <file>`) do not process includes.
+
 ## Validation & Linting
 
-Stormchaser provides robust, offline JSON Schema validation for the DSL. Workflows can be validated for structural correctness before submission.
+`stormchaser lint` parses a workflow and validates it against the DSL's JSON schema, offline.
 
 ### Generating the Schema
 
-The base JSON Schema (Draft 7) for the Stormchaser DSL can be generated locally using the CLI:
+The JSON Schema (Draft 7) for the DSL can be generated locally:
 
 ```bash
 stormchaser schema generate > schema.json
 ```
 
-You can also output the schema directly in the functional HCL data format using the `--format` flag:
+Or in the HCL form, with `--format`:
 
 ```bash
 stormchaser schema generate --format hcl > schema.hcl
 ```
 
-Or retrieved from a running Stormchaser server API (replace `<host>` and `<port>` with the address of your deployment — the default for a local development server is port `3000`, while Kubernetes deployments may expose a different port or an ingress URL):
+Or fetched from a running API server (`<host>` and `<port>` are your deployment's address):
 
 ```bash
-curl http://<host>:<port>/api/v1/schema > schema.json
+curl https://<host>:<port>/api/v1/schema > schema.json
 ```
 
 ### Linting Workflows
-
-The `stormchaser lint` command checks `.storm` files against the generated JSON schema.
 
 ```bash
 stormchaser lint my-workflow.storm
@@ -1047,24 +907,24 @@ stormchaser lint my-workflow.storm
 
 #### Remote & Offline Validation
 
-By default, `lint` generates the schema locally. To validate strictly against the live server's configuration, you can use the `--remote` flag:
+By default `lint` generates the schema locally. To validate against the live server's schema, use `--remote`:
 
 ```bash
 stormchaser lint my-workflow.storm --remote
 ```
 
-For **true offline validation** against a server's exact configuration (similar to `sqlx prepare`), you can download the server schema locally:
+To validate offline against a server's schema, download it once:
 
 ```bash
 # Downloads the live schema to .stormchaser-schema.json
 stormchaser lint --prepare
 ```
 
-Subsequent `lint` runs will automatically detect `.stormchaser-schema.json` and validate against it offline.
+Later `lint` runs find `.stormchaser-schema.json` in the current directory and validate against it.
 
 #### Validating Custom Step Plugins
 
-If you use custom, extensible step types, the linter can validate them by providing additional schemas. It supports local JSON files and reading directly from local Git repositories (without needing a checkout):
+The linter can validate the specs of custom step types against extra schemas, from local JSON files or from local Git repositories (without a checkout):
 
 ```bash
 stormchaser lint my-workflow.storm \
@@ -1074,7 +934,7 @@ stormchaser lint my-workflow.storm \
 
 #### Pre-commit Hook Integration
 
-Stormchaser provides native support for validating `.storm` files as part of your CI or `pre-commit` workflow. You can easily add the `stormchaser-lint` hook to your repository's `.pre-commit-config.yaml`:
+The repository's own `.pre-commit-config.yaml` lints `.storm` files with this hook, which can be copied:
 
 ```yaml
 repos:
@@ -1082,7 +942,7 @@ repos:
     hooks:
       - id: stormchaser-lint
         name: Stormchaser Linter
-        entry: bash -c 'cargo build -p stormchaser -q && for f in "$@"; do target/debug/stormchaser lint "$f" || exit 1; done' --
+        entry: bash -c 'cargo build -p stormchaser-cli -q && for f in "$@"; do target/debug/stormchaser lint "$f" || exit 1; done' --
         language: system
         files: \.storm$
 ```

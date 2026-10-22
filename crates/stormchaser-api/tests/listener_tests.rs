@@ -1,5 +1,10 @@
 //! The HTTP listener serving TLS itself, exercised over real sockets.
 
+#![expect(
+    clippy::disallowed_methods,
+    reason = "tests call the servers they start"
+)]
+
 use axum::extract::ConnectInfo;
 use axum::routing::get;
 use axum::Router;

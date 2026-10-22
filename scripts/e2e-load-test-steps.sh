@@ -34,9 +34,9 @@ for i in $(seq 1 $NUM_STEPS); do
   echo "      program = \".text\"" >> "$STORM_FILE"
   echo "      input = { text = \"Hello World $i!\" }" >> "$STORM_FILE"
 
-  if [ "$i" -gt 1 ]; then
-    prev=$((i - 1))
-    echo "      depends_on = [\"step_$prev\"]" >> "$STORM_FILE"
+  # Each step starts the next: a step runs once every step naming it in next is done
+  if [ "$i" -lt "$NUM_STEPS" ]; then
+    echo "      next = [\"step_$((i + 1))\"]" >> "$STORM_FILE"
   fi
   echo "    }" >> "$STORM_FILE"
 done
@@ -45,7 +45,9 @@ echo '  }' >> "$STORM_FILE"
 echo '}' >> "$STORM_FILE"
 
 echo ">>> Cleaning up previous workflow runs in local DB..."
-POSTGRES_CONTAINER=$(docker ps --format '{{.Names}}' | grep postgres | head -n 1)
+# The first container named postgres, unless STORMCHASER_POSTGRES_CONTAINER names the
+# stack's own: on a host running several stacks the first can be another one
+POSTGRES_CONTAINER=${STORMCHASER_POSTGRES_CONTAINER:-$(docker ps --format '{{.Names}}' | grep postgres | head -n 1)}
 if [ "${STORMCHASER_E2E_RESET_ALL_RUNS:-0}" = "1" ]; then
   echo ">>> STORMCHASER_E2E_RESET_ALL_RUNS=1 set; truncating all workflow runs."
   docker exec "$POSTGRES_CONTAINER" psql -U stormchaser -d stormchaser -c "TRUNCATE workflow_runs CASCADE" > /dev/null 2>&1
@@ -77,7 +79,8 @@ echo -e "${GREEN}>>> Successfully spawned workflow $RUN_ID.${NC}"
 
 echo ">>> Polling for completion of workflow..."
 
-for attempt in {1..120}; do
+# One step at a time, so this takes minutes: up to 15 (450 polls, 2 s apart)
+for attempt in {1..450}; do
     # We check if the workflow reached a terminal state
     STATUS=$(docker exec "$POSTGRES_CONTAINER" psql -U stormchaser -d stormchaser -t -c "
         SELECT status FROM workflow_runs WHERE id = '$RUN_ID'
@@ -85,7 +88,7 @@ for attempt in {1..120}; do
         SELECT status FROM archived_workflow_runs WHERE id = '$RUN_ID'
     " | xargs)
 
-    echo "Attempt $attempt/120 - Status: $STATUS"
+    echo "Attempt $attempt/450 - Status: $STATUS"
 
     if [ "$STATUS" == "succeeded" ]; then
         END_TIME=$(date +%s)

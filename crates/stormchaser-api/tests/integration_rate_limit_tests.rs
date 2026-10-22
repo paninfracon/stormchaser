@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::env::var;
 use std::sync::Arc;
 use stormchaser_api::{app, AppState};
-use stormchaser_model::OpaClient;
+use stormchaser_opa::OpaClient;
 use tower::ServiceExt;
 
 use axum::extract::connect_info::ConnectInfo;

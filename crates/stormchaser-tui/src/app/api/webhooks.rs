@@ -1,5 +1,5 @@
 use super::*;
-use stormchaser_model::event_rules::WebhookConfig;
+use stormchaser_model::api::{CreateWebhookRequest, UpdateWebhookRequest};
 
 impl<'a> App<'a> {
     /// Fetches the latest list of webhooks from the API.
@@ -8,28 +8,27 @@ impl<'a> App<'a> {
             return Ok(());
         }
 
-        let res = self
-            .api_request(reqwest::Method::GET, "/api/v1/webhooks", None)
-            .await?;
-
-        if res.status().is_success() {
-            self.webhooks = res.json::<Vec<WebhookConfig>>().await?;
-            if !self.webhooks.is_empty() {
-                if self.webhooks_state.selected().is_none() {
-                    self.webhooks_state.select(Some(0));
-                }
-                if self.selected_webhook.is_none() {
-                    if let Some(i) = self.webhooks_state.selected() {
-                        self.selected_webhook = Some(self.webhooks[i].clone());
+        match self.api().list_webhooks().await {
+            Ok(webhooks) => {
+                self.webhooks = webhooks;
+                if !self.webhooks.is_empty() {
+                    if self.webhooks_state.selected().is_none() {
+                        self.webhooks_state.select(Some(0));
                     }
+                    if self.selected_webhook.is_none() {
+                        if let Some(i) = self.webhooks_state.selected() {
+                            self.selected_webhook = Some(self.webhooks[i].clone());
+                        }
+                    }
+                } else {
+                    self.webhooks_state.select(None);
+                    self.selected_webhook = None;
                 }
-            } else {
-                self.webhooks_state.select(None);
-                self.selected_webhook = None;
+                self.error = None;
             }
-            self.error = None;
-        } else {
-            self.error = Some(format!("Failed to fetch webhooks: {}", res.status()));
+            Err(e) => {
+                self.error = Some(format!("Failed to fetch webhooks: {}", refused(e)?));
+            }
         }
         Ok(())
     }
@@ -51,28 +50,44 @@ impl<'a> App<'a> {
 
         let source_type =
             crate::app::WEBHOOK_SOURCE_TYPE_OPTIONS[self.webhook_source_type_index].to_string();
-
-        let (method, path) = if let Some(id) = self.webhook_edit_id {
-            (reqwest::Method::PATCH, format!("/api/v1/webhooks/{}", id))
+        let description = if description.trim().is_empty() {
+            None
         } else {
-            (reqwest::Method::POST, "/api/v1/webhooks".to_string())
+            Some(description)
+        };
+        let secret_token = if secret_token.trim().is_empty() {
+            None
+        } else {
+            Some(secret_token)
         };
 
-        let payload = serde_json::json!({
-            "name": name,
-            "description": if description.trim().is_empty() { None::<String> } else { Some(description) },
-            "source_type": source_type,
-            "secret_token": if secret_token.trim().is_empty() { None::<String> } else { Some(secret_token) },
-            "is_active": self.webhook_is_active,
-        });
-
-        let res = self.api_request(method, &path, Some(payload)).await?;
-
-        if res.status().is_success() {
-            self.webhook_dialog_active = false;
-            self.refresh_webhooks().await?;
+        let result = if let Some(id) = self.webhook_edit_id {
+            let request = UpdateWebhookRequest {
+                name: Some(name),
+                description,
+                source_type: Some(source_type),
+                secret_token,
+                is_active: Some(self.webhook_is_active),
+            };
+            self.api().update_webhook(id, &request).await
         } else {
-            self.error = Some(format!("Failed to save webhook: {}", res.status()));
+            let request = CreateWebhookRequest {
+                name,
+                description,
+                source_type,
+                secret_token,
+            };
+            self.api().create_webhook(&request).await.map(|_| ())
+        };
+
+        match result {
+            Ok(()) => {
+                self.webhook_dialog_active = false;
+                self.refresh_webhooks().await?;
+            }
+            Err(e) => {
+                self.error = Some(format!("Failed to save webhook: {}", refused(e)?));
+            }
         }
 
         Ok(())
@@ -82,18 +97,11 @@ impl<'a> App<'a> {
     pub async fn delete_selected_webhook(&mut self) -> Result<()> {
         if let Some(webhook) = &self.selected_webhook {
             if self.token.is_some() {
-                let res = self
-                    .api_request(
-                        reqwest::Method::DELETE,
-                        &format!("/api/v1/webhooks/{}", webhook.id),
-                        None,
-                    )
-                    .await?;
-
-                if res.status().is_success() {
-                    self.refresh_webhooks().await?;
-                } else {
-                    self.error = Some(format!("Failed to delete webhook: {}", res.status()));
+                match self.api().delete_webhook(webhook.id).await {
+                    Ok(()) => self.refresh_webhooks().await?,
+                    Err(e) => {
+                        self.error = Some(format!("Failed to delete webhook: {}", refused(e)?));
+                    }
                 }
             }
         }
@@ -106,6 +114,7 @@ mod tests {
     use super::*;
     use chrono::Utc;
     use ratatui_textarea::TextArea;
+    use stormchaser_model::event_rules::WebhookConfig;
     use tokio::sync::mpsc;
 
     use wiremock::matchers::{method, path};
@@ -156,7 +165,10 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/api/v1/webhooks"))
-            .respond_with(ResponseTemplate::new(201))
+            .respond_with(
+                ResponseTemplate::new(201)
+                    .set_body_json(serde_json::json!({ "id": WebhookId::new_v4() })),
+            )
             .mount(&server)
             .await;
 

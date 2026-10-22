@@ -14,33 +14,24 @@ use leptos::server_fn::codec::Json;
 pub async fn create_storage_backend(
     name: String,
     description: Option<String>,
-    connection_type: stormchaser_model::connections::ConnectionType,
+    connection_type: ConnectionType,
     config: serde_json::Value,
     aws_assume_role_arn: Option<String>,
     is_default_sfs: bool,
 ) -> Result<(), ServerFnError> {
-    let cookie = require_auth().await?;
-    let api_url = std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
-
-    let client = super::http_client();
-    let res = client
-        .post(format!("{}/api/v1/connections", api_url))
-        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", cookie))
-        .json(&serde_json::json!({
-            "name": name,
-            "description": description,
-            "connection_type": connection_type,
-            "config": config,
-            "aws_assume_role_arn": aws_assume_role_arn,
-            "is_default_sfs": is_default_sfs
-        }))
-        .send()
+    let request = stormchaser_model::api::CreateStorageBackendRequest {
+        name,
+        description,
+        connection_type,
+        config,
+        aws_assume_role_arn,
+        credentials: None,
+        is_default_sfs,
+    };
+    authed_client()
+        .await?
+        .create_connection(&request)
         .await
-        .map_err(|e| ServerFnError::new(e.to_string()))?;
-
-    if res.status().is_success() {
-        Ok(())
-    } else {
-        Err(ServerFnError::new(format!("Failed: {}", res.status())))
-    }
+        .map_err(api_error("Failed"))?;
+    Ok(())
 }

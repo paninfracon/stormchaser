@@ -9,7 +9,10 @@ use stormchaser_model::RunId;
 use stormchaser_tls::TlsReloader;
 use uuid::Uuid;
 
-pub fn start_liveness_worker(pool: sqlx::PgPool, _nats_client: async_nats::Client) {
+pub fn start_liveness_worker(
+    pool: sqlx::PgPool,
+    _nats_client: async_nats::Client,
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(15));
         loop {
@@ -33,90 +36,104 @@ pub fn start_liveness_worker(pool: sqlx::PgPool, _nats_client: async_nats::Clien
                 Err(e) => tracing::error!("Failed to check runner liveness: {:?}", e),
             }
 
-            // 2. Detect zombie steps and fail them out
-            if let Ok(mut tx) = pool.begin().await {
-                match crate::db::steps::fetch_zombie_steps(&mut *tx).await {
-                    Ok(zombies) => {
-                        for zombie in zombies {
-                            tracing::warn!(
-                                "Detected zombie step {} (Run {}) on dead runner {}",
-                                zombie.id,
-                                zombie.run_id,
-                                zombie.runner_id.clone().unwrap_or_default()
-                            );
+            // 2. Fail the steps of runners that have gone
+            if let Err(e) = fail_zombie_steps(&pool).await {
+                tracing::error!("Failed to fail the steps of lost runners: {:?}", e);
+            }
 
-                            let fail_event = stormchaser_model::events::StepFailedEvent {
-                                run_id: zombie.run_id,
-                                step_id: zombie.id,
-                                fencing_token: zombie.fencing_token,
-                                completion_token: None,
-                                event_type: stormchaser_model::events::EventType::Step(
-                                    stormchaser_model::events::StepEventType::Failed,
-                                ),
-                                error: "lost_zombie".to_string(),
-                                runner_id: zombie.runner_id,
-                                exit_code: None,
-                                storage_hashes: None,
-                                artifacts: None,
-                                test_reports: None,
-                                outputs: None,
-                                timestamp: chrono::Utc::now(),
-                            };
-
-                            let event_payload = match serde_json::to_value(&fail_event) {
-                                Ok(value) => value,
-                                Err(error) => {
-                                    tracing::error!(
-                                    "Failed to serialize zombie failure event for run {} step {}: {:?}",
-                                    fail_event.run_id,
-                                    fail_event.step_id,
-                                    error
-                                );
-                                    continue;
-                                }
-                            };
-
-                            if let Err(error) = crate::db::outbox::insert_outbox_event(
-                                &mut *tx,
-                                stormchaser_model::nats::NatsSubject::StepFailed(Some(
-                                    stormchaser_model::nats::compute_shard_id(&zombie.run_id),
-                                )),
-                                stormchaser_model::events::EventType::Step(
-                                    stormchaser_model::events::StepEventType::Failed,
-                                ),
-                                stormchaser_model::events::EventSource::System,
-                                event_payload,
-                                Some(stormchaser_model::events::SchemaVersion::new(
-                                    "1.0".to_string(),
-                                )),
-                                None,
-                            )
-                            .await
-                            {
-                                tracing::error!(
-                                "Failed to enqueue zombie failure event for run {} step {}: {:?}",
-                                zombie.run_id,
-                                zombie.id,
-                                error
-                            );
-                            }
-                        }
-                    }
-                    Err(e) => tracing::error!("Failed to fetch zombie steps: {:?}", e),
-                }
-                if let Err(error) = tx.commit().await {
-                    tracing::error!("Failed to commit liveness worker transaction: {:?}", error);
-                }
+            // 3. Fail the built-in steps of engines that have gone
+            if let Err(e) = fail_lost_engine_steps(&pool, crate::engine_instance::LOST_AFTER).await
+            {
+                tracing::error!("Failed to fail the steps of lost engines: {:?}", e);
             }
         }
-    });
+    })
+}
+
+/// Fails the steps of runners that have gone: offline, or silent for 30 seconds.
+pub async fn fail_zombie_steps(pool: &sqlx::PgPool) -> anyhow::Result<usize> {
+    let mut tx = pool.begin().await?;
+    let zombies = db::steps::fetch_zombie_steps(&mut *tx).await?;
+    for zombie in &zombies {
+        tracing::warn!(
+            "Detected zombie step {} (Run {}) on dead runner {}",
+            zombie.id,
+            zombie.run_id,
+            zombie.runner_id.as_deref().unwrap_or_default()
+        );
+        let event = stormchaser_model::events::StepFailedEvent {
+            runner_id: zombie.runner_id.clone(),
+            ..stormchaser_model::events::StepFailedEvent::new(
+                zombie.run_id,
+                zombie.id,
+                zombie.fencing_token,
+                "lost_zombie",
+            )
+        };
+        crate::db::outbox::insert_step_failed(&mut *tx, &event).await?;
+    }
+    tx.commit().await?;
+    Ok(zombies.len())
+}
+
+/// How long an engine may go without a heartbeat before it is forgotten
+const ENGINE_GONE: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Built-in step types with no effect but their output, which an engine that stopped
+/// while running one can leave to another to run again
+const RERUNNABLE_BUILT_INS: &[&str] = &["JQ", "JinjaRender"];
+
+/// Fails the built-in steps whose engine has sent no heartbeat for `lost_after`.
+/// They would never finish. Failing them, rather than running them again, is what
+/// happens to a step whose runner has gone: a built-in step may have had its effect
+/// before its engine died. Those of [`RERUNNABLE_BUILT_INS`] have none, and are put
+/// back to pending; the dispatch recovery worker dispatches them again.
+pub async fn fail_lost_engine_steps(
+    pool: &sqlx::PgPool,
+    lost_after: Duration,
+) -> anyhow::Result<usize> {
+    let mut tx = pool.begin().await?;
+    for (step_id, run_id) in crate::step_machine::bulk::requeue_lost_engine_steps(
+        &mut tx,
+        lost_after,
+        RERUNNABLE_BUILT_INS,
+    )
+    .await?
+    {
+        tracing::warn!(
+            "Step {} of run {} was running in an engine that has stopped; it has no side effects, so it runs again",
+            step_id,
+            run_id
+        );
+    }
+    let lost = db::take_lost_engine_steps(&mut tx, lost_after, RERUNNABLE_BUILT_INS).await?;
+    for step in &lost {
+        tracing::warn!(
+            "Step {} of run {} was running in an engine that has stopped; failing it",
+            step.id,
+            step.run_id
+        );
+        let event = stormchaser_model::events::StepFailedEvent {
+            completion_token: step.completion_token.clone(),
+            ..stormchaser_model::events::StepFailedEvent::new(
+                step.run_id,
+                step.id,
+                step.fencing_token,
+                "The engine running this step stopped before it finished",
+            )
+        };
+        crate::db::outbox::insert_step_failed(&mut *tx, &event).await?;
+    }
+    db::delete_gone_engines(&mut *tx, ENGINE_GONE).await?;
+    tx.commit().await?;
+    Ok(lost.len())
 }
 
 pub fn start_timeout_worker(
     pool: sqlx::PgPool,
     nats_client: async_nats::Client,
     tls_reloader: Arc<TlsReloader>,
-) {
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(30));
         loop {
@@ -180,10 +197,13 @@ pub fn start_timeout_worker(
                 Err(e) => tracing::error!("Failed to fetch runs for timeout check: {:?}", e),
             }
         }
-    });
+    })
 }
 
-pub fn start_resolver_crash_recovery_worker(pool: sqlx::PgPool, _nats_client: async_nats::Client) {
+pub fn start_resolver_crash_recovery_worker(
+    pool: sqlx::PgPool,
+    _nats_client: async_nats::Client,
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(60));
         loop {
@@ -192,53 +212,59 @@ pub fn start_resolver_crash_recovery_worker(pool: sqlx::PgPool, _nats_client: as
             match db::get_stalled_resolving_runs(&pool, 5).await {
                 Ok(run_ids) => {
                     for run_id in run_ids {
-                        tracing::warn!("Recovering crashed resolution for run {}", run_id);
-                        if let Ok(run) = handler::fetch_run(run_id, &pool).await {
-                            if run.status == RunStatus::Resolving {
-                                let machine = crate::workflow_machine::WorkflowMachine::<
-                                    crate::workflow_machine::state::Resolving,
-                                >::new_from_run(run);
-                                if let Ok(mut tx) = pool.begin().await {
-                                    let result = machine
-                                        .fail(
-                                            "Engine crashed during resolution".to_string(),
-                                            &mut tx,
-                                        )
-                                        .await;
-                                    if result.is_ok() {
-                                        // Emit failed event
-                                        let event = stormchaser_model::events::WorkflowFailedEvent {
-                                            run_id,
-                                            event_type: stormchaser_model::events::EventType::Workflow(stormchaser_model::events::WorkflowEventType::Failed),
-                                            timestamp: chrono::Utc::now(),
-                                            status: stormchaser_model::workflow::RunStatus::Failed,
-                                        };
-                                        let _ = crate::db::outbox::insert_outbox_event(
-                                            &mut *tx,
-                                            stormchaser_model::nats::NatsSubject::RunFailed(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
-                                            stormchaser_model::events::EventType::Workflow(stormchaser_model::events::WorkflowEventType::Failed),
-                                            stormchaser_model::events::EventSource::System,
-                                            serde_json::to_value(event).unwrap(),
-                                            Some(stormchaser_model::events::SchemaVersion::new("1.0".to_string())),
-                                            None,
-                                        ).await;
-                                        if let Err(error) = tx.commit().await {
-                                            tracing::error!(
-                                                "Failed to commit resolver crash recovery transaction for run {}: {:?}",
-                                                run_id,
-                                                error
-                                            );
-                                        }
-                                    }
-                                }
-                            }
+                        if let Err(e) = fail_crashed_resolution(&pool, run_id).await {
+                            tracing::error!(
+                                "Failed to recover the crashed resolution of run {}: {:?}",
+                                run_id,
+                                e
+                            );
                         }
                     }
                 }
                 Err(e) => tracing::error!("Failed to fetch stalled resolving runs: {:?}", e),
             }
         }
-    });
+    })
+}
+
+/// Fails a run whose resolution has stalled, its engine having crashed while resolving
+/// it, together with the event that reports it.
+async fn fail_crashed_resolution(pool: &sqlx::PgPool, run_id: RunId) -> anyhow::Result<()> {
+    use stormchaser_model::events::{
+        EventSource, EventType, SchemaVersion, WorkflowEventType, WorkflowFailedEvent,
+    };
+    let run = handler::fetch_run(run_id, pool).await?;
+    if run.status != RunStatus::Resolving {
+        return Ok(());
+    }
+    tracing::warn!("Recovering crashed resolution for run {}", run_id);
+    let machine = crate::workflow_machine::WorkflowMachine::<
+        crate::workflow_machine::state::Resolving,
+    >::load(run)?;
+    let mut tx = pool.begin().await?;
+    machine
+        .fail("Engine crashed during resolution".to_string(), &mut tx)
+        .await?;
+    let event = WorkflowFailedEvent {
+        run_id,
+        event_type: EventType::Workflow(WorkflowEventType::Failed),
+        timestamp: chrono::Utc::now(),
+        status: RunStatus::Failed,
+    };
+    crate::db::outbox::insert_outbox_event(
+        &mut *tx,
+        stormchaser_model::nats::NatsSubject::RunFailed(Some(
+            stormchaser_model::nats::compute_shard_id(&run_id),
+        )),
+        EventType::Workflow(WorkflowEventType::Failed),
+        EventSource::System,
+        serde_json::to_value(event)?,
+        Some(SchemaVersion::new("1.0".to_string())),
+        None,
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(())
 }
 
 pub fn start_outbox_relay_worker(
@@ -265,10 +291,19 @@ pub fn start_outbox_relay_worker(
                                 }
                             }
 
-                            match js
+                            // The relay publishes an event again when it dies before
+                            // deleting its row; the stream drops the second copy
+                            headers.insert("Nats-Msg-Id", event.id.to_string().as_str());
+
+                            // Published once the stream has stored it, not once sent
+                            let published = match js
                                 .publish_with_headers(event.subject, headers, event.payload.into())
                                 .await
                             {
+                                Ok(ack) => ack.await.map(|_| ()).map_err(anyhow::Error::from),
+                                Err(e) => Err(anyhow::Error::from(e)),
+                            };
+                            match published {
                                 Ok(_) => {
                                     if let Err(error) =
                                         db::outbox::delete_outbox_event(&mut *tx, event.id).await
@@ -376,7 +411,10 @@ pub async fn purge_finished_task_messages(
     Ok(cleared)
 }
 
-pub fn start_task_message_purge_worker(pool: sqlx::PgPool, nats_client: async_nats::Client) {
+pub fn start_task_message_purge_worker(
+    pool: sqlx::PgPool,
+    nats_client: async_nats::Client,
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(30));
         let js = async_nats::jetstream::new(nats_client);
@@ -386,7 +424,236 @@ pub fn start_task_message_purge_worker(pool: sqlx::PgPool, nats_client: async_na
                 tracing::warn!("Task message purge failed: {:?}", e);
             }
         }
-    });
+    })
+}
+
+/// How long a claimed step may take to be handed over before it is taken for lost
+const LOST_DISPATCH: Duration = Duration::from_secs(5 * 60);
+/// How long a step may wait for dispatch before the engine tries again
+const WAITING_STEP: Duration = Duration::from_secs(60);
+
+/// Puts back steps whose dispatch was lost, and dispatches again the runs whose
+/// steps have been waiting longer than they should.
+pub async fn recover_dispatches(
+    pool: &sqlx::PgPool,
+    nats_client: &async_nats::Client,
+    tls_reloader: &Arc<TlsReloader>,
+    lost_after: Duration,
+    waiting_after: Duration,
+) -> anyhow::Result<()> {
+    put_back_lost_dispatches(pool, lost_after).await?;
+
+    for run_id in db::runs_with_waiting_steps(pool, waiting_after).await? {
+        if let Err(e) = handler::dispatch_pending_steps(
+            run_id,
+            pool.clone(),
+            nats_client.clone(),
+            tls_reloader.clone(),
+        )
+        .await
+        {
+            tracing::warn!(
+                "Could not dispatch the waiting steps of run {}: {:?}",
+                run_id,
+                e
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Puts back to pending the steps whose dispatch was lost, giving back what they
+/// claimed of their run's quota, as a failed dispatch does: a step lost before it
+/// claimed any, or whose failed dispatch gave it back already, gives back nothing. All
+/// or none, so that no step is put back still holding its quota.
+async fn put_back_lost_dispatches(pool: &sqlx::PgPool, lost_after: Duration) -> anyhow::Result<()> {
+    let mut tx = pool.begin().await?;
+    let lost = crate::step_machine::bulk::requeue_lost_dispatches(&mut tx, lost_after).await?;
+    let mut limits = std::collections::HashMap::new();
+    for step in lost {
+        tracing::warn!(
+            "Step {} of run {} was claimed for dispatch and never handed over; dispatching it again",
+            step.id,
+            step.run_id
+        );
+        let (max_cpu, max_mem) = match limits.get(&step.run_id) {
+            Some(limit) => *limit,
+            None => {
+                let quotas = handler::fetch_quotas(step.run_id, &mut *tx).await?;
+                let limit = (
+                    crate::resource_utils::parse_cpu(&quotas.max_cpu).unwrap_or(0.0),
+                    crate::resource_utils::parse_memory(&quotas.max_memory).unwrap_or(0),
+                );
+                *limits.entry(step.run_id).or_insert(limit)
+            }
+        };
+        if max_cpu > 0.0 || max_mem > 0 {
+            let req =
+                crate::resource_utils::get_step_resource_requirements(&step.step_type, &step.spec);
+            db::release_step_quota(&mut tx, step.run_id, step.id, req.cpu, req.memory).await?;
+        }
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+pub fn start_dispatch_recovery_worker(
+    pool: sqlx::PgPool,
+    nats_client: async_nats::Client,
+    tls_reloader: Arc<TlsReloader>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            if let Err(e) = recover_dispatches(
+                &pool,
+                &nats_client,
+                &tls_reloader,
+                LOST_DISPATCH,
+                WAITING_STEP,
+            )
+            .await
+            {
+                tracing::warn!("Dispatch recovery failed: {:?}", e);
+            }
+        }
+    })
+}
+
+/// How long finished runs are kept after they are archived, as a duration such as `30d`.
+/// Unset keeps them for good.
+pub const ARCHIVE_RETENTION_ENV: &str = "STORMCHASER_ARCHIVE_RETENTION";
+/// The shortest retention the engine accepts, so that a slip such as `30s` for `30d`
+/// cannot empty the archive.
+const MIN_ARCHIVE_RETENTION: Duration = Duration::from_secs(60 * 60);
+const RETENTION_CHECK: Duration = Duration::from_secs(60 * 60);
+const RETENTION_BATCH: i64 = 500;
+
+/// The archive retention `STORMCHASER_ARCHIVE_RETENTION` sets, or `None` when it is unset.
+pub fn archive_retention() -> anyhow::Result<Option<Duration>> {
+    match std::env::var(ARCHIVE_RETENTION_ENV) {
+        Ok(value) => parse_archive_retention(&value).map(Some),
+        Err(_) => Ok(None),
+    }
+}
+
+fn parse_archive_retention(value: &str) -> anyhow::Result<Duration> {
+    let retention = humantime::parse_duration(value.trim()).map_err(|e| {
+        anyhow::anyhow!(
+            "{} is not a duration ({}): {}",
+            ARCHIVE_RETENTION_ENV,
+            value,
+            e
+        )
+    })?;
+    anyhow::ensure!(
+        retention >= MIN_ARCHIVE_RETENTION,
+        "{} is {}; the shortest allowed is 1h",
+        ARCHIVE_RETENTION_ENV,
+        value
+    );
+    Ok(retention)
+}
+
+/// Deletes the archived runs that finished more than `retention` ago, in batches, and
+/// returns how many it deleted.
+pub async fn purge_expired_runs(pool: &sqlx::PgPool, retention: Duration) -> anyhow::Result<u64> {
+    let mut purged = 0;
+    loop {
+        let mut tx = pool.begin().await?;
+        let deleted = db::purge_archived_runs(&mut tx, retention, RETENTION_BATCH).await?;
+        tx.commit().await?;
+        purged += deleted;
+        if deleted < RETENTION_BATCH as u64 {
+            return Ok(purged);
+        }
+    }
+}
+
+/// Deletes expired archived runs every hour, if `STORMCHASER_ARCHIVE_RETENTION` is set.
+pub fn start_retention_worker(pool: sqlx::PgPool) -> Option<tokio::task::JoinHandle<()>> {
+    let retention = match archive_retention() {
+        Ok(Some(retention)) => retention,
+        Ok(None) => return None,
+        Err(e) => {
+            // Keeping the archive is the safe outcome of a bad setting
+            tracing::error!("Archived runs are kept: {:#}", e);
+            return None;
+        }
+    };
+    Some(tokio::spawn(async move {
+        let mut interval = tokio::time::interval(RETENTION_CHECK);
+        loop {
+            interval.tick().await;
+            match purge_expired_runs(&pool, retention).await {
+                Ok(0) => {}
+                Ok(purged) => tracing::info!("Deleted {} expired archived runs", purged),
+                Err(e) => tracing::warn!("Archive retention failed: {:?}", e),
+            }
+        }
+    }))
+}
+
+/// How often the engine looks for steps whose wait before a retry is over
+const RETRY_CHECK: Duration = Duration::from_secs(5);
+
+/// Dispatches the runs that have a step whose wait before its next attempt is over.
+pub async fn dispatch_due_retries(
+    pool: &sqlx::PgPool,
+    nats_client: &async_nats::Client,
+    tls_reloader: &Arc<TlsReloader>,
+) -> anyhow::Result<()> {
+    for run_id in db::runs_with_due_retries(pool).await? {
+        if let Err(e) = handler::dispatch_pending_steps(
+            run_id,
+            pool.clone(),
+            nats_client.clone(),
+            tls_reloader.clone(),
+        )
+        .await
+        {
+            tracing::warn!(
+                "Could not dispatch the steps of run {} due a retry: {:?}",
+                run_id,
+                e
+            );
+        }
+    }
+    Ok(())
+}
+
+pub fn start_retry_worker(
+    pool: sqlx::PgPool,
+    nats_client: async_nats::Client,
+    tls_reloader: Arc<TlsReloader>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(RETRY_CHECK);
+        loop {
+            interval.tick().await;
+            if let Err(e) = dispatch_due_retries(&pool, &nats_client, &tls_reloader).await {
+                tracing::warn!("Retry dispatch failed: {:?}", e);
+            }
+        }
+    })
+}
+
+#[cfg(test)]
+mod retention_tests {
+    use super::parse_archive_retention;
+    use std::time::Duration;
+
+    #[test]
+    fn a_retention_is_a_duration_of_an_hour_or_more() {
+        assert_eq!(
+            parse_archive_retention("30d").unwrap(),
+            Duration::from_secs(30 * 86400)
+        );
+        assert!(parse_archive_retention("1h").is_ok());
+        assert!(parse_archive_retention("30s").is_err());
+        assert!(parse_archive_retention("a month").is_err());
+    }
 }
 
 #[cfg(test)]

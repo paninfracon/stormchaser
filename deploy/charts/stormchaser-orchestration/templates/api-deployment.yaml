@@ -31,8 +31,6 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           imagePullPolicy: {{ .Values.api.image.pullPolicy }}
           env:
-            - name: BINARY
-              value: "stormchaser-api"
             - name: KUBERNETES_NAMESPACE
               valueFrom:
                 fieldRef:
@@ -101,8 +99,6 @@ spec:
             {{- end }}
             - name: LOKI_URL
               value: {{ .Values.global.loki.url | quote }}
-            - name: GRAFANA_URL
-              value: {{ .Values.global.grafana.url | quote }}
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: {{ .Values.global.otel.endpoint | quote }}
             - name: OTEL_SERVICE_NAME
@@ -148,6 +144,18 @@ spec:
             - name: http
               containerPort: 3000
               protocol: TCP
+          # The API listens only once the engine's init container has migrated the
+          # database, waiting up to STORMCHASER_SCHEMA_WAIT (5 minutes). Until then
+          # the liveness probe would restart it.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+              {{- if eq (include "stormchaser-orchestration.listenTls" .) "true" }}
+              scheme: HTTPS
+              {{- end }}
+            periodSeconds: 5
+            failureThreshold: 72
           livenessProbe:
             httpGet:
               path: /healthz

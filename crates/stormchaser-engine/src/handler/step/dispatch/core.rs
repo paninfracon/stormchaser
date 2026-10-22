@@ -17,7 +17,7 @@ use crate::handler::fetch_run_context;
 use stormchaser_model::dsl;
 
 /// Recursively searches for a step by name within a list of steps.
-use super::intrinsic::{apply_intrinsic_mutations, try_dispatch_intrinsic};
+use super::intrinsic::{apply_intrinsic_mutations, try_dispatch_intrinsic, BuiltInStep};
 use super::storage::{setup_storage_urls, setup_test_report_urls};
 pub fn find_step<'a>(steps: &'a [Step], name: &str) -> Option<&'a Step> {
     for step in steps {
@@ -31,6 +31,24 @@ pub fn find_step<'a>(steps: &'a [Step], name: &str) -> Option<&'a Step> {
         }
     }
     None
+}
+
+/// Why a step of type `dispatched` (after the engine's rewrites) cannot be handed to a
+/// runner, or `None` when it can.
+fn undispatchable(dispatched: &str) -> Option<String> {
+    use stormchaser_model::dsl::step_types::{step_type, Executor};
+    let executor = step_type(dispatched)?.executor;
+    let reason = match executor {
+        Executor::Runner => return None,
+        Executor::Engine => format!("this engine build does not run {} steps", dispatched),
+        Executor::Rewritten => format!(
+            "a {} step needs a spec the engine can turn into a container step",
+            dispatched
+        ),
+        Executor::Waits => format!("a {} step only waits, and cannot be dispatched", dispatched),
+        Executor::Planned => format!("{} steps are not supported yet", dispatched),
+    };
+    Some(reason)
 }
 
 /// Dispatches a step instance, handling intrinsic types or forwarding to runners via NATS.
@@ -67,19 +85,32 @@ pub async fn dispatch_step_instance(
     )
     .await?;
 
-    if try_dispatch_intrinsic(
+    let built_in = BuiltInStep {
         run_id,
-        step_instance_id,
+        step_id: step_instance_id,
         fencing_token,
-        &step_type,
-        &resolved_spec,
-        resolved_params,
-        pool.clone(),
-        nats_client.clone(),
-        tls_reloader.clone(),
-    )
-    .await?
-    {
+        step_type: step_type.clone(),
+        spec: resolved_spec.clone(),
+        params: resolved_params.clone(),
+        pool: pool.clone(),
+        tls_reloader: tls_reloader.clone(),
+    };
+    if try_dispatch_intrinsic(built_in).await? {
+        return Ok(());
+    }
+
+    // Only runners take what is left. A built-in type that no runner runs would wait for
+    // one until its run timed out; a type that is not built in may be a runner's own.
+    if let Some(reason) = undispatchable(&step_type) {
+        tracing::warn!("Run {}: step {}: {}", run_id, step_name, reason);
+        crate::handler::integrations::utils::report_step_failed(
+            &pool,
+            run_id,
+            step_instance_id,
+            fencing_token,
+            reason,
+        )
+        .await?;
         return Ok(());
     }
 
@@ -151,7 +182,7 @@ pub async fn dispatch_step_instance(
                 )
             })?;
         let password = conn
-            .encrypted_credentials
+            .credentials
             .filter(|v| !v.is_empty())
             .with_context(|| {
                 format!(
@@ -172,6 +203,7 @@ pub async fn dispatch_step_instance(
     let payload = StepScheduledEvent {
         run_id,
         step_id: step_instance_id,
+        attempt: Some(crate::db::step_attempt(&pool, step_instance_id).await?),
         fencing_token,
         step_name: Some(step_name.to_string()),
         step_type: Some(step_type.clone()),
@@ -198,12 +230,6 @@ pub async fn dispatch_step_instance(
         .and_then(|a| a.as_str())
     {
         if affinity_context == "shared" {
-            let backend = if step_type == "k8s_job" {
-                "k8s"
-            } else {
-                "docker"
-            };
-
             // Check whether a runner has already been established for this affinity group.
             let mut maybe_runner_id =
                 crate::db::get_affinity_runner_id(&pool, run_id, affinity_context)
@@ -235,15 +261,28 @@ pub async fn dispatch_step_instance(
                 }
             }
 
+            // The group's steps go to the runner its first step landed on, on the subject
+            // for that runner's kind: a container step can land on a Kubernetes runner too.
             if let Some(runner_id) = maybe_runner_id {
-                subject =
-                    NatsSubject::Custom(format!("stormchaser.v1.runner.{}.{}", backend, runner_id));
+                match crate::db::get_runner(&pool, &runner_id).await {
+                    Ok(Some(runner)) if matches!(runner.runner_type.as_str(), "k8s" | "docker") => {
+                        subject = NatsSubject::Custom(format!(
+                            "stormchaser.v1.runner.{}.{}",
+                            runner.runner_type, runner_id
+                        ));
+                    }
+                    _ => tracing::warn!(
+                        "Affinity runner {} for run {} is not a known runner; dispatching step {} to any runner",
+                        runner_id, run_id, step_instance_id
+                    ),
+                }
             }
         }
     }
 
     // From here the runner owns the step and reports its result without a token.
     crate::db::clear_step_completion_token(&pool, step_instance_id).await?;
+    crate::db::mark_step_published(&pool, step_instance_id).await?;
 
     let stream_seq = publish_cloudevent_with_sequence(
         &js,

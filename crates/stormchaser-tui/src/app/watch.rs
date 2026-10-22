@@ -1,11 +1,9 @@
 use super::*;
 use crate::AppEvent;
-use eventsource_stream::Eventsource;
 use futures::StreamExt;
-use reqwest::header::AUTHORIZATION;
+use reqwest::StatusCode;
 use serde_json::Value;
 use stormchaser_model::RunId;
-use stormchaser_model::StepInstanceId;
 
 impl<'a> App<'a> {
     /// Re-populates the log view buffer from the currently selected step's logs and fetches full logs.
@@ -21,49 +19,27 @@ impl<'a> App<'a> {
                     self.log_auto_scroll = true;
                 }
 
-                let step_id = step
-                    .instance
-                    .get("id")
-                    .and_then(|v| v.as_str())
-                    .and_then(|s| uuid::Uuid::parse_str(s).ok().map(StepInstanceId::new));
-
-                let Some(id) = step_id else {
-                    // Without a stable UUID we cannot dedupe or fetch logs reliably.
-                    return;
-                };
-
+                let id = step.instance.id;
                 if self.fetched_steps.contains(&id) {
                     return;
                 }
                 self.fetched_steps.insert(id);
 
+                if self.token.is_none() {
+                    return;
+                }
+
                 // Spawn background task to fetch full historical logs for this step
                 let run_id = run.detail.id;
-                let url = self.url.clone();
-                let token = self.token.clone();
+                let api = self.api();
                 let tx = self.status_tx.clone();
                 let step_index = self.selected_step_index;
 
                 tokio::spawn(async move {
-                    if let Some(token) = token {
-                        let client = crate::http::client();
-                        if let Ok(res) = client
-                            .get(format!(
-                                "{}/api/v1/runs/{}/steps/{}/logs?limit=5000",
-                                url, run_id, id
-                            ))
-                            .header(AUTHORIZATION, format!("Bearer {}", token))
-                            .send()
-                            .await
-                        {
-                            if res.status().is_success() {
-                                if let Ok(logs) = res.json::<Vec<String>>().await {
-                                    let _ = tx
-                                        .send(AppEvent::StepLogsFetched(run_id, step_index, logs))
-                                        .await;
-                                }
-                            }
-                        }
+                    if let Ok(logs) = api.step_logs(run_id, id, Some(5000)).await {
+                        let _ = tx
+                            .send(AppEvent::StepLogsFetched(run_id, step_index, logs))
+                            .await;
                     }
                 });
             } else {
@@ -93,93 +69,67 @@ impl<'a> App<'a> {
         // We don't clear logs here because we want to keep the historical logs
         // from the full fetch until SSE lines arrive.
 
-        let url = self.url.clone();
-        let token = self.token.clone();
-        let tx = self.status_tx.clone();
+        let api = self.token.is_some().then(|| self.api());
 
-        let status_url = format!("{}/api/v1/runs/{}/status/stream", url, id);
-        let log_url = format!("{}/api/v1/runs/{}/logs/stream", url, id);
-
-        let tx_status = tx.clone();
-        let token_status = token.clone();
+        let tx_status = self.status_tx.clone();
+        let api_status = api.clone();
         let status_handle = tokio::spawn(async move {
-            if let Some(token) = token_status {
-                let client = crate::http::client();
-                if let Ok(res) = client
-                    .get(&status_url)
-                    .header(AUTHORIZATION, format!("Bearer {}", token))
-                    .send()
-                    .await
-                {
-                    if res.status() == reqwest::StatusCode::UNAUTHORIZED {
+            let Some(api) = api_status else { return };
+            let stream = match api.stream_run_status(id).await {
+                Ok(stream) => stream,
+                Err(e) => {
+                    if e.status() == Some(StatusCode::UNAUTHORIZED) {
                         let _ = tx_status.send(AppEvent::TokenExpired).await;
-                        return;
                     }
-
-                    let mut stream = res.bytes_stream().eventsource();
-                    while let Some(event) = stream.next().await {
-                        if let Ok(event) = event {
-                            match event.event.as_str() {
-                                "workflow_run" => {
-                                    if let Ok(run) =
-                                        serde_json::from_str::<WorkflowRunDetail>(&event.data)
-                                    {
-                                        let _ = tx_status.send(AppEvent::WorkflowUpdate(run)).await;
-                                    }
-                                }
-                                "run_status" => {
-                                    let _ = tx_status
-                                        .send(AppEvent::StatusUpdate(id, event.data))
-                                        .await;
-                                }
-                                "step_status" => {
-                                    if let Ok(payload) = serde_json::from_str::<Value>(&event.data)
-                                    {
-                                        let step_name = payload["step_name"]
-                                            .as_str()
-                                            .unwrap_or_default()
-                                            .to_string();
-                                        let status = payload["status"]
-                                            .as_str()
-                                            .unwrap_or_default()
-                                            .to_string();
-                                        let _ = tx_status
-                                            .send(AppEvent::StepUpdate(id, step_name, status))
-                                            .await;
-                                    }
-                                }
-                                _ => {}
-                            }
+                    return;
+                }
+            };
+            let mut stream = std::pin::pin!(stream);
+            while let Some(event) = stream.next().await {
+                let Ok(event) = event else { continue };
+                match event.event.as_str() {
+                    "workflow_run" => {
+                        if let Ok(run) = serde_json::from_str::<WorkflowRunDetail>(&event.data) {
+                            let _ = tx_status.send(AppEvent::WorkflowUpdate(run)).await;
                         }
                     }
+                    "run_status" => {
+                        let _ = tx_status.send(AppEvent::StatusUpdate(id, event.data)).await;
+                    }
+                    "step_status" => {
+                        if let Ok(payload) = serde_json::from_str::<Value>(&event.data) {
+                            let step_name = payload["step_name"]
+                                .as_str()
+                                .unwrap_or_default()
+                                .to_string();
+                            let status = payload["status"].as_str().unwrap_or_default().to_string();
+                            let _ = tx_status
+                                .send(AppEvent::StepUpdate(id, step_name, status))
+                                .await;
+                        }
+                    }
+                    _ => {}
                 }
             }
         });
 
-        let tx_log = tx.clone();
-        let token_log = token.clone();
+        let tx_log = self.status_tx.clone();
         let log_handle = tokio::spawn(async move {
-            if let Some(token) = token_log {
-                let client = crate::http::client();
-                if let Ok(res) = client
-                    .get(&log_url)
-                    .header(AUTHORIZATION, format!("Bearer {}", token))
-                    .send()
-                    .await
-                {
-                    if res.status() == reqwest::StatusCode::UNAUTHORIZED {
+            let Some(api) = api else { return };
+            let stream = match api.stream_run_logs(id).await {
+                Ok(stream) => stream,
+                Err(e) => {
+                    if e.status() == Some(StatusCode::UNAUTHORIZED) {
                         let _ = tx_log.send(AppEvent::TokenExpired).await;
-                        return;
                     }
-
-                    let mut stream = res.bytes_stream().eventsource();
-                    while let Some(event) = stream.next().await {
-                        if let Ok(event) = event {
-                            if event.event == "log" {
-                                let _ = tx_log.send(AppEvent::LogLine(id, event.data)).await;
-                            }
-                        }
-                    }
+                    return;
+                }
+            };
+            let mut stream = std::pin::pin!(stream);
+            while let Some(event) = stream.next().await {
+                let Ok(event) = event else { continue };
+                if event.event == "log" {
+                    let _ = tx_log.send(AppEvent::LogLine(id, event.data)).await;
                 }
             }
         });
@@ -232,20 +182,14 @@ mod tests {
 
         let id = RunId::new_v4();
         // Insert a dummy into cached runs
-        let dummy_run = WorkflowRunFullDetail {
-            detail: crate::app::WorkflowRunDetail {
+        let dummy_run = crate::app::fixtures::full_detail(
+            crate::app::fixtures::run_detail(
                 id,
-                workflow_name: "test".to_string(),
-                initiating_user: "u".to_string(),
-                status: RunStatus::Succeeded,
-                created_at: chrono::Utc::now(),
-                finished_at: None,
-            },
-            steps: vec![],
-            artifacts: vec![],
-            test_summaries: vec![],
-            test_cases: vec![],
-        };
+                "test",
+                stormchaser_model::workflow::RunStatus::Succeeded,
+            ),
+            vec![],
+        );
         app.cached_runs.insert(id, dummy_run);
 
         app.start_watching(id).await;

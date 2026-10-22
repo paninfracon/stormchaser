@@ -114,7 +114,7 @@ impl WasmExecutor {
         let module_bytes = if module_path.starts_with("http://")
             || module_path.starts_with("https://")
         {
-            let (client, url) = stormchaser_model::net_guard::guarded_client(module_path).await?;
+            let (client, url) = stormchaser_core::net_guard::guarded_client(module_path).await?;
             let res = client
                 .get(url)
                 .send()
@@ -122,7 +122,7 @@ impl WasmExecutor {
                 .with_context(|| format!("Failed to fetch WASM module from {}", module_path))?
                 .error_for_status()
                 .with_context(|| format!("Failed to fetch WASM module from {}", module_path))?;
-            stormchaser_model::net_guard::read_body_capped(res, MAX_WASM_MODULE_BYTES)
+            stormchaser_core::net_guard::read_body_capped(res, MAX_WASM_MODULE_BYTES)
                 .await
                 .with_context(|| format!("Failed to read bytes from {}", module_path))?
         } else if let Some(base64_data) = module_path.strip_prefix("base64://") {

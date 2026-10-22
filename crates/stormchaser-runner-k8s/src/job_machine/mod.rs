@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use stormchaser_model::dsl::Step;
 
 /// Cryptographic utilities for job state.
-pub mod crypto;
+pub use stormchaser_runner_core::crypto;
 /// Kubernetes utility functions for job management.
 pub mod k8s_utils;
 /// State transitions for the job machine.
@@ -32,6 +32,10 @@ pub struct JobMetadata {
     pub step_id: Uuid,
     /// Monotonically increasing token for preventing duplicate execution.
     pub fencing_token: i64,
+    /// Which attempt at the step this is, as the engine numbered it. Absent from an
+    /// engine, or a Job's labels, that predate it.
+    #[serde(default)]
+    pub attempt: Option<i32>,
     /// DSL definition of the step to execute.
     pub step_dsl: Step,
     /// Kubernetes namespace where the job will run.

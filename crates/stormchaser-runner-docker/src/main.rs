@@ -1,34 +1,16 @@
 use anyhow::{Context, Result};
-use axum::{extract::State, routing::get, Router};
 use bollard::Docker;
-use cloudevents::EventBuilder;
-use futures::StreamExt;
-use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
-use stormchaser_model::events::{
-    EventSource, EventType, RunnerEventType, RunnerHeartbeatEvent, RunnerRegisterEvent,
-    RunnerStepTypeSchema, SchemaVersion,
-};
-use stormchaser_model::nats::{publish_cloudevent, NatsSubject};
-use stormchaser_model::runner::RunnerStatus;
-use tokio::sync::watch;
-use tokio::time;
-use tracing::{error, info, warn};
+use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use stormchaser_model::{dsl, APPLICATION_JSON};
-
+pub mod backend;
 pub mod container_machine;
 pub mod handler;
 pub mod parsing;
 pub mod reaper;
 pub mod traits;
 
-use crate::handler::{handle_cancel, handle_task, scan_for_orphans};
-use crate::reaper::run_reaper;
-
-/// Configuration for the Stormchaser Docker Runner.
 #[derive(Debug, Clone)]
 pub struct Config {
     pub nats_url: String,
@@ -87,10 +69,6 @@ impl Config {
     }
 }
 
-struct AppState {
-    is_ready: watch::Receiver<bool>,
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     let config = Config::from_env(std::env::vars());
@@ -110,281 +88,30 @@ pub async fn run_runner(config: Config) -> Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let nats_url = config.nats_url;
-    let runner_id = config.runner_id;
-    let encryption_key = config.encryption_key;
-
-    if encryption_key.is_some() {
-        info!("State encryption is enabled");
-    } else {
-        warn!("State encryption is DISABLED. Sensitive step data in Docker labels will be stored in plaintext.");
-    }
-
     info!(
         "Starting Stormchaser Docker Runner {} (rev: {}, branch: {}, built: {}): {}",
         env!("CARGO_PKG_VERSION"),
         env!("VERGEN_GIT_SHA"),
         env!("VERGEN_GIT_BRANCH"),
         env!("VERGEN_BUILD_TIMESTAMP"),
-        runner_id
+        config.runner_id
     );
 
-    // Initialize Docker client
     let docker =
         Docker::connect_with_local_defaults().context("Failed to connect to Docker daemon")?;
-
-    // Watch channel for readiness state
-    let (ready_tx, ready_rx) = watch::channel(false);
-
-    // 1. Start Health Check Server
-    let health_state = Arc::new(AppState { is_ready: ready_rx });
-
-    let reaper_docker = docker.clone();
-    tokio::spawn(async move {
-        if let Err(e) = run_reaper(reaper_docker).await {
-            error!("Reaper error: {:?}", e);
-        }
+    let backend = Arc::new(backend::DockerBackend {
+        docker,
+        loki_url: config.loki_url,
     });
-
-    let app = Router::new()
-        .route("/healthz", get(|| async { "OK" }))
-        .route(
-            "/readyz",
-            get(|state: State<Arc<AppState>>| async move {
-                if *state.is_ready.borrow() {
-                    axum::http::StatusCode::OK
-                } else {
-                    axum::http::StatusCode::SERVICE_UNAVAILABLE
-                }
-            }),
-        )
-        .with_state(health_state);
-
-    let health_addr = SocketAddr::from(([0, 0, 0, 0], 8081)); // Different port from K8s runner
-    let listener = tokio::net::TcpListener::bind(health_addr).await?;
-    info!("Health server listening on {}", health_addr);
-
-    let health_server = tokio::spawn(async move {
-        if let Err(e) = axum::serve(listener, app).await {
-            error!("Health server error: {:?}", e);
-        }
-    });
-
-    // 2. Connect to NATS
-    let nats_options = stormchaser_model::nats::apply_auth_from_env(
-        async_nats::ConnectOptions::new().retry_on_initial_connect(),
+    stormchaser_runner_core::run(
+        backend,
+        stormchaser_runner_core::RunnerSettings {
+            nats_url: config.nats_url,
+            runner_id: config.runner_id,
+            encryption_key: config.encryption_key,
+        },
     )
-    .await?;
-    let nats_client = async_nats::connect_with_options(nats_url, nats_options)
-        .await
-        .context("Failed to connect to NATS")?;
-
-    // 3. Register with the Orchestration Engine
-    let nats_subject = format!("stormchaser.v1.runner.docker.{}", runner_id);
-
-    // Generate JSON Schema for our supported step type
-    let common_schema =
-        stormchaser_model::schema_gen::draft07_schema_for::<dsl::CommonContainerSpec>();
-    let common_schema_json = serde_json::to_value(common_schema)?;
-
-    // A key of this runner's own, which signs everything it reports from here on
-    stormchaser_model::runner_auth::obtain_session(&nats_client, &runner_id).await?;
-
-    let registration_payload = RunnerRegisterEvent {
-        runner_id: runner_id.clone(),
-        runner_type: "docker".to_string(),
-        protocol_version: "v1".to_string(),
-        nats_subject: nats_subject.clone(),
-        capabilities: vec![
-            "docker".to_string(),
-            "linux".to_string(),
-            "container".to_string(),
-        ],
-        step_types: vec![RunnerStepTypeSchema {
-            step_type: "RunContainer".to_string(),
-            schema: Some(common_schema_json),
-            documentation: Some(
-                "Runs a container using Docker with a minimal common set of parameters."
-                    .to_string(),
-            ),
-        }],
-    };
-
-    let ce = cloudevents::EventBuilderV10::new()
-        .id(uuid::Uuid::new_v4().to_string())
-        .ty("stormchaser.v1.runner.register")
-        .source(EventSource::System.as_str())
-        .time(chrono::Utc::now())
-        .data(
-            APPLICATION_JSON,
-            stormchaser_model::runner_auth::sign_if_runner(
-                serde_json::to_value(registration_payload).unwrap(),
-                "stormchaser.v1.runner.register",
-            ),
-        )
-        .build()
-        .context("Failed to build CloudEvent")?;
-
-    let payload_bytes = serde_json::to_vec(&ce).context("Failed to serialize CloudEvent")?;
-
-    nats_client
-        .publish("stormchaser.v1.runner.register", payload_bytes.into())
-        .await
-        .context("Failed to publish registration event")?;
-
-    info!("Runner registered successfully");
-
-    // Scan for orphaned containers
-    let _ = scan_for_orphans(
-        docker.clone(),
-        nats_client.clone(),
-        runner_id.clone(),
-        encryption_key.clone(),
-    )
-    .await;
-
-    let _ = ready_tx.send(true);
-
-    // 4. Start heartbeat loop
-    let heartbeat_client = nats_client.clone();
-    let heartbeat_id = runner_id.clone();
-    let mut heartbeat_interval = time::interval(Duration::from_secs(10));
-
-    // 5. Subscribe to task subjects
-    let js = async_nats::jetstream::new(nats_client.clone());
-    info!("Waiting for the JetStream stream 'stormchaser'...");
-    let stream = stormchaser_model::nats::wait_for_stream(&js).await;
-
-    let runner_consumer = stream
-        .create_consumer(async_nats::jetstream::consumer::pull::Config {
-            // Named so the create request carries the filter in its subject, which lets
-            // NATS permissions limit runners to consumers on their own task subjects.
-            name: Some(format!("runner-docker-{}", runner_id)),
-            filter_subject: nats_subject.clone(),
-            ..Default::default()
-        })
-        .await
-        .context("Failed to create runner-specific JetStream consumer")?;
-
-    let mut runner_task_messages = runner_consumer
-        .messages()
-        .await
-        .context("Failed to get runner-specific consumer messages")?;
-
-    use stormchaser_model::runner::{CONTAINER_TASKS_CONSUMER, CONTAINER_TASKS_SUBJECT};
-    let consumer = stormchaser_model::runner::task_consumer(
-        &stream,
-        CONTAINER_TASKS_CONSUMER,
-        CONTAINER_TASKS_SUBJECT,
-    )
-    .await?;
-
-    let mut task_messages = consumer
-        .messages()
-        .await
-        .context("Failed to get consumer messages")?;
-
-    // Cancellations of runs, which every runner reads for itself
-    let mut cancel_messages = stormchaser_model::run_cancel::subscribe(&stream).await?;
-
-    info!(
-        "Listening for tasks on {} and {} (consumer {})",
-        nats_subject, CONTAINER_TASKS_SUBJECT, CONTAINER_TASKS_CONSUMER
-    );
-
-    // 6. Main event loop
-    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
-    let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
-
-    loop {
-        tokio::select! {
-            _ = sigterm.recv() => {
-                info!("SIGTERM received, shutting down...");
-                break;
-            }
-            _ = sigint.recv() => {
-                info!("SIGINT received, shutting down...");
-                break;
-            }
-            _ = heartbeat_interval.tick() => {
-                let heartbeat_payload = RunnerHeartbeatEvent {
-                    runner_id: heartbeat_id.clone(),
-                    version: env!("CARGO_PKG_VERSION").to_string(),
-                    state: RunnerStatus::Online,
-                };
-
-                if let Err(e) = publish_cloudevent(&async_nats::jetstream::new(heartbeat_client.clone()), NatsSubject::RunnerHeartbeat, EventType::Runner(RunnerEventType::Heartbeat), EventSource::System, serde_json::to_value(heartbeat_payload).unwrap(), Some(SchemaVersion::new("1.0".to_string())), None)
-                    .await
-                {
-                    error!("Failed to publish heartbeat: {:?}", e);
-                }
-            }
-            message = cancel_messages.next() => {
-                match message {
-                    Some(Ok(msg)) => {
-                        tokio::spawn(handle_cancel(msg, docker.clone()));
-                    }
-                    Some(Err(e)) => {
-                        error!("Run cancellation consumer error: {:?}", e);
-                        time::sleep(Duration::from_secs(1)).await;
-                    }
-                    None => {
-                        error!("Run cancellation consumer closed");
-                        break;
-                    }
-                }
-            }
-            message = runner_task_messages.next() => {
-                match message {
-                    Some(Ok(msg)) => {
-                        tokio::spawn(handle_task(
-                            msg,
-                            docker.clone(),
-                            nats_client.clone(),
-                            runner_id.clone(),
-                            encryption_key.clone(),
-                            config.loki_url.clone(),
-                        ));
-                    }
-                    Some(Err(e)) => {
-                        error!("JetStream runner consumer error: {:?}", e);
-                        time::sleep(Duration::from_secs(1)).await;
-                    }
-                    None => {
-                        error!("JetStream runner consumer closed");
-                        break;
-                    }
-                }
-            }
-            message = task_messages.next() => {
-                match message {
-                    Some(Ok(msg)) => {
-                        tokio::spawn(handle_task(
-                            msg,
-                            docker.clone(),
-                            nats_client.clone(),
-                            runner_id.clone(),
-                            encryption_key.clone(),
-                            config.loki_url.clone(),
-                        ));
-                    }
-                    Some(Err(e)) => {
-                        error!("JetStream consumer error: {:?}", e);
-                        time::sleep(Duration::from_secs(1)).await;
-                    }
-                    None => {
-                        error!("JetStream consumer closed");
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    health_server.abort();
-    info!("Runner stopped");
-
-    Ok(())
+    .await
 }
 
 #[cfg(test)]

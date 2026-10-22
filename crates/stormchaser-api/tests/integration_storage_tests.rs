@@ -4,7 +4,6 @@ use axum::{
     http::{self, Request, StatusCode},
 };
 use chrono::Utc;
-use jsonwebtoken::{encode, EncodingKey, Header};
 use serde_json::json;
 use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
@@ -16,7 +15,7 @@ use stormchaser_api::{app, AppState, Claims, JWT_SECRET};
 use stormchaser_model::connections::ConnectionType;
 use stormchaser_model::step::StepStatus;
 use stormchaser_model::workflow::RunStatus;
-use stormchaser_model::OpaClient;
+use stormchaser_opa::OpaClient;
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -27,12 +26,7 @@ fn get_token() -> String {
         exp: (Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
         groups: Vec::new(),
     };
-    encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(JWT_SECRET),
-    )
-    .unwrap()
+    stormchaser_api::sign_local_token(&claims, JWT_SECRET).unwrap()
 }
 
 #[tokio::test]
@@ -86,7 +80,7 @@ async fn test_storage_backend_crud() {
             "endpoint": "http://localhost:9000",
             "secret_key": "s3-secret-value"
         },
-        "encrypted_credentials": "bearer-credential",
+        "credentials": "bearer-credential",
         "is_default_sfs": false
     });
 
@@ -140,7 +134,7 @@ async fn test_storage_backend_crud() {
     assert!(!listed_text.contains("s3-secret-value"));
     assert!(!listed_text.contains("bearer-credential"));
     assert_eq!(listed["config"]["secret_key"], "********");
-    assert_eq!(listed["encrypted_credentials"], "********");
+    assert_eq!(listed["credentials"], "********");
     assert_eq!(listed["config"]["bucket"], "test-bucket");
 
     // 3. Update, the way a client does after loading the connection: it changes one
@@ -150,7 +144,7 @@ async fn test_storage_backend_crud() {
     let update_payload = json!({
         "description": "Updated Description",
         "config": edited_config,
-        "encrypted_credentials": listed["encrypted_credentials"]
+        "credentials": listed["credentials"]
     });
 
     let response = app
@@ -175,7 +169,7 @@ async fn test_storage_backend_crud() {
 
     // The masks were not written over the real secrets.
     let (stored_config, stored_credentials): (Value, Option<String>) =
-        sqlx::query_as("SELECT config, encrypted_credentials FROM connections WHERE id = $1::uuid")
+        sqlx::query_as("SELECT config, credentials FROM connections WHERE id = $1::uuid")
             .bind(connection_id)
             .fetch_one(&pool)
             .await

@@ -5,6 +5,10 @@ pub use hcl_to_json::*;
 pub use json_to_hcl::*;
 
 #[cfg(test)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "tests parse HCL the module itself generated"
+)]
 mod tests {
     use super::*;
     use hcl::Body;

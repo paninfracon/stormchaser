@@ -1,7 +1,8 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+use stormchaser_core::LogBackend;
 use stormchaser_dsl::ast::Step;
-use stormchaser_model::{LogBackend, StepInstanceId};
+use stormchaser_model::StepInstanceId;
 
 pub async fn scrape_outputs_from_logs(
     tx: &mut sqlx::PgConnection,

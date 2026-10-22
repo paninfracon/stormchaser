@@ -65,17 +65,17 @@ async fn test_step_machine_pending_fail() -> Result<()> {
         .await?
         .unwrap();
 
-    let machine = StepMachine::<state::Pending>::from_instance(instance);
+    let machine = StepMachine::<state::Pending>::load(instance)?;
     let failed_machine = machine
         .fail("Test failure".to_string(), None, &mut tx)
         .await?;
 
-    assert_eq!(failed_machine.instance.status, StepStatus::Failed);
+    assert_eq!(failed_machine.instance().status, StepStatus::Failed);
     assert_eq!(
-        failed_machine.instance.error,
+        failed_machine.instance().error,
         Some("Test failure".to_string())
     );
-    assert!(failed_machine.instance.finished_at.is_some());
+    assert!(failed_machine.instance().finished_at.is_some());
 
     tx.rollback().await?;
     Ok(())
@@ -124,17 +124,17 @@ async fn test_step_machine_waiting_for_event_fail() -> Result<()> {
         .await?
         .unwrap();
 
-    let machine = StepMachine::<state::WaitingForEvent>::from_instance(instance);
+    let machine = StepMachine::<state::WaitingForEvent>::load(instance)?.unfinished();
     let failed_machine = machine
         .fail("Event failure".to_string(), None, &mut tx)
         .await?;
 
-    assert_eq!(failed_machine.instance.status, StepStatus::Failed);
+    assert_eq!(failed_machine.instance().status, StepStatus::Failed);
     assert_eq!(
-        failed_machine.instance.error,
+        failed_machine.instance().error,
         Some("Event failure".to_string())
     );
-    assert!(failed_machine.instance.finished_at.is_some());
+    assert!(failed_machine.instance().finished_at.is_some());
 
     tx.rollback().await?;
     Ok(())

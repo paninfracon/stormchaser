@@ -1,3 +1,4 @@
+#![cfg(any(feature = "chatops-slack", feature = "chatops-teams"))]
 #![allow(clippy::explicit_auto_deref)]
 use futures::StreamExt;
 use serde_json::json;
@@ -8,6 +9,7 @@ use uuid::Uuid;
 use wiremock::matchers::{body_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+#[cfg(feature = "chatops-slack")]
 #[tokio::test]
 async fn test_slack_message_integration() {
     let _ = tracing_subscriber::fmt()
@@ -30,6 +32,14 @@ async fn test_slack_message_integration() {
 
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
+    // The engine creates the stream at start-up; a fresh test stack has none
+    stormchaser_engine::nats::init_jetstream(&nats_client)
+        .await
+        .unwrap();
+    // Built-in steps report their results through the outbox, which the engine's
+    // relay publishes
+    let _relay =
+        stormchaser_engine::workers::start_outbox_relay_worker(pool.clone(), nats_client.clone());
 
     let mock_server = MockServer::start().await;
 
@@ -38,7 +48,7 @@ async fn test_slack_message_integration() {
     let backend_name = format!("test-slack-conn-{}", connection_id);
     sqlx::query(
         r#"
-        INSERT INTO connections (id, name, connection_type, config, encrypted_credentials, is_default_sfs)
+        INSERT INTO connections (id, name, connection_type, config, credentials, is_default_sfs)
         VALUES ($1, $2, 'http_api', $3, $4, FALSE)
         "#,
     )
@@ -76,7 +86,7 @@ async fn test_slack_message_integration() {
         .unwrap();
 
     // Insert mock step instance
-    sqlx::query("INSERT INTO step_instances (id, run_id, step_name, step_type, status) VALUES ($1, $2, 'slack_step', 'SlackMessage', 'pending')")
+    sqlx::query("INSERT INTO step_instances (id, run_id, step_name, step_type, status) VALUES ($1, $2, 'slack_step', 'SlackMessage', 'initializing')")
         .bind(step_instance_id)
         .bind(run_id)
         .execute(&pool)
@@ -95,7 +105,6 @@ async fn test_slack_message_integration() {
         "blocks": [{"type": "section"}]
     });
 
-    #[cfg(feature = "chatops-slack")]
     {
         stormchaser_engine::handler::handle_slack_message(
             run_id,
@@ -103,7 +112,6 @@ async fn test_slack_message_integration() {
             1,
             spec,
             pool.clone(),
-            nats_client.clone(),
         )
         .await
         .expect("handle_slack_message failed");
@@ -123,6 +131,7 @@ async fn test_slack_message_integration() {
     }
 }
 
+#[cfg(feature = "chatops-teams")]
 #[tokio::test]
 async fn test_teams_message_integration() {
     let _ = tracing_subscriber::fmt()
@@ -145,6 +154,14 @@ async fn test_teams_message_integration() {
 
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
+    // The engine creates the stream at start-up; a fresh test stack has none
+    stormchaser_engine::nats::init_jetstream(&nats_client)
+        .await
+        .unwrap();
+    // Built-in steps report their results through the outbox, which the engine's
+    // relay publishes
+    let _relay =
+        stormchaser_engine::workers::start_outbox_relay_worker(pool.clone(), nats_client.clone());
 
     let mock_server = MockServer::start().await;
 
@@ -153,7 +170,7 @@ async fn test_teams_message_integration() {
     let backend_name = format!("test-teams-conn-{}", connection_id);
     sqlx::query(
         r#"
-        INSERT INTO connections (id, name, connection_type, config, encrypted_credentials, is_default_sfs)
+        INSERT INTO connections (id, name, connection_type, config, credentials, is_default_sfs)
         VALUES ($1, $2, 'http_api', $3, $4, FALSE)
         "#,
     )
@@ -208,7 +225,7 @@ async fn test_teams_message_integration() {
         .unwrap();
 
     // Insert mock step instance
-    sqlx::query("INSERT INTO step_instances (id, run_id, step_name, step_type, status) VALUES ($1, $2, 'teams_step', 'TeamsMessage', 'pending')")
+    sqlx::query("INSERT INTO step_instances (id, run_id, step_name, step_type, status) VALUES ($1, $2, 'teams_step', 'TeamsMessage', 'initializing')")
         .bind(step_instance_id)
         .bind(run_id)
         .execute(&pool)
@@ -226,7 +243,6 @@ async fn test_teams_message_integration() {
         "message": "Hello Teams"
     });
 
-    #[cfg(feature = "chatops-teams")]
     {
         stormchaser_engine::handler::handle_teams_message(
             run_id,
@@ -234,7 +250,6 @@ async fn test_teams_message_integration() {
             1,
             spec,
             pool.clone(),
-            nats_client.clone(),
         )
         .await
         .expect("handle_teams_message failed");

@@ -40,15 +40,17 @@ Unsure where to begin contributing to Stormchaser? You can start by looking thro
 ### Getting the code
 
 1. Fork the repository on GitHub.
-2. Clone your fork locally: `git clone https://github.com/paninfracon/stormchaser.git`
-3. Create a new branch for your changes: `git checkout -b my-new-feature`
+2. Clone your fork locally: `git clone https://github.com/<your-username>/stormchaser.git`
+3. Create a new branch from `trunk` for your changes: `git checkout -b my-new-feature`
 
 ### Prerequisites
 
 * **Rust 1.96 or newer** (the workspace `rust-version`). Install or update it with `rustup update stable`. CI builds and lints with the latest stable toolchain, so run `cargo clippy` on stable before opening a pull request.
-* **Docker** with Docker Compose v2, used by the test scripts to start Postgres and NATS.
+* **Docker** with Docker Compose v2, used by the test scripts to start Postgres and NATS, and by `scripts/setup.sh` for the local stack.
+* **Python 3** (with `passlib[bcrypt]` for `scripts/setup.sh`) and **`openssl`**, used by the scripts to generate passwords, tokens and test certificates.
 * **`sqlx-cli`** (`cargo install sqlx-cli`), used by the test scripts to apply database migrations.
-* **`cargo-deny`** (`cargo install cargo-deny`), run by the pre-commit hooks to check advisories and licenses.
+* **`cargo-deny`** (`cargo install cargo-deny`), run by the pre-commit hooks and CI to check advisories and licenses.
+* For the pre-commit hooks: [`prek`](https://github.com/j178/prek) or `pre-commit`, plus the `opa` CLI (Rego formatting and checks, and `scripts/build-opa-policy.sh`) and `terraform` (formats `.storm` and HCL files).
 * For the Web UI and its end-to-end tests:
   * the WASM target: `rustup target add wasm32-unknown-unknown`
   * `cargo-leptos`: `cargo install --locked cargo-leptos`
@@ -58,16 +60,18 @@ Unsure where to begin contributing to Stormchaser? You can start by looking thro
 ### Making changes
 
 * Make your changes to the code.
-* Ensure that the code is formatted with `rustfmt`. The project includes a `rustfmt.toml` file with the project's formatting rules.
-* This project uses `pre-commit` hooks. Please make sure to install them by running `pre-commit install`.
-* Add tests for your changes. You can run the tests via `./scripts/test-unit.sh` and `./scripts/test-integration.sh`.
-* Make sure the tests pass.
+* Format the code with `cargo fmt` (default `rustfmt` settings; there is no `rustfmt.toml`).
+* This project uses pre-commit hooks (`.pre-commit-config.yaml`): formatting, clippy, cargo-deny, shellcheck, gitleaks, markdownlint, OPA checks and `stormchaser lint` on `.storm` files. Install them with `prek install` or `pre-commit install`.
+* Add tests for your changes. You can run the tests via `./scripts/test-unit.sh` and `./scripts/test-integration.sh`; CI runs both with `--all-features`.
+* Make sure the tests pass, and that `cargo clippy --workspace --all-targets --all-features -- -D warnings` and `cargo clippy -p stormchaser-engine --all-targets --no-default-features -- -D warnings` are clean.
+* If you change `deploy/opa/policy.rego`, rebuild the built-in policy with `./scripts/build-opa-policy.sh` and commit `crates/stormchaser-opa/policy/stormchaser.wasm`.
+* Add a line to the `[Unreleased]` section of `CHANGELOG.md` for user-visible changes.
 
 ## Pull Request Process
 
 1. Push your changes to your fork: `git push origin my-new-feature`
 2. Open a pull request on the Stormchaser repository.
 3. The pull request will be reviewed by the maintainers.
-4. Once the pull request is approved, it will be merged into the `main` branch.
+4. Once the pull request is approved, it will be merged into the `trunk` branch.
 
 Thank you for your contribution!

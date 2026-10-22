@@ -1,5 +1,10 @@
 # Default values for stormchaser-runner-k8s.
+#
+# The runner does not ship step logs; a collector on the nodes must (see
+# docs/observability.md). The chart has no value for STORMCHASER_SFS_PVC_NAME
+# (docs/sfs_pvc_optimization.md) and no way to add other environment variables.
 
+# Each replica is a separate runner with its own id; they share the work.
 replicaCount: 1
 
 image:
@@ -21,6 +26,8 @@ serviceAccount:
   # If not set and create is true, a name is generated using the fullname template
   name: ""
 
+# The runner serves only /healthz and /readyz on port 8080. It has no /metrics
+# endpoint, so the scrape annotations below find nothing.
 podAnnotations:
   prometheus.io/scrape: "true"
   prometheus.io/port: "8080"
@@ -44,10 +51,12 @@ securityContext:
     drop:
       - ALL
 
+# A Service in front of the health port. Nothing in Stormchaser connects to it.
 service:
   type: ClusterIP
   port: 8080
 
+# Not used: the chart has no Ingress template.
 ingress:
   enabled: false
   className: ""

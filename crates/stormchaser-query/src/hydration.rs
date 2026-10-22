@@ -1,7 +1,7 @@
 use crate::models::{HydrationEvent, HydrationStatus, QueryTask};
+use crate::state::QueryState as AppState;
 use hcl::expr::*;
 use serde_json::Value;
-use stormchaser_api::AppState;
 
 pub fn extract_vars(expr: &Expression, deps: &mut std::collections::HashSet<String>) {
     match expr {
@@ -213,7 +213,7 @@ pub async fn execute_query(
 
     if let Some(conn_name) = params.get("connection") {
         if let Some(app_state) = state {
-            let conn = stormchaser_engine::db::get_storage_backend_by_name::<
+            let conn = stormchaser_core::db::get_storage_backend_by_name::<
                 _,
                 stormchaser_model::connections::Connection,
             >(&app_state.pool, conn_name)
@@ -237,8 +237,8 @@ pub async fn execute_query(
                     subject: stormchaser_model::auth::OpaSubject {
                         sub: initiating_user,
                         email: Some(initiating_user),
+                        groups: &[],
                     },
-                    token: None,
                 };
                 if !app_state.opa.check_resource(opa_ctx).await? {
                     return Err(anyhow::anyhow!(
@@ -255,7 +255,7 @@ pub async fn execute_query(
     }
 
     let pool = state.map(|s| &s.pool);
-    stormchaser_engine::query::// Connection use was checked above, as the caller
+    stormchaser_core::query::// Connection use was checked above, as the caller
     execute_query(query_type, params, pool, db_url, None)
     .await
 }

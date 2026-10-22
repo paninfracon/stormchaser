@@ -393,3 +393,129 @@ fn hostile_workflows_are_refused_and_never_overflow_the_stack() {
         .unwrap_err();
     assert!(format!("{err:#}").contains("the limit is"), "{err:#}");
 }
+
+fn parse_retry(retry: &str) -> anyhow::Result<stormchaser_dsl::ast::Workflow> {
+    StormchaserParser::new().parse(&format!(
+        r#"
+        stormchaser_dsl_version = "0.1"
+        workflow "test_retry" {{
+            steps {{
+                step "flaky" "RunContainer" {{
+                    image = "alpine"
+                    {retry}
+                }}
+            }}
+        }}
+        "#
+    ))
+}
+
+#[test]
+fn test_parse_retry() {
+    let workflow = parse_retry(
+        r#"retry {
+            count     = 3
+            backoff   = "exponential"
+            delay     = "5s"
+            max_delay = "5m"
+        }"#,
+    )
+    .expect("Failed to parse DSL");
+    let step = &workflow.steps[0];
+    let retry = step.retry.as_ref().expect("retry is parsed");
+    assert_eq!(retry.count, 3);
+    assert_eq!(retry.backoff, "exponential");
+    assert_eq!(retry.delay.as_deref(), Some("5s"));
+    assert_eq!(retry.max_delay.as_deref(), Some("5m"));
+    // The block is not also passed on to the runner in the spec
+    assert!(step.spec.get("retry").is_none());
+
+    let workflow = parse_retry("retry {\n count = 1\n }").unwrap();
+    assert_eq!(workflow.steps[0].retry.as_ref().unwrap().backoff, "fixed");
+}
+
+#[test]
+fn test_parse_retry_refuses_what_it_cannot_follow() {
+    for retry in [
+        "retry {\n backoff = \"fixed\"\n }",
+        "retry {\n count = -1\n }",
+        "retry {\n count = \"3\"\n }",
+        "retry {\n count = 1000\n }",
+        "retry {\n count = 3\n backoff = \"random\"\n }",
+        "retry {\n count = 3\n delay = \"soon\"\n }",
+        "retry {\n count = 3\n attempts = 2\n }",
+    ] {
+        let err = parse_retry(retry).expect_err(retry);
+        assert!(
+            format!("{:#}", err).contains("retry"),
+            "{}: {:#}",
+            retry,
+            err
+        );
+    }
+}
+
+/// What the parser does not understand is refused, not dropped: a dropped setting
+/// looks as if it worked.
+#[test]
+fn unknown_or_mistyped_settings_are_refused() {
+    let parser = StormchaserParser::new();
+    let step = "step \"a\" \"RunContainer\" {\n spec {\n image = \"alpine\"\n }\n}";
+    let steps = format!("steps {{\n{step}\n}}");
+    let workflow = |inner: &str| format!("workflow \"w\" {{\n{inner}\n}}\n");
+    let with_step = |settings: &str| {
+        workflow(&format!(
+            "steps {{\nstep \"a\" \"RunContainer\" {{\n{settings}\n}}\n}}"
+        ))
+    };
+    let cases = [
+        // A step outside `steps` used to vanish, leaving a workflow with none
+        (workflow(step), "has no block 'step'"),
+        (
+            workflow(&format!("version = \"1\"\n{steps}")),
+            "has no attribute 'version'",
+        ),
+        (
+            format!("{}{}", workflow(&steps), workflow(&steps)),
+            "found another block 'workflow'",
+        ),
+        (
+            workflow(&format!("quotas {{\nmax_concurrency = \"2\"\n}}\n{steps}")),
+            "'max_concurrency' must be a whole number",
+        ),
+        (
+            workflow(&format!("quotas {{\nmax_cpus = \"2\"\n}}\n{steps}")),
+            "has no attribute 'max_cpus'",
+        ),
+        (
+            workflow(&format!(
+                "storage \"s\" {{\npreserve = [\"/\"]\n}}\n{steps}"
+            )),
+            "has no attribute 'preserve'",
+        ),
+        (
+            workflow(&format!("input \"i\" {{\nrequired = true\n}}\n{steps}")),
+            "Input 'i' has no attribute 'required'",
+        ),
+        (
+            with_step("allow_failure = \"yes\""),
+            "'allow_failure' must be true or false",
+        ),
+        (with_step("next = \"b\""), "expected a list of strings"),
+        (
+            with_step("outputs {\noutput \"o\" {\nregx = \"x\"\n}\n}"),
+            "Output 'o' has no attribute 'regx'",
+        ),
+        (
+            with_step("strategy {\nmax_parallel = -1\n}"),
+            "'max_parallel' must be a whole number",
+        ),
+    ];
+    for (workflow, expected) in cases {
+        let error = format!("{:#}", parser.parse(&workflow).unwrap_err());
+        assert!(
+            error.contains(expected),
+            "{workflow}\nexpected an error containing {expected:?}, got {error:?}"
+        );
+    }
+}

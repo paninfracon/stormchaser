@@ -5,6 +5,7 @@ use sqlx::{Executor, Postgres};
 use stormchaser_model::{ConnectionId, RunId, StepInstanceId, TestSummary};
 use uuid::Uuid;
 
+pub use stormchaser_core::db::connections::get_storage_backend_by_name;
 use stormchaser_model::test_report;
 
 #[allow(clippy::too_many_arguments)]
@@ -186,22 +187,6 @@ where
     .bind(&test_case.message)
     .execute(executor)
     .await
-}
-
-#[allow(clippy::too_many_arguments)]
-/// Get storage backend by name.
-pub async fn get_storage_backend_by_name<'a, E, O>(
-    executor: E,
-    name: &str,
-) -> Result<Option<O>, sqlx::Error>
-where
-    E: Executor<'a, Database = Postgres>,
-    O: Send + Unpin + for<'r> sqlx::FromRow<'r, PgRow>,
-{
-    sqlx::query_as::<_, O>("SELECT * FROM connections WHERE name = $1")
-        .bind(name)
-        .fetch_optional(executor)
-        .await
 }
 
 #[allow(clippy::too_many_arguments)]

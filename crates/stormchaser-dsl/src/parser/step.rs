@@ -7,14 +7,21 @@ use stormchaser_model::dsl;
 
 use crate::ast::Step;
 
-use super::expr::{block_to_value, expr_to_string, expr_to_string_vec, expr_to_value};
+use super::expr::{
+    block_to_value, expr_to_bool, expr_to_param, expr_to_string, expr_to_string_vec, expr_to_u32,
+    expr_to_value, merge_spec_attr, unknown_attribute, unknown_block,
+};
 
 pub fn parse_steps(body: &Body) -> Result<Vec<Step>> {
+    if let Some(attr) = body.attributes().next() {
+        return Err(unknown_attribute("A list of steps", attr.key()));
+    }
     let mut steps = Vec::new();
     for block in body.blocks() {
-        if block.identifier() == "step" {
-            steps.push(parse_single_step(block)?);
+        if block.identifier() != "step" {
+            return Err(unknown_block("A list of steps", block.identifier()));
         }
+        steps.push(parse_single_step(block)?);
     }
     Ok(steps)
 }
@@ -83,16 +90,26 @@ fn apply_step_attributes(
     for attr in block.body().attributes() {
         match attr.key() {
             "condition" => step.condition = Some(expr_to_string(attr.expr())?),
-            "next" => step.next = expr_to_string_vec(attr.expr())?,
+            "next" => {
+                step.next = expr_to_string_vec(attr.expr())
+                    .with_context(|| format!("Step '{}' next", step.name))?
+            }
             "iterate" => step.iterate = Some(expr_to_string(attr.expr())?),
             "iterate_as" | "as" => step.iterate_as = Some(expr_to_string(attr.expr())?),
             "allow_failure" => {
-                if let Value::Bool(b) = expr_to_value(attr.expr())? {
-                    step.allow_failure = Some(b);
-                }
+                step.allow_failure = Some(
+                    expr_to_bool("allow_failure", attr.expr())
+                        .with_context(|| format!("Step '{}'", step.name))?,
+                )
             }
             "timeout" => step.timeout = Some(expr_to_string(attr.expr())?),
-            "artifacts" => step.artifacts = Some(expr_to_string_vec(attr.expr())?),
+            "artifacts" => {
+                step.artifacts = Some(
+                    expr_to_string_vec(attr.expr())
+                        .with_context(|| format!("Step '{}' artifacts", step.name))?,
+                )
+            }
+            "spec" => merge_spec_attr(spec_map, attr.expr())?,
             _ => {
                 spec_map.insert(attr.key().to_string(), expr_to_value(attr.expr())?);
             }
@@ -110,8 +127,10 @@ fn apply_step_inner_blocks(
         match inner_block.identifier() {
             "params" => {
                 for attr in inner_block.body().attributes() {
-                    step.params
-                        .insert(attr.key().to_string(), expr_to_string(attr.expr())?);
+                    step.params.insert(
+                        attr.key().to_string(),
+                        expr_to_param(attr.key(), attr.expr())?,
+                    );
                 }
             }
             "aliases" => {
@@ -124,7 +143,16 @@ fn apply_step_inner_blocks(
                 step.steps = Some(parse_steps(inner_block.body())?);
             }
             "strategy" => {
-                step.strategy = Some(parse_step_strategy_block(inner_block)?);
+                step.strategy = Some(
+                    parse_step_strategy_block(inner_block)
+                        .with_context(|| format!("Step '{}'", step.name))?,
+                );
+            }
+            "retry" => {
+                step.retry = Some(
+                    parse_retry_block(inner_block)
+                        .with_context(|| format!("Step '{}'", step.name))?,
+                );
             }
             "reports" => {
                 step.reports.extend(parse_step_reports_block(inner_block)?);
@@ -160,6 +188,38 @@ fn apply_step_inner_blocks(
     Ok(())
 }
 
+/// Parses a `retry { count = 3  backoff = "exponential"  delay = "10s"  max_delay = "5m" }`
+/// block. `count` is required; `backoff` defaults to `fixed`.
+pub(super) fn parse_retry_block(block: &Block) -> Result<dsl::RetryPolicy> {
+    let mut count = None;
+    let mut retry = dsl::RetryPolicy {
+        count: 0,
+        backoff: "fixed".to_string(),
+        delay: None,
+        max_delay: None,
+    };
+    for attr in block.body().attributes() {
+        match attr.key() {
+            "count" => {
+                count = match expr_to_value(attr.expr())? {
+                    Value::Number(n) => n.as_u64().and_then(|n| u32::try_from(n).ok()),
+                    _ => None,
+                };
+                if count.is_none() {
+                    anyhow::bail!("retry count must be a whole number of retries");
+                }
+            }
+            "backoff" => retry.backoff = expr_to_string(attr.expr())?,
+            "delay" => retry.delay = Some(expr_to_string(attr.expr())?),
+            "max_delay" => retry.max_delay = Some(expr_to_string(attr.expr())?),
+            other => anyhow::bail!("retry has no attribute '{}'", other),
+        }
+    }
+    retry.count = count.context("retry needs a count")?;
+    retry.validate().map_err(anyhow::Error::msg)?;
+    Ok(retry)
+}
+
 fn parse_step_strategy_block(inner_block: &Block) -> Result<dsl::Strategy> {
     let mut s = dsl::Strategy {
         affinity: None,
@@ -170,17 +230,9 @@ fn parse_step_strategy_block(inner_block: &Block) -> Result<dsl::Strategy> {
     for attr in inner_block.body().attributes() {
         match attr.key() {
             "affinity" => s.affinity = Some(expr_to_string(attr.expr())?),
-            "fail_fast" => {
-                if let Value::Bool(b) = expr_to_value(attr.expr())? {
-                    s.fail_fast = Some(b);
-                }
-            }
-            "max_parallel" => {
-                if let Value::Number(n) = expr_to_value(attr.expr())? {
-                    s.max_parallel = n.as_u64().map(|v| v as u32);
-                }
-            }
-            _ => {}
+            "fail_fast" => s.fail_fast = Some(expr_to_bool("fail_fast", attr.expr())?),
+            "max_parallel" => s.max_parallel = Some(expr_to_u32("max_parallel", attr.expr())?),
+            other => return Err(unknown_attribute("A step's strategy", other)),
         }
     }
     Ok(s)
@@ -188,8 +240,14 @@ fn parse_step_strategy_block(inner_block: &Block) -> Result<dsl::Strategy> {
 
 fn parse_step_reports_block(inner_block: &Block) -> Result<Vec<dsl::TestReport>> {
     let mut reports = Vec::new();
+    if let Some(attr) = inner_block.body().attributes().next() {
+        return Err(unknown_attribute("A step's reports", attr.key()));
+    }
     for report_block in inner_block.body().blocks() {
-        if report_block.identifier() == "report" {
+        if report_block.identifier() != "report" {
+            return Err(unknown_block("A step's reports", report_block.identifier()));
+        }
+        {
             let art_name = report_block
                 .labels()
                 .first()
@@ -199,10 +257,12 @@ fn parse_step_reports_block(inner_block: &Block) -> Result<Vec<dsl::TestReport>>
             let mut path = String::new();
             let mut format = "junit".to_string();
             for attr in report_block.body().attributes() {
-                if attr.key() == "path" {
-                    path = expr_to_string(attr.expr())?;
-                } else if attr.key() == "format" {
-                    format = expr_to_string(attr.expr())?;
+                match attr.key() {
+                    "path" => path = expr_to_string(attr.expr())?,
+                    "format" => format = expr_to_string(attr.expr())?,
+                    other => {
+                        return Err(unknown_attribute(&format!("Report '{}'", art_name), other))
+                    }
                 }
             }
             reports.push(dsl::TestReport {
@@ -223,14 +283,17 @@ fn parse_step_outputs_block(
     let mut outputs = Vec::new();
 
     for attr in inner_block.body().attributes() {
-        if attr.key() == "start_marker" {
-            start_marker = Some(expr_to_string(attr.expr())?);
-        } else if attr.key() == "end_marker" {
-            end_marker = Some(expr_to_string(attr.expr())?);
+        match attr.key() {
+            "start_marker" => start_marker = Some(expr_to_string(attr.expr())?),
+            "end_marker" => end_marker = Some(expr_to_string(attr.expr())?),
+            other => return Err(unknown_attribute("A step's outputs", other)),
         }
     }
     for output_block in inner_block.body().blocks() {
-        if output_block.identifier() == "output" {
+        if output_block.identifier() != "output" {
+            return Err(unknown_block("A step's outputs", output_block.identifier()));
+        }
+        {
             let name = output_block
                 .labels()
                 .first()
@@ -258,17 +321,9 @@ fn parse_step_outputs_block(
                     "regex" => {
                         regex = Some(expr_to_string(attr.expr())?);
                     }
-                    "group" => {
-                        if let Value::Number(n) = expr_to_value(attr.expr())? {
-                            group = n.as_u64().map(|v| v as u32);
-                        }
-                    }
-                    "sensitive" => {
-                        if let Value::Bool(b) = expr_to_value(attr.expr())? {
-                            sensitive = Some(b);
-                        }
-                    }
-                    _ => {}
+                    "group" => group = Some(expr_to_u32("group", attr.expr())?),
+                    "sensitive" => sensitive = Some(expr_to_bool("sensitive", attr.expr())?),
+                    other => return Err(unknown_attribute(&format!("Output '{}'", name), other)),
                 }
             }
 

@@ -28,6 +28,10 @@ async fn setup() -> (PgPool, async_nats::Client, Arc<TlsReloader>) {
         .expect("Failed to connect to DB");
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = stormchaser_model::nats::connect(&nats_url).await.unwrap();
+    // Built-in steps report their results through the outbox, which the engine's
+    // relay publishes
+    let _relay =
+        stormchaser_engine::workers::start_outbox_relay_worker(pool.clone(), nats_client.clone());
     let tls_config = TlsConfig::default();
     let tls_reloader = Arc::new(TlsReloader::new(tls_config).await.unwrap());
     (pool, nats_client, tls_reloader)
@@ -82,7 +86,7 @@ async fn test_ses_handler_invoke() {
         .await
         .unwrap();
 
-    sqlx::query("INSERT INTO step_instances (id, run_id, step_name, step_type, status, spec, params) VALUES ($1, $2, 'test-step', 'Email', 'pending', '{}', '{}')")
+    sqlx::query("INSERT INTO step_instances (id, run_id, step_name, step_type, status, spec, params) VALUES ($1, $2, 'test-step', 'Email', 'initializing', '{}', '{}')")
         .bind(step_id)
         .bind(run_id)
         .execute(&pool)
@@ -103,7 +107,6 @@ async fn test_ses_handler_invoke() {
         step_id,
         spec.clone(),
         pool.clone(),
-        nats_client.clone(),
         tls_reloader.clone(),
     )
     .await;
@@ -121,10 +124,15 @@ async fn test_ses_handler_invoke() {
     });
 
     let step_id_2 = StepInstanceId::new_v4();
-    sqlx::query("INSERT INTO step_instances (id, run_id, step_name, step_type, status, spec, params) VALUES ($1, $2, 'test-step2', 'Email', 'pending', '{}', '{}')")
+    sqlx::query("INSERT INTO step_instances (id, run_id, step_name, step_type, status, spec, params) VALUES ($1, $2, 'test-step2', 'Email', 'initializing', '{}', '{}')")
         .bind(step_id_2)
         .bind(run_id)
         .execute(&pool)
+        .await
+        .unwrap();
+
+    let mut failures = nats_client
+        .subscribe("stormchaser.v1.*.step.failed")
         .await
         .unwrap();
 
@@ -133,26 +141,33 @@ async fn test_ses_handler_invoke() {
         step_id_2,
         spec_invalid,
         pool.clone(),
-        nats_client.clone(),
         tls_reloader.clone(),
     )
     .await;
 
     // With an invalid role ARN, the STS assume-role response (mocked as
     // {"status": "success"}) cannot be parsed as valid AWS credentials.
-    // The handler should capture this error, mark the step as failed, and return Ok.
+    // The handler reports the failure to the step-failed handler and returns Ok.
     assert!(
         res_fail.is_ok(),
         "Expected Ok even on failure, got: {:?}",
         res_fail
     );
 
-    let failed_step = stormchaser_engine::handler::fetch_step_instance(step_id_2, &pool)
-        .await
-        .unwrap();
-    assert_eq!(
-        failed_step.status,
-        stormchaser_model::step::StepStatus::Failed,
-        "Expected step status to be Failed"
-    );
+    let reported = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        use futures::StreamExt;
+        while let Some(msg) = failures.next().await {
+            let event: serde_json::Value = serde_json::from_slice(&msg.payload).unwrap();
+            if event["data"]["step_id"] == serde_json::json!(step_id_2) {
+                return event["data"]["error"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
+            }
+        }
+        String::new()
+    })
+    .await
+    .expect("no failure was reported for the step");
+    assert!(reported.contains("Failed to send email"), "{reported}");
 }

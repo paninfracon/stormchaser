@@ -99,11 +99,7 @@ pub(crate) fn render_event_rule_dialog(f: &mut Frame, app: &mut App) {
     let area = centered_rect(80, 80, f.area());
     f.render_widget(Clear, area);
 
-    let title = if app.event_rule_edit_id.is_some() {
-        " Edit Event Rule "
-    } else {
-        " Create Event Rule "
-    };
+    let title = " Create Event Rule ";
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -121,7 +117,7 @@ pub(crate) fn render_event_rule_dialog(f: &mut Frame, app: &mut App) {
             Constraint::Length(3), // Event Type Pattern
             Constraint::Length(3), // Condition Expr
             Constraint::Length(3), // Workflow Name
-            Constraint::Length(3), // Repo URL
+            Constraint::Length(3), // Git Connection
             Constraint::Length(3), // Workflow Path
             Constraint::Length(3), // Git Ref
             Constraint::Length(6), // Input Mappings
@@ -133,11 +129,11 @@ pub(crate) fn render_event_rule_dialog(f: &mut Frame, app: &mut App) {
     let labels = [
         "Name:",
         "Description:",
-        "Webhook ID (Optional):",
+        "Webhook ID:",
         "Event Type Pattern:",
         "Condition Expr (Optional):",
         "Workflow Name:",
-        "Repo URL:",
+        "Git Connection (Name or ID):",
         "Workflow Path:",
         "Git Ref:",
         "Input Mappings (JSON):",

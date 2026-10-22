@@ -2,6 +2,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::time::Duration;
 
 use super::Strategy;
 
@@ -117,12 +118,70 @@ pub struct OutputExtraction {
 /// Step retry policy definition.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct RetryPolicy {
-    /// Number of retry attempts.
+    /// How many times a failed step is run again, after its first attempt.
     pub count: u32,
-    /// Backoff strategy ('fixed', 'exponential').
+    /// Backoff strategy: 'fixed', 'linear' or 'exponential'.
     pub backoff: String,
+    /// Delay before the first retry (default 10s). Later retries wait longer
+    /// according to `backoff`.
+    #[serde(default)]
+    pub delay: Option<String>,
     /// Maximum backoff delay.
     pub max_delay: Option<String>,
+}
+
+impl RetryPolicy {
+    /// The most retries a step may ask for.
+    pub const MAX_COUNT: u32 = 100;
+    /// The longest a step waits between attempts, whatever its policy says.
+    pub const MAX_DELAY: Duration = Duration::from_secs(24 * 60 * 60);
+    const DEFAULT_DELAY: Duration = Duration::from_secs(10);
+
+    /// Checks the policy can be followed: a known backoff, durations that parse and a
+    /// count no larger than [`Self::MAX_COUNT`].
+    pub fn validate(&self) -> Result<(), String> {
+        if !matches!(self.backoff.as_str(), "fixed" | "linear" | "exponential") {
+            return Err(format!(
+                "retry backoff '{}' is not one of 'fixed', 'linear' or 'exponential'",
+                self.backoff
+            ));
+        }
+        if self.count > Self::MAX_COUNT {
+            return Err(format!(
+                "retry count {} is more than the most allowed, {}",
+                self.count,
+                Self::MAX_COUNT
+            ));
+        }
+        for (name, value) in [("delay", &self.delay), ("max_delay", &self.max_delay)] {
+            if let Some(value) = value {
+                humantime::parse_duration(value.trim())
+                    .map_err(|e| format!("retry {} '{}' is not a duration: {}", name, value, e))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// How long to wait before retry number `retry` (1 for the first retry).
+    /// A duration that does not parse counts as the default.
+    pub fn delay_before(&self, retry: u32) -> Duration {
+        let parse = |value: &Option<String>| {
+            value
+                .as_deref()
+                .and_then(|v| humantime::parse_duration(v.trim()).ok())
+        };
+        let base = parse(&self.delay).unwrap_or(Self::DEFAULT_DELAY);
+        let retry = retry.max(1);
+        let delay = match self.backoff.as_str() {
+            "linear" => base.saturating_mul(retry),
+            "exponential" => base.saturating_mul(2u32.saturating_pow(retry - 1)),
+            _ => base,
+        };
+        let max = parse(&self.max_delay)
+            .unwrap_or(Self::MAX_DELAY)
+            .min(Self::MAX_DELAY);
+        delay.min(max)
+    }
 }
 
 impl Step {
@@ -190,5 +249,51 @@ mod redaction_tests {
         // And it still parses as the spec it was
         let spec: CommonContainerSpec = serde_json::from_value(kept.spec).unwrap();
         assert_eq!(spec.env.unwrap().len(), 2);
+    }
+}
+
+#[cfg(test)]
+mod retry_tests {
+    use super::*;
+
+    fn policy(backoff: &str, delay: Option<&str>, max_delay: Option<&str>) -> RetryPolicy {
+        RetryPolicy {
+            count: 3,
+            backoff: backoff.to_string(),
+            delay: delay.map(str::to_string),
+            max_delay: max_delay.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn delays_follow_the_backoff() {
+        let secs = |p: &RetryPolicy, n| p.delay_before(n).as_secs();
+        let fixed = policy("fixed", Some("5s"), None);
+        assert_eq!((secs(&fixed, 1), secs(&fixed, 3)), (5, 5));
+        let linear = policy("linear", Some("5s"), None);
+        assert_eq!((secs(&linear, 1), secs(&linear, 3)), (5, 15));
+        let exponential = policy("exponential", None, None);
+        assert_eq!((secs(&exponential, 1), secs(&exponential, 4)), (10, 80));
+    }
+
+    #[test]
+    fn delays_stop_at_max_delay_and_never_overflow() {
+        let capped = policy("exponential", Some("10s"), Some("30s"));
+        assert_eq!(capped.delay_before(10).as_secs(), 30);
+        let uncapped = policy("exponential", Some("1h"), None);
+        assert_eq!(uncapped.delay_before(100), RetryPolicy::MAX_DELAY);
+        let too_high = policy("fixed", Some("1h"), Some("1000d"));
+        assert_eq!(too_high.delay_before(1).as_secs(), 3600);
+    }
+
+    #[test]
+    fn validation_refuses_what_cannot_be_followed() {
+        assert!(policy("linear", Some("1m"), Some("5m")).validate().is_ok());
+        assert!(policy("random", None, None).validate().is_err());
+        assert!(policy("fixed", Some("soon"), None).validate().is_err());
+        assert!(policy("fixed", None, Some("later")).validate().is_err());
+        let mut many = policy("fixed", None, None);
+        many.count = RetryPolicy::MAX_COUNT + 1;
+        assert!(many.validate().is_err());
     }
 }

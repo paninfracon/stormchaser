@@ -24,7 +24,7 @@ use validate::validate_connection;
     post,
     path = "/api/v1/connections",
     responses(
-        (status = 200, description = "Success"),
+        (status = 201, description = "Created", body = crate::CreatedResponse),
         (status = 400, description = "Bad Request"),
         (status = 404, description = "Not Found"),
         (status = 500, description = "Internal Server Error")
@@ -62,7 +62,7 @@ pub async fn create_connection(
         &payload.connection_type,
         &payload.config,
         &payload.aws_assume_role_arn,
-        &payload.encrypted_credentials,
+        &payload.credentials,
         payload.is_default_sfs,
     )
     .await
@@ -76,7 +76,12 @@ pub async fn create_connection(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    Ok((StatusCode::CREATED, Json(serde_json::json!({ "id": id }))))
+    Ok((
+        StatusCode::CREATED,
+        Json(crate::CreatedResponse {
+            id: id.into_inner(),
+        }),
+    ))
 }
 
 /// List storage backends.
@@ -84,7 +89,7 @@ pub async fn create_connection(
     get,
     path = "/api/v1/connections",
     responses(
-        (status = 200, description = "Success"),
+        (status = 200, description = "Success", body = [stormchaser_model::Connection]),
         (status = 400, description = "Bad Request"),
         (status = 404, description = "Not Found"),
         (status = 500, description = "Internal Server Error")
@@ -117,7 +122,7 @@ pub async fn list_connections(
     path = "/api/v1/connections/{id}",
     params(("id" = stormchaser_model::ConnectionId, Path, description="Backend ID")),
     responses(
-        (status = 200, description = "Success"),
+        (status = 200, description = "Success", body = stormchaser_model::Connection),
         (status = 400, description = "Bad Request"),
         (status = 404, description = "Not Found"),
         (status = 500, description = "Internal Server Error")
@@ -168,8 +173,8 @@ pub async fn update_connection(
     }
     // Responses mask stored secrets. A client that loads a connection, edits it and saves
     // it sends those masks back; they mean "unchanged", not a new value.
-    if payload.encrypted_credentials.as_deref() == Some(crate::redact::MASK) {
-        payload.encrypted_credentials = None;
+    if payload.credentials.as_deref() == Some(crate::redact::MASK) {
+        payload.credentials = None;
     }
     if let Some(config) = payload.config.as_mut() {
         let stored = db::get_connection(&state.pool, id)
@@ -288,7 +293,7 @@ pub async fn list_run_artifacts(
     path = "/api/v1/runs/{run_id}/reports",
     params(("run_id" = stormchaser_model::RunId, Path, description="Run ID")),
     responses(
-        (status = 200, description = "Success"),
+        (status = 200, description = "Success", body = [crate::TestReportSummary]),
         (status = 400, description = "Bad Request"),
         (status = 404, description = "Not Found"),
         (status = 500, description = "Internal Server Error")
@@ -310,10 +315,10 @@ pub async fn list_run_test_reports(
 /// Lists run test summaries.
 #[utoipa::path(
     get,
-    path = "/api/v1/runs/{run_id}/test-summaries",
+    path = "/api/v1/runs/{run_id}/summaries",
     params(("run_id" = stormchaser_model::RunId, Path, description="Run ID")),
     responses(
-        (status = 200, description = "Success"),
+        (status = 200, description = "Success", body = [crate::TestSummaryResponse]),
         (status = 400, description = "Bad Request"),
         (status = 404, description = "Not Found"),
         (status = 500, description = "Internal Server Error")
@@ -340,7 +345,7 @@ pub async fn list_run_test_summaries(
         ("report_id" = stormchaser_model::TestReportId, Path, description = "Report ID")
     ),
     responses(
-        (status = 200, description = "Test report content"),
+        (status = 200, description = "Test report content", body = crate::TestReportContent),
         (status = 404, description = "Report not found"),
         (status = 500, description = "Internal Server Error")
     ),
@@ -360,7 +365,7 @@ pub async fn get_test_report(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)
-        .map(|c: String| serde_json::json!({ "content": c }))?;
+        .map(|content: String| crate::TestReportContent { content })?;
 
     Ok(Json(report))
 }

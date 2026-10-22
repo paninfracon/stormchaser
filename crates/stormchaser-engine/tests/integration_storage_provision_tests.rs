@@ -4,8 +4,8 @@ use sqlx::postgres::PgPoolOptions;
 use std::env::var;
 use std::sync::Arc;
 use stormchaser_engine::handler;
-use stormchaser_model::auth::OpaClient;
 use stormchaser_model::RunId;
+use stormchaser_opa::OpaClient;
 use uuid::Uuid;
 
 use stormchaser_tls::TlsConfig;

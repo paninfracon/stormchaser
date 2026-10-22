@@ -1,46 +1,73 @@
 # Cargo Features
 
-This document outlines the various Cargo features available across the `stormchaser` workspace crates and their purposes.
+This document lists the Cargo features of the `stormchaser` workspace crates and what each one does.
 
-By default, most functional features are enabled to provide a complete "batteries-included" experience, but they can be opted out of to reduce binary size, dependencies, and compilation times.
+Only three crates have features: `stormchaser-api`, `stormchaser-engine` and `stormchaser-tls`, plus the build-mode features of `stormchaser-web`. The defaults turn on every integration. Turning one off removes its dependencies and makes steps that need it fail with an error saying the feature is not enabled in this build. The other crates have no features.
 
 ## `stormchaser-api`
 
 | Feature | Default | Description |
 | :--- | :---: | :--- |
-| `mcp` | ✅ | Enables the integrated [Model Context Protocol (MCP) server](mcp-server.md), exposing the OpenAPI spec as AI-callable tools over Streamable HTTP. Pulls in `rmcp` and `rmcp-openapi`. |
+| `mcp` | yes | Builds the [Model Context Protocol (MCP) server](mcp-server.md) into the API at `/api/v1/mcp`, exposing the OpenAPI operations as tools over Streamable HTTP. Pulls in `rmcp` and `rmcp-openapi`. |
+
+## `stormchaser-core`
+
+| Feature | Default | Description |
+| :--- | :---: | :--- |
+| `aws-cloudcontrol` | no | Input queries backed by the AWS Cloud Control API. The engine and the query service turn it on with their own `aws-cloudcontrol` features, both on by default. |
 
 ## `stormchaser-engine`
 
 | Feature | Default | Description |
 | :--- | :---: | :--- |
-| `aws-lambda` | ✅ | Enables the ability to dispatch workflow steps directly to AWS Lambda functions. |
-| `aws-ses` | ✅ | Enables the "Send Email" step using AWS Simple Email Service (SES). |
-| `aws-s3-sts` | ✅ | Enables AWS STS integration for assuming roles when interacting with S3 storage backends. |
-| `email` | ✅ | Enables general SMTP email capabilities (e.g., sending approval requests) using the `lettre` crate. |
-| `vault` | ✅ | Enables fetching dynamic secrets from HashiCorp Vault during workflow execution. |
-| `aws-sdk-sts` | ✅ | Base STS support for AWS authentication. |
-| `rustls-native-certs` | ✅ | Enables loading native root certificates for TLS connections, particularly useful outside of containerized environments. |
-| `aws-cloudcontrol` | ✅ | Enables dynamic workflow input queries backed by the AWS Cloud Control API. |
-| `aws-sops` | ✅ | Enables assuming an AWS role (via STS) when decrypting SOPS secrets. |
-| `chatops-slack` | ✅ | Enables the Slack message integration. |
-| `chatops-teams` | ✅ | Enables the Microsoft Teams message integration. |
+| `aws-lambda` | yes | `LambdaInvoke` steps. Turns on `aws-sdk-sts`. |
+| `aws-ses` | yes | The SES backend for `EmailSend` and `TestReportEmail` steps. Turns on `aws-sdk-sts`. |
+| `aws-s3-sts` | yes | Assuming an IAM role (`aws_assume_role_arn`) for S3 storage connections. Turns on `aws-sdk-sts`. |
+| `email` | yes | SMTP email through `lettre`: approval notifications, and the SMTP backend for `EmailSend` and `TestReportEmail`. Without it, approval steps log a warning and send nothing. |
+| `vault` | yes | Reading secrets from HashiCorp Vault (`secret()` in workflows). |
+| `aws-sdk-sts` | yes | The STS client. On its own, it lets Terraform steps assume `aws_assume_role_arn`; the other AWS features turn it on. |
+| `rustls-native-certs` | yes | Pulls in the `rustls-native-certs` crate. No engine code uses it at present; services already validate TLS against the system certificate store without it. |
+| `aws-cloudcontrol` | yes | Workflow input queries backed by the AWS Cloud Control API. Turns on `stormchaser-core/aws-cloudcontrol`. |
+| `aws-sops` | yes | Assuming an IAM role (through STS) before decrypting SOPS secrets. Turns on `aws-sdk-sts`. Decrypting SOPS files itself needs only the `sops` binary on the engine's `PATH`. |
+| `chatops-slack` | yes | `SlackMessage` steps. |
+| `chatops-teams` | yes | `TeamsMessage` steps. |
+
+CI builds and lints the engine both with all features and with `--no-default-features`.
+
+## `stormchaser-query`
+
+| Feature | Default | Description |
+| :--- | :---: | :--- |
+| `aws-cloudcontrol` | yes | Input queries backed by the AWS Cloud Control API. Turns on `stormchaser-core/aws-cloudcontrol`. |
+
+## `stormchaser-tls`
+
+| Feature | Default | Description |
+| :--- | :---: | :--- |
+| `listener` | no | An HTTPS (or plain HTTP) listener for Axum services, used by the API, the query service and the web UI's server. Pulls in `axum`, `hyper`, `hyper-util`, `tokio-rustls` and `tower`. |
 
 ## `stormchaser-web`
 
 | Feature | Default | Description |
 | :--- | :---: | :--- |
-| `ssr` | ❌ | Builds the server-side rendering binary (Axum server). Selected automatically by `cargo leptos`. |
-| `hydrate` | ❌ | Builds the WASM frontend that hydrates the server-rendered page. Selected automatically by `cargo leptos`. |
+| `ssr` | no | Builds the server-side rendering binary (Axum server). Selected automatically by `cargo leptos`. Without it, the `stormchaser-web` binary does nothing. |
+| `hydrate` | no | Builds the WASM frontend that hydrates the server-rendered page. Selected automatically by `cargo leptos`. |
+
+Build or run the web UI with `cargo leptos build -p stormchaser-web` or `cargo leptos watch -p stormchaser-web`, not plain `cargo run`.
 
 ## Disabling Default Features
 
-To build a minimal version of a crate or the workspace, you can use the `--no-default-features` flag and explicitly enable only what you need:
+To build a smaller binary, use `--no-default-features` and enable only what you need:
 
 ```bash
 # Build the API without the MCP server
 cargo build -p stormchaser-api --no-default-features
 
-# Build the engine with only core execution capabilities
+# Build the engine with no optional integrations
 cargo build -p stormchaser-engine --no-default-features
+
+# Build the engine with only Vault and SMTP email
+cargo build -p stormchaser-engine --no-default-features --features vault,email
 ```
+
+`stormchaser-api` and `stormchaser-query` depend on `stormchaser-engine` with its default features, so building them turns those features on in the engine library they link.

@@ -63,6 +63,7 @@ pub(crate) fn build_container_result_event(
     run_id: Uuid,
     step_id: Uuid,
     fencing_token: i64,
+    attempt: Option<i32>,
     runner_id: String,
 ) -> EventDispatch {
     match state {
@@ -73,6 +74,7 @@ pub(crate) fn build_container_result_event(
                 run_id: RunId::new(run_id),
                 step_id: StepInstanceId::new(step_id),
                 fencing_token,
+                attempt,
                 completion_token: None,
                 event_type: event_type.clone(),
                 runner_id: Some(runner_id),
@@ -104,6 +106,7 @@ pub(crate) fn build_container_result_event(
                 run_id: RunId::new(run_id),
                 step_id: StepInstanceId::new(step_id),
                 fencing_token,
+                attempt,
                 completion_token: None,
                 event_type: event_type.clone(),
                 error: reason,
@@ -134,6 +137,7 @@ pub(crate) fn build_container_execution_error_event(
     run_id: Uuid,
     step_id: Uuid,
     fencing_token: i64,
+    attempt: Option<i32>,
     runner_id: String,
     error: &anyhow::Error,
 ) -> Value {
@@ -141,6 +145,7 @@ pub(crate) fn build_container_execution_error_event(
         run_id: RunId::new(run_id),
         step_id: StepInstanceId::new(step_id),
         fencing_token,
+        attempt,
         completion_token: None,
         event_type: EventType::Step(StepEventType::Failed),
         error: format!("{:?}", error),
@@ -160,6 +165,7 @@ pub(crate) async fn publish_container_result(
     run_id: Uuid,
     step_id: Uuid,
     fencing_token: i64,
+    attempt: Option<i32>,
     runner_id: String,
     nats: async_nats::Client,
 ) {
@@ -168,7 +174,7 @@ pub(crate) async fn publish_container_result(
         ContainerState::Failed(reason, _) => warn!("Adopted step {} failed: {}", step_id, reason),
     }
     let event_dispatch =
-        build_container_result_event(state, run_id, step_id, fencing_token, runner_id);
+        build_container_result_event(state, run_id, step_id, fencing_token, attempt, runner_id);
 
     let _ = publish_cloudevent(
         &async_nats::jetstream::new(nats),
@@ -228,6 +234,7 @@ mod tests_handler_ext {
             run_id,
             step_id,
             0,
+            None,
             "runner-1".to_string(),
         );
 
@@ -270,6 +277,7 @@ mod tests_handler_ext {
             run_id,
             step_id,
             0,
+            None,
             "runner-2".to_string(),
         );
 
@@ -294,6 +302,7 @@ mod tests_handler_ext {
             run_id,
             step_id,
             0,
+            None,
             "runner-3".to_string(),
             &anyhow::anyhow!("execution failed"),
         );

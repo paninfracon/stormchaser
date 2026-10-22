@@ -59,6 +59,14 @@ WORKDIR /app
 ARG BINARY=stormchaser-engine
 ENV BINARY_NAME=${BINARY}
 
+# The engine decrypts workflows' SOPS-encrypted secrets with the sops CLI; without it
+# every such run fails
+RUN if [ "${BINARY_NAME}" = "stormchaser-engine" ]; then \
+      curl -fsSLo /usr/local/bin/sops "https://github.com/getsops/sops/releases/download/v3.13.3/sops-v3.13.3.linux.amd64" && \
+      echo "e5bec3346a873ae91d871550f3e698c1aad962aff462a080e40f25fde17fef6b  /usr/local/bin/sops" | sha256sum -c - && \
+      chmod 0755 /usr/local/bin/sops; \
+    fi
+
 # Copy the binary from the builder
 COPY --from=builder /app/${BINARY_NAME} /usr/local/bin/${BINARY_NAME}
 

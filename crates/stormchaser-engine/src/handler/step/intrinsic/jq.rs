@@ -1,15 +1,10 @@
-use crate::handler::fetch_step_instance;
+use crate::handler::integrations::utils::{report_step_completed, report_step_failed};
 use anyhow::Result;
-use chrono::Utc;
 use serde_json::Value;
 use sqlx::PgPool;
-use std::sync::Arc;
-use stormchaser_model::events::StepFailedEvent;
-use stormchaser_model::events::{EventSource, EventType, SchemaVersion, StepEventType};
-use stormchaser_model::nats::NatsSubject;
+use std::collections::HashMap;
 use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
-use stormchaser_tls::TlsReloader;
 
 use stormchaser_model::dsl;
 
@@ -58,58 +53,17 @@ pub fn mutate_if_has_files(step_type: &mut String, resolved_spec: &mut Value) {
     }
 }
 
-/// Attempts to dispatch a jq step instance directly if it operates on strings (instead of files).
-#[allow(clippy::too_many_arguments)]
-pub async fn try_dispatch(
-    run_id: RunId,
-    step_instance_id: StepInstanceId,
-    fencing_token: i64,
-    step_type: &str,
-    resolved_spec: &Value,
-    pool: PgPool,
-    nats_client: async_nats::Client,
-    _tls_reloader: Arc<TlsReloader>,
-) -> Result<bool> {
-    if step_type == "JQ" {
-        let pool = pool.clone();
-        let nats_client = nats_client.clone();
-        let spec = resolved_spec.clone();
-
-        tokio::spawn(async move {
-            let _ = dispatch_jq_internal(
-                run_id,
-                step_instance_id,
-                fencing_token,
-                spec,
-                pool,
-                nats_client,
-            )
-            .await;
-        });
-        return Ok(true);
-    }
-
-    Ok(false)
-}
-
-async fn dispatch_jq_internal(
+/// Runs a JQ step, reporting its result.
+pub(crate) async fn run_jq(
     run_id: RunId,
     step_instance_id: StepInstanceId,
     fencing_token: i64,
     spec: Value,
     pool: PgPool,
-    nats_client: async_nats::Client,
 ) -> Result<()> {
     // 1. Transition to running
-    if let Ok(instance) = fetch_step_instance(step_instance_id, &pool).await {
-        let machine =
-            crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::from_instance(
-                instance,
-            );
-        if let Ok(mut conn) = pool.acquire().await {
-            let _ = machine.start("intrinsic-jq".to_string(), &mut *conn).await;
-        }
-    }
+    crate::handler::integrations::utils::start_built_in(&pool, step_instance_id, "intrinsic-jq")
+        .await?;
 
     let actual_spec = spec.get("spec").unwrap_or(&spec).clone();
     let jq_spec: Result<dsl::JqSpec, _> = serde_json::from_value(actual_spec.clone());
@@ -131,70 +85,27 @@ async fn dispatch_jq_internal(
 
     match result {
         Ok(outputs) => {
-            use std::collections::HashMap;
-            use stormchaser_model::events::{EventType, StepCompletedEvent, StepEventType};
-            let mut outputs_map = HashMap::new();
-            outputs_map.insert("result".to_string(), outputs);
-            let event = StepCompletedEvent {
+            let outputs = HashMap::from([("result".to_string(), outputs)]);
+            report_step_completed(
+                &pool,
                 run_id,
-                step_id: step_instance_id,
+                step_instance_id,
                 fencing_token,
-                completion_token: crate::db::step_completion_token(&pool, step_instance_id).await,
-                event_type: EventType::Step(StepEventType::Completed),
-                runner_id: None,
-                exit_code: Some(0),
-                storage_hashes: None,
-                artifacts: None,
-                test_reports: None,
-                outputs: Some(outputs_map),
-                timestamp: Utc::now(),
-            };
-            let js = async_nats::jetstream::new(nats_client);
-            use stormchaser_model::nats::NatsSubject;
-            let _ = stormchaser_model::nats::publish_cloudevent(
-                &js,
-                NatsSubject::StepCompleted(Some(stormchaser_model::nats::compute_shard_id(
-                    &run_id,
-                ))),
-                EventType::Step(StepEventType::Completed),
-                EventSource::System,
-                serde_json::to_value(event).unwrap(),
-                Some(SchemaVersion::new("1.0".to_string())),
-                None,
+                Some(outputs),
             )
-            .await;
+            .await
         }
         Err(e) => {
-            let event = StepFailedEvent {
+            report_step_failed(
+                &pool,
                 run_id,
-                step_id: step_instance_id,
+                step_instance_id,
                 fencing_token,
-                completion_token: crate::db::step_completion_token(&pool, step_instance_id).await,
-                event_type: EventType::Step(StepEventType::Failed),
-                error: format!("JQ execution failed: {:?}", e),
-                runner_id: None,
-                exit_code: None,
-                storage_hashes: None,
-                artifacts: None,
-                test_reports: None,
-                outputs: None,
-                timestamp: Utc::now(),
-            };
-            let js = async_nats::jetstream::new(nats_client);
-            let _ = stormchaser_model::nats::publish_cloudevent(
-                &js,
-                NatsSubject::StepFailed(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
-                EventType::Step(StepEventType::Failed),
-                EventSource::System,
-                serde_json::to_value(event).unwrap(),
-                Some(SchemaVersion::new("1.0".to_string())),
-                None,
+                format!("JQ execution failed: {:?}", e),
             )
-            .await;
+            .await
         }
     }
-
-    Ok(())
 }
 
 #[cfg(test)]

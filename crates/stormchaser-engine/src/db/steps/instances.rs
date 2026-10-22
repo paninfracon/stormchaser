@@ -3,6 +3,7 @@ use serde_json::Value;
 use sqlx::postgres::PgQueryResult;
 use sqlx::postgres::PgRow;
 use sqlx::{Executor, Postgres};
+pub use stormchaser_core::db::steps::{read_step_completion_token, step_completion_token};
 use stormchaser_model::step::StepStatus;
 use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
@@ -13,33 +14,6 @@ pub struct ZombieStep {
     pub run_id: RunId,
     pub runner_id: Option<String>,
     pub fencing_token: i64,
-}
-
-#[allow(clippy::too_many_arguments)]
-/// Complete step instance.
-pub async fn complete_step_instance<'a, E>(
-    executor: E,
-    status: &StepStatus,
-    exit_code: Option<i32>,
-    runner_id: Option<&str>,
-    id: StepInstanceId,
-) -> Result<PgQueryResult, sqlx::Error>
-where
-    E: Executor<'a, Database = Postgres>,
-{
-    sqlx::query(
-        r#"
-        UPDATE step_instances
-        SET status = $1, finished_at = NOW(), exit_code = $2, runner_id = COALESCE($3, runner_id)
-        WHERE id = $4
-        "#,
-    )
-    .bind(status)
-    .bind(exit_code)
-    .bind(runner_id)
-    .bind(id)
-    .execute(executor)
-    .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -61,23 +35,6 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-/// Update step instance status.
-pub async fn update_step_instance_status<'a, E>(
-    executor: E,
-    status: &StepStatus,
-    id: StepInstanceId,
-) -> Result<PgQueryResult, sqlx::Error>
-where
-    E: Executor<'a, Database = Postgres>,
-{
-    sqlx::query("UPDATE step_instances SET status = $1 WHERE id = $2")
-        .bind(status)
-        .bind(id)
-        .execute(executor)
-        .await
-}
-
-#[allow(clippy::too_many_arguments)]
 /// Get step spec and params.
 pub async fn get_step_spec_and_params<'a, E, O>(
     executor: E,
@@ -90,49 +47,6 @@ where
     sqlx::query_as::<_, O>("SELECT spec, params FROM step_instances WHERE id = $1")
         .bind(id)
         .fetch_one(executor)
-        .await
-}
-
-#[allow(clippy::too_many_arguments)]
-/// Fail step instance with error.
-pub async fn fail_step_instance_with_error<'a, E>(
-    executor: E,
-    status: StepStatus,
-    error: &str,
-    exit_code: Option<i32>,
-    id: StepInstanceId,
-) -> Result<PgQueryResult, sqlx::Error>
-where
-    E: Executor<'a, Database = Postgres>,
-{
-    sqlx::query(
-        r#"
-        UPDATE step_instances
-        SET status = $1, finished_at = NOW(), error = $2, exit_code = $3
-        WHERE id = $4
-        "#,
-    )
-    .bind(status)
-    .bind(error)
-    .bind(exit_code)
-    .bind(id)
-    .execute(executor)
-    .await
-}
-
-/// Record step status history.
-pub async fn record_step_status_history<'a, E>(
-    executor: E,
-    step_instance_id: StepInstanceId,
-    status: &StepStatus,
-) -> Result<PgQueryResult, sqlx::Error>
-where
-    E: Executor<'a, Database = Postgres>,
-{
-    sqlx::query("INSERT INTO step_status_history (step_instance_id, status) VALUES ($1, $2)")
-        .bind(step_instance_id)
-        .bind(status)
-        .execute(executor)
         .await
 }
 
@@ -152,14 +66,9 @@ where
 {
     sqlx::query(
         r#"
-                WITH inserted AS (
-                    INSERT INTO step_instances (id, run_id, step_name, step_type, status, created_at)
+                INSERT INTO step_instances (id, run_id, step_name, step_type, status, created_at)
                     VALUES ($1, $2, $3, $4, $5, $6)
                     ON CONFLICT DO NOTHING
-                    RETURNING id
-                )
-                INSERT INTO step_status_history (step_instance_id, status)
-                SELECT id, $5 FROM inserted
                 "#,
     )
     .bind(id)
@@ -173,8 +82,8 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-/// Count running steps for run.
-pub async fn count_running_steps_for_run<'a, E, O>(
+/// How many of a run's steps are in flight (see [`crate::step_machine::bulk::IN_FLIGHT`]).
+pub async fn count_in_flight_steps_for_run<'a, E, O>(
     executor: E,
     run_id: RunId,
 ) -> Result<O, sqlx::Error>
@@ -183,12 +92,10 @@ where
     O: Send + Unpin,
     (O,): for<'r> sqlx::FromRow<'r, PgRow>,
 {
-    sqlx::query_scalar::<_, O>(
-        r#"SELECT COUNT(*) FROM step_instances WHERE run_id = $1 AND status = 'running'"#,
-    )
-    .bind(run_id)
-    .fetch_one(executor)
-    .await
+    sqlx::query_scalar::<_, O>(crate::step_machine::bulk::IN_FLIGHT)
+        .bind(run_id)
+        .fetch_one(executor)
+        .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -211,13 +118,8 @@ where
 {
     sqlx::query(
         r#"
-                WITH inserted AS (
-                    INSERT INTO step_instances (id, run_id, step_name, step_type, status, iteration_index, affinity_context, spec, params, created_at)
+                INSERT INTO step_instances (id, run_id, step_name, step_type, status, iteration_index, affinity_context, spec, params, created_at)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                    RETURNING id
-                )
-                INSERT INTO step_status_history (step_instance_id, status)
-                SELECT id, $5 FROM inserted
                 "#,
     )
     .bind(id)
@@ -254,14 +156,9 @@ where
 {
     sqlx::query(
         r#"
-            WITH inserted AS (
-                INSERT INTO step_instances (id, run_id, step_name, step_type, status, iteration_index, affinity_context, spec, params, created_at)
+            INSERT INTO step_instances (id, run_id, step_name, step_type, status, iteration_index, affinity_context, spec, params, created_at)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                 ON CONFLICT DO NOTHING
-                RETURNING id
-            )
-            INSERT INTO step_status_history (step_instance_id, status)
-            SELECT id, $5 FROM inserted
             "#,
     )
     .bind(id)
@@ -304,48 +201,6 @@ where
     .await
 }
 
-/// Atomically claim pending step instances for a run by transitioning them to `initializing`.
-///
-/// Uses `SELECT … FOR UPDATE SKIP LOCKED` inside a CTE so that concurrent engine processes
-/// never claim the same step.  Returns the rows that were successfully claimed.
-pub async fn claim_pending_step_instances_for_run<O>(
-    pool: &sqlx::PgPool,
-    run_id: RunId,
-    limit: i64,
-) -> Result<Vec<O>, sqlx::Error>
-where
-    O: Send + Unpin + for<'r> sqlx::FromRow<'r, PgRow>,
-{
-    let mut tx = pool.begin().await?;
-    let rows: Vec<O> = sqlx::query_as::<_, O>(
-        r#"
-        WITH claimed AS (
-            SELECT id
-            FROM step_instances
-            WHERE run_id = $1
-              AND status = 'pending'
-              AND step_type NOT IN ('Approval', 'Wait')
-            ORDER BY created_at ASC
-            LIMIT $2
-            FOR UPDATE SKIP LOCKED
-        )
-        UPDATE step_instances si
-        SET status = 'initializing'
-        FROM claimed
-        WHERE si.id = claimed.id
-        RETURNING si.id, si.run_id, si.step_name, si.step_type, si.status as "status",
-                  si.iteration_index, si.runner_id, si.affinity_context, si.started_at,
-                  si.finished_at, si.exit_code, si.error, si.spec, si.params, si.created_at
-        "#,
-    )
-    .bind(run_id)
-    .bind(limit)
-    .fetch_all(&mut *tx)
-    .await?;
-    tx.commit().await?;
-    Ok(rows)
-}
-
 #[allow(clippy::too_many_arguments)]
 /// Get step instance by id.
 pub async fn get_step_instance_by_id<'a, E, O>(
@@ -364,65 +219,6 @@ where
     .await
 }
 
-#[allow(clippy::too_many_arguments)]
-/// Fail pending steps for run on timeout.
-pub async fn fail_pending_steps_for_run_on_timeout<'a, E>(
-    executor: E,
-    run_id: RunId,
-) -> Result<PgQueryResult, sqlx::Error>
-where
-    E: Executor<'a, Database = Postgres>,
-{
-    sqlx::query(
-        r#"
-        UPDATE step_instances
-        SET status = 'failed', error = 'Workflow timed out', finished_at = NOW()
-        WHERE run_id = $1 AND status IN ('pending', 'running', 'waiting_for_event')
-        "#,
-    )
-    .bind(run_id)
-    .execute(executor)
-    .await
-}
-
-#[allow(clippy::too_many_arguments)]
-/// Update step instance running.
-pub async fn update_step_instance_running<'a, E>(
-    executor: E,
-    status: &StepStatus,
-    runner_id: Option<&str>,
-    id: StepInstanceId,
-) -> Result<PgQueryResult, sqlx::Error>
-where
-    E: Executor<'a, Database = Postgres>,
-{
-    sqlx::query(
-        "UPDATE step_instances SET status = $1, started_at = COALESCE(started_at, NOW()), runner_id = COALESCE($2, runner_id) WHERE id = $3"
-    )
-    .bind(status)
-    .bind(runner_id)
-    .bind(id)
-    .execute(executor)
-    .await
-}
-
-#[allow(clippy::too_many_arguments)]
-/// Update step instance terminal.
-pub async fn update_step_instance_terminal<'a, E>(
-    executor: E,
-    status: &StepStatus,
-    id: StepInstanceId,
-) -> Result<PgQueryResult, sqlx::Error>
-where
-    E: Executor<'a, Database = Postgres>,
-{
-    sqlx::query("UPDATE step_instances SET status = $1, finished_at = NOW() WHERE id = $2")
-        .bind(status)
-        .bind(id)
-        .execute(executor)
-        .await
-}
-
 /// Get step type and spec.
 pub async fn get_step_type_and_spec<'a, E, O>(
     executor: E,
@@ -438,30 +234,6 @@ where
         .await
 }
 
-/// Returns the secret that must accompany the event finishing a step the engine handles
-/// itself, or `None` once the step has been handed to a runner.
-///
-/// A lookup failure is reported as `None`: the resulting event is then rejected by the
-/// handler, which is the safe outcome.
-pub async fn step_completion_token<'a, E>(executor: E, id: StepInstanceId) -> Option<String>
-where
-    E: Executor<'a, Database = Postgres>,
-{
-    match sqlx::query_scalar::<_, Option<String>>(
-        "SELECT completion_token FROM step_instances WHERE id = $1",
-    )
-    .bind(id)
-    .fetch_optional(executor)
-    .await
-    {
-        Ok(token) => token.flatten(),
-        Err(e) => {
-            tracing::error!("Failed to read completion token for step {}: {:?}", id, e);
-            None
-        }
-    }
-}
-
 /// Clears a step's completion token because it is being handed to a runner, which
 /// reports the result itself and never holds the token.
 pub async fn clear_step_completion_token<'a, E>(
@@ -475,6 +247,25 @@ where
         .bind(id)
         .execute(executor)
         .await?;
+    Ok(())
+}
+
+/// Takes a step back from runners for the engine to finish: it gets a new completion
+/// token, so from now on only a report from the engine is accepted, and none from a
+/// runner that may have received it.
+pub async fn take_step_back_from_runners<'a, E>(
+    executor: E,
+    id: StepInstanceId,
+) -> Result<(), sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    sqlx::query(
+        "UPDATE step_instances SET completion_token = gen_random_uuid()::text WHERE id = $1",
+    )
+    .bind(id)
+    .execute(executor)
+    .await?;
     Ok(())
 }
 
@@ -636,4 +427,164 @@ where
     .execute(executor)
     .await?;
     Ok(result.rows_affected() > 0)
+}
+
+/// Records that a claimed step's task message is about to be published to a runner.
+pub async fn mark_step_published<'a, E>(
+    executor: E,
+    id: StepInstanceId,
+) -> Result<PgQueryResult, sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    sqlx::query("UPDATE step_instances SET dispatched_at = NOW() WHERE id = $1")
+        .bind(id)
+        .execute(executor)
+        .await
+}
+
+/// Records that the engine process `engine_id` is starting a claimed step itself. A
+/// step marked and then lost is failed; one started and not marked would never end.
+pub async fn set_step_run_by_engine<'a, E>(
+    executor: E,
+    id: StepInstanceId,
+    engine_id: uuid::Uuid,
+) -> Result<PgQueryResult, sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    sqlx::query("UPDATE step_instances SET dispatched_at = NOW(), engine_id = $2 WHERE id = $1")
+        .bind(id)
+        .bind(engine_id)
+        .execute(executor)
+        .await
+}
+
+/// A built-in step whose engine stopped sending heartbeats before it finished.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct LostEngineStep {
+    pub id: StepInstanceId,
+    pub run_id: RunId,
+    pub fencing_token: i64,
+    pub completion_token: Option<String>,
+}
+
+/// Takes the built-in steps whose engine has sent no heartbeat for `lost_after`,
+/// and forgets which engine ran them, so that each is taken once. They stay locked
+/// until the transaction ends.
+///
+/// Steps of the `rerunnable` types are left for [`reset_lost_engine_steps`]. Each
+/// statement sees what other transactions committed before it began, so a step can
+/// become lost after that query ran in the same transaction (a stalled engine that
+/// starts one more step, say); without this filter it would be failed here instead of
+/// run again.
+pub async fn take_lost_engine_steps(
+    tx: &mut sqlx::PgConnection,
+    lost_after: std::time::Duration,
+    rerunnable: &[&str],
+) -> Result<Vec<LostEngineStep>, sqlx::Error> {
+    sqlx::query_as(
+        r#"
+        WITH lost AS (
+            SELECT s.id
+            FROM step_instances s
+            JOIN engine_instances e ON s.engine_id = e.id
+            WHERE s.status IN ('initializing', 'running')
+              AND NOT s.step_type = ANY($2)
+              AND e.last_heartbeat_at < NOW() - make_interval(secs => $1)
+            FOR UPDATE OF s SKIP LOCKED
+        )
+        UPDATE step_instances s
+        SET engine_id = NULL
+        FROM lost, workflow_runs wr
+        WHERE s.id = lost.id AND wr.id = s.run_id
+        RETURNING s.id, s.run_id, wr.fencing_token, s.completion_token
+        "#,
+    )
+    .bind(lost_after.as_secs_f64())
+    .bind(rerunnable)
+    .fetch_all(tx)
+    .await
+}
+
+/// Forgets engines that have sent no heartbeat for `gone_after` and are running
+/// no step.
+pub async fn delete_gone_engines<'a, E>(
+    executor: E,
+    gone_after: std::time::Duration,
+) -> Result<PgQueryResult, sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    sqlx::query(
+        r#"
+        DELETE FROM engine_instances e
+        WHERE e.last_heartbeat_at < NOW() - make_interval(secs => $1)
+          AND NOT EXISTS (
+              SELECT 1 FROM step_instances s
+              WHERE s.engine_id = e.id AND s.status IN ('initializing', 'running')
+          )
+        "#,
+    )
+    .bind(gone_after.as_secs_f64())
+    .execute(executor)
+    .await
+}
+
+/// Running runs with a step created more than `older_than` ago and still pending.
+/// Dispatch happens when a run's events arrive; a run whose steps were all put back to
+/// pending has none coming. A run whose steps wait for its concurrency limit is listed
+/// too, and dispatching it again finds no room, which costs a query.
+pub async fn runs_with_waiting_steps<'a, E>(
+    executor: E,
+    older_than: std::time::Duration,
+) -> Result<Vec<RunId>, sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    sqlx::query_scalar(
+        r#"
+        SELECT DISTINCT si.run_id
+        FROM step_instances si
+        JOIN workflow_runs wr ON wr.id = si.run_id
+        WHERE wr.status = 'running'
+          AND si.status = 'pending'
+          AND si.step_type NOT IN ('Approval', 'Wait')
+          AND si.created_at < NOW() - make_interval(secs => $1)
+          AND (si.retry_at IS NULL OR si.retry_at <= NOW())
+        "#,
+    )
+    .bind(older_than.as_secs_f64())
+    .fetch_all(executor)
+    .await
+}
+
+/// How many times a step has been run, counting the run in progress.
+pub async fn step_attempt<'a, E>(executor: E, id: StepInstanceId) -> Result<i32, sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    sqlx::query_scalar("SELECT attempt FROM step_instances WHERE id = $1")
+        .bind(id)
+        .fetch_one(executor)
+        .await
+}
+
+/// Running runs with a step whose wait before its next attempt is over.
+pub async fn runs_with_due_retries<'a, E>(executor: E) -> Result<Vec<RunId>, sqlx::Error>
+where
+    E: Executor<'a, Database = Postgres>,
+{
+    sqlx::query_scalar(
+        r#"
+        SELECT DISTINCT si.run_id
+        FROM step_instances si
+        JOIN workflow_runs wr ON wr.id = si.run_id
+        WHERE si.retry_at <= NOW()
+          AND si.status = 'pending'
+          AND wr.status = 'running'
+        "#,
+    )
+    .fetch_all(executor)
+    .await
 }

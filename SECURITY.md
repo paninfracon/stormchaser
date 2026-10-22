@@ -2,12 +2,20 @@
 
 ## Supported Versions
 
-Currently, Stormchaser is in active development. Only the latest version is supported for security updates.
+Stormchaser is in active development. Only the latest release is supported for security updates.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| v0.1.x  | :white_check_mark: |
-| < v0.1.x| :x:                |
+| Version | Supported |
+| ------- | --------- |
+| 1.5.x   | Yes       |
+| < 1.5   | No        |
+
+## How Stormchaser is secured
+
+[docs/security.md](docs/security.md) describes authentication, the authorization
+policy, transport security, what operators must provide (such as encryption of the
+database at rest), and the known limitations of the current release.
+[docs/nats.md](docs/nats.md) covers securing the NATS broker, and
+[docs/opa-rbac.md](docs/opa-rbac.md) writing your own policy.
 
 ## Reporting a Vulnerability
 

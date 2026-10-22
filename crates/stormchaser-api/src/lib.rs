@@ -3,18 +3,10 @@
 
 /// The interactive API documentation
 pub mod api_docs;
-/// Authentication and authorization module
-pub mod auth;
-/// Per-object authorization
-pub mod authz;
-/// Configuration module
-pub mod config;
 /// Database access module
 pub mod db;
 /// Human-in-the-loop module
 pub mod hitl;
-/// The HTTP listener, with or without TLS.
-pub mod listener;
 /// API routes module
 pub mod routes;
 /// Setup module
@@ -24,7 +16,7 @@ pub mod telemetry;
 
 use async_nats::Client;
 use auth::opa::opa_middleware;
-pub use auth::{AuthClaims, Claims, JWT_SECRET};
+pub use auth::{sign_local_token, AuthClaims, Claims, JWT_SECRET};
 use axum::extract;
 use axum::{
     http::StatusCode,
@@ -38,7 +30,8 @@ use sqlx::PgPool;
 use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use stormchaser_model::auth::OpaAuthorizer;
+use stormchaser_core::LogBackend;
+pub use stormchaser_core::{access as authz, auth, config, listener};
 use stormchaser_model::connections::ArtifactRegistry;
 use stormchaser_model::connections::Connection;
 use stormchaser_model::connections::ConnectionType;
@@ -49,7 +42,7 @@ use stormchaser_model::test_report::TestCase;
 use stormchaser_model::test_report::TestCaseStatus;
 use stormchaser_model::test_report::TestReport;
 use stormchaser_model::test_report::TestSummary;
-use stormchaser_model::LogBackend;
+use stormchaser_opa::OpaAuthorizer;
 use tokio::sync;
 /// Rate limiting middleware and configuration
 pub mod rate_limit;
@@ -111,7 +104,12 @@ pub use routes::*;
         routes::step::stream_run_status_api,
         routes::schema::get_schema,
         hitl::approve_step_link_page,
-        hitl::approve_step_link
+        hitl::approve_step_link,
+        hitl::approve_step,
+        hitl::reject_step,
+        hitl::correlate_event,
+        routes::webhook::update_webhook,
+        routes::schema::parse_git
     ),
     components(
         schemas(
@@ -128,7 +126,9 @@ pub use routes::*;
             TestSummary, TestReport,
             CreateWebhookRequest, CreateEventRuleRequest,
             WebhookConfig, EventRule,
-            DirectRunRequest
+            DirectRunRequest, UpdateWebhookRequest, ParseGitRequest,
+            TestReportSummary, TestSummaryResponse, TestReportContent,
+            TestConnectionRequest, TestConnectionResponse
         )
     ),
     tags(
@@ -143,10 +143,33 @@ pub use routes::*;
     ),
     security(
         ("bearer_auth" = [])
-    )
+    ),
+    modifiers(&BearerAuth)
 )]
 /// OpenAPI documentation struct for the API
 pub struct ApiDoc;
+
+/// Defines the `bearer_auth` scheme the operations name: a token from `/auth/exchange`
+/// or the identity provider, sent as `Authorization: Bearer <token>`.
+struct BearerAuth;
+
+impl utoipa::Modify for BearerAuth {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
+        openapi
+            .components
+            .get_or_insert_with(Default::default)
+            .add_security_scheme(
+                "bearer_auth",
+                SecurityScheme::Http(
+                    HttpBuilder::new()
+                        .scheme(HttpAuthScheme::Bearer)
+                        .bearer_format("JWT")
+                        .build(),
+                ),
+            );
+    }
+}
 
 /// Counter metric for tracking the total number of enqueued workflow runs
 pub static RUNS_ENQUEUED: Lazy<Counter<u64>> = Lazy::new(|| {
@@ -177,6 +200,21 @@ pub struct AppState {
     pub api_base_url: String,
     /// Additional `Host` header values the MCP server accepts
     pub mcp_allowed_hosts: Vec<String>,
+}
+
+impl stormchaser_core::service::ServiceState for AppState {
+    fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+    fn opa(&self) -> &Arc<dyn OpaAuthorizer> {
+        &self.opa
+    }
+    fn oidc_config(&self) -> Option<&auth::jwks::OidcConfig> {
+        self.oidc_config.as_ref()
+    }
+    fn jwks(&self) -> &Arc<RwLock<auth::jwks::JwksCache>> {
+        &self.jwks
+    }
 }
 
 /// Whether Swagger UI and the OpenAPI document are served (`STORMCHASER_API_DOCS=true`).
@@ -273,17 +311,17 @@ pub fn app(state: AppState) -> Router {
         // Runs after the two below: who may act on the object the path names.
         .layer(middleware::from_fn_with_state(
             state.clone(),
-            authz::authorize_object,
+            authz::authorize_object::<AppState>,
         ))
         .layer(middleware::from_fn_with_state(
             state.clone(),
-            opa_middleware,
+            opa_middleware::<AppState>,
         ))
         // Added last so it runs first: unauthenticated requests get 401 before policy
         // is consulted.
         .layer(middleware::from_fn_with_state(
             state.clone(),
-            auth::require_auth,
+            auth::require_auth::<AppState>,
         ));
 
     // The MCP transport is governed by policy alone (see docs/security.md): clients
@@ -298,7 +336,7 @@ pub fn app(state: AppState) -> Router {
     }
     let policy_only_routes = policy_only_routes.layer(middleware::from_fn_with_state(
         state.clone(),
-        opa_middleware,
+        opa_middleware::<AppState>,
     ));
 
     let api_v1 = Router::new()

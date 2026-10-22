@@ -1,6 +1,5 @@
-use crate::handler::{fetch_outputs, fetch_run_context, fetch_step_instance};
+use crate::handler::{fetch_outputs, fetch_run_context};
 use anyhow::Result;
-use chrono::Utc;
 use serde_json::Value;
 use sqlx::PgPool;
 use std::time::Duration;
@@ -15,21 +14,13 @@ pub async fn handle_webhook_invoke(
     step_id: StepInstanceId,
     spec: Value,
     pool: PgPool,
-    nats_client: async_nats::Client,
 ) -> Result<()> {
     let spec: WebhookInvokeSpec = serde_json::from_value(spec)?;
 
     info!("Invoking webhook {} for run {}", spec.url, run_id);
 
     // 1. Mark as Running
-    let instance = fetch_step_instance(step_id, &pool).await?;
-    let machine =
-        crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::from_instance(
-            instance,
-        );
-    let _ = machine
-        .start("webhook".to_string(), &mut *pool.acquire().await?)
-        .await?;
+    crate::handler::integrations::utils::start_built_in(&pool, step_id, "webhook").await?;
 
     // 2. Prepare Context for Template Rendering
     let run_context = fetch_run_context(run_id, &pool).await?;
@@ -47,7 +38,7 @@ pub async fn handle_webhook_invoke(
     let rendered_body = render_webhook_body(&spec, &template_ctx)?;
 
     // 4. Build and Execute Request
-    execute_webhook_request(run_id, step_id, &spec, rendered_body, pool, nats_client).await
+    execute_webhook_request(run_id, step_id, &spec, rendered_body, pool).await
 }
 
 use stormchaser_model::dsl;
@@ -72,9 +63,8 @@ async fn execute_webhook_request(
     spec: &dsl::WebhookInvokeSpec,
     rendered_body: Option<String>,
     pool: PgPool,
-    nats_client: async_nats::Client,
 ) -> Result<()> {
-    let (client, url) = stormchaser_model::net_guard::guarded_client(&spec.url).await?;
+    let (client, url) = stormchaser_core::net_guard::guarded_client(&spec.url).await?;
     let method = match spec
         .method
         .as_deref()
@@ -112,33 +102,17 @@ async fn execute_webhook_request(
     let status = res.status();
 
     if status.is_success() {
-        let body_bytes = stormchaser_model::net_guard::read_body_capped(
+        let body_bytes = stormchaser_core::net_guard::read_body_capped(
             res,
-            stormchaser_model::net_guard::MAX_RESPONSE_BYTES,
+            stormchaser_core::net_guard::MAX_RESPONSE_BYTES,
         )
         .await?;
         let body_val: Value = serde_json::from_slice(&body_bytes).unwrap_or_else(
             |_| serde_json::json!({ "text": String::from_utf8_lossy(&body_bytes) }),
         );
 
-        let instance = fetch_step_instance(step_id, &pool).await?;
-        let machine =
-            crate::step_machine::StepMachine::<crate::step_machine::state::Running>::from_instance(
-                instance,
-            );
-        let _ = machine.succeed(&mut *pool.acquire().await?).await?;
-
-        let event = serde_json::json!({
-            "run_id": run_id,
-            "step_id": step_id,
-            "event_type": "step_completed",
-            "outputs": body_val,
-            "timestamp": Utc::now(),
-        });
-        let js = async_nats::jetstream::new(nats_client);
-        js.publish("stormchaser.step.completed", event.to_string().into())
-            .await?;
-        Ok(())
+        let outputs = std::collections::HashMap::from([("response".to_string(), body_val)]);
+        super::utils::report_step_completed(&pool, run_id, step_id, 0, Some(outputs)).await
     } else {
         let error_body = res
             .text()

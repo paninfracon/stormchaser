@@ -60,11 +60,13 @@ pub async fn archive_and_delete_workflow_run(
         r#"
         INSERT INTO archived_step_instances (
             id, run_id, step_name, step_type, status, iteration_index, runner_id,
-            affinity_context, started_at, finished_at, exit_code, error, spec, params, created_at
+            affinity_context, started_at, finished_at, exit_code, error, spec, params, created_at,
+            attempt
         )
         SELECT
             id, run_id, step_name, step_type, status, iteration_index, runner_id,
-            affinity_context, started_at, finished_at, exit_code, error, spec, params, created_at
+            affinity_context, started_at, finished_at, exit_code, error, spec, params, created_at,
+            attempt
         FROM step_instances WHERE run_id = $1
         "#,
     )
@@ -177,4 +179,29 @@ pub async fn archive_and_delete_workflow_run(
         .await?;
 
     Ok(())
+}
+
+/// Deletes up to `limit` archived runs that finished more than `older_than` ago, with
+/// everything archived with them, and returns how many it deleted.
+pub async fn purge_archived_runs(
+    conn: &mut sqlx::PgConnection,
+    older_than: std::time::Duration,
+    limit: i64,
+) -> Result<u64, sqlx::Error> {
+    let runs: Vec<uuid::Uuid> = sqlx::query_scalar(
+        r#"
+        SELECT id FROM archived_workflow_runs
+        WHERE COALESCE(finished_at, created_at) < NOW() - make_interval(secs => $1)
+        ORDER BY COALESCE(finished_at, created_at)
+        LIMIT $2
+        "#,
+    )
+    .bind(older_than.as_secs_f64())
+    .bind(limit)
+    .fetch_all(&mut *conn)
+    .await?;
+    if runs.is_empty() {
+        return Ok(0);
+    }
+    stormchaser_core::db::delete_archived_runs(conn, &runs).await
 }

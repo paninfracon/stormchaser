@@ -5,7 +5,6 @@ use axum::{
     http::{Request, StatusCode},
 };
 use chrono::Utc;
-use jsonwebtoken::{encode, EncodingKey, Header};
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 
@@ -14,7 +13,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::Once;
 use stormchaser_api::{app, AppState, Claims, JWT_SECRET};
-use stormchaser_model::auth::OpaClient;
+use stormchaser_opa::OpaClient;
 
 use stormchaser_model::RunId;
 use tower::ServiceExt;
@@ -79,12 +78,7 @@ fn get_token() -> String {
         exp: (Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
         groups: Vec::new(),
     };
-    encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(JWT_SECRET),
-    )
-    .unwrap()
+    stormchaser_api::sign_local_token(&claims, JWT_SECRET).unwrap()
 }
 
 #[tokio::test]
@@ -748,6 +742,7 @@ async fn test_get_workflow_run_not_found() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
+/// Only a finished run can be deleted: a running one keeps its steps on runners.
 #[tokio::test]
 async fn test_delete_workflow_run() {
     let app = match setup_app().await {
@@ -755,7 +750,6 @@ async fn test_delete_workflow_run() {
         None => return,
     };
 
-    let run_id = Uuid::new_v4();
     let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
         dotenvy::dotenv().ok();
         format!(
@@ -766,59 +760,193 @@ async fn test_delete_workflow_run() {
     });
     let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
 
+    let delete = |run_id: Uuid| {
+        let app = app.clone();
+        async move {
+            app.oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!("/api/v1/runs/{}", run_id))
+                    .header(AUTHORIZATION, format!("Bearer {}", get_token()))
+                    .extension(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 12345))))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .status()
+        }
+    };
+
+    let run_id = Uuid::new_v4();
     sqlx::query("INSERT INTO workflow_runs (id, workflow_name, initiating_user, repo_url, workflow_path, git_ref, status, fencing_token) VALUES ($1, 'wf', 'u', 'r', 'p', 'g', 'running'::run_status, 1)")
         .bind(run_id)
         .execute(&pool)
         .await
         .unwrap();
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
-    let response = app
+    assert_eq!(delete(run_id).await, StatusCode::CONFLICT);
+    let still_there: bool =
+        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM workflow_runs WHERE id = $1)")
+            .bind(run_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(still_there, "a running run was deleted");
+
+    sqlx::query("UPDATE workflow_runs SET status = 'failed' WHERE id = $1")
+        .bind(run_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(delete(run_id).await, StatusCode::NO_CONTENT);
+    assert_eq!(delete(run_id).await, StatusCode::NOT_FOUND);
+}
+
+/// Deleting an archived run deletes what was archived with it, some of which does not
+/// cascade from the run
+#[tokio::test]
+async fn test_delete_archived_workflow_run() {
+    let (app, pool) = match setup_app_with_pool().await {
+        Some(a) => a,
+        None => return,
+    };
+
+    let run_id = Uuid::new_v4();
+    let step_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO archived_workflow_runs (id, workflow_name, status, version, fencing_token, created_at, updated_at, finished_at, repo_url, workflow_path, git_ref, initiating_user) \
+         VALUES ($1, 'wf', 'succeeded', 1, 1, NOW(), NOW(), NOW(), '', '', '', 'u')",
+    )
+    .bind(run_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO archived_step_instances (id, run_id, step_name, step_type, status, created_at) VALUES ($1, $2, 'build', 'RunContainer', 'succeeded', NOW())",
+    )
+    .bind(step_id)
+    .bind(run_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO archived_step_status_history (id, step_instance_id, status, created_at) VALUES ((random() * 1e15)::bigint, $1, 'succeeded', NOW())")
+        .bind(step_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let status = app
         .oneshot(
             Request::builder()
                 .method("DELETE")
                 .uri(format!("/api/v1/runs/{}", run_id))
                 .header(AUTHORIZATION, format!("Bearer {}", get_token()))
-                .extension(ConnectInfo(addr))
+                .extension(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 12345))))
                 .body(Body::empty())
                 .unwrap(),
         )
         .await
-        .unwrap();
+        .unwrap()
+        .status();
+    assert_eq!(status, StatusCode::NO_CONTENT);
 
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    let history: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM archived_step_status_history WHERE step_instance_id = $1",
+    )
+    .bind(step_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(history, 0, "the run's step history was left behind");
+}
+
+async fn post_direct_run(app: axum::Router, dsl: &str) -> axum::response::Response {
+    let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
+    app.oneshot(
+        Request::builder()
+            .method("POST")
+            .uri("/api/v1/runs/direct")
+            .header(AUTHORIZATION, format!("Bearer {}", get_token()))
+            .header("Content-Type", stormchaser_model::APPLICATION_JSON)
+            .extension(ConnectInfo(addr))
+            .body(Body::from(
+                serde_json::to_vec(&json!({ "dsl": dsl, "inputs": {} })).unwrap(),
+            ))
+            .unwrap(),
+    )
+    .await
+    .unwrap()
 }
 
 #[tokio::test]
 async fn test_direct_run() {
+    let (app, pool) = match setup_app_with_pool().await {
+        Some(a) => a,
+        None => return,
+    };
+
+    let response =
+        post_direct_run(app, "stormchaser_dsl_version = \"v1\"\nworkflow \"wf\" {}").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let run_id = body["run_id"].as_str().unwrap().to_string();
+
+    // Queued in the outbox, for the engine's relay to publish
+    let queued: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM outbox_events WHERE subject LIKE '%.run.direct' AND payload LIKE '%' || $1 || '%'",
+    )
+    .bind(&run_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(queued, 1);
+    sqlx::query("DELETE FROM outbox_events WHERE payload LIKE '%' || $1 || '%'")
+        .bind(&run_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_direct_run_that_does_not_parse_is_refused_with_why() {
     let app = match setup_app().await {
         Some(a) => a,
         None => return,
     };
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/v1/runs/direct")
-                .header(AUTHORIZATION, format!("Bearer {}", get_token()))
-                .header("Content-Type", stormchaser_model::APPLICATION_JSON)
-                .extension(ConnectInfo(addr))
-                .body(Body::from(
-                    serde_json::to_vec(&json!({
-                        "dsl": "stormchaser_dsl_version = \"v1\"\nworkflow \"wf\" {}",
-                        "inputs": {},
-                        "secrets": {}
-                    }))
-                    .unwrap(),
-                ))
-                .unwrap(),
-        )
+    let response = post_direct_run(
+        app,
+        r#"
+        stormchaser_dsl_version = "v1"
+        workflow "wf" {
+            step_library "base" {
+                type = "RunContainer"
+                spec { image = "alpine:${params.tag}" }
+            }
+            steps {
+                step "s" "base" {}
+            }
+        }
+        "#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
+    let body = String::from_utf8_lossy(&body);
+    assert!(
+        body.contains(
+            "Step 's' uses params.tag, which neither it nor its step library 'base' sets"
+        ),
+        "{body}"
+    );
 }
 
 #[tokio::test]
@@ -872,7 +1000,7 @@ async fn test_run_from_git() {
 
     // Verify git file system cache only has the `.storm` file.
     let temp_dir = tempfile::tempdir().unwrap();
-    let git_cache = stormchaser_engine::git_cache::GitCache::new(temp_dir.path());
+    let git_cache = stormchaser_core::git_cache::GitCache::new(temp_dir.path());
     let repo_url = "https://github.com/paninfracon/stormchaser";
     let git_ref = "trunk";
     let workflow_path = "tests/hello-world.storm";
@@ -957,7 +1085,7 @@ async fn test_run_from_git() {
     // Steps report as a runner the engine has issued a key to: a step no runner has
     // claimed takes a result only from such a runner
     let runner_id = format!("test-runner-{}", uuid::Uuid::new_v4());
-    stormchaser_engine::db::store_runner_session(&pool, &runner_id, &[5u8; 32])
+    stormchaser_core::db::store_runner_session(&pool, &runner_id, &[5u8; 32])
         .await
         .unwrap();
 

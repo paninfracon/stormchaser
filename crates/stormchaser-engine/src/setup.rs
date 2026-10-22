@@ -1,12 +1,11 @@
 use crate::config::Config;
-use anyhow::Context;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::ConnectOptions;
 use std::sync::Arc;
 use std::time::Duration;
-use stormchaser_model::auth::OpaClient;
-use stormchaser_model::LogBackend;
-use stormchaser_opa::OpaWasmInstance;
+use stormchaser_core::LogBackend;
+use stormchaser_opa::OpaClient;
+use stormchaser_opa::PolicyConfig;
 use stormchaser_tls::TlsConfig;
 use stormchaser_tls::TlsReloader;
 
@@ -21,17 +20,25 @@ pub async fn setup_tls(config: &Config) -> anyhow::Result<Arc<TlsReloader>> {
     Ok(Arc::new(TlsReloader::new(tls_config).await?))
 }
 
+/// The database pool, once the schema is ready (see [`stormchaser_core::db::migrations::prepare`]).
 pub async fn setup_database(config: &Config) -> anyhow::Result<sqlx::PgPool> {
-    let mut db_options = stormchaser_model::db_tls::connect_options(
+    let pool = connect_database(config).await?;
+    stormchaser_core::db::migrations::prepare(&pool).await?;
+    Ok(pool)
+}
+
+/// The database pool, with nothing done to the schema.
+pub async fn connect_database(config: &Config) -> anyhow::Result<sqlx::PgPool> {
+    let mut db_options = stormchaser_core::db_tls::connect_options(
         &config.database_url,
-        &stormchaser_model::db_tls::DbTls {
+        &stormchaser_core::db_tls::DbTls {
             setting: config.db_ssl,
             ca: config.tls_ca_cert_path.as_deref(),
             cert: &config.tls_cert_path,
             key: &config.tls_key_path,
         },
     )?;
-    if !stormchaser_model::db_tls::is_verified(&db_options) {
+    if !stormchaser_core::db_tls::is_verified(&db_options) {
         tracing::warn!(
             "The database connection is not verified TLS, because STORMCHASER_DB_SSL=false \
              or DATABASE_URL asks for a weaker sslmode. Only do this where the database \
@@ -44,32 +51,24 @@ pub async fn setup_database(config: &Config) -> anyhow::Result<sqlx::PgPool> {
         .log_slow_statements(log::LevelFilter::Warn, Duration::from_secs(1));
 
     let pool = PgPoolOptions::new()
-        .max_connections(5)
+        .max_connections(stormchaser_core::db_tls::max_connections()?)
         .connect_with(db_options)
         .await?;
-
-    tracing::info!("Running database migrations...");
-    sqlx::migrate!("./migrations").run(&pool).await?;
-    tracing::info!("Database migrations completed successfully");
 
     Ok(pool)
 }
 
 pub fn setup_opa(config: &Config, tls_reloader: &TlsReloader) -> anyhow::Result<Arc<OpaClient>> {
-    let mut opa_client = OpaClient::new(config.opa_url.clone(), Some(tls_reloader.client_config()));
-
-    if let Some(wasm_path) = &config.opa_wasm_path {
-        tracing::info!("Loading OPA WASM policy from {:?}", wasm_path);
-        let wasm_bytes = std::fs::read(wasm_path).context("Failed to read OPA WASM policy")?;
-        let executor = OpaWasmInstance::new(&wasm_bytes)?;
-        opa_client = opa_client.with_wasm_executor(Arc::new(executor));
-    }
-
-    if let Some(entrypoint) = config.opa_entrypoint.clone() {
-        opa_client = opa_client.with_entrypoint(entrypoint);
-    }
-
-    Ok(Arc::new(opa_client))
+    Ok(Arc::new(stormchaser_opa::policy_client(
+        &PolicyConfig {
+            url: config.opa_url.clone(),
+            wasm_path: config.opa_wasm_path.clone(),
+            data_path: config.opa_data_path.clone(),
+            entrypoint: config.opa_entrypoint.clone(),
+            disabled: config.authz_disabled,
+        },
+        Some(tls_reloader.client_config()),
+    )?))
 }
 
 pub fn setup_log_backend(config: &Config) -> Arc<Option<LogBackend>> {

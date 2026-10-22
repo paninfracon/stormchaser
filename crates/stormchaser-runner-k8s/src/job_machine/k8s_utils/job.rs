@@ -5,22 +5,9 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 
 use super::*;
 
-/// The name of a step's Job: `storm-`, as much of the step's name as fits, and the
-/// step's full id. Kubernetes limits Job names to 63 characters; the id is what keeps
-/// them apart, so it is never shortened.
+/// The name of a step's Job (see [`stormchaser_model::runner::workload_name`]).
 pub fn job_name(step_name: &str, step_id: uuid::Uuid) -> String {
-    let readable: String = step_name
-        .to_lowercase()
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .take(20)
-        .collect();
-    let readable = readable.trim_matches('-');
-    if readable.is_empty() {
-        format!("storm-{step_id}")
-    } else {
-        format!("storm-{readable}-{step_id}")
-    }
+    stormchaser_model::runner::workload_name(step_name, step_id)
 }
 
 pub fn do_build_job_spec(
@@ -95,6 +82,10 @@ pub fn do_build_job_spec(
             metadata.fencing_token.to_string(),
         ),
     ]);
+    match metadata.attempt {
+        Some(attempt) => labels.insert("stormchaser-attempt".to_string(), attempt.to_string()),
+        None => labels.remove("stormchaser-attempt"),
+    };
 
     // Job Annotations. The step's definition is kept so that a restarted runner can pick
     // the step up again. Encrypted, it is kept whole; in clear, it is kept without the
@@ -140,14 +131,9 @@ pub fn do_build_job_spec(
         },
         spec: Some(JobSpec {
             template: pod_template,
-            backoff_limit: Some(step_spec.backoff_limit.unwrap_or_else(|| {
-                metadata
-                    .step_dsl
-                    .retry
-                    .as_ref()
-                    .map(|r| r.count as i32)
-                    .unwrap_or(0)
-            })),
+            // The engine retries a step as its `retry` policy says; Kubernetes retrying
+            // the pod as well would multiply the attempts
+            backoff_limit: Some(step_spec.backoff_limit.unwrap_or(0)),
             completions: Some(step_spec.completions.unwrap_or(1)),
             parallelism: Some(step_spec.parallelism.unwrap_or(1)),
             // Kubernetes ends the Job, and its pods, when this runs out

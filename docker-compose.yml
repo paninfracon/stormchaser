@@ -163,6 +163,31 @@ services:
       - ${STORMCHASER_CERT_DIR:-./tests/certs}:/src:ro
       - certs:/certs
 
+  # Applies the database migrations, then exits. The API and the engine wait for the
+  # schema at start-up, and start once this has finished.
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BINARY: stormchaser-engine
+    command: ["/usr/local/bin/stormchaser-engine", "migrate"]
+    environment:
+      DATABASE_URL: 'postgres://stormchaser:${STORMCHASER_DEV_PASSWORD?Error: STORMCHASER_DEV_PASSWORD is not set}@postgres:5432/stormchaser'
+      # No TLS on this local stack; see orchestration-engine
+      STORMCHASER_DB_SSL: 'false'
+      RUST_LOG: ${RUST_LOG:-info}
+      TLS_CA_CERT_PATH: /etc/engine/certs/ca.crt
+      TLS_CERT_PATH: /etc/engine/certs/tls.crt
+      TLS_KEY_PATH: /etc/engine/certs/tls.key
+    volumes:
+      - certs:/etc/engine/certs:ro
+    depends_on:
+      certs:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+
   orchestration-engine:
     build:
       context: .
@@ -190,7 +215,6 @@ services:
       AWS_ACCESS_KEY_ID: stormchaser
       AWS_SECRET_ACCESS_KEY: ${STORMCHASER_MINIO_PASSWORD:-stormchaser_dev_password}
       AWS_DEFAULT_REGION: us-east-1
-      S3_INTERNAL_URL: http://s3:9000
       TLS_CA_CERT_PATH: /etc/engine/certs/ca.crt
       TLS_CERT_PATH: /etc/engine/certs/tls.crt
       TLS_KEY_PATH: /etc/engine/certs/tls.key
@@ -198,6 +222,8 @@ services:
       - git-cache:/tmp/stormchaser/git-cache
       - certs:/etc/engine/certs:ro
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       certs:
         condition: service_completed_successfully
       postgres:
@@ -229,17 +255,15 @@ services:
       OIDC_CLIENT_ID: stormchaser-cli
       OIDC_CLIENT_SECRET: '${STORMCHASER_CLI_SECRET?Error: STORMCHASER_CLI_SECRET is not set}'
       LOKI_URL: http://loki:3100
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4317
-      OTEL_SERVICE_NAME: stormchaser-query
       OPA_URL: http://opa:8181/v1/data/stormchaser/allow
-      API_RATE_LIMIT_PER_SECOND: 10000
-      API_RATE_LIMIT_BURST_SIZE: 100000
       TLS_CA_CERT_PATH: /etc/engine/certs/ca.crt
       TLS_CERT_PATH: /etc/engine/certs/tls.crt
       TLS_KEY_PATH: /etc/engine/certs/tls.key
     volumes:
       - certs:/etc/engine/certs:ro
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       certs:
         condition: service_completed_successfully
       postgres:
@@ -300,6 +324,8 @@ services:
     volumes:
       - certs:/etc/engine/certs:ro
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       certs:
         condition: service_completed_successfully
       postgres:
@@ -324,7 +350,6 @@ services:
       QUERY_URL: http://orchestration-query:3001
       EXTERNAL_API_URL: http://localhost:${PORT_API:-3000}
       WEB_URL: http://localhost:${PORT_WEB:-3003}
-      RUST_LOG: ${RUST_LOG:-stormchaser_web=info}
       GRAFANA_URL: http://localhost:${PORT_GRAFANA:-3002}
     depends_on:
       - orchestration-api

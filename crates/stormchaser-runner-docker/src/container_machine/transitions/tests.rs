@@ -25,6 +25,7 @@ fn create_test_metadata(image: &str, cmd: Vec<&str>) -> ContainerMetadata {
         step_id: Uuid::new_v4(),
         runner_id: "test_runner".to_string(),
         fencing_token: 0,
+        attempt: None,
         step_dsl: Step {
             name: "test_step".to_string(),
             r#type: "RunContainer".to_string(),

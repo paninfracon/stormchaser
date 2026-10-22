@@ -4,8 +4,8 @@ pub mod archive;
 pub mod connections;
 /// Module for events.
 pub mod events;
-/// Module for outbox.
-pub mod outbox;
+/// The transactional outbox, shared with the API.
+pub use stormchaser_core::db::outbox;
 /// Module for quotas.
 pub mod quotas;
 /// Module for runners.

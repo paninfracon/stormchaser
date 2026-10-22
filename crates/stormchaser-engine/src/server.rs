@@ -5,8 +5,8 @@ use futures::StreamExt;
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
-use stormchaser_model::auth::OpaClient;
-use stormchaser_model::LogBackend;
+use stormchaser_core::LogBackend;
+use stormchaser_opa::OpaClient;
 use tokio::time::sleep;
 use tracing::info;
 
@@ -17,7 +17,6 @@ use stormchaser_tls::TlsReloader;
 
 use crate::router::handle_message;
 use crate::setup::*;
-use crate::workers::*;
 
 pub async fn setup_nats_consumers(
     nats_client: &async_nats::Client,
@@ -381,19 +380,24 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
         std::env::var("STORMCHASER_ASSIGNED_SHARDS").unwrap_or_else(|_| "0".to_string());
     let assigned_shards = parse_assigned_shards(&assigned_shards_env)?;
 
-    if assigned_shards.contains(&0) {
-        start_liveness_worker(pool.clone(), nats_client.clone());
-        start_timeout_worker(pool.clone(), nats_client.clone(), tls_reloader.clone());
-        start_resolver_crash_recovery_worker(pool.clone(), nats_client.clone());
-        let _outbox_relay_worker = start_outbox_relay_worker(pool.clone(), nats_client.clone());
-        start_task_message_purge_worker(pool.clone(), nats_client.clone());
-    }
+    // Before it takes any step, so that the steps it runs itself are never without one
+    let heartbeat = crate::engine_instance::start_heartbeat(pool.clone())
+        .await
+        .context("Failed to record the engine's first heartbeat")?;
 
     let (messages, query_messages) = setup_nats_consumers(&nats_client, &assigned_shards).await?;
 
+    // Whatever its shards, one replica at a time runs the background workers. After the
+    // consumers are set up, which creates the stream that the relay and purge work on.
+    let leader_election = crate::leader::start_leader_election(
+        pool.clone(),
+        nats_client.clone(),
+        tls_reloader.clone(),
+    );
+
     info!("Engine listening for events and queries");
 
-    run_event_loop(
+    let event_loop = run_event_loop(
         messages,
         query_messages,
         pool,
@@ -402,10 +406,15 @@ pub async fn run_engine(config: Config) -> anyhow::Result<()> {
         nats_client,
         tls_reloader,
         log_backend,
-    )
-    .await;
-
-    Ok(())
+    );
+    // Neither task ends unless it panics. An engine without its heartbeat would have its
+    // built-in steps failed under it, and one out of the leader election would never
+    // run the background workers; exiting lets it be restarted whole.
+    tokio::select! {
+        _ = event_loop => Ok(()),
+        ended = heartbeat => anyhow::bail!("The engine's heartbeat stopped: {:?}", ended),
+        ended = leader_election => anyhow::bail!("The leader election stopped: {:?}", ended),
+    }
 }
 
 #[cfg(test)]

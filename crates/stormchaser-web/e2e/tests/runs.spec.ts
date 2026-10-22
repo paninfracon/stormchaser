@@ -15,7 +15,7 @@ test.describe('Workflow Runs', () => {
               description: null,
               connection_type: "git",
               config: { repo_url: "https://github.com/example/repo" },
-              encrypted_credentials: null,
+              credentials: null,
               aws_assume_role_arn: null,
               is_default_sfs: false,
               ca_cert: null,
@@ -135,20 +135,27 @@ test.describe('Workflow Runs', () => {
             },
             steps: [{
               instance: {
-                id: "step-123",
+                id: "22222222-2222-2222-2222-222222222222",
+                run_id: "11111111-1111-1111-1111-111111111111",
                 step_name: "approval-step",
+                step_type: "approval",
                 status: "waiting_for_event",
-                requires_approval: true,
-                depends_on: [],
+                iteration_index: null,
+                runner_id: null,
+                affinity_context: null,
                 started_at: "2024-01-01T00:01:00Z",
-                finished_at: null
+                finished_at: null,
+                exit_code: null,
+                error: null,
+                spec: {},
+                params: {},
+                created_at: "2024-01-01T00:01:00Z"
               },
               outputs: [],
               history: [],
               logs: []
             }],
             artifacts: [],
-            test_summaries: [],
             test_cases: []
           })
         });
@@ -180,10 +187,56 @@ test.describe('Workflow Runs', () => {
     await page.locator('button', { hasText: 'Approve' }).click();
     expect(approveCalled).toBeTruthy();
 
-    // Verify Delete Run button
+    // A run that has not finished cannot be deleted, so it offers no Delete
+    await expect(page.locator('button', { hasText: 'Delete Run' })).toHaveCount(0);
+    expect(deleteCalled).toBeFalsy();
+  });
+  test('should offer Delete on a finished run', async ({ page }) => {
+    let deleteCalled = false;
+    const run = {
+      id: "33333333-3333-3333-3333-333333333333",
+      workflow_name: "finished-run",
+      initiating_user: "u",
+      repo_url: "https://github.com/example/repo",
+      workflow_path: "main.storm",
+      git_ref: "main",
+      version: 1,
+      status: "failed",
+      created_at: "2024-01-01T00:00:00Z",
+      updated_at: "2024-01-01T00:05:00Z",
+      started_resolving_at: null,
+      started_at: "2024-01-01T00:00:00Z",
+      finished_at: "2024-01-01T00:05:00Z",
+      error: "step failed",
+      inputs: {},
+      secrets: {}
+    };
+
+    await page.route('**/api/*', async route => {
+      const url = route.request().url();
+      if (url.includes('fetch_workflow_runs') || url.includes('FetchWorkflowRuns')) {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([run]) });
+      } else if (url.includes('fetch_workflow_run_detail') || url.includes('FetchWorkflowRunDetail')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ detail: run, steps: [], artifacts: [], test_cases: [] })
+        });
+      } else if (url.includes('delete_workflow_run') || url.includes('DeleteWorkflowRun')) {
+        deleteCalled = true;
+        await route.fulfill({ status: 200, body: JSON.stringify(null) });
+      } else {
+        await route.continue();
+      }
+    });
+
+    await page.goto('/approvals');
+    await page.locator('a', { hasText: 'Runs' }).click();
+    await page.locator('text=finished-run').click();
+
     await expect(page.locator('button', { hasText: 'Delete Run' })).toBeVisible();
     await page.locator('button', { hasText: 'Delete Run' }).click();
-    expect(deleteCalled).toBeTruthy();
+    await expect.poll(() => deleteCalled).toBeTruthy();
   });
   test('should sort workflow runs in the table', async ({ page }) => {
     await page.route('**/api/*', async route => {

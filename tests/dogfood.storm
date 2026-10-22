@@ -118,7 +118,6 @@ workflow "dogfood" {
     }
     provision "api_binary" {
       resource_type = "artifact"
-      name          = "api_binary"
       destination   = "/target/release/stormchaser-api"
     }
   }
@@ -126,9 +125,11 @@ workflow "dogfood" {
   steps {
     # 1. Build Phase
     # Compiles the Stormchaser API binary from the provisioned source code.
-    # This runs in a clean rust:nightly container.
+    # This runs in a clean rust:nightly-bookworm container.
     step "build" "RunContainer" {
-      image = "rustlang/rust:nightly"
+      # Bookworm, as the image Dockerfile.prebuilt runs it in: a binary built on a newer
+      # Debian needs a newer glibc than that image has
+      image = "rustlang/rust:nightly-bookworm"
       # A release build of the workspace needs more than the default step limits
       # (1 CPU, 2Gi): rustc is OOM-killed at 2Gi
       cpu    = "8"
@@ -139,7 +140,7 @@ workflow "dogfood" {
       env = [
         { name = "DATABASE_URL", value = "postgres://stormchaser:${inputs.db_password}@${inputs.host_ip}:${inputs.port_db}/stormchaser" }
       ]
-      command = ["/bin/sh", "-c"]
+      command = ["/bin/bash", "-c"]
       args = [<<-EOF
         set -eo pipefail
         apt-get update >/dev/null 2>&1
@@ -161,7 +162,7 @@ workflow "dogfood" {
     # volume at the end of this step, it only keeps the specific files needed for the
     # subsequent steps, discarding the massive intermediate `target/` compilation objects.
     step "test" "RunContainer" {
-      image  = "rustlang/rust:nightly"
+      image  = "rustlang/rust:nightly-bookworm"
       cpu    = "8"
       memory = "16Gi"
       storage_mounts = [
@@ -174,10 +175,13 @@ workflow "dogfood" {
       env = [
         { name = "DATABASE_URL", value = "postgres://stormchaser:${inputs.db_password}@${inputs.host_ip}:${inputs.port_db}/stormchaser" },
         { name = "NATS_URL", value = "nats://${inputs.host_ip}:${inputs.port_nats}" },
+        # The tests sign tokens with the API's dev-only secret. A release build, which
+        # this is, falls back to it only when told to
+        { name = "STORMCHASER_JWT_SECRET", value = "stormchaser-secret-dev-only" },
         { name = "NATS_USER", value = "stormchaser" },
         { name = "NATS_PASSWORD", value = inputs.nats_password }
       ]
-      command = ["/bin/sh", "-c"]
+      command = ["/bin/bash", "-c"]
       args = [<<-EOF
         set -eo pipefail
         apt-get update >/dev/null 2>&1
@@ -188,7 +192,10 @@ workflow "dogfood" {
         # test_run_from_git: requires outbound HTTPS access to github.com for a live git clone,
         #   which is not available inside this step container; run this test locally with the
         #   full service stack instead.
-        SQLX_OFFLINE=true cargo test --release -p stormchaser-api --jobs 1 -- --test-threads=1 -Z unstable-options --format junit --skip test_enterprise_opa_rbac_integration --skip test_mcp_opa_policy --skip test_run_from_git > tests.xml
+        # users_see_and_change_only_what_they_own, a_report_is_only_served_under_its_own_run,
+        #   starting_a_run_needs_use_of_its_git_connection: start an OPA container with
+        #   Docker, which this step container does not have.
+        SQLX_OFFLINE=true cargo test --release -p stormchaser-api --jobs 1 -- --test-threads=1 -Z unstable-options --format junit --skip test_enterprise_opa_rbac_integration --skip test_mcp_opa_policy --skip test_run_from_git --skip users_see_and_change_only_what_they_own --skip a_report_is_only_served_under_its_own_run --skip starting_a_run_needs_use_of_its_git_connection > tests.xml
       EOF
       ]
       reports {
@@ -218,8 +225,12 @@ workflow "dogfood" {
         # Dockerfile.prebuilt copies target/sit[e] so that only the web image gets site
         # assets. Docker copies nothing when the pattern matches nothing; buildah fails.
         mkdir -p target/site
-        buildah bud --storage-driver vfs -t ${inputs.host_ip}:${inputs.port_reg}/stormchaser-api:dogfood -f Dockerfile.prebuilt --build-arg BINARY=stormchaser-api .
-        buildah push --storage-driver vfs --tls-verify=false ${inputs.host_ip}:${inputs.port_reg}/stormchaser-api:dogfood
+        # The binary comes from the api_binary artifact, which keeps no file mode
+        chmod 0755 target/release/stormchaser-api
+        # A tag of this run's own: deploy names it, so the Deployment changes and Kubernetes
+        # replaces the API's pod. The same tag every run left the old pod serving.
+        buildah bud --storage-driver vfs -t ${inputs.host_ip}:${inputs.port_reg}/stormchaser-api:dogfood-${run.id} -f Dockerfile.prebuilt --build-arg BINARY=stormchaser-api .
+        buildah push --storage-driver vfs --tls-verify=false ${inputs.host_ip}:${inputs.port_reg}/stormchaser-api:dogfood-${run.id}
       EOF
       ]
       next = ["setup_certs"]
@@ -280,9 +291,12 @@ workflow "dogfood" {
         echo "$KUBECONFIG_DATA" > ~/.kube/config
         export KUBECONFIG=~/.kube/config
 
+        # Into the namespace setup_certs put the certificate and NATS credentials in
         helm upgrade --install stormchaser-dogfood /app/deploy/charts/stormchaser-orchestration \
-          --set global.image.repository=${inputs.host_ip}:${inputs.port_reg}/stormchaser-api \
-          --set global.image.tag=dogfood \
+          --namespace stormchaser-dogfood \
+          --set api.image.repository=${inputs.host_ip}:${inputs.port_reg}/stormchaser-api \
+          --set api.image.tag=dogfood-${run.id} \
+          --set api.image.pullPolicy=Always \
           --set global.database.ssl=false \
           --set "global.database.url=postgres://stormchaser:$DB_PASSWORD@${inputs.host_ip}:${inputs.port_db}/stormchaser" \
           --set global.nats.url=nats://${inputs.host_ip}:${inputs.port_nats} \

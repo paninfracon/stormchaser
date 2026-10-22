@@ -1,0 +1,57 @@
+[package]
+publish = true
+name = "stormchaser-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[features]
+default = []
+aws-cloudcontrol = ["dep:aws-config", "dep:aws-sdk-sts", "dep:aws-sdk-cloudcontrol"]
+
+[dependencies]
+stormchaser-model = { workspace = true }
+stormchaser-tls = { workspace = true, features = ["listener"] }
+stormchaser-opa = { version = "1.5.1", path = "../stormchaser-opa" }
+async-nats = { workspace = true }
+log = { workspace = true }
+axum = { workspace = true }
+jsonwebtoken = { workspace = true }
+reqwest = { workspace = true }
+reqwest-middleware = { workspace = true }
+reqwest-retry = { workspace = true }
+urlencoding = "2.1"
+url = { workspace = true }
+tokio-tungstenite = "0.30.0"
+tungstenite = "0.30.0"
+utoipa = { version = "6.0", features = ["axum_extras", "uuid", "chrono"] }
+aes-gcm = { workspace = true }
+anyhow = { workspace = true }
+base64 = { workspace = true }
+chrono = { workspace = true }
+git2 = { version = "0.21", features = ["vendored-openssl", "https", "ssh"] }
+hex = "0.4"
+humantime = "2.1"
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+sqlx = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+tokio = { workspace = true }
+futures = "0.3"
+libc = "0.2"
+jaq-core = { workspace = true }
+jaq-json = { workspace = true }
+jaq-std = { workspace = true }
+aws-config = { workspace = true, optional = true }
+aws-sdk-sts = { workspace = true, optional = true }
+aws-sdk-cloudcontrol = { version = "1.65.0", default-features = false, features = ["default-https-client", "rt-tokio"], optional = true }
+
+[dev-dependencies]
+rustls = { version = "0.23.46", features = ["ring"] }
+wiremock = "0.6"
+tempfile = "3.10"

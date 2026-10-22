@@ -5,12 +5,19 @@ import rego.v1
 # Stormchaser asks this policy four kinds of question, told apart by the shape of the
 # input:
 #
-#   request   {method, path, token}                      may this API request proceed?
-#   resource  {action, resource, subject, token}         may this user act on this object?
+#   request   {method, path, subject}                    may this API request proceed?
+#   resource  {action, resource, subject}                may this user act on this object?
 #   engine    {run_id, initiating_user, workflow_ast, inputs}   may this run start?
-#   approval  {run_id, initiating_user, step_ast, inputs, run_outputs, approver, token}
+#   approval  {run_id, initiating_user, step_ast, inputs, run_outputs, approver}
 #
 # Anything else is refused.
+#
+# subject and approver are the identity the API verified from the caller's token:
+# {sub, email, groups}. A request without a valid token has no subject. The token itself
+# is never sent.
+#
+# Stormchaser builds this file into its services as the policy they use when no other is
+# configured. After changing it, run scripts/build-opa-policy.sh.
 #
 # Deployment settings come from data.stormchaser_settings (see settings.json):
 #
@@ -50,15 +57,15 @@ is_request if {
 
 read_only_methods := {"GET", "HEAD", "OPTIONS"}
 
-token_is_empty if not input.token
+no_subject if not input.subject
 
-token_is_empty if input.token == null
+no_subject if input.subject == null
 
 # Requests without a token come from the MCP server, which does not pass the user's
 # token on. They may only read. (The login and token exchange endpoints legitimately
 # have no token.)
 request_denied if {
-	token_is_empty
+	no_subject
 	not input.method in read_only_methods
 	not startswith(input.path, "/api/v1/mcp")
 	input.path != "/api/v1/auth/exchange"
@@ -99,25 +106,12 @@ request_denied if {
 #
 # What is left to them is workflows in the repositories authors have registered.
 
-token_claims := payload if {
-	is_string(input.token)
-	[_, payload, _] := io.jwt.decode(input.token)
-} else := {}
-
 request_is_from_author if {
-	some group in object.get(token_claims, "groups", [])
+	some group in subject_groups
 	group in author_groups
 }
 
-request_is_from_author if {
-	some group in object.get(token_claims, "groups", [])
-	group in admin_groups
-}
-
-request_is_from_author if {
-	some claim in ["email", "sub"]
-	object.get(token_claims, claim, "") in admins
-}
+request_is_from_author if is_admin
 
 author_only_paths := {"/api/v1/runs/direct", "/api/v1/schema/hydrate-direct"}
 
@@ -136,7 +130,8 @@ request_denied if {
 
 # --- Who is asking ------------------------------------------------------------------
 
-# The API verifies the token before asking, and sends the verified subject and email.
+# The API verifies the token before asking, and sends who it identifies: subject id,
+# email and groups.
 subject_ids contains id if {
 	id := input.subject.sub
 	is_string(id)
@@ -149,10 +144,9 @@ subject_ids contains id if {
 	id != ""
 }
 
-token_groups := groups if {
-	is_string(input.token)
-	[_, payload, _] := io.jwt.decode(input.token)
-	groups := object.get(payload, "groups", [])
+subject_groups := groups if {
+	groups := input.subject.groups
+	is_array(groups)
 } else := []
 
 is_admin if {
@@ -161,7 +155,7 @@ is_admin if {
 }
 
 is_admin if {
-	some group in token_groups
+	some group in subject_groups
 	group in admin_groups
 }
 
@@ -274,6 +268,11 @@ approver_ids contains id if {
 	id != ""
 }
 
+approver_groups := groups if {
+	groups := input.approver.groups
+	is_array(groups)
+} else := []
+
 # With separation of duties on, whoever started a run may not approve its steps.
 approval_denied if {
 	separation_of_duties
@@ -295,7 +294,7 @@ approver_listed if {
 }
 
 approver_listed if {
-	some group in token_groups
+	some group in approver_groups
 	group in step_approvers
 }
 
@@ -305,7 +304,7 @@ approver_is_admin if {
 }
 
 approver_is_admin if {
-	some group in token_groups
+	some group in approver_groups
 	group in admin_groups
 }
 

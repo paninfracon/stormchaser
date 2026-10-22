@@ -6,7 +6,6 @@ use axum::{
     http::{header, Request, StatusCode},
 };
 use chrono::{Duration, Utc};
-use jsonwebtoken::{encode, EncodingKey, Header};
 use rustls::crypto::ring;
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
@@ -17,7 +16,7 @@ use std::str;
 use std::sync::Arc;
 use std::sync::Once;
 use stormchaser_api::{app, AppState, Claims, JWT_SECRET};
-use stormchaser_model::auth::OpaClient;
+use stormchaser_opa::OpaClient;
 use tokio::sync::RwLock;
 use tower::ServiceExt;
 
@@ -80,12 +79,7 @@ fn get_token() -> String {
         exp: (Utc::now() + Duration::hours(1)).timestamp() as usize,
         groups: Vec::new(),
     };
-    encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(JWT_SECRET),
-    )
-    .unwrap()
+    stormchaser_api::sign_local_token(&claims, JWT_SECRET).unwrap()
 }
 
 #[tokio::test]

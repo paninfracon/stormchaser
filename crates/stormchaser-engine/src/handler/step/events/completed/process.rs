@@ -10,6 +10,8 @@ use stormchaser_model::step::StepStatus;
 use stormchaser_model::RunId;
 use stormchaser_tls::TlsReloader;
 
+use super::super::helpers::step_lets_run_continue;
+
 #[allow(clippy::too_many_arguments)]
 pub async fn process_step_completion(
     dsl_step: &ast::Step,
@@ -75,17 +77,19 @@ async fn schedule_iterated_batches(
 
     let finished_instances = all_instances_of_this_step
         .iter()
-        .filter(|s| s.status == StepStatus::Succeeded || s.status == StepStatus::Skipped)
+        .filter(|s| step_lets_run_continue(&s.status))
         .count();
 
     let total_instances = all_instances_of_this_step.len();
 
     if finished_instances < total_instances {
         // Some instances are still running or waiting
-        let waiting_instances: Vec<&&StepInstance> = all_instances_of_this_step
+        let mut waiting_instances: Vec<&&StepInstance> = all_instances_of_this_step
             .iter()
             .filter(|s| s.status == StepStatus::WaitingForEvent)
             .collect();
+        // Iterations start in order, not in the order the database returned them
+        waiting_instances.sort_by_key(|s| s.iteration_index);
 
         if !waiting_instances.is_empty() {
             let running_or_pending = all_instances_of_this_step
@@ -113,8 +117,8 @@ async fn schedule_iterated_batches(
                 for next_instance in waiting_instances.iter().take(to_schedule as usize) {
                     let machine = crate::step_machine::StepMachine::<
                         crate::step_machine::state::WaitingForEvent,
-                    >::from_instance((**next_instance).clone());
-                    let _ = machine.reschedule(&mut *tx).await?;
+                    >::load((**next_instance).clone())?;
+                    machine.reschedule(&mut *tx).await?;
                 }
             }
         }
@@ -164,7 +168,7 @@ async fn evaluate_successors(
             !pred_instances.is_empty()
                 && pred_instances
                     .iter()
-                    .all(|s| s.status == StepStatus::Succeeded || s.status == StepStatus::Skipped)
+                    .all(|s| step_lets_run_continue(&s.status))
         });
 
         if all_predecessors_done {

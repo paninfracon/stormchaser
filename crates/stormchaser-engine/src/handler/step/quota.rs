@@ -16,7 +16,8 @@ pub async fn release_step_quota_for_instance(
         let req = crate::resource_utils::get_step_resource_requirements(&step_type, &spec);
         if req.cpu > 0.0 || req.memory > 0 {
             let _ =
-                crate::db::release_step_quota(&mut *executor, run_id, req.cpu, req.memory).await;
+                crate::db::release_step_quota(&mut *executor, run_id, step_id, req.cpu, req.memory)
+                    .await;
         }
     }
 

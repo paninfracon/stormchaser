@@ -93,8 +93,9 @@ echo -e "${BLUE}Run ID:${NC} $RUN_ID"
 STATUS="started"
 # A release build and the tests from scratch take well over ten minutes
 for i in {1..180}; do
-    STATUS_JSON=$(cargo run -q -p stormchaser-cli -- --url "$API_URL" runs get "$RUN_ID")
-    RUN_STATUS=$(echo "$STATUS_JSON" | jq -r '.detail.status')
+    # A poll that fails is a run the engine has not created yet
+    STATUS_JSON=$(cargo run -q -p stormchaser-cli -- --url "$API_URL" runs get "$RUN_ID" 2>&1) || true
+    RUN_STATUS=$(echo "$STATUS_JSON" | jq -r '.detail.status' 2>/dev/null || true)
 
     if [ "$RUN_STATUS" = "succeeded" ]; then
         STATUS="succeeded"

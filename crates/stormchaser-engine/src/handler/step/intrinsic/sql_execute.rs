@@ -1,83 +1,22 @@
-use crate::handler::{fetch_outputs, fetch_run_context, fetch_step_instance};
+use crate::handler::integrations::utils::report_step_completed;
+use crate::handler::{fetch_outputs, fetch_run_context};
 use anyhow::{Context, Result};
-use chrono::Utc;
 use serde_json::Value;
 use sqlx::Connection;
 use sqlx::PgPool;
+use std::collections::HashMap;
 use std::time::Duration;
 use stormchaser_model::dsl::SqlExecuteSpec;
-use stormchaser_model::events::{
-    EventSource, EventType, SchemaVersion, StepCompletedEvent, StepEventType, StepFailedEvent,
-};
-use stormchaser_model::nats::{publish_cloudevent, NatsSubject};
 use stormchaser_model::{RunId, StepInstanceId};
-use tracing::{error, info};
+use tracing::info;
 
-pub async fn try_dispatch(
-    run_id: RunId,
-    step_id: StepInstanceId,
-    fencing_token: i64,
-    step_type: &str,
-    spec: &Value,
-    pool: PgPool,
-    nats_client: async_nats::Client,
-) -> Result<bool> {
-    if step_type == "SqlExecute" {
-        let spec_clone = spec.clone();
-        tokio::spawn(async move {
-            if let Err(e) = handle_sql_execute(
-                run_id,
-                step_id,
-                fencing_token,
-                spec_clone,
-                pool.clone(),
-                nats_client.clone(),
-            )
-            .await
-            {
-                error!("SqlExecute failed for run {}: {:?}", run_id, e);
-                let fail_event = StepFailedEvent {
-                    run_id,
-                    step_id,
-                    fencing_token,
-                    completion_token: crate::db::step_completion_token(&pool, step_id).await,
-                    event_type: EventType::Step(StepEventType::Failed),
-                    error: format!("SqlExecute failed: {:?}", e),
-                    runner_id: Some("intrinsic-sql".to_string()),
-                    exit_code: Some(1),
-                    storage_hashes: None,
-                    outputs: None,
-                    artifacts: None,
-                    test_reports: None,
-                    timestamp: Utc::now(),
-                };
-                let _ = publish_cloudevent(
-                    &async_nats::jetstream::new(nats_client),
-                    NatsSubject::StepFailed(Some(stormchaser_model::nats::compute_shard_id(
-                        &run_id,
-                    ))),
-                    EventType::Step(StepEventType::Failed),
-                    EventSource::System,
-                    serde_json::to_value(fail_event).unwrap(),
-                    Some(SchemaVersion::new("1.0".to_string())),
-                    None,
-                )
-                .await;
-            }
-        });
-        return Ok(true);
-    }
-
-    Ok(false)
-}
-
-async fn handle_sql_execute(
+/// Runs a SqlExecute step, reporting its result.
+pub(crate) async fn handle_sql_execute(
     run_id: RunId,
     step_id: StepInstanceId,
     fencing_token: i64,
     spec: Value,
     pool: PgPool,
-    nats_client: async_nats::Client,
 ) -> Result<()> {
     let spec: SqlExecuteSpec = serde_json::from_value(spec.get("spec").unwrap_or(&spec).clone())?;
 
@@ -87,14 +26,7 @@ async fn handle_sql_execute(
     );
 
     // 1. Mark as Running
-    let instance = fetch_step_instance(step_id, &pool).await?;
-    let machine =
-        crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::from_instance(
-            instance,
-        );
-    let _ = machine
-        .start("sql_execute".to_string(), &mut *pool.acquire().await?)
-        .await?;
+    crate::handler::integrations::utils::start_built_in(&pool, step_id, "sql_execute").await?;
 
     let conn = crate::db::connections::get_storage_backend_by_name::<
         _,
@@ -147,33 +79,8 @@ async fn handle_sql_execute(
         "rows_affected": rows_affected
     });
 
-    let completed_event = StepCompletedEvent {
-        run_id,
-        step_id,
-        fencing_token,
-        completion_token: crate::db::step_completion_token(&pool, step_id).await,
-        event_type: EventType::Step(StepEventType::Completed),
-        runner_id: Some("intrinsic-sql".to_string()),
-        exit_code: Some(0),
-        storage_hashes: None,
-        outputs: Some(vec![("result".to_string(), output)].into_iter().collect()),
-        artifacts: None,
-        test_reports: None,
-        timestamp: Utc::now(),
-    };
-
-    publish_cloudevent(
-        &async_nats::jetstream::new(nats_client),
-        NatsSubject::StepCompleted(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
-        EventType::Step(StepEventType::Completed),
-        EventSource::System,
-        serde_json::to_value(completed_event).unwrap(),
-        Some(SchemaVersion::new("1.0".to_string())),
-        None,
-    )
-    .await?;
-
-    Ok(())
+    let outputs = HashMap::from([("result".to_string(), output)]);
+    report_step_completed(&pool, run_id, step_id, fencing_token, Some(outputs)).await
 }
 
 async fn execute_sql_query(

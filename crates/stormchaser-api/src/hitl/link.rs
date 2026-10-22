@@ -8,7 +8,7 @@ use axum::{
     response::IntoResponse,
 };
 use chrono::Utc;
-use stormchaser_engine::hitl::{approval_link_key, open_approval_link, LinkError};
+use stormchaser_core::hitl::{approval_link_key, open_approval_link, LinkError};
 use stormchaser_model::events::{
     EventSource, EventType, SchemaVersion, StepCompletedEvent, StepEventType, StepFailedEvent,
 };
@@ -177,14 +177,8 @@ pub async fn use_approval_link(
         }),
         _ => None,
     };
-    if let Err((status, message)) = check_approval_opa(
-        state,
-        payload.run_id,
-        &step.step_name,
-        approver.as_ref(),
-        None,
-    )
-    .await
+    if let Err((status, message)) =
+        check_approval_opa(state, payload.run_id, &step.step_name, approver.as_ref()).await
     {
         return (status, message).into_response();
     }
@@ -230,8 +224,9 @@ pub async fn use_approval_link(
         let completion_event = StepCompletedEvent {
             run_id: payload.run_id,
             step_id: payload.step_id,
+            attempt: None,
             fencing_token,
-            completion_token: stormchaser_engine::db::step_completion_token(
+            completion_token: stormchaser_core::db::step_completion_token(
                 &state.pool,
                 payload.step_id,
             )
@@ -262,8 +257,9 @@ pub async fn use_approval_link(
         let failure_event = StepFailedEvent {
             run_id: payload.run_id,
             step_id: payload.step_id,
+            attempt: None,
             fencing_token,
-            completion_token: stormchaser_engine::db::step_completion_token(
+            completion_token: stormchaser_core::db::step_completion_token(
                 &state.pool,
                 payload.step_id,
             )

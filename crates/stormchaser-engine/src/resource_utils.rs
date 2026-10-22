@@ -1,31 +1,13 @@
-/// Parse cpu.
+use stormchaser_model::dsl::limits::{parse_cpu_millis, parse_memory_bytes};
+
+/// Reads a CPU quantity (`500m`, `2`, `0.5`) as cores, the way runners read it.
 pub fn parse_cpu(cpu_str: &str) -> Option<f64> {
-    if let Some(m_idx) = cpu_str.find('m') {
-        if let Ok(m_cores) = cpu_str[..m_idx].parse::<f64>() {
-            return Some(m_cores / 1000.0);
-        }
-    } else if let Ok(cores) = cpu_str.parse::<f64>() {
-        return Some(cores);
-    }
-    None
+    parse_cpu_millis(cpu_str.trim()).map(|millis| millis as f64 / 1000.0)
 }
 
-/// Parse memory.
+/// Reads a memory quantity (`512Mi`, `1.5Gi`, `1G`) as bytes, the way runners read it.
 pub fn parse_memory(memory_str: &str) -> Option<i64> {
-    let mem = memory_str.to_lowercase();
-    if let Some(idx) = mem.find(|c: char| c.is_alphabetic()) {
-        let val = mem[..idx].trim().parse::<i64>().ok()?;
-        let suffix = &mem[idx..];
-        match suffix {
-            "k" | "ki" => Some(val * 1024),
-            "m" | "mi" => Some(val * 1024 * 1024),
-            "g" | "gi" => Some(val * 1024 * 1024 * 1024),
-            "t" | "ti" => Some(val * 1024 * 1024 * 1024 * 1024),
-            _ => None,
-        }
-    } else {
-        mem.trim().parse::<i64>().ok()
-    }
+    parse_memory_bytes(memory_str.trim()).and_then(|bytes| i64::try_from(bytes).ok())
 }
 
 use serde_json::Value;
@@ -66,5 +48,29 @@ pub fn get_step_resource_requirements(step_type: &str, spec: &Value) -> StepReso
     StepResourceRequirements {
         cpu: cpu_req,
         memory: mem_req,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn quotas_read_quantities_as_runners_do() {
+        assert_eq!(parse_cpu("500m"), Some(0.5));
+        assert_eq!(parse_cpu("2"), Some(2.0));
+        // Fractions and decimal units, which this parser used to read as nothing or as
+        // binary units
+        assert_eq!(parse_memory("1.5Gi"), Some(3 << 29));
+        assert_eq!(parse_memory("1G"), Some(1_000_000_000));
+        assert_eq!(parse_memory("512Mi"), Some(512 << 20));
+        assert_eq!(parse_memory("lots"), None);
+
+        let req = get_step_resource_requirements(
+            "RunContainer",
+            &json!({ "cpu": "250m", "memory": "1.5Gi" }),
+        );
+        assert_eq!((req.cpu, req.memory), (0.25, 3 << 29));
     }
 }

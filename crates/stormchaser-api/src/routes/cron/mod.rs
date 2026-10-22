@@ -1,12 +1,9 @@
 pub mod external;
 use crate::db;
-use async_nats::jetstream;
 use chrono::Utc;
 use external::*;
 use stormchaser_model::cron;
-use stormchaser_model::events::WorkflowQueuedEvent;
-use stormchaser_model::events::{EventSource, EventType, SchemaVersion, WorkflowEventType};
-use stormchaser_model::nats::{publish_cloudevent, NatsSubject};
+use stormchaser_model::events::EventSource;
 use stormchaser_model::workflow::RunStatus;
 use stormchaser_model::CronWorkflowId;
 use stormchaser_model::RunId;
@@ -25,7 +22,7 @@ use axum::{
     post,
     path = "/api/v1/cron-workflows",
     responses(
-        (status = 200, description = "Success"),
+        (status = 200, description = "Success", body = crate::CronWorkflowResponse),
         (status = 400, description = "Bad Request"),
         (status = 404, description = "Not Found"),
         (status = 500, description = "Internal Server Error")
@@ -109,7 +106,7 @@ pub async fn create_cron_workflow(
     get,
     path = "/api/v1/cron-workflows",
     responses(
-        (status = 200, description = "Success"),
+        (status = 200, description = "Success", body = [stormchaser_model::cron::CronWorkflow]),
         (status = 400, description = "Bad Request"),
         (status = 404, description = "Not Found"),
         (status = 500, description = "Internal Server Error")
@@ -276,34 +273,20 @@ pub async fn trigger_cron_workflow(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    tx.commit()
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    // Publish to NATS
-    let event = WorkflowQueuedEvent {
+    // The engine's relay publishes it
+    stormchaser_core::db::outbox::insert_run_queued(
+        &mut *tx,
         run_id,
-        event_type: EventType::Workflow(WorkflowEventType::Queued),
-        timestamp: Utc::now(),
-        status: stormchaser_model::workflow::RunStatus::Queued,
-        dsl: None,
-        inputs: None,
-        initiating_user: None,
-        sops_file: None, // Cron jobs might need these later, but default to None for now
-        sops_role_arn: None,
-    };
-
-    publish_cloudevent(
-        &jetstream::new(state.nats.clone()),
-        NatsSubject::RunQueued(Some(stormchaser_model::nats::compute_shard_id(&run_id))),
-        EventType::Workflow(WorkflowEventType::Queued),
         EventSource::System,
-        serde_json::to_value(event).unwrap(),
-        Some(SchemaVersion::new("1.0".to_string())),
+        None,
         None,
     )
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    tx.commit()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(EnqueueResponse {
         run_id,

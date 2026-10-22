@@ -1,49 +1,14 @@
-use crate::utils::{for_stderr, for_stdout, handle_response, require_token};
+use crate::utils::stream_run_status;
 use anyhow::Result;
+use stormchaser_client::Client;
 
-pub async fn watch_run(
-    url: &str,
-    token: Option<&str>,
-    http_client: &reqwest_middleware::ClientWithMiddleware,
-    id: stormchaser_model::RunId,
-) -> Result<()> {
-    let token = require_token(token)?;
-    let res = http_client
-        .get(format!("{}/api/v1/runs/{}/status/stream", url, id))
-        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
-        .send()
-        .await?;
-
-    if !res.status().is_success() {
-        return handle_response(res).await;
-    }
-
-    use eventsource_stream::Eventsource;
-    use futures::stream::StreamExt;
-    let mut stream = res.bytes_stream().eventsource();
-    while let Some(event) = stream.next().await {
-        match event {
-            Ok(event) => {
-                if event.event == "error" {
-                    eprintln!("Error from stream: {}", for_stderr(&event.data));
-                    break;
-                }
-                println!("{}: {}", for_stdout(&event.event), for_stdout(&event.data));
-            }
-            Err(e) => {
-                eprintln!("Stream error: {}", e);
-                break;
-            }
-        }
-    }
-    Ok(())
+pub async fn watch_run(client: &Client, id: stormchaser_model::RunId) -> Result<()> {
+    stream_run_status(client, id).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reqwest_middleware::ClientBuilder;
-    use reqwest_retry::{policies::ExponentialBackoff, RetryTransientMiddleware};
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -62,15 +27,16 @@ mod tests {
                     .insert_header("content-type", "text/event-stream")
                     .set_body_string(sse_body),
             )
+            .expect(1)
             .mount(&server)
             .await;
 
-        let retry_policy = ExponentialBackoff::builder().build_with_max_retries(0);
-        let client = ClientBuilder::new(reqwest::Client::new())
-            .with(RetryTransientMiddleware::new_with_policy(retry_policy))
-            .build();
+        let client = Client::builder(server.uri())
+            .token("fake_token")
+            .build()
+            .unwrap();
 
-        let result = watch_run(&server.uri(), Some("fake_token"), &client, id).await;
+        let result = watch_run(&client, id).await;
 
         result.unwrap();
     }

@@ -1,0 +1,214 @@
+use anyhow::Context;
+use std::path::PathBuf;
+
+#[derive(Debug, Clone)]
+/// Config.
+pub struct Config {
+    /// The database url.
+    pub database_url: String,
+    /// The tls ca cert path.
+    pub tls_ca_cert_path: Option<PathBuf>,
+    /// The tls cert path.
+    pub tls_cert_path: PathBuf,
+    /// The tls key path.
+    pub tls_key_path: PathBuf,
+    /// The tls server name.
+    pub tls_server_name: Option<String>,
+    /// `STORMCHASER_DB_SSL`, if set. Unset, the database connection is verified TLS
+    /// unless `DATABASE_URL` names an `sslmode` of its own.
+    pub db_ssl: Option<bool>,
+    /// Whether the HTTP listener serves TLS itself: yes unless
+    /// `STORMCHASER_LISTEN_TLS=false`.
+    pub listen_tls: bool,
+    /// The nats url.
+    pub nats_url: String,
+    /// The opa url.
+    pub opa_url: Option<String>,
+    /// The opa wasm path.
+    pub opa_wasm_path: Option<PathBuf>,
+    /// The opa entrypoint.
+    pub opa_entrypoint: Option<String>,
+    /// `OPA_DATA_PATH`: the data document (settings) for a WASM policy.
+    pub opa_data_path: Option<PathBuf>,
+    /// `STORMCHASER_AUTHZ_DISABLED`: enforce no policy. Debug builds only.
+    pub authz_disabled: bool,
+    /// The loki url.
+    pub loki_url: Option<String>,
+    /// The elasticsearch url.
+    pub elasticsearch_url: Option<String>,
+    /// The elasticsearch index.
+    pub elasticsearch_index: Option<String>,
+    /// The oidc issuer.
+    pub oidc_issuer: Option<String>,
+    /// The oidc external issuer.
+    pub oidc_external_issuer: Option<String>,
+    /// The oidc client id.
+    pub oidc_client_id: Option<String>,
+    /// The oidc client secret.
+    pub oidc_client_secret: Option<String>,
+    /// The API base URL for MCP callback.
+    pub api_base_url: String,
+    /// Additional `Host` header values the MCP server accepts.
+    pub mcp_allowed_hosts: Vec<String>,
+}
+
+impl Config {
+    /// From env.
+    pub fn from_env<I, K, V>(env: I) -> anyhow::Result<Self>
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: AsRef<str>,
+        V: AsRef<str>,
+    {
+        let mut database_url = None;
+        let mut tls_ca_cert_path = None;
+        let mut tls_cert_path = PathBuf::from("/etc/engine/certs/tls.crt");
+        let mut tls_key_path = PathBuf::from("/etc/engine/certs/tls.key");
+        let mut tls_server_name = None;
+        let mut db_ssl = None;
+        let mut listen_tls = None;
+        let mut nats_url = "nats://localhost:4222".to_string();
+        let mut opa_url = None;
+        let mut opa_wasm_path = None;
+        let mut opa_entrypoint = None;
+        let mut opa_data_path = None;
+        let mut authz_disabled = false;
+        let mut loki_url = None;
+        let mut elasticsearch_url = None;
+        let mut elasticsearch_index = None;
+        let mut oidc_issuer = None;
+        let mut oidc_external_issuer = None;
+        let mut oidc_client_id = None;
+        let mut oidc_client_secret = None;
+        let mut api_base_url = "http://localhost:3000".to_string();
+        let mut mcp_allowed_hosts = Vec::new();
+
+        for (k, v) in env {
+            match k.as_ref() {
+                "DATABASE_URL" => database_url = Some(v.as_ref().to_string()),
+                "TLS_CA_CERT_PATH" => tls_ca_cert_path = Some(PathBuf::from(v.as_ref())),
+                "TLS_CERT_PATH" => tls_cert_path = PathBuf::from(v.as_ref()),
+                "TLS_KEY_PATH" => tls_key_path = PathBuf::from(v.as_ref()),
+                "TLS_SERVER_NAME" => tls_server_name = Some(v.as_ref().to_string()),
+                "STORMCHASER_DB_SSL" => {
+                    db_ssl = Some(stormchaser_tls::parse_switch(
+                        "STORMCHASER_DB_SSL",
+                        v.as_ref(),
+                    )?)
+                }
+                "STORMCHASER_LISTEN_TLS" => listen_tls = Some(v.as_ref().to_string()),
+                "NATS_URL" => nats_url = v.as_ref().to_string(),
+                "OPA_URL" => {
+                    let val = v.as_ref().to_string();
+                    if !val.is_empty() {
+                        opa_url = Some(val);
+                    }
+                }
+                "OPA_WASM_PATH" => opa_wasm_path = Some(PathBuf::from(v.as_ref())),
+                "OPA_ENTRYPOINT" => opa_entrypoint = Some(v.as_ref().to_string()),
+                "OPA_DATA_PATH" => opa_data_path = Some(PathBuf::from(v.as_ref())),
+                "STORMCHASER_AUTHZ_DISABLED" => {
+                    authz_disabled =
+                        stormchaser_tls::parse_switch("STORMCHASER_AUTHZ_DISABLED", v.as_ref())?
+                }
+                "LOKI_URL" => loki_url = Some(v.as_ref().to_string()),
+                "ELASTICSEARCH_URL" => elasticsearch_url = Some(v.as_ref().to_string()),
+                "ELASTICSEARCH_INDEX" => elasticsearch_index = Some(v.as_ref().to_string()),
+                "OIDC_ISSUER" => oidc_issuer = Some(v.as_ref().to_string()),
+                "OIDC_EXTERNAL_ISSUER" => oidc_external_issuer = Some(v.as_ref().to_string()),
+                "OIDC_CLIENT_ID" => oidc_client_id = Some(v.as_ref().to_string()),
+                "OIDC_CLIENT_SECRET" => oidc_client_secret = Some(v.as_ref().to_string()),
+                "API_BASE_URL" => api_base_url = v.as_ref().to_string(),
+                "MCP_ALLOWED_HOSTS" => {
+                    mcp_allowed_hosts = v
+                        .as_ref()
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|host| !host.is_empty())
+                        .map(str::to_string)
+                        .collect();
+                }
+                _ => {}
+            }
+        }
+
+        Ok(Self {
+            database_url: database_url.context("DATABASE_URL must be set")?,
+            tls_ca_cert_path,
+            tls_cert_path,
+            tls_key_path,
+            tls_server_name,
+            db_ssl,
+            listen_tls: stormchaser_tls::listener::listen_tls_setting(listen_tls.as_deref())?,
+            nats_url,
+            opa_url,
+            opa_wasm_path,
+            opa_entrypoint,
+            opa_data_path,
+            authz_disabled,
+            loki_url,
+            elasticsearch_url,
+            elasticsearch_index,
+            oidc_issuer,
+            oidc_external_issuer,
+            oidc_client_id,
+            oidc_client_secret,
+            api_base_url,
+            mcp_allowed_hosts,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_config_opa_url_empty_string_treated_as_none() {
+        let env = vec![
+            ("DATABASE_URL", "postgres://user:pass@localhost/db"),
+            ("OPA_URL", ""),
+        ];
+        let config = Config::from_env(env).unwrap();
+        assert!(
+            config.opa_url.is_none(),
+            "Empty OPA_URL should be treated as None"
+        );
+    }
+
+    #[test]
+    fn test_config_mcp_allowed_hosts_defaults_to_empty() {
+        let env = vec![("DATABASE_URL", "postgres://user:pass@localhost/db")];
+        let config = Config::from_env(env).unwrap();
+        assert!(config.mcp_allowed_hosts.is_empty());
+    }
+
+    #[test]
+    fn test_config_mcp_allowed_hosts_parses_comma_separated_list() {
+        let env = vec![
+            ("DATABASE_URL", "postgres://user:pass@localhost/db"),
+            (
+                "MCP_ALLOWED_HOSTS",
+                "stormchaser.paninfracon.net, api.paninfracon.net:8443,,",
+            ),
+        ];
+        let config = Config::from_env(env).unwrap();
+        assert_eq!(
+            config.mcp_allowed_hosts,
+            vec!["stormchaser.paninfracon.net", "api.paninfracon.net:8443"]
+        );
+    }
+
+    #[test]
+    fn test_config_opa_url_non_empty_is_set() {
+        let env = vec![
+            ("DATABASE_URL", "postgres://user:pass@localhost/db"),
+            ("OPA_URL", "http://127.0.0.1:8181/v1/data/stormchaser/allow"),
+        ];
+        let config = Config::from_env(env).unwrap();
+        assert_eq!(
+            config.opa_url.as_deref(),
+            Some("http://127.0.0.1:8181/v1/data/stormchaser/allow")
+        );
+    }
+}

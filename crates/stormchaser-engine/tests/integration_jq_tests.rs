@@ -6,8 +6,8 @@ use std::env::var;
 use std::sync::Arc;
 use std::time::Duration;
 use stormchaser_engine::handler;
-use stormchaser_model::auth::OpaClient;
 use stormchaser_model::RunId;
+use stormchaser_opa::OpaClient;
 use tokio::time::sleep;
 
 use stormchaser_tls::TlsConfig;
@@ -58,6 +58,14 @@ async fn test_jq_step_execution() {
 
     let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
     let nats_client = stormchaser_model::nats::connect(nats_url).await.unwrap();
+    // The engine creates the stream at start-up; a fresh test stack has none
+    stormchaser_engine::nats::init_jetstream(&nats_client)
+        .await
+        .unwrap();
+    // Built-in steps report their results through the outbox, which the engine's
+    // relay publishes
+    let _relay =
+        stormchaser_engine::workers::start_outbox_relay_worker(pool.clone(), nats_client.clone());
     let opa_client = Arc::new(OpaClient::new(None, None));
 
     // Subscribe to completion events before dispatching

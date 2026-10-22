@@ -1,11 +1,14 @@
-use crate::utils::{handle_response, require_token};
-use anyhow::Result;
+use crate::utils::print_json;
+use anyhow::{Context, Result};
 use clap::Subcommand;
-use reqwest::header::AUTHORIZATION;
-use serde_json::json;
 use serde_json::Value;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use stormchaser_client::Client;
+use stormchaser_model::api::{
+    CreateStorageBackendRequest, TestConnectionRequest, UpdateStorageBackendRequest,
+};
+use stormchaser_model::connections::ConnectionType;
 
 #[derive(Subcommand)]
 pub enum ConnectionCommands {
@@ -29,7 +32,7 @@ pub enum ConnectionCommands {
         aws_assume_role_arn: Option<String>,
         /// Optional encrypted credentials (password/token)
         #[arg(long)]
-        encrypted_credentials: Option<String>,
+        credentials: Option<String>,
         /// Validate the connection before creating it
         #[arg(long)]
         test: bool,
@@ -53,7 +56,7 @@ pub enum ConnectionCommands {
         aws_assume_role_arn: Option<String>,
         /// Optional encrypted credentials (password/token)
         #[arg(long)]
-        encrypted_credentials: Option<String>,
+        credentials: Option<String>,
     },
     /// Delete a connection
     Delete { id: stormchaser_model::ConnectionId },
@@ -71,21 +74,20 @@ pub enum ConnectionCommands {
     },
 }
 
-pub async fn handle(
-    url: &str,
-    token: Option<&str>,
-    http_client: &reqwest_middleware::ClientWithMiddleware,
-    command: ConnectionCommands,
-) -> Result<()> {
+/// A connection type as the API spells it (`s3`, `http_api`).
+fn parse_connection_type(text: &str) -> Result<ConnectionType> {
+    serde_json::from_value(Value::String(text.to_string()))
+        .with_context(|| format!("Unknown connection type '{}'", text))
+}
+
+fn read_config(path: &Path) -> Result<Value> {
+    Ok(serde_json::from_str(&fs::read_to_string(path)?)?)
+}
+
+pub async fn handle(client: &Client, command: ConnectionCommands) -> Result<()> {
     match command {
         ConnectionCommands::List => {
-            let token = require_token(token)?;
-            let res = http_client
-                .get(format!("{}/api/v1/connections", url))
-                .header(AUTHORIZATION, format!("Bearer {}", token))
-                .send()
-                .await?;
-            handle_response(res).await?;
+            print_json(&client.list_connections().await?)?;
         }
         ConnectionCommands::Create {
             name,
@@ -94,71 +96,52 @@ pub async fn handle(
             default_sfs,
             description,
             aws_assume_role_arn,
-            encrypted_credentials,
+            credentials,
             test,
         } => {
-            let config_json: Value = serde_json::from_str(&fs::read_to_string(config)?)?;
-            let token = require_token(token)?;
+            let config = read_config(&config)?;
+            let connection_type = parse_connection_type(&connection_type)?;
 
             if test {
-                let test_res = http_client
-                    .post(format!("{}/api/v1/connections/test", url))
-                    .header(AUTHORIZATION, format!("Bearer {}", token))
-                    .json(&json!({
-                        "connection_type": connection_type,
-                        "config": config_json,
-                        "aws_assume_role_arn": aws_assume_role_arn,
-                    }))
-                    .send()
-                    .await?;
-
-                if !test_res.status().is_success() {
-                    anyhow::bail!("Test request failed: {}", test_res.status());
-                }
-
-                let body: Value = test_res.json().await?;
-                let success = body
-                    .get("success")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-                let msg = body
-                    .get("message")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Unknown");
+                let result = client
+                    .test_connection(&TestConnectionRequest {
+                        connection_type: connection_type.clone(),
+                        config: config.clone(),
+                        aws_assume_role_arn: aws_assume_role_arn.clone(),
+                    })
+                    .await;
+                let result = match result {
+                    Ok(result) => result,
+                    Err(e) => match e.status() {
+                        Some(status) => anyhow::bail!("Test request failed: {}", status),
+                        None => return Err(e.into()),
+                    },
+                };
                 // Can quote what the tested server answered
-                let msg = crate::utils::strip_control(msg);
+                let msg = crate::utils::strip_control(&result.message);
 
-                if !success {
+                if !result.success {
                     anyhow::bail!("Connection test failed: {}. Aborting creation.", msg);
                 } else {
                     println!("Connection test passed: {}", msg);
                 }
             }
 
-            let res = http_client
-                .post(format!("{}/api/v1/connections", url))
-                .header(AUTHORIZATION, format!("Bearer {}", token))
-                .json(&json!({
-                    "name": name,
-                    "connection_type": connection_type,
-                    "config": config_json,
-                    "is_default_sfs": default_sfs,
-                    "description": description,
-                    "aws_assume_role_arn": aws_assume_role_arn,
-                    "encrypted_credentials": encrypted_credentials,
-                }))
-                .send()
+            let created = client
+                .create_connection(&CreateStorageBackendRequest {
+                    name,
+                    description,
+                    connection_type,
+                    config,
+                    aws_assume_role_arn,
+                    credentials,
+                    is_default_sfs: default_sfs,
+                })
                 .await?;
-            handle_response(res).await?;
+            print_json(&created)?;
         }
         ConnectionCommands::Get { id } => {
-            let token = require_token(token)?;
-            let res = http_client
-                .get(format!("{}/api/v1/connections/{}", url, id))
-                .header(AUTHORIZATION, format!("Bearer {}", token))
-                .send()
-                .await?;
-            handle_response(res).await?;
+            print_json(&client.get_connection(id).await?)?;
         }
         ConnectionCommands::Update {
             id,
@@ -167,64 +150,42 @@ pub async fn handle(
             default_sfs,
             description,
             aws_assume_role_arn,
-            encrypted_credentials,
+            credentials,
         } => {
-            let mut body = json!({});
-            if let Some(n) = name {
-                body["name"] = json!(n);
-            }
-            if let Some(c) = config {
-                body["config"] = serde_json::from_str(&fs::read_to_string(c)?)?;
-            }
-            if let Some(d) = default_sfs {
-                body["is_default_sfs"] = json!(d);
-            }
-            if let Some(desc) = description {
-                body["description"] = json!(desc);
-            }
-            if let Some(arn) = aws_assume_role_arn {
-                body["aws_assume_role_arn"] = json!(arn);
-            }
-            if let Some(credentials) = encrypted_credentials {
-                body["encrypted_credentials"] = json!(credentials);
-            }
-
-            let token = require_token(token)?;
-            let res = http_client
-                .patch(format!("{}/api/v1/connections/{}", url, id))
-                .header(AUTHORIZATION, format!("Bearer {}", token))
-                .json(&body)
-                .send()
+            let config = config.as_deref().map(read_config).transpose()?;
+            client
+                .update_connection(
+                    id,
+                    &UpdateStorageBackendRequest {
+                        name,
+                        description,
+                        connection_type: None,
+                        config,
+                        aws_assume_role_arn,
+                        credentials,
+                        is_default_sfs: default_sfs,
+                    },
+                )
                 .await?;
-            handle_response(res).await?;
+            println!("Success");
         }
         ConnectionCommands::Delete { id } => {
-            let token = require_token(token)?;
-            let res = http_client
-                .delete(format!("{}/api/v1/connections/{}", url, id))
-                .header(AUTHORIZATION, format!("Bearer {}", token))
-                .send()
-                .await?;
-            handle_response(res).await?;
+            client.delete_connection(id).await?;
+            println!("Success");
         }
         ConnectionCommands::Test {
             connection_type,
             config,
             aws_assume_role_arn,
         } => {
-            let config_json: Value = serde_json::from_str(&fs::read_to_string(config)?)?;
-            let token = require_token(token)?;
-            let res = http_client
-                .post(format!("{}/api/v1/connections/test", url))
-                .header(AUTHORIZATION, format!("Bearer {}", token))
-                .json(&json!({
-                    "connection_type": connection_type,
-                    "config": config_json,
-                    "aws_assume_role_arn": aws_assume_role_arn,
-                }))
-                .send()
+            let result = client
+                .test_connection(&TestConnectionRequest {
+                    connection_type: parse_connection_type(&connection_type)?,
+                    config: read_config(&config)?,
+                    aws_assume_role_arn,
+                })
                 .await?;
-            handle_response(res).await?;
+            print_json(&result)?;
         }
     }
     Ok(())
@@ -233,8 +194,8 @@ pub async fn handle(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reqwest_middleware::ClientBuilder;
-    use wiremock::matchers::{header, method, path};
+    use serde_json::json;
+    use wiremock::matchers::{body_partial_json, header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
@@ -242,15 +203,18 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/api/v1/connections"))
-            .and(header(AUTHORIZATION, "Bearer test-token"))
+            .and(header("authorization", "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
             .mount(&server)
             .await;
 
-        let client = ClientBuilder::new(reqwest::Client::new()).build();
+        let client = Client::builder(server.uri())
+            .token("test-token")
+            .build()
+            .unwrap();
         let cmd = ConnectionCommands::List;
 
-        let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
+        let result = handle(&client, cmd).await;
         result.unwrap();
     }
 
@@ -259,8 +223,16 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/api/v1/connections"))
-            .and(header(AUTHORIZATION, "Bearer test-token"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "created"})))
+            .and(header("authorization", "Bearer test-token"))
+            .and(body_partial_json(json!({
+                "connection_type": "s3",
+                "config": { "bucket": "my-bucket" },
+                "is_default_sfs": true
+            })))
+            .respond_with(
+                ResponseTemplate::new(201).set_body_json(json!({"id": uuid::Uuid::new_v4()})),
+            )
+            .expect(1)
             .mount(&server)
             .await;
 
@@ -269,7 +241,10 @@ mod tests {
         let mut temp_file = NamedTempFile::new().unwrap();
         writeln!(temp_file, "{{\"bucket\":\"my-bucket\"}}").unwrap();
 
-        let client = ClientBuilder::new(reqwest::Client::new()).build();
+        let client = Client::builder(server.uri())
+            .token("test-token")
+            .build()
+            .unwrap();
         let cmd = ConnectionCommands::Create {
             name: "test-storage".to_string(),
             connection_type: "s3".to_string(),
@@ -277,11 +252,11 @@ mod tests {
             default_sfs: true,
             description: None,
             aws_assume_role_arn: None,
-            encrypted_credentials: None,
+            credentials: None,
             test: false,
         };
 
-        let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
+        let result = handle(&client, cmd).await;
         result.unwrap();
     }
 
@@ -291,15 +266,69 @@ mod tests {
         let id = stormchaser_model::ConnectionId::new_v4();
         Mock::given(method("DELETE"))
             .and(path(format!("/api/v1/connections/{}", id)))
-            .and(header(AUTHORIZATION, "Bearer test-token"))
+            .and(header("authorization", "Bearer test-token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "deleted"})))
             .mount(&server)
             .await;
 
-        let client = ClientBuilder::new(reqwest::Client::new()).build();
+        let client = Client::builder(server.uri())
+            .token("test-token")
+            .build()
+            .unwrap();
         let cmd = ConnectionCommands::Delete { id };
 
-        let result = handle(&server.uri(), Some("test-token"), &client, cmd).await;
+        let result = handle(&client, cmd).await;
         result.unwrap();
+    }
+
+    #[test]
+    fn an_unknown_connection_type_is_refused() {
+        assert_eq!(
+            parse_connection_type("http_api").unwrap(),
+            ConnectionType::HttpApi
+        );
+        parse_connection_type("ftp").unwrap_err();
+    }
+
+    #[tokio::test]
+    async fn a_failed_test_stops_the_creation() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/connections/test"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "success": false,
+                "message": "bucket not found"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/connections"))
+            .respond_with(ResponseTemplate::new(201))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("config.json");
+        std::fs::write(&config, r#"{"bucket":"b"}"#).unwrap();
+
+        let client = Client::builder(server.uri())
+            .token("test-token")
+            .build()
+            .unwrap();
+        let cmd = ConnectionCommands::Create {
+            name: "s".to_string(),
+            connection_type: "s3".to_string(),
+            config,
+            default_sfs: false,
+            description: None,
+            aws_assume_role_arn: None,
+            credentials: None,
+            test: true,
+        };
+
+        let err = handle(&client, cmd).await.unwrap_err();
+        assert!(err.to_string().contains("bucket not found"), "{err}");
     }
 }

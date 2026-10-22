@@ -49,7 +49,9 @@ fi
 echo -e "${GREEN}>>> Successfully spawned workflow $RUN_ID.${NC}"
 
 echo ">>> Polling for completion of workflow..."
-POSTGRES_CONTAINER=$(docker ps --format '{{.Names}}' | grep postgres | head -n 1)
+# The first container named postgres, unless STORMCHASER_POSTGRES_CONTAINER names the
+# stack's own: on a host running several stacks the first can be another one
+POSTGRES_CONTAINER=${STORMCHASER_POSTGRES_CONTAINER:-$(docker ps --format '{{.Names}}' | grep postgres | head -n 1)}
 
 for attempt in {1..60}; do
     STATUS=$(docker exec "$POSTGRES_CONTAINER" psql -U stormchaser -d stormchaser -t -c "

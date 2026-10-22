@@ -1,4 +1,5 @@
 use crate::api::{approve_step, delete_workflow_run, fetch_workflow_run_detail, reject_step};
+use crate::models::{step_status_name, RunStatus, StepStatus, TestCaseStatus};
 use crate::runs::StepLogsPanel;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -64,12 +65,8 @@ pub fn RunDetailsPanel(
     Effect::new(move |_| {
         if selected_step_id.get_untracked().is_none() {
             if let Some(Ok(detail)) = detail_resource.get() {
-                if !detail.steps.is_empty() {
-                    if let Some(id_val) = detail.steps[0].instance.get("id") {
-                        if let Some(id_str) = id_val.as_str() {
-                            set_selected_step_id.set(Some(id_str.to_string()));
-                        }
-                    }
+                if let Some(step) = detail.steps.first() {
+                    set_selected_step_id.set(Some(step.instance.id.to_string()));
                 }
             }
         }
@@ -89,8 +86,13 @@ pub fn RunDetailsPanel(
                                         <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                                             <h3 style="margin: 0 0 0.5rem 0;">{detail.detail.workflow_name.clone()}</h3>
                                             {
+                                                // Only a finished run can be deleted
+                                                let finished = matches!(
+                                                    detail.detail.status,
+                                                    RunStatus::Succeeded | RunStatus::Failed | RunStatus::Aborted
+                                                );
                                                 let delete_run_id = active_run_id.clone();
-                                                view! {
+                                                finished.then(move || view! {
                                                     <button
                                                         class="btn btn-secondary"
                                                         style="color: var(--status-error); border-color: var(--status-error); padding: 0.25rem 0.75rem; font-size: 0.85rem;"
@@ -106,7 +108,7 @@ pub fn RunDetailsPanel(
                                                     >
                                                         "Delete Run"
                                                     </button>
-                                                }
+                                                })
                                             }
                                         </div>
                                     <div style="display: flex; flex-direction: column; gap: 0.25rem; color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1.5rem;">
@@ -120,16 +122,17 @@ pub fn RunDetailsPanel(
                                     <h4 style="margin: 0 0 1rem 0;">"Steps"</h4>
                                     <ul style="list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem;">
                                         {steps.clone().into_iter().map(move |step| {
-                                            let step_id = step.instance.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                                            let step_name = step.instance.get("step_name").and_then(|v| v.as_str()).unwrap_or("Unknown").to_string();
-                                            let status_str = step.instance.get("status").and_then(|v| v.as_str()).unwrap_or("pending");
+                                            let step_id = step.instance.id.to_string();
+                                            let step_name = step.instance.step_name.clone();
+                                            let status = step.instance.status.clone();
+                                            let status_str = step_status_name(&status);
 
-                                            let status_class = match status_str {
-                                                "initializing" => "status-initializing",
-                                                "running" => "status-running",
-                                                "unpacking_sfs" | "packing_sfs" => "status-running",
-                                                "succeeded" => "status-succeeded",
-                                                "failed" => "status-failed",
+                                            let status_class = match status {
+                                                StepStatus::Initializing => "status-initializing",
+                                                StepStatus::Running => "status-running",
+                                                StepStatus::UnpackingSfs | StepStatus::PackingSfs => "status-running",
+                                                StepStatus::Succeeded => "status-succeeded",
+                                                StepStatus::Failed => "status-failed",
                                                 _ => "status-queued",
                                             };
 
@@ -144,11 +147,11 @@ pub fn RunDetailsPanel(
                                                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
                                                         <div style="font-weight: 500; font-size: 1rem;">{step_name}</div>
                                                         <span class=format!("status-badge {}", status_class) style="font-size: 0.75rem;">
-                                                            {status_str.to_string()}
+                                                            {status_str}
                                                         </span>
                                                     </div>
 
-                                                    {if status_str == "waiting_for_event" && is_selected {
+                                                    {if status == StepStatus::WaitingForEvent && is_selected {
                                                         let s_run_id = active_run_id.clone();
                                                         let s_step_id = step_id_clone.clone();
                                                         let on_approve = move |_| {
@@ -182,8 +185,8 @@ pub fn RunDetailsPanel(
                                                     }}
 
                                                     {if is_selected {
-                                                        let started = step.instance.get("started_at").and_then(|v| v.as_str()).unwrap_or("-").to_string();
-                                                        let finished = step.instance.get("finished_at").and_then(|v| v.as_str()).unwrap_or("-").to_string();
+                                                        let started = step.instance.started_at.map(|t| t.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)).unwrap_or_else(|| "-".to_string());
+                                                        let finished = step.instance.finished_at.map(|t| t.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)).unwrap_or_else(|| "-".to_string());
 
                                                         view! {
                                                             <div style="margin-top: 1rem; font-size: 0.85rem; color: var(--text-secondary); display: flex; flex-direction: column; gap: 0.5rem; border-top: 1px solid var(--surface-border); padding-top: 1rem;">
@@ -199,14 +202,13 @@ pub fn RunDetailsPanel(
                                                                             <strong>"Outputs:"</strong>
                                                                             <ul style="margin: 0.25rem 0 0 1rem; padding: 0;">
                                                                                 {step.outputs.into_iter().map(|out| {
-                                                                                    let key = out.get("key").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                                                                                    let is_sensitive = out.get("is_sensitive").and_then(|v| v.as_bool()).unwrap_or(false);
-                                                                                    let val = if is_sensitive {
+                                                                                    let key = out.key;
+                                                                                    let val = if out.is_sensitive {
                                                                                         "*** REDACTED ***".to_string()
-                                                                                    } else if let Some(v) = out.get("value") {
-                                                                                        if let Some(s) = v.as_str() { s.to_string() } else { v.to_string() }
+                                                                                    } else if let Some(s) = out.value.as_str() {
+                                                                                        s.to_string()
                                                                                     } else {
-                                                                                        "null".to_string()
+                                                                                        out.value.to_string()
                                                                                     };
                                                                                     view! { <li style="margin-bottom: 0.25rem;"><code>{key}</code>": " {val}</li> }
                                                                                 }).collect_view()}
@@ -230,8 +232,8 @@ pub fn RunDetailsPanel(
                                                                                 </thead>
                                                                                 <tbody>
                                                                                     {step.history.into_iter().map(|hist| {
-                                                                                        let h_status = hist.get("status").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                                                                                        let h_time = hist.get("created_at").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                                                                        let h_status = step_status_name(&hist.status);
+                                                                                        let h_time = hist.created_at.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true);
                                                                                         view! {
                                                                                             <tr style="border-bottom: 1px solid var(--surface-border);">
                                                                                                 <td style="padding: 0.25rem 0.5rem;">{h_status}</td>
@@ -261,7 +263,7 @@ pub fn RunDetailsPanel(
                                             <h4 style="margin: 1.5rem 0 1rem 0;">"Artifacts"</h4>
                                             <ul style="list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.9rem;">
                                                 {detail.artifacts.clone().into_iter().map(|artifact| {
-                                                    let name = artifact.get("artifact_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                                    let name = artifact.artifact_name;
                                                     view! {
                                                         <li style="padding: 0.75rem; border: 1px solid var(--surface-border); border-radius: 6px; background: var(--surface-default);">
                                                             <strong>{name}</strong>
@@ -275,9 +277,10 @@ pub fn RunDetailsPanel(
                                     }}
 
                                     {if !detail.test_cases.is_empty() {
-                                        let passed = detail.test_cases.iter().filter(|t| t.get("status").and_then(|v| v.as_str()) == Some("passed")).count();
-                                        let failed = detail.test_cases.iter().filter(|t| t.get("status").and_then(|v| v.as_str()) == Some("failed")).count();
-                                        let errors = detail.test_cases.iter().filter(|t| t.get("status").and_then(|v| v.as_str()) == Some("error")).count();
+                                        let count = |status: TestCaseStatus| detail.test_cases.iter().filter(|t| t.status == status).count();
+                                        let passed = count(TestCaseStatus::Passed);
+                                        let failed = count(TestCaseStatus::Failed);
+                                        let errors = count(TestCaseStatus::Error);
                                         view! {
                                             <h4 style="margin: 1.5rem 0 1rem 0;">"Test Reports"</h4>
                                             <div style="margin-bottom: 1rem; font-size: 0.9rem; color: var(--text-secondary);">
@@ -285,19 +288,18 @@ pub fn RunDetailsPanel(
                                             </div>
                                             <div style="display: flex; flex-wrap: wrap; gap: 0.25rem;">
                                                 {detail.test_cases.clone().into_iter().map(|tc| {
-                                                    let status = tc.get("status").and_then(|v| v.as_str()).unwrap_or("skipped");
-                                                    let color = match status {
-                                                        "passed" => "var(--status-success)",
-                                                        "failed" | "error" => "var(--status-error)",
-                                                        _ => "var(--status-queued)",
+                                                    let color = match tc.status {
+                                                        TestCaseStatus::Passed => "var(--status-success)",
+                                                        TestCaseStatus::Failed | TestCaseStatus::Error => "var(--status-error)",
+                                                        TestCaseStatus::Skipped => "var(--status-queued)",
                                                     };
-                                                    let symbol = match status {
-                                                        "passed" => "✔",
-                                                        "failed" => "✘",
-                                                        "error" => "!",
-                                                        _ => "○",
+                                                    let symbol = match tc.status {
+                                                        TestCaseStatus::Passed => "✔",
+                                                        TestCaseStatus::Failed => "✘",
+                                                        TestCaseStatus::Error => "!",
+                                                        TestCaseStatus::Skipped => "○",
                                                     };
-                                                    let name = tc.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                                    let name = tc.test_case;
                                                     view! {
                                                         <span style=format!("color: {}; font-weight: bold; cursor: pointer;", color) title=name>{symbol}</span>
                                                     }

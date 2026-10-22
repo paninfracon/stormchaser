@@ -1,11 +1,13 @@
 # stormchaser-model
 
-Foundational domain types and core execution state models for Stormchaser. This crate remains pure and free of execution logic, defining the shared data structures used across the workspace.
+Types and shared code used across the Stormchaser workspace: workflow and step models, the DSL's types, events and CloudEvents envelopes, connections, auth contexts, typed ids and JSON Schema generation.
+
+It is not a pure types crate. Outside `wasm32` it also holds infrastructure the services share: PostgreSQL connection options (TLS, pool size), NATS connection setup, the outbox models, SSRF-guarded HTTP clients, Loki and Elasticsearch log backends, runner identity, and the OCI-backed event schema cache. It depends on `tokio`, `sqlx`, `async-nats` and `reqwest` for these. The `wasm32` build, used by the web UI, leaves them out.
 
 ---
 
 ## About Stormchaser
 
-Stormchaser is a robust, distributed workflow engine for event-driven and human-triggered workflows. Built in Rust for performance and reliability, it utilizes a graph-based DSL, NATS JetStream for event messaging, and PostgreSQL for state management.
+Stormchaser is a distributed workflow engine for event-driven and human-triggered workflows, written in Rust. Workflows are written in an HCL-based DSL; the engine keeps state in PostgreSQL and passes events over NATS JetStream.
 
 For more information, full documentation, and examples, please visit the [Stormchaser GitHub Repository](https://github.com/paninfracon/stormchaser) and read the [Main Project README](https://github.com/paninfracon/stormchaser/blob/trunk/README.md).

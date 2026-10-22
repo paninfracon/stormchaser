@@ -7,7 +7,7 @@ use stormchaser_model::dsl::Step;
 /// Stopping the containers of a cancelled run.
 pub mod cancel;
 /// Cryptographic utilities for container state encryption.
-pub mod crypto;
+pub use stormchaser_runner_core::crypto;
 /// Docker-specific helper utilities.
 pub mod docker_utils;
 /// State machine transitions for containers.
@@ -28,6 +28,10 @@ pub struct ContainerMetadata {
     pub runner_id: String,
     /// Monotonically increasing token for preventing duplicate execution.
     pub fencing_token: i64,
+    /// Which attempt at the step this is, as the engine numbered it. Absent from an
+    /// engine, or a container's labels, that predate it.
+    #[serde(default)]
+    pub attempt: Option<i32>,
     /// The step specification from the workflow DSL.
     pub step_dsl: Step,
     /// When the container task was received.

@@ -1,3 +1,10 @@
+# The Docker runner as a DaemonSet: one runner per node, using that node's Docker
+# daemon through its socket.
+#
+# The chart sets no LOKI_URL, so step containers keep Docker's default logging and
+# their logs do not reach Loki; the API cannot show them (see docs/observability.md).
+# It also has no value for STORMCHASER_SFS_HOST_PATH (docs/sfs_docker_optimization.md)
+# and no way to add other environment variables.
 image:
   repository: stormchaser-runner-docker
   pullPolicy: IfNotPresent
@@ -7,7 +14,7 @@ image:
 nameOverride: ""
 fullnameOverride: ""
 
-# Restrict the daemonset to specific nodes (e.g. nodes labeled for docker runner)
+# Restrict the DaemonSet to specific nodes (e.g. nodes labelled for the Docker runner)
 nodeSelector: {}
 
 tolerations: []
@@ -42,6 +49,8 @@ config:
     maxTimeout: "24h"
     # Most processes and threads a step's container may have.
     pidsLimit: 4096
+  # The runner's id is "docker-<pod name>". It survives a restart of the container but
+  # not a replacement of the pod; the chart has no value for RUNNER_ID.
   rustLog: "stormchaser_runner_docker=info"
   # Image of the agent container beside each step. Empty means `stormchaser-agent:v1`,
   # the tag a local build gives it; in production name a digest-pinned reference.

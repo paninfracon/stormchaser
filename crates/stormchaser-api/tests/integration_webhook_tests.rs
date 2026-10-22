@@ -8,7 +8,7 @@ use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
 use std::collections::HashMap;
 use std::env::var;
-use stormchaser_model::OpaClient;
+use stormchaser_opa::OpaClient;
 
 use std::net::SocketAddr;
 use std::sync::Arc;

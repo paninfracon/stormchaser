@@ -178,7 +178,7 @@ pub async fn mutate_if_terraform(
 }
 
 async fn mutate_terraform_spec(
-    run_id: uuid::Uuid,
+    #[allow(unused_variables)] run_id: uuid::Uuid,
     step_type: &mut String,
     resolved_spec: &mut Value,
 ) -> anyhow::Result<()> {

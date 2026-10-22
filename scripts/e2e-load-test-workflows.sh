@@ -71,7 +71,9 @@ workflow "hello_world" {
 EOF
 
 echo ">>> Cleaning up previous workflow runs in local DB..."
-POSTGRES_CONTAINER=$(docker ps --format '{{.Names}}' | grep postgres | head -n 1)
+# The first container named postgres, unless STORMCHASER_POSTGRES_CONTAINER names the
+# stack's own: on a host running several stacks the first can be another one
+POSTGRES_CONTAINER=${STORMCHASER_POSTGRES_CONTAINER:-$(docker ps --format '{{.Names}}' | grep postgres | head -n 1)}
 if [ "${STORMCHASER_E2E_RESET_ALL_RUNS:-0}" = "1" ]; then
     echo ">>> STORMCHASER_E2E_RESET_ALL_RUNS=1 set; truncating all workflow runs."
     docker exec "$POSTGRES_CONTAINER" psql -U stormchaser -d stormchaser -c "TRUNCATE workflow_runs CASCADE" > /dev/null 2>&1
@@ -147,7 +149,7 @@ echo -e "${BLUE}>>> Polling for completion of $SUCCESSFUL_SUBMISSIONS workflows.
 STATUS="started"
 for attempt in {1..90}; do
     # Fast polling using database count to bypass 100 limit on API
-    POSTGRES_CONTAINER=$(docker ps --format '{{.Names}}' | grep postgres | head -n 1)
+    POSTGRES_CONTAINER=${STORMCHASER_POSTGRES_CONTAINER:-$(docker ps --format '{{.Names}}' | grep postgres | head -n 1)}
 
     SUCCEEDED=$(docker exec "$POSTGRES_CONTAINER" psql -U stormchaser -d stormchaser -t -c "SELECT (SELECT count(*) FROM workflow_runs WHERE status = 'succeeded' AND workflow_name = 'hello_world') + (SELECT count(*) FROM archived_workflow_runs WHERE status = 'succeeded' AND workflow_name = 'hello_world')" | xargs)
     FAILED=$(docker exec "$POSTGRES_CONTAINER" psql -U stormchaser -d stormchaser -t -c "SELECT (SELECT count(*) FROM workflow_runs WHERE status = 'failed' AND workflow_name = 'hello_world') + (SELECT count(*) FROM archived_workflow_runs WHERE status = 'failed' AND workflow_name = 'hello_world')" | xargs)

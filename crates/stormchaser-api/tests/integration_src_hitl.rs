@@ -6,9 +6,9 @@ use std::collections::HashMap;
 use std::env::var;
 use std::sync::Arc;
 use stormchaser_model::auth::Claims;
-use stormchaser_model::auth::OpaClient;
 use stormchaser_model::RunId;
 use stormchaser_model::StepInstanceId;
+use stormchaser_opa::OpaClient;
 use uuid::Uuid;
 
 use axum::extract::{Path, State};
@@ -17,7 +17,7 @@ use reqwest::StatusCode;
 use stormchaser_api::auth::AuthClaims;
 use stormchaser_api::hitl::*;
 use stormchaser_api::AppState;
-use stormchaser_engine::hitl::{seal_approval_link, ApprovalLink};
+use stormchaser_core::hitl::{seal_approval_link, ApprovalLink};
 
 /// The key these tests seal links with; handlers are given it directly.
 const LINK_KEY: &str = "test-only-approval-link-key-aaaaaa";
@@ -237,7 +237,6 @@ async fn test_approve_step_success() {
             exp: 0,
             groups: Vec::new(),
         }),
-        axum::http::HeaderMap::new(),
         Path((run_id, step_id)),
         Json(json!({"approved": true})),
     )
@@ -262,7 +261,6 @@ async fn test_reject_step_success() {
             exp: 0,
             groups: Vec::new(),
         }),
-        axum::http::HeaderMap::new(),
         Path((run_id, step_id)),
     )
     .await;
@@ -286,7 +284,6 @@ async fn a_wait_step_cannot_be_approved() {
             exp: 0,
             groups: Vec::new(),
         }),
-        axum::http::HeaderMap::new(),
         Path((run_id, step_id)),
         Json(json!({"approved": true})),
     )

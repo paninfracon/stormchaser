@@ -100,6 +100,7 @@ async fn test_zombie_step_handler() {
     let event = StepFailedEvent {
         run_id,
         step_id,
+        attempt: None,
         fencing_token: 1, // Matches the inserted run's fencing_token
         completion_token: None,
         event_type: EventType::Step(StepEventType::Failed),
@@ -226,6 +227,7 @@ async fn a_step_adopted_by_another_runner_is_no_longer_lost_with_the_old_one() {
         stormchaser_model::events::StepRunningEvent {
             run_id,
             step_id,
+            attempt: None,
             event_type: EventType::Step(StepEventType::Running),
             runner_id: Some(new_runner.clone()),
             timestamp: Utc::now(),
@@ -255,6 +257,7 @@ async fn a_step_adopted_by_another_runner_is_no_longer_lost_with_the_old_one() {
         stormchaser_model::events::StepRunningEvent {
             run_id,
             step_id,
+            attempt: None,
             event_type: EventType::Step(StepEventType::Running),
             runner_id: Some(old_runner.clone()),
             timestamp: Utc::now(),

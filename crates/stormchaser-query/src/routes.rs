@@ -1,6 +1,7 @@
 use crate::hydration::run_hydration_loop;
 use crate::limits::{hydration_slots, Slot};
 use crate::models::{HydrateDirectRequest, HydrateSchemaRequest};
+use crate::state::QueryState as AppState;
 use axum::{
     extract::State,
     http::StatusCode,
@@ -8,8 +9,7 @@ use axum::{
     Json,
 };
 use serde_json::Value;
-use stormchaser_api::authz::Caller;
-use stormchaser_api::AppState;
+use stormchaser_core::access::Caller;
 use tokio_stream::StreamExt;
 
 /// Largest workflow text accepted for a direct hydration.
@@ -28,13 +28,13 @@ pub async fn hydrate_schema(
 ) -> Result<Response, StatusCode> {
     // Taken before the repository is read, which is work too
     let slot = take_slot(&caller)?;
-    let source = stormchaser_api::routes::ParseGitRequest {
+    let source = stormchaser_core::git_source::ParseGitRequest {
         connection: payload.connection,
         workflow_path: payload.workflow_path,
         git_ref: payload.git_ref,
     };
     let dsl =
-        stormchaser_api::routes::schema::read_workflow_from_git(&state, &caller, &source).await?;
+        stormchaser_core::git_source::read_workflow_from_git(&state, &caller, &source).await?;
     hydrate(dsl, payload.inputs, state, &caller, slot).await
 }
 
@@ -145,20 +145,14 @@ workflow "hydration-test" {
     /// The service's router over the test database, or `None` when there is no test
     /// stack to run against.
     async fn app() -> Option<(Router, sqlx::PgPool)> {
-        let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-        let nats = stormchaser_model::nats::connect(nats_url).await.ok()?;
         let pool = sqlx::PgPool::connect(&std::env::var("DATABASE_URL").ok()?)
             .await
             .ok()?;
         let state = AppState {
             pool: pool.clone(),
-            nats,
-            opa: Arc::new(stormchaser_model::OpaClient::new(None, None)),
+            opa: Arc::new(stormchaser_opa::OpaClient::new(None, None)),
             oidc_config: None,
             jwks: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
-            log_backend: None,
-            api_base_url: "http://localhost:3000".to_string(),
-            mcp_allowed_hosts: Vec::new(),
         };
         let router = Router::new()
             .route("/api/v1/schema/hydrate", post(hydrate_schema))
@@ -168,18 +162,14 @@ workflow "hydration-test" {
     }
 
     fn token() -> String {
-        let claims = stormchaser_api::Claims {
+        let claims = stormchaser_core::auth::Claims {
             sub: "hydration-tester".to_string(),
             email: Some("hydration-tester@paninfracon.net".to_string()),
             exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
             groups: Vec::new(),
         };
-        jsonwebtoken::encode(
-            &jsonwebtoken::Header::default(),
-            &claims,
-            &jsonwebtoken::EncodingKey::from_secret(stormchaser_api::JWT_SECRET),
-        )
-        .unwrap()
+        stormchaser_core::auth::sign_local_token(&claims, stormchaser_core::auth::JWT_SECRET)
+            .unwrap()
     }
 
     async fn post_json(

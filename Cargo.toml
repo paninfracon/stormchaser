@@ -2,12 +2,15 @@
 resolver = "2"
 members = [
     "crates/stormchaser-api",
+    "crates/stormchaser-core",
     "crates/stormchaser-cli",
+    "crates/stormchaser-client",
     "crates/stormchaser-dsl",
     "crates/stormchaser-engine",
     "crates/stormchaser-model",
     "crates/stormchaser-runner-k8s",
     "crates/stormchaser-runner-docker",
+    "crates/stormchaser-runner-core",
     "crates/stormchaser-agent",
     "crates/stormchaser-tls",
     "crates/stormchaser-opa",
@@ -26,6 +29,9 @@ rust-version = "1.96"
 [workspace.dependencies]
 stormchaser-model = { version = "1.5.1", path = "crates/stormchaser-model" }
 stormchaser-dsl = { version = "1.5.1", path = "crates/stormchaser-dsl" }
+stormchaser-core = { version = "1.5.1", path = "crates/stormchaser-core" }
+stormchaser-runner-core = { version = "1.5.1", path = "crates/stormchaser-runner-core" }
+stormchaser-client = { version = "1.5.1", path = "crates/stormchaser-client" }
 stormchaser-tls = { version = "1.5.1", path = "crates/stormchaser-tls" }
 
 tokio = { version = "1", features = ["full"] }

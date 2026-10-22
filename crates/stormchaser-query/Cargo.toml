@@ -11,10 +11,14 @@ license.workspace = true
 name = "stormchaser-query"
 path = "src/main.rs"
 
+[features]
+default = ["aws-cloudcontrol"]
+aws-cloudcontrol = ["stormchaser-core/aws-cloudcontrol"]
+
 [dependencies]
 stormchaser-model = { workspace = true }
 stormchaser-dsl = { workspace = true }
-stormchaser-engine = { version = "1.5.1", path = "../stormchaser-engine" }
+stormchaser-core = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -28,7 +32,6 @@ axum = { workspace = true }
 tokio-stream = "0.1.18"
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-stormchaser-api = { version = "1.5.1", path = "../stormchaser-api" }
 stormchaser-tls = { version = "1.5.1", path = "../stormchaser-tls" }
 stormchaser-opa = { version = "1.5.1", path = "../stormchaser-opa" }
 async-nats.workspace = true

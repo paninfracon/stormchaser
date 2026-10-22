@@ -38,8 +38,7 @@ workflow "dogfood" {
   }
 
   storage "workspace" {
-    size     = "10Gi"
-    preserve = ["/"]
+    size = "10Gi"
     provision "repo" {
       resource_type = "download"
       url           = inputs.repo_url
@@ -60,14 +59,15 @@ workflow "dogfood" {
     }
     provision "api_binary" {
       resource_type = "artifact"
-      name          = "api_binary"
       destination   = "/target/release/stormchaser-api"
     }
   }
 
   steps {
     step "build" "RunContainer" {
-      image = "rustlang/rust:nightly"
+      # Bookworm, as the image Dockerfile.prebuilt runs it in: a binary built on a newer
+      # Debian needs a newer glibc than that image has
+      image = "rustlang/rust:nightly-bookworm"
       # A release build of the workspace needs more than the default step limits
       # (1 CPU, 2Gi): rustc is OOM-killed at 2Gi
       cpu    = "8"
@@ -78,7 +78,7 @@ workflow "dogfood" {
       env = [
         { name = "DATABASE_URL", value = "postgres://stormchaser:${inputs.db_password}@stormchaser-postgresql.stormchaser.svc.cluster.local:5432/stormchaser" }
       ]
-      command = ["/bin/sh", "-c"]
+      command = ["/bin/bash", "-c"]
       args = [<<-EOF
         set -eo pipefail
         apt-get update
@@ -92,7 +92,7 @@ workflow "dogfood" {
     }
 
     step "test" "RunContainer" {
-      image  = "rustlang/rust:nightly"
+      image  = "rustlang/rust:nightly-bookworm"
       cpu    = "8"
       memory = "16Gi"
       storage_mounts = [
@@ -108,7 +108,7 @@ workflow "dogfood" {
         { name = "NATS_USER", value = "stormchaser" },
         { name = "NATS_PASSWORD", value = inputs.nats_password }
       ]
-      command = ["/bin/sh", "-c"]
+      command = ["/bin/bash", "-c"]
       args = [<<-EOF
         set -eo pipefail
         apt-get update
@@ -141,8 +141,10 @@ workflow "dogfood" {
         # assets. Docker copies nothing when the pattern matches nothing; buildah fails.
         mkdir -p target/site
         ls -la /app/target/release/ || true
-        buildah bud --storage-driver vfs -t registry.container-registry.svc.cluster.local:5000/stormchaser-api:dogfood -f Dockerfile.prebuilt --build-arg BINARY=stormchaser-api .
-        buildah push --storage-driver vfs --tls-verify=false registry.container-registry.svc.cluster.local:5000/stormchaser-api:dogfood
+        # A tag of this run's own: deploy names it, so the Deployment changes and Kubernetes
+        # replaces the API's pod. The same tag every run left the old pod serving.
+        buildah bud --storage-driver vfs -t registry.container-registry.svc.cluster.local:5000/stormchaser-api:dogfood-${run.id} -f Dockerfile.prebuilt --build-arg BINARY=stormchaser-api .
+        buildah push --storage-driver vfs --tls-verify=false registry.container-registry.svc.cluster.local:5000/stormchaser-api:dogfood-${run.id}
       EOF
       ]
       next = ["setup_certs"]
@@ -198,8 +200,9 @@ workflow "dogfood" {
         helm upgrade --install stormchaser-dogfood /app/deploy/charts/stormchaser-orchestration \
           --namespace stormchaser-dogfood \
           --create-namespace \
-          --set global.image.repository=localhost:32000/stormchaser-api \
-          --set global.image.tag=dogfood \
+          --set api.image.repository=localhost:32000/stormchaser-api \
+          --set api.image.tag=dogfood-${run.id} \
+          --set api.image.pullPolicy=Always \
           --set global.database.ssl=false \
           --set "global.database.url=postgres://stormchaser:$DB_PASSWORD@stormchaser-postgresql.stormchaser.svc.cluster.local:5432/stormchaser" \
           --set global.nats.url=nats://stormchaser-nats.stormchaser.svc.cluster.local:4222 \

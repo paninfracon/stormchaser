@@ -1,8 +1,8 @@
+use crate::app::fixtures::{full_detail, run_detail, step_detail};
 use crate::app::App;
-use crate::app::{StepDetail, WorkflowRunDetail, WorkflowRunFullDetail};
-use chrono::Utc;
+use crate::app::{parse_step_status, StepDetail, WorkflowRunDetail, WorkflowRunFullDetail};
 use stormchaser_model::workflow::RunStatus;
-use stormchaser_model::RunId;
+use stormchaser_model::{RunId, StepInstanceId};
 use tokio::sync::mpsc;
 
 pub fn setup_app() -> App<'static> {
@@ -16,26 +16,15 @@ pub fn setup_app() -> App<'static> {
 }
 
 pub fn mock_run_detail(id: RunId, status: RunStatus) -> WorkflowRunDetail {
-    WorkflowRunDetail {
-        id,
-        workflow_name: "test".to_string(),
-        initiating_user: "user".to_string(),
-        status,
-        created_at: Utc::now(),
-        finished_at: None,
-    }
+    run_detail(id, "test", status)
 }
 
 pub fn mock_step_detail(name: &str, status: &str) -> StepDetail {
-    StepDetail {
-        instance: serde_json::json!({
-            "step_name": name,
-            "status": status,
-        }),
-        outputs: vec![],
-        history: vec![],
-        logs: vec![],
-    }
+    step_detail(
+        StepInstanceId::new_v4(),
+        name,
+        parse_step_status(status).expect("a step status"),
+    )
 }
 
 pub fn mock_full_detail(
@@ -43,11 +32,5 @@ pub fn mock_full_detail(
     status: RunStatus,
     steps: Vec<StepDetail>,
 ) -> WorkflowRunFullDetail {
-    WorkflowRunFullDetail {
-        detail: mock_run_detail(id, status),
-        steps,
-        artifacts: vec![],
-        test_summaries: vec![],
-        test_cases: vec![],
-    }
+    full_detail(mock_run_detail(id, status), steps)
 }

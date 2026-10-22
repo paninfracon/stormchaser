@@ -236,6 +236,7 @@ async fn test_handle_step_running() {
     let event = StepRunningEvent {
         run_id,
         step_id,
+        attempt: None,
         runner_id: Some("test-runner".to_string()),
         timestamp: chrono::Utc::now(),
         event_type: stormchaser_model::events::EventType::Step(

@@ -2,29 +2,29 @@ pub mod hydration;
 pub mod limits;
 pub mod models;
 pub mod routes;
+pub mod state;
 
 use axum::{middleware, routing::post, Router};
 use std::env;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
 
-// Import Config, AppState, and setup from stormchaser_api to maintain identical configuration
-use stormchaser_api::auth::opa::opa_middleware;
-use stormchaser_api::config::Config;
-use stormchaser_api::setup::build_app_state;
+use state::QueryState;
+use stormchaser_core::auth::opa::opa_middleware;
+use stormchaser_core::config::Config;
 
 use routes::{hydrate_schema, hydrate_schema_direct};
 
 fn main() -> anyhow::Result<()> {
     // Started as a jq worker (for a query's `jq_filter`), this process evaluates one
     // program and exits here, before any runtime exists.
-    stormchaser_engine::jq_sandbox::run_worker_if_requested();
+    stormchaser_core::jq_sandbox::run_worker_if_requested();
     run()
 }
 
 #[tokio::main]
 async fn run() -> anyhow::Result<()> {
-    stormchaser_engine::jq_sandbox::install_current_exe_as_worker()?;
+    stormchaser_core::jq_sandbox::install_current_exe_as_worker()?;
 
     tracing_subscriber::fmt::init();
 
@@ -32,10 +32,9 @@ async fn run() -> anyhow::Result<()> {
 
     let config = Config::from_env(env::vars())?;
 
-    // Uses the exact same state builder as stormchaser-api to guarantee TLS, DB, NATS,
-    // OIDC, and OPA configuration parity.
-    let tls = stormchaser_api::listener::tls_from_config(&config).await?;
-    let state = build_app_state(config).await?;
+    // The same settings, token checks and policy as the API
+    let tls = stormchaser_core::listener::tls_from_config(&config).await?;
+    let state = QueryState::from_config(&config).await?;
 
     let app = Router::new()
         .route("/healthz", axum::routing::get(|| async { "OK" }))
@@ -44,7 +43,7 @@ async fn run() -> anyhow::Result<()> {
         .route("/api/v1/schema/hydrate-direct", post(hydrate_schema_direct))
         .layer(middleware::from_fn_with_state(
             state.clone(),
-            opa_middleware, // Reusing identical authentication and OPA gates
+            opa_middleware::<QueryState>,
         ))
         .with_state(state);
 
@@ -57,7 +56,7 @@ async fn run() -> anyhow::Result<()> {
         if tls.is_some() { "https" } else { "http" }
     );
     let listener = TcpListener::bind(addr).await?;
-    stormchaser_api::listener::serve(listener, app, tls, std::future::pending()).await?;
+    stormchaser_core::listener::serve(listener, app, tls, std::future::pending()).await?;
 
     Ok(())
 }

@@ -81,6 +81,7 @@ fn rejection(
     StepFailedEvent {
         run_id,
         step_id,
+        attempt: None,
         fencing_token: 1,
         completion_token,
         event_type: EventType::Step(StepEventType::Failed),

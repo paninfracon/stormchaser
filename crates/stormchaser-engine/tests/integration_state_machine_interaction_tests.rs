@@ -3,8 +3,8 @@ use chrono::Utc;
 use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
 use std::env::var;
-use stormchaser_engine::step_machine::StepMachine;
-use stormchaser_engine::workflow_machine::WorkflowMachine;
+use stormchaser_engine::step_machine::{state as step_state, StepMachine};
+use stormchaser_engine::workflow_machine::{state as wf_state, WorkflowMachine};
 use stormchaser_model::step::{StepInstance, StepStatus};
 use stormchaser_model::workflow::{RunStatus, WorkflowRun};
 use stormchaser_model::RunId;
@@ -116,7 +116,8 @@ async fn test_workflow_step_success_interaction() {
 
     let mut conn = pool.acquire().await.unwrap();
 
-    let wf_machine = WorkflowMachine::new(run)
+    let wf_machine = WorkflowMachine::<wf_state::Queued>::load(run)
+        .unwrap()
         .start_resolving(&mut conn)
         .await
         .unwrap()
@@ -133,18 +134,22 @@ async fn test_workflow_step_success_interaction() {
     insert_test_step(&pool, &step1).await;
     insert_test_step(&pool, &step2).await;
 
-    let step_machine1 = StepMachine::new(step1)
+    let step_machine1 = StepMachine::<step_state::Pending>::load(step1)
+        .unwrap()
         .start("runner-1".to_string(), &mut conn)
         .await
         .unwrap()
+        .unfinished()
         .succeed(&mut conn)
         .await
         .unwrap();
 
-    let step_machine2 = StepMachine::new(step2)
+    let step_machine2 = StepMachine::<step_state::Pending>::load(step2)
+        .unwrap()
         .start("runner-2".to_string(), &mut conn)
         .await
         .unwrap()
+        .unfinished()
         .succeed(&mut conn)
         .await
         .unwrap();
@@ -174,7 +179,8 @@ async fn test_workflow_step_failure_interaction() {
 
     let mut conn = pool.acquire().await.unwrap();
 
-    let wf_machine = WorkflowMachine::new(run)
+    let wf_machine = WorkflowMachine::<wf_state::Queued>::load(run)
+        .unwrap()
         .start_resolving(&mut conn)
         .await
         .unwrap()
@@ -188,10 +194,12 @@ async fn test_workflow_step_failure_interaction() {
     let step1 = create_test_step(run_id_uuid, "step1");
     insert_test_step(&pool, &step1).await;
 
-    let step_machine1 = StepMachine::new(step1)
+    let step_machine1 = StepMachine::<step_state::Pending>::load(step1)
+        .unwrap()
         .start("runner-1".to_string(), &mut conn)
         .await
         .unwrap()
+        .unfinished()
         .fail("failed to execute".to_string(), Some(1), &mut conn)
         .await
         .unwrap();
@@ -223,7 +231,8 @@ async fn test_workflow_abort_cascades_to_step() {
 
     let mut conn = pool.acquire().await.unwrap();
 
-    let wf_machine = WorkflowMachine::new(run)
+    let wf_machine = WorkflowMachine::<wf_state::Queued>::load(run)
+        .unwrap()
         .start_resolving(&mut conn)
         .await
         .unwrap()
@@ -236,19 +245,24 @@ async fn test_workflow_abort_cascades_to_step() {
 
     let step1 = create_test_step(run_id_uuid, "step1");
     insert_test_step(&pool, &step1).await;
-    let step_machine1 = StepMachine::new(step1)
+    let step_machine1 = StepMachine::<step_state::Pending>::load(step1)
+        .unwrap()
         .start("runner-1".to_string(), &mut conn)
         .await
         .unwrap();
 
-    // User aborts workflow
+    // The run times out
     let wf_machine = wf_machine.abort(&mut conn).await.unwrap();
 
-    // Engine should cascade abort to running steps
-    let step_machine1 = step_machine1.abort(&mut conn).await.unwrap();
+    // and its running steps fail with it, as the timeout handler fails them
+    let step_machine1 = step_machine1
+        .unfinished()
+        .fail("Workflow timed out".to_string(), None, &mut conn)
+        .await
+        .unwrap();
 
     assert_eq!(wf_machine.into_run().status, RunStatus::Aborted);
-    assert_eq!(step_machine1.into_instance().status, StepStatus::Aborted);
+    assert_eq!(step_machine1.into_instance().status, StepStatus::Failed);
 
     // Cleanup
     sqlx::query("DELETE FROM workflow_runs WHERE id = $1")

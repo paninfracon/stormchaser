@@ -1,14 +1,12 @@
-use crate::utils::{handle_run_response, parse_inputs, require_token};
+use crate::utils::{follow_run, parse_inputs};
 use anyhow::Result;
-use reqwest::header::AUTHORIZATION;
-use serde_json::json;
 use std::fs;
 use std::path::PathBuf;
+use stormchaser_client::Client;
+use stormchaser_model::api::DirectRunRequest;
 
 pub async fn handle(
-    url: &str,
-    token: Option<&str>,
-    http_client: &reqwest_middleware::ClientWithMiddleware,
+    client: &Client,
     file: PathBuf,
     input: Vec<String>,
     tail: bool,
@@ -16,26 +14,24 @@ pub async fn handle(
 ) -> Result<()> {
     let dsl = fs::read_to_string(file)?;
     let inputs = parse_inputs(input)?;
-    let token = require_token(token)?;
 
-    let res = http_client
-        .post(format!("{}/api/v1/runs/direct", url))
-        .header(AUTHORIZATION, format!("Bearer {}", token))
-        .json(&json!({ "dsl": dsl, "inputs": inputs }))
-        .send()
-        .await?;
+    let run = client
+        .run_direct(&DirectRunRequest {
+            dsl,
+            inputs: inputs.into(),
+        })
+        .await;
 
-    handle_run_response(http_client, url, token, res, tail, watch).await
+    follow_run(client, run, tail, watch).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reqwest_middleware::ClientBuilder;
+    use serde_json::json;
     use std::io::Write;
-    use stormchaser_model::RunStatus;
     use tempfile::NamedTempFile;
-    use wiremock::matchers::{header, method, path};
+    use wiremock::matchers::{body_json, header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
@@ -43,31 +39,30 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/api/v1/runs/direct"))
-            .and(header(AUTHORIZATION, "Bearer test-token"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "id": "12345678-1234-1234-1234-123456789012",
-                "status": RunStatus::Queued
+            .and(header("authorization", "Bearer test-token"))
+            .and(body_json(json!({
+                "dsl": "workflow \"test\" {}\n",
+                "inputs": { "param": "value" }
             })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "run_id": "12345678-1234-1234-1234-123456789012",
+                "status": "queued"
+            })))
+            .expect(1)
             .mount(&server)
             .await;
 
-        let client = ClientBuilder::new(reqwest::Client::new()).build();
+        let client = Client::builder(server.uri())
+            .token("test-token")
+            .build()
+            .unwrap();
 
         let mut temp_file = NamedTempFile::new().unwrap();
         writeln!(temp_file, "workflow \"test\" {{}}").unwrap();
 
         let input = vec!["param=value".to_string()];
 
-        let result = handle(
-            &server.uri(),
-            Some("test-token"),
-            &client,
-            temp_file.path().to_path_buf(),
-            input,
-            false,
-            false,
-        )
-        .await;
+        let result = handle(&client, temp_file.path().to_path_buf(), input, false, false).await;
 
         result.unwrap();
     }

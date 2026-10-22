@@ -1,7 +1,9 @@
+#![expect(clippy::disallowed_methods, reason = "tests call the OPA they start")]
 use std::net::TcpListener;
 use std::process::Command;
 use std::time::Duration;
-use stormchaser_model::auth::{ApiOpaContext, OpaAuthorizer, OpaClient};
+use stormchaser_model::auth::{ApiOpaContext, OpaSubject};
+use stormchaser_opa::{OpaAuthorizer, OpaClient};
 use uuid::Uuid;
 
 /// Pinned OPA image used by integration tests.  Update this constant (and re-run
@@ -32,30 +34,27 @@ impl Drop for ContainerGuard {
     }
 }
 
-/// Helper to mock a JWT token (only signature is mocked, claims are real for testing)
-fn mock_token(email: &str, groups: Vec<&str>) -> String {
-    use jsonwebtoken::{encode, EncodingKey, Header};
-    use serde::{Deserialize, Serialize};
+/// A user as the API describes them to policy, from their verified token.
+struct User {
+    email: String,
+    groups: Vec<String>,
+}
 
-    #[derive(Debug, Serialize, Deserialize)]
-    struct Claims {
-        email: String,
-        groups: Vec<String>,
-        exp: usize,
+impl User {
+    fn new(email: &str, groups: &[&str]) -> Self {
+        Self {
+            email: email.to_string(),
+            groups: groups.iter().map(|&s| s.to_string()).collect(),
+        }
     }
 
-    let claims = Claims {
-        email: email.to_string(),
-        groups: groups.iter().map(|&s| s.to_string()).collect(),
-        exp: 2000000000, // Future
-    };
-
-    encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret("secret".as_ref()),
-    )
-    .unwrap()
+    fn subject(&self) -> OpaSubject<'_> {
+        OpaSubject {
+            sub: &self.email,
+            email: Some(&self.email),
+            groups: &self.groups,
+        }
+    }
 }
 
 #[tokio::test]
@@ -121,17 +120,17 @@ async fn test_enterprise_opa_rbac_integration() {
     let client = OpaClient::new(Some(opa_url), None);
 
     // 3. Test Cases (API Context)
-    let admin_token = mock_token("admin@paninfracon.net", vec!["Okta-Global-Admins"]);
-    let dev_token = mock_token("dev@paninfracon.net", vec!["Okta-Engineering"]);
-    let ops_token = mock_token("ops@paninfracon.net", vec!["Okta-SRE"]);
-    let sec_token = mock_token("sec@paninfracon.net", vec!["EntraID-SecOps"]);
-    let hacker_token = mock_token("hacker@evil.com", vec!["Okta-Global-Admins"]); // Admin group, bad domain
+    let admin = User::new("admin@paninfracon.net", &["Okta-Global-Admins"]);
+    let dev = User::new("dev@paninfracon.net", &["Okta-Engineering"]);
+    let ops = User::new("ops@paninfracon.net", &["Okta-SRE"]);
+    let sec = User::new("sec@paninfracon.net", &["EntraID-SecOps"]);
+    let hacker = User::new("hacker@evil.com", &["Okta-Global-Admins"]); // Admin group, bad domain
 
     // --- Admin Tests ---
     let admin_ctx = ApiOpaContext {
         path: "/api/v1/anything/dangerous",
         method: "DELETE",
-        token: Some(&admin_token),
+        subject: Some(admin.subject()),
     };
     assert!(
         client.check(admin_ctx).await.unwrap(),
@@ -142,7 +141,7 @@ async fn test_enterprise_opa_rbac_integration() {
     let hacker_ctx = ApiOpaContext {
         path: "/api/v1/runs",
         method: "GET",
-        token: Some(&hacker_token),
+        subject: Some(hacker.subject()),
     };
     assert!(
         !client.check(hacker_ctx).await.unwrap(),
@@ -153,7 +152,7 @@ async fn test_enterprise_opa_rbac_integration() {
     let dev_start_run_ctx = ApiOpaContext {
         path: "/api/v1/runs",
         method: "POST",
-        token: Some(&dev_token),
+        subject: Some(dev.subject()),
     };
     assert!(
         client.check(dev_start_run_ctx).await.unwrap(),
@@ -163,7 +162,7 @@ async fn test_enterprise_opa_rbac_integration() {
     let dev_delete_webhook_ctx = ApiOpaContext {
         path: "/api/v1/webhooks/123",
         method: "DELETE",
-        token: Some(&dev_token),
+        subject: Some(dev.subject()),
     };
     assert!(
         !client.check(dev_delete_webhook_ctx).await.unwrap(),
@@ -174,7 +173,7 @@ async fn test_enterprise_opa_rbac_integration() {
     let ops_view_run_ctx = ApiOpaContext {
         path: "/api/v1/runs",
         method: "GET",
-        token: Some(&ops_token),
+        subject: Some(ops.subject()),
     };
     assert!(
         client.check(ops_view_run_ctx).await.unwrap(),
@@ -184,7 +183,7 @@ async fn test_enterprise_opa_rbac_integration() {
     let ops_start_run_ctx = ApiOpaContext {
         path: "/api/v1/runs",
         method: "POST",
-        token: Some(&ops_token),
+        subject: Some(ops.subject()),
     };
     assert!(
         !client.check(ops_start_run_ctx).await.unwrap(),
@@ -194,7 +193,7 @@ async fn test_enterprise_opa_rbac_integration() {
     let ops_delete_webhook_ctx = ApiOpaContext {
         path: "/api/v1/webhooks/123",
         method: "DELETE",
-        token: Some(&ops_token),
+        subject: Some(ops.subject()),
     };
     assert!(
         client.check(ops_delete_webhook_ctx).await.unwrap(),
@@ -203,9 +202,10 @@ async fn test_enterprise_opa_rbac_integration() {
 
     // --- Security Tests ---
     let sec_view_reports_ctx = ApiOpaContext {
-        path: "/api/v1/reports",
+        // Test reports are served under their run
+        path: "/api/v1/runs/00000000-0000-0000-0000-000000000001/reports",
         method: "GET",
-        token: Some(&sec_token),
+        subject: Some(sec.subject()),
     };
     assert!(
         client.check(sec_view_reports_ctx).await.unwrap(),
@@ -215,7 +215,7 @@ async fn test_enterprise_opa_rbac_integration() {
     let sec_view_runs_ctx = ApiOpaContext {
         path: "/api/v1/runs",
         method: "GET",
-        token: Some(&sec_token),
+        subject: Some(sec.subject()),
     };
     assert!(
         client.check(sec_view_runs_ctx).await.unwrap(),
@@ -225,7 +225,7 @@ async fn test_enterprise_opa_rbac_integration() {
     let sec_start_runs_ctx = ApiOpaContext {
         path: "/api/v1/runs",
         method: "POST",
-        token: Some(&sec_token),
+        subject: Some(sec.subject()),
     };
     assert!(
         !client.check(sec_start_runs_ctx).await.unwrap(),

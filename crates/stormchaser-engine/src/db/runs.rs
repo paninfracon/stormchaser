@@ -233,51 +233,19 @@ where
         .await
 }
 
-#[allow(clippy::too_many_arguments)]
-/// Update workflow run status.
-pub async fn update_workflow_run_status<'a, E>(
-    executor: E,
-    status: RunStatus,
-    id: RunId,
-) -> Result<PgQueryResult, sqlx::Error>
+/// Whether a run with this id exists, running or archived.
+pub async fn workflow_run_exists<'a, E>(executor: E, id: RunId) -> Result<bool, sqlx::Error>
 where
     E: Executor<'a, Database = Postgres>,
 {
-    sqlx::query(
+    sqlx::query_scalar(
         r#"
-            UPDATE workflow_runs
-            SET status = $1, finished_at = NOW(), updated_at = NOW(), version = version + 1
-            WHERE id IN (SELECT id FROM workflow_runs WHERE id = $2 AND status != $1 FOR UPDATE)
-            "#,
-    )
-    .bind(status)
-    .bind(id)
-    .execute(executor)
-    .await
-}
-
-#[allow(clippy::too_many_arguments)]
-/// Fail workflow run.
-pub async fn fail_workflow_run<'a, E>(
-    executor: E,
-    status: RunStatus,
-    error: &str,
-    id: RunId,
-) -> Result<PgQueryResult, sqlx::Error>
-where
-    E: Executor<'a, Database = Postgres>,
-{
-    sqlx::query(
-        r#"
-        UPDATE workflow_runs
-        SET status = $1, finished_at = NOW(), updated_at = NOW(), version = version + 1, error = $2
-        WHERE id = $3 AND status != $1
+        SELECT EXISTS (SELECT 1 FROM workflow_runs WHERE id = $1)
+            OR EXISTS (SELECT 1 FROM archived_workflow_runs WHERE id = $1)
         "#,
     )
-    .bind(status)
-    .bind(error)
     .bind(id)
-    .execute(executor)
+    .fetch_one(executor)
     .await
 }
 
@@ -336,41 +304,6 @@ where
         .bind(run_id)
         .fetch_one(executor)
         .await
-}
-
-#[allow(clippy::too_many_arguments)]
-/// Update workflow run status full.
-pub async fn update_workflow_run_status_full<'a, E>(
-    executor: E,
-    status: &RunStatus,
-    updated_at: DateTime<Utc>,
-    started_resolving_at: Option<DateTime<Utc>>,
-    started_at: Option<DateTime<Utc>>,
-    finished_at: Option<DateTime<Utc>>,
-    error: Option<&str>,
-    id: RunId,
-    version: i32,
-) -> Result<PgQueryResult, sqlx::Error>
-where
-    E: Executor<'a, Database = Postgres>,
-{
-    sqlx::query(
-        r#"
-        UPDATE workflow_runs
-        SET status = $1, updated_at = $2, started_resolving_at = $3, started_at = $4, finished_at = $5, error = $6, version = version + 1
-        WHERE id = $7 AND version = $8
-        "#
-    )
-    .bind(status)
-    .bind(updated_at)
-    .bind(started_resolving_at)
-    .bind(started_at)
-    .bind(finished_at)
-    .bind(error)
-    .bind(id)
-    .bind(version)
-    .execute(executor)
-    .await
 }
 
 #[allow(clippy::too_many_arguments)]

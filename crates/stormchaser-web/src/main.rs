@@ -232,50 +232,39 @@ async fn auth_callback_handler(
     }
 
     if let Some(code) = query.code {
-        let api_url =
-            std::env::var("API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
         let web_url =
             std::env::var("WEB_URL").unwrap_or_else(|_| "http://127.0.0.1:3001".to_string());
-
-        let client = http_client();
-        match client
-            .post(format!("{}/api/v1/auth/exchange", api_url))
-            .json(&serde_json::json!({
-                "sso_token": code,
-                "callback_url": format!("{}/auth/callback", web_url),
-                "code_verifier": code_verifier,
-            }))
-            .send()
+        let request = stormchaser_model::api::AuthExchangeRequest {
+            sso_token: code,
+            callback_url: format!("{}/auth/callback", web_url),
+            code_verifier: code_verifier.map(str::to_string),
+        };
+        if let Ok(response) = stormchaser_web::api::api_client()
+            .exchange_token(&request)
             .await
         {
-            Ok(res) if res.status().is_success() => {
-                if let Ok(json) = res.json::<serde_json::Value>().await {
-                    if let Some(access) = json.get("access_token").and_then(|v| v.as_str()) {
-                        let cookie = format!(
-                            "auth_token={}; Path=/; HttpOnly; SameSite=Lax; Secure",
-                            access
-                        );
-                        let mut headers_res = axum::http::HeaderMap::new();
-                        headers_res.insert(
-                            header::SET_COOKIE,
-                            header::HeaderValue::from_str(&cookie).unwrap(),
-                        );
-                        let clear_state_cookie = "oauth_state=; Path=/; HttpOnly; SameSite=Lax; Secure; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
-                        headers_res.append(
-                            header::SET_COOKIE,
-                            header::HeaderValue::from_static(clear_state_cookie),
-                        );
-                        let clear_verifier_cookie = "oauth_verifier=; Path=/auth/callback; HttpOnly; SameSite=Lax; Secure; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
-                        headers_res.append(
-                            header::SET_COOKIE,
-                            header::HeaderValue::from_static(clear_verifier_cookie),
-                        );
-                        headers_res.insert(header::LOCATION, header::HeaderValue::from_static("/"));
-                        return (axum::http::StatusCode::SEE_OTHER, headers_res).into_response();
-                    }
-                }
-            }
-            _ => {}
+            let access = response.access_token;
+            let cookie = format!(
+                "auth_token={}; Path=/; HttpOnly; SameSite=Lax; Secure",
+                access
+            );
+            let mut headers_res = axum::http::HeaderMap::new();
+            headers_res.insert(
+                header::SET_COOKIE,
+                header::HeaderValue::from_str(&cookie).unwrap(),
+            );
+            let clear_state_cookie = "oauth_state=; Path=/; HttpOnly; SameSite=Lax; Secure; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
+            headers_res.append(
+                header::SET_COOKIE,
+                header::HeaderValue::from_static(clear_state_cookie),
+            );
+            let clear_verifier_cookie = "oauth_verifier=; Path=/auth/callback; HttpOnly; SameSite=Lax; Secure; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
+            headers_res.append(
+                header::SET_COOKIE,
+                header::HeaderValue::from_static(clear_verifier_cookie),
+            );
+            headers_res.insert(header::LOCATION, header::HeaderValue::from_static("/"));
+            return (axum::http::StatusCode::SEE_OTHER, headers_res).into_response();
         }
     }
     // Fallback error

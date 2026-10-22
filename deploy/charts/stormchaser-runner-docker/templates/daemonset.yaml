@@ -36,8 +36,6 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default (printf "v%s" .Chart.AppVersion) }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
-            - name: BINARY
-              value: "stormchaser-runner-docker"
             - name: NATS_URL
               value: {{ .Values.config.natsUrl | quote }}
             {{- with .Values.config.natsAuthSecret }}

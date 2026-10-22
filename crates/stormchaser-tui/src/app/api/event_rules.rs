@@ -1,5 +1,6 @@
 use super::*;
-use stormchaser_model::event_rules::EventRule;
+use std::collections::HashMap;
+use stormchaser_model::api::CreateEventRuleRequest;
 use stormchaser_model::WebhookId;
 
 impl<'a> App<'a> {
@@ -9,53 +10,54 @@ impl<'a> App<'a> {
             return Ok(());
         }
 
-        let res = self
-            .api_request(reqwest::Method::GET, "/api/v1/rules", None)
-            .await?;
-
-        if res.status().is_success() {
-            self.event_rules = res.json::<Vec<EventRule>>().await?;
-            if !self.event_rules.is_empty() {
-                if self.event_rules_state.selected().is_none() {
-                    self.event_rules_state.select(Some(0));
-                }
-                if self.selected_event_rule.is_none() {
-                    if let Some(i) = self.event_rules_state.selected() {
-                        self.selected_event_rule = Some(self.event_rules[i].clone());
+        match self.api().list_event_rules().await {
+            Ok(rules) => {
+                self.event_rules = rules;
+                if !self.event_rules.is_empty() {
+                    if self.event_rules_state.selected().is_none() {
+                        self.event_rules_state.select(Some(0));
                     }
+                    if self.selected_event_rule.is_none() {
+                        if let Some(i) = self.event_rules_state.selected() {
+                            self.selected_event_rule = Some(self.event_rules[i].clone());
+                        }
+                    }
+                } else {
+                    self.event_rules_state.select(None);
+                    self.selected_event_rule = None;
                 }
-            } else {
-                self.event_rules_state.select(None);
-                self.selected_event_rule = None;
+                self.error = None;
             }
-            self.error = None;
-        } else {
-            self.error = Some(format!("Failed to fetch event rules: {}", res.status()));
+            Err(e) => {
+                self.error = Some(format!("Failed to fetch event rules: {}", refused(e)?));
+            }
         }
         Ok(())
     }
 
-    /// Submits the event rule form for creation or update.
+    /// Submits the event rule form, creating a rule. The API cannot change a rule.
     pub async fn submit_event_rule_form(&mut self) -> Result<()> {
         if self.token.is_none() {
             return Ok(());
         }
 
-        let name = self.event_rule_inputs[0].lines().join("\n");
-        let description = self.event_rule_inputs[1].lines().join("\n");
-        let webhook_id = self.event_rule_inputs[2].lines().join("\n");
-        let event_type_pattern = self.event_rule_inputs[3].lines().join("\n");
-        let condition_expr = self.event_rule_inputs[4].lines().join("\n");
-        let workflow_name = self.event_rule_inputs[5].lines().join("\n");
-        let repo_url = self.event_rule_inputs[6].lines().join("\n");
-        let workflow_path = self.event_rule_inputs[7].lines().join("\n");
-        let git_ref = self.event_rule_inputs[8].lines().join("\n");
-        let input_mappings_str = self.event_rule_inputs[9].lines().join("\n");
+        let field = |i: usize| self.event_rule_inputs[i].lines().join("\n");
+        let name = field(0);
+        let description = field(1);
+        let webhook_id = field(2);
+        let event_type_pattern = field(3);
+        let condition_expr = field(4);
+        let workflow_name = field(5);
+        let connection = field(6);
+        let workflow_path = field(7);
+        let git_ref = field(8);
+        let input_mappings_str = field(9);
 
         if name.trim().is_empty()
+            || webhook_id.trim().is_empty()
             || event_type_pattern.trim().is_empty()
             || workflow_name.trim().is_empty()
-            || repo_url.trim().is_empty()
+            || connection.trim().is_empty()
             || workflow_path.trim().is_empty()
             || git_ref.trim().is_empty()
         {
@@ -63,57 +65,56 @@ impl<'a> App<'a> {
             return Ok(());
         }
 
-        let input_mappings: serde_json::Value = if input_mappings_str.trim().is_empty() {
-            serde_json::json!({})
+        let input_mappings: HashMap<String, String> = if input_mappings_str.trim().is_empty() {
+            HashMap::new()
         } else {
             match serde_json::from_str(&input_mappings_str) {
                 Ok(v) => v,
                 Err(_) => {
-                    self.error = Some("Input mappings must be valid JSON.".to_string());
+                    self.error =
+                        Some("Input mappings must be a JSON object of strings.".to_string());
                     return Ok(());
                 }
             }
         };
 
-        let webhook_id_typed = if webhook_id.trim().is_empty() {
-            None
-        } else {
-            match uuid::Uuid::parse_str(&webhook_id).map(WebhookId::new) {
-                Ok(id) => Some(id),
-                Err(_) => {
-                    self.error = Some("Invalid Webhook ID format".to_string());
-                    return Ok(());
-                }
+        let webhook_id = match uuid::Uuid::parse_str(webhook_id.trim()).map(WebhookId::new) {
+            Ok(id) => id,
+            Err(_) => {
+                self.error = Some("Invalid Webhook ID format".to_string());
+                return Ok(());
             }
         };
 
-        let (method, path) = if let Some(id) = self.event_rule_edit_id {
-            (reqwest::Method::PATCH, format!("/api/v1/rules/{}", id))
-        } else {
-            (reqwest::Method::POST, "/api/v1/rules".to_string())
+        let request = CreateEventRuleRequest {
+            name,
+            description: if description.trim().is_empty() {
+                None
+            } else {
+                Some(description)
+            },
+            webhook_id,
+            event_type_pattern,
+            condition_expr: if condition_expr.trim().is_empty() {
+                None
+            } else {
+                Some(condition_expr)
+            },
+            workflow_name,
+            connection,
+            workflow_path,
+            git_ref,
+            input_mappings,
         };
 
-        let payload = serde_json::json!({
-            "name": name,
-            "description": if description.trim().is_empty() { None::<String> } else { Some(description) },
-            "webhook_id": webhook_id_typed.map(|i| i.into_inner()),
-            "event_type_pattern": event_type_pattern,
-            "condition_expr": if condition_expr.trim().is_empty() { None::<String> } else { Some(condition_expr) },
-            "workflow_name": workflow_name,
-            "repo_url": repo_url,
-            "workflow_path": workflow_path,
-            "git_ref": git_ref,
-            "input_mappings": input_mappings,
-            "is_active": self.event_rule_is_active,
-        });
-
-        let res = self.api_request(method, &path, Some(payload)).await?;
-
-        if res.status().is_success() {
-            self.event_rule_dialog_active = false;
-            self.refresh_event_rules().await?;
-        } else {
-            self.error = Some(format!("Failed to save event rule: {}", res.status()));
+        match self.api().create_event_rule(&request).await {
+            Ok(_) => {
+                self.event_rule_dialog_active = false;
+                self.refresh_event_rules().await?;
+            }
+            Err(e) => {
+                self.error = Some(format!("Failed to save event rule: {}", refused(e)?));
+            }
         }
 
         Ok(())
@@ -123,18 +124,11 @@ impl<'a> App<'a> {
     pub async fn delete_selected_event_rule(&mut self) -> Result<()> {
         if let Some(rule) = &self.selected_event_rule {
             if self.token.is_some() {
-                let res = self
-                    .api_request(
-                        reqwest::Method::DELETE,
-                        &format!("/api/v1/rules/{}", rule.id),
-                        None,
-                    )
-                    .await?;
-
-                if res.status().is_success() {
-                    self.refresh_event_rules().await?;
-                } else {
-                    self.error = Some(format!("Failed to delete event rule: {}", res.status()));
+                match self.api().delete_event_rule(rule.id).await {
+                    Ok(()) => self.refresh_event_rules().await?,
+                    Err(e) => {
+                        self.error = Some(format!("Failed to delete event rule: {}", refused(e)?));
+                    }
                 }
             }
         }
@@ -145,6 +139,10 @@ impl<'a> App<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
+    use ratatui_textarea::TextArea;
+    use stormchaser_model::event_rules::EventRule;
+    use stormchaser_model::RuleId;
     use tokio::sync::mpsc;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -223,5 +221,61 @@ mod tests {
         let result = app.delete_selected_event_rule().await;
         result.unwrap();
         assert!(app.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_submit_event_rule_form_creates_a_rule() {
+        let server = MockServer::start().await;
+        let webhook_id = WebhookId::new_v4();
+
+        Mock::given(method("POST"))
+            .and(path("/api/v1/rules"))
+            .and(wiremock::matchers::body_partial_json(serde_json::json!({
+                "webhook_id": webhook_id,
+                "connection": "repo",
+                "input_mappings": { "sha": "event.after" },
+            })))
+            .respond_with(
+                ResponseTemplate::new(201)
+                    .set_body_json(serde_json::json!({ "id": RuleId::new_v4() })),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/rules"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(Vec::<EventRule>::new()))
+            .mount(&server)
+            .await;
+
+        let (tx, _rx) = mpsc::channel(1);
+        let mut app = App::new(
+            server.uri(),
+            "http://localhost:3001".to_string(),
+            Some("token".to_string()),
+            tx,
+        );
+        app.open_event_rule_dialog();
+        let values = [
+            "rule",
+            "",
+            &webhook_id.to_string(),
+            "push",
+            "",
+            "wf",
+            "repo",
+            "wf.storm",
+            "main",
+            r#"{"sha": "event.after"}"#,
+        ];
+        app.event_rule_inputs = values
+            .iter()
+            .map(|v| TextArea::from(vec![v.to_string()]))
+            .collect();
+
+        app.submit_event_rule_form().await.unwrap();
+        assert!(app.error.is_none(), "{:?}", app.error);
+        assert!(!app.event_rule_dialog_active);
     }
 }

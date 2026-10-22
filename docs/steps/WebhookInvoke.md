@@ -1,16 +1,20 @@
 # WebhookInvoke Step
 
-The `WebhookInvoke` step makes an HTTP/HTTPS call to an external service. This is useful for triggering external APIs or notifying other systems.
+The `WebhookInvoke` step sends an HTTP or HTTPS request, usually to notify another system. The engine runs it itself; no runner is involved. For calls that need a connection's credentials or outputs taken from the response, use [RestApi](RestApi.md).
+
+Requests go through the engine's outbound guard: hosts on private and internal networks are refused unless the operator lists them in `STORMCHASER_SSRF_ALLOWED_HOSTS`, and redirects are not followed.
 
 ## DSL Specification
 
 The `spec` block for `WebhookInvoke` supports the following fields:
 
-* `url` (string, required): The endpoint to send the request to.
-* `method` (string, optional): The HTTP method to use (e.g., "GET", "POST", "PUT"). Defaults to "POST".
+* `url` (string, required): The endpoint to send the request to. It is not a Jinja template; use `${...}` to put values in it.
+* `method` (string, optional): `POST` (the default), `GET`, `PUT`, `DELETE` or `PATCH`. Any other value is sent as `POST`.
 * `headers` (object, optional): Key-value pairs of HTTP headers.
-* `body` (string, optional): The request body. Supports MiniJinja template rendering.
-* `timeout` (string, optional): Duration to wait for a response (e.g., "30s", "1m").
+* `body` (string, optional): The request body, a MiniJinja template with `inputs`, `steps` (`steps.<name>.outputs.<key>`) and `run` (`run.id`) in its context.
+* `timeout` (string, optional): How long to wait for a response, such as `"10s"`. Defaults to 30 seconds.
+
+A 2xx response completes the step. Its body is kept as the step output `response`: the parsed JSON, or `{"text": "<body>"}` when it is not JSON. Any other status fails the step.
 
 ## Example
 
@@ -23,7 +27,7 @@ step "notify_custom_api" "WebhookInvoke" {
       "Content-Type"  = "application/json"
       "Authorization" = "Bearer ${secrets.API_TOKEN}"
     }
-    body    = "{\"event\": \"deployment_started\", \"id\": \"{{ run_id }}\"}"
+    body    = "{\"event\": \"deployment_started\", \"id\": \"{{ run.id }}\"}"
     timeout = "10s"
   }
 }

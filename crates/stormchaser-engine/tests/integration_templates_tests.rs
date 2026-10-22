@@ -9,7 +9,7 @@ use stormchaser_model::RunId;
 mod common {
     use std::env::var;
     use std::sync::Arc;
-    use stormchaser_model::auth::{self, OpaClient};
+    use stormchaser_opa::OpaClient;
     /// Get pool.
     pub async fn get_pool() -> sqlx::PgPool {
         let db_url = var("DATABASE_URL").unwrap_or_else(|_| {
@@ -24,7 +24,11 @@ mod common {
     }
 
     /// Setup test env.
-    pub async fn setup_test_env() -> (sqlx::PgPool, async_nats::Client, Arc<auth::OpaClient>) {
+    pub async fn setup_test_env() -> (
+        sqlx::PgPool,
+        async_nats::Client,
+        Arc<stormchaser_opa::OpaClient>,
+    ) {
         let pool = get_pool().await;
         let nats_url = var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
         let nats_client = stormchaser_model::nats::connect(&nats_url).await.unwrap();
@@ -139,4 +143,88 @@ async fn test_step_library_direct_run() {
     // params should contain base_tag from library and cmd from step
     assert_eq!(step.params["base_tag"], "latest");
     assert_eq!(step.params["cmd"], "echo");
+}
+
+/// A step library's params are its arguments: its spec uses them, a step overrides
+/// them, and they can come from the run's inputs.
+#[tokio::test]
+async fn a_step_librarys_params_shape_its_steps() {
+    let (pool, nats_client, opa_client) = common::setup_test_env().await;
+    let run_id = RunId::new_v4();
+    let dsl = r#"
+        stormchaser_dsl_version = "v1"
+        workflow "library_params" {
+            step_library "python_env" {
+                type = "RunContainer"
+                params {
+                    version  = "${inputs.version}"
+                    greeting = "hi"
+                }
+                spec {
+                    image   = "python:${params.version}-slim"
+                    command = ["echo", "${params.greeting}"]
+                }
+                timeout = "7m"
+            }
+            steps {
+                step "default" "python_env" {}
+                step "overridden" "python_env" {
+                    params {
+                        greeting = "hello"
+                    }
+                }
+            }
+        }
+    "#;
+
+    handler::handle_workflow_direct(
+        serde_json::json!({
+            "run_id": run_id,
+            "dsl": dsl,
+            "inputs": { "version": "3.12" },
+            "initiating_user": "test"
+        }),
+        pool.clone(),
+        opa_client,
+        nats_client.clone(),
+    )
+    .await
+    .unwrap();
+    handler::handle_workflow_start_pending(
+        run_id,
+        pool.clone(),
+        nats_client,
+        Arc::new(TlsReloader::new(TlsConfig::default()).await.unwrap()),
+    )
+    .await
+    .unwrap();
+
+    let steps: Vec<(String, serde_json::Value)> = sqlx::query_as(
+        "SELECT step_name, spec FROM step_instances WHERE run_id = $1 ORDER BY step_name",
+    )
+    .bind(run_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(steps.len(), 2);
+    assert_eq!(steps[0].0, "default");
+    assert_eq!(steps[0].1["image"], "python:3.12-slim");
+    assert_eq!(steps[0].1["command"][1], "hi");
+    assert_eq!(steps[1].0, "overridden");
+    assert_eq!(steps[1].1["command"][1], "hello");
+
+    // The runner takes a step's timeout from its definition
+    let definition: serde_json::Value =
+        sqlx::query_scalar("SELECT workflow_definition FROM run_contexts WHERE run_id = $1")
+            .bind(run_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(definition["steps"][0]["timeout"], "7m");
+
+    sqlx::query("DELETE FROM workflow_runs WHERE id = $1")
+        .bind(run_id)
+        .execute(&pool)
+        .await
+        .unwrap();
 }

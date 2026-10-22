@@ -1,6 +1,7 @@
 # Default values for stormchaser-orchestration.
 
 global:
+  # Not used by this chart's templates; each service has its own image below.
   image:
     repository: stormchaser
     pullPolicy: IfNotPresent
@@ -12,6 +13,10 @@ global:
     url: ""
     existingSecret: ""
     existingSecretKey: "DATABASE_URL"
+    # STORMCHASER_DB_SSL for the API, engine and query service. true: verified TLS
+    # (verify-full) whatever the URL says. false: the sslmode in the URL, or no TLS.
+    # Each service opens at most 10 connections (STORMCHASER_DB_MAX_CONNECTIONS); the
+    # chart has no value for that.
     ssl: true
   nats:
     url: "nats://nats:4222"
@@ -49,10 +54,17 @@ global:
     # Lambda function names or ARNs the engine may invoke with its own credentials
     # (a LambdaInvoke step with no assume_role_arn). A trailing "*" matches a prefix.
     allowedLambdaFunctions: []
+  # Where the API and engine read step logs from (LOKI_URL). Without a reachable Loki
+  # the API cannot show step logs and the engine cannot extract outputs from them.
+  # The default is the bundled quickstart Loki; in production point it at your own.
   loki:
     url: "http://loki:3100"
+  # GRAFANA_URL. Only the web tier uses it, to link to dashboards.
   grafana:
     url: "http://grafana:80"
+  # The OPA decision URL for the API, engine and query service (OPA_URL). The default
+  # is the OPA sidecar that api.opa.sidecar.enabled adds to each of those pods; with
+  # the sidecar off, point it at an OPA they can reach.
   opa:
     url: "http://127.0.0.1:8181/v1/data/stormchaser/allow"
   oidc:
@@ -69,6 +81,9 @@ global:
     existingSecret: ""
     existingSecretKey: "client-secret"
     clientSecret: ""
+  # OTLP gRPC endpoint for traces and metrics (OTEL_EXPORTER_OTLP_ENDPOINT), given to
+  # the API, engine and query service; only the API and engine export anything.
+  # The default is the bundled quickstart Alloy. See docs/observability.md.
   otel:
     endpoint: "http://alloy:4317"
   tls:
@@ -137,6 +152,8 @@ api:
   trustedProxies: []
   # Comma-separated Host header values the MCP server accepts in addition to
   # loopback names and the API_BASE_URL host, e.g. "stormchaser.example.com".
+  # The chart does not set API_BASE_URL, so the MCP server's tool calls go to
+  # http://localhost:3000. See docs/mcp-server.md.
   mcpAllowedHosts: ""
   service:
     type: ClusterIP
@@ -203,7 +220,6 @@ web:
     # Empty means the release this chart belongs to (v<appVersion>)
     tag: ""
   replicaCount: 1
-  rustLog: "stormchaser_web=info"
   externalApiUrl: "http://localhost:3000"
   webUrl: "http://localhost:3003"
   service:
@@ -227,16 +243,29 @@ engine:
     pullPolicy: IfNotPresent
     # Empty means the release this chart belongs to (v<appVersion>)
     tag: ""
+  # Above 1 with persistence on and accessMode ReadWriteOnce, the chart refuses to
+  # render. One replica at a time runs the background workers (timeouts, sweeps).
   replicaCount: 1
   rustLog: "stormchaser_engine=info"
+  # Where the engine keeps cloned repositories (GIT_CACHE_DIR); the cache volume is
+  # mounted here.
   gitCacheDir: "/tmp/stormchaser/git-cache"
   resources: {}
+  # The chart has no values for the run quota ceilings (STORMCHASER_RUN_MAX_*), the
+  # Terraform image (STORMCHASER_TERRAFORM_IMAGE) or the database pool size; the
+  # engine uses their defaults (see docs/quotas.md).
+  # The engine's cache of cloned repositories, kept across restarts. With
+  # ReadWriteOnce the Deployment uses the Recreate strategy (the old pod stops
+  # before the new one starts) and the chart refuses more than one replica; more
+  # replicas need ReadWriteMany, or persistence off for an emptyDir cache per pod.
   persistence:
     enabled: true
     size: 10Gi
     storageClass: ""
     accessMode: ReadWriteOnce
 
+# Bundled Prometheus and Grafana subcharts, for evaluation only. Production brings
+# its own (see docs/observability.md).
 prometheus:
   enabled: false
   server:

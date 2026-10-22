@@ -2,7 +2,7 @@
 
 Stormchaser includes an integrated [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that allows AI agents and LLMs to natively interact with the Stormchaser API.
 
-By exposing its OpenAPI specification as MCP tools, Stormchaser empowers AI assistants to autonomously inspect workflows, trigger runs, approve manual steps, and monitor execution states directly from their context window.
+It exposes the API's OpenAPI specification as MCP tools. Because tool calls reach the API without the caller's token (see [Security & OPA Policies](#security--opa-policies)), in practice only tools for routes that need no token, such as `GET /api/v1/schema`, succeed. Every route that needs a bearer token answers `401`. The server is usable for exploring the API's shape, not yet for operating Stormchaser.
 
 ## Overview
 
@@ -25,7 +25,7 @@ To build and run the API with default features (including MCP):
 cargo build -p stormchaser-api
 ```
 
-If you need to disable MCP, run with `--no-default-features`.
+The server is behind the `mcp` Cargo feature. To build without it, use `--no-default-features` (and add back any other default features you need). If `API_BASE_URL` does not parse as a URL, the API starts without the MCP route.
 
 ## Configuration
 
@@ -54,8 +54,8 @@ An entry without a port matches that host on any port; an entry with a port matc
 The MCP server is fully integrated with Stormchaser's Open Policy Agent (OPA) integration.
 
 1. **Transport Endpoint**: The default policy permits the requests the transport itself needs on `/api/v1/mcp` without a token: `POST` (JSON-RPC messages), `DELETE` (ending a session) and read-only requests such as `GET`. Every other non-read-only request under `/api/v1/mcp` is denied. `POST` and `DELETE` are also permitted at `/api/v1/mcp/messages`, which older client configurations used; it is served by the same handler.
-2. **Tool Execution**: When an AI executes a tool (which triggers a REST API call), that secondary API call is evaluated by OPA. If the AI client does not pass the user's token during the tool execution, the request will be unauthenticated.
-3. **Default Policy**: The default Rego policy explicitly blocks unauthenticated requests that are not read-only (e.g., `POST`, `DELETE`), preventing an AI client from modifying state without proper authorization proxying.
+2. **Tool Execution**: When an AI executes a tool, the server makes the matching REST call to `API_BASE_URL`, and that call is evaluated by OPA like any other. The server does not forward the client's `Authorization` header to these calls (the `rmcp-openapi` crate only reads it under its actix-web transport, and Stormchaser uses Axum), so every tool call arrives unauthenticated.
+3. **Default Policy**: The default Rego policy (`deploy/opa/policy.rego`) blocks unauthenticated requests that are not read-only (e.g., `POST`, `DELETE`). Separately, every route that needs a bearer token rejects a request without one (`401`) before policy is consulted. So tool calls that list runs, start runs or approve steps all fail; only routes that need no token work.
 
 ## Connecting an AI Client
 
@@ -65,4 +65,4 @@ Configure the AI client to use the Streamable HTTP transport with this URL:
 
 The host the client uses must be on the server's allow-list (see [Allowed hosts](#allowed-hosts)). Clients that only support the older HTTP+SSE transport, with separate SSE and message endpoints, are not supported.
 
-Clients should provide a valid Authorization header (`Bearer <token>`) when available, especially for tool calls that require authenticated write access.
+A client may send an `Authorization: Bearer <token>` header, but it is not passed on to tool calls (see [Security & OPA Policies](#security--opa-policies)). Forwarding the caller's token is not implemented.

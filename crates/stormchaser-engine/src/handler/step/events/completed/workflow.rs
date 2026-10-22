@@ -7,9 +7,10 @@ use stormchaser_dsl::ast::Workflow;
 use stormchaser_model::events::{
     EventSource, EventType, WorkflowCompletedEvent, WorkflowEventType,
 };
-use stormchaser_model::step::StepStatus;
 use stormchaser_model::RunId;
 use tracing::{error, info};
+
+use super::super::helpers::step_lets_run_continue;
 
 pub async fn check_workflow_completion(
     tx: &mut sqlx::PgConnection,
@@ -29,7 +30,7 @@ pub async fn check_workflow_completion(
         let is_done = !step_instances.is_empty()
             && step_instances
                 .iter()
-                .all(|s| s.status == StepStatus::Succeeded || s.status == StepStatus::Skipped);
+                .all(|s| step_lets_run_continue(&s.status));
 
         tracing::info!(
             "Step {} done? {} (instances: {})",
@@ -44,8 +45,15 @@ pub async fn check_workflow_completion(
 
     if all_dsl_steps_done {
         let run = fetch_run(run_id, &mut *tx).await?;
-        let machine = WorkflowMachine::<state::Running>::new_from_run(run.clone());
-        let _ = machine.succeed(&mut *tx).await?;
+        let machine = match WorkflowMachine::<state::Running>::load(run.clone()) {
+            Ok(machine) => machine,
+            Err(wrong) => {
+                // It has already ended (it timed out, say)
+                tracing::warn!("Not completing run {}: {}", run_id, wrong);
+                return Ok(false);
+            }
+        };
+        machine.succeed(&mut *tx).await?;
 
         use stormchaser_model::nats::NatsSubject;
         if let Err(e) = crate::db::outbox::insert_outbox_event(

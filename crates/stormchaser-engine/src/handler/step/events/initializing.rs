@@ -28,18 +28,31 @@ pub async fn handle_step_initializing(
         return Ok(());
     }
 
+    if !super::helpers::report_is_current_attempt(&pool, &instance, event.attempt).await? {
+        return Ok(());
+    }
+
     // 2. Use state machine to transition
     if instance.status == stormchaser_model::step::StepStatus::Pending {
         if !super::helpers::reporter_holds_step(&instance, event.runner_id.as_deref()) {
             return Ok(());
         }
         let machine =
-            crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::from_instance(
+            crate::step_machine::StepMachine::<crate::step_machine::state::Pending>::load(
                 instance.clone(),
-            );
+            )?;
         let _ = machine
             .initializing(runner_id.to_string(), &mut *pool.acquire().await?)
             .await?;
+    } else if instance.status == stormchaser_model::step::StepStatus::Initializing
+        && instance.runner_id.is_none()
+    {
+        // The engine claimed it before handing it out; this is the runner that took it.
+        // Recorded now, so that the step is judged by that runner's liveness from here on
+        // and only that runner's results are accepted.
+        if let Some(reporter) = event.runner_id.as_deref() {
+            crate::db::steps::reassign_step_runner(&pool, step_id, reporter).await?;
+        }
     } else {
         info!(
             "Step {} is already past Pending state, ignoring Initializing event.",

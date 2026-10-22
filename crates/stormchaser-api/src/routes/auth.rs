@@ -11,7 +11,6 @@ use jsonwebtoken::decode;
 use jsonwebtoken::decode_header;
 use jsonwebtoken::DecodingKey;
 use jsonwebtoken::Validation;
-use jsonwebtoken::{encode, EncodingKey, Header};
 use reqwest::Client;
 use serde::Deserialize;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -198,6 +197,10 @@ pub async fn exchange_token(
     }
 
     // 1. Exchange code for tokens
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the identity provider's token endpoint, from the operator's configuration"
+    )]
     let client = Client::new();
     let token_url = format!("{}/token", oidc_config.issuer.trim_end_matches('/'));
 
@@ -304,12 +307,8 @@ pub async fn exchange_token(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let token = encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(jwt_secret.as_slice()),
-    )
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let token = auth::sign_local_token(&claims, &jwt_secret)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(AuthExchangeResponse {
         access_token: token,
@@ -341,6 +340,10 @@ pub async fn refresh_token(
         .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // Exchange refresh token for new tokens
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the identity provider's token endpoint, from the operator's configuration"
+    )]
     let client = Client::new();
     let token_url = format!("{}/token", oidc_config.issuer.trim_end_matches('/'));
 
@@ -432,12 +435,8 @@ pub async fn refresh_token(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let token = encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(jwt_secret.as_slice()),
-    )
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let token = auth::sign_local_token(&claims, &jwt_secret)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(AuthExchangeResponse {
         access_token: token,

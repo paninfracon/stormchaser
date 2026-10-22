@@ -1,9 +1,11 @@
 target/
-!target/release/stormchaser*
 .cargo/
 .idea/
 .vscode/
 **/target/
+# After both target/ patterns: the last pattern matching a path decides, and placed
+# before `**/target/` this let Docker 29 copy each binary as an empty file
+!target/release/stormchaser*
 *.png
 *.mmd
 

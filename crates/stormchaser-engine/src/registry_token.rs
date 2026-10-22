@@ -8,8 +8,8 @@
 use anyhow::{anyhow, bail, Context, Result};
 use base64::Engine as _;
 use serde_json::{json, Value};
+use stormchaser_core::net_guard::{guarded_client, read_body_capped};
 use stormchaser_model::connections::Connection;
-use stormchaser_model::net_guard::{guarded_client, read_body_capped};
 use uuid::Uuid;
 
 /// Token responses are a few kilobytes; anything much larger is not one.

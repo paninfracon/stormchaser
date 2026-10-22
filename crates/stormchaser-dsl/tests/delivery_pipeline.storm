@@ -36,7 +36,6 @@ workflow "ModernDeliveryPipeline" {
         mode        = "0600"
       }
     }
-    preserve = ["target/**", "node_modules/**"]
   }
 
   steps {
