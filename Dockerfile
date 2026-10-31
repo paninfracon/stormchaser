@@ -1,5 +1,5 @@
 # Multi-stage Dockerfile for Stormchaser
-FROM rust:1.96-slim-bookworm@sha256:e18a79fc84dfcfc3ab5ba72290398a644c135c97eaa881447fddc354ee4701a3 AS builder
+FROM rust:1.99-slim-bookworm@sha256:24707e70a4f1e23d9a7b25202ec43126d28a52294b96aad5c670df1fd1f1d400 AS builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
